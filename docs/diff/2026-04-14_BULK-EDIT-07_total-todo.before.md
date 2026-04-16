@@ -1,0 +1,1711 @@
+# 미니맵
+
+- 서명 기능 구현
+  - 전자 서명 기능 구현
+    - [✓] 무결성 기능
+    - [외부대기] 본인 인증 기능
+- 서류 관리
+  - 서류 누락 방지
+    - [진행중] 서류 클라우드 관리
+    - [진행중] 현장별 필요 서류 누락 방지 기능
+  - 반복 서류 자동 생성
+    - [진행중] 템플릿 등록
+    - [진행중] 템플릿 추출
+  - 현장 입력과 승인 처리
+    - [진행중] 서류와 연계된 현장별 사진 라벨링 보관
+    - [ ] 일괄 정보 입력
+    - [ ] 일괄 요청
+    - [ ] 변환 저장
+- 독립 알림 서비스
+  - [진행중] 문자 발송
+  - [진행중] 이메일 발송
+
+# 실행 정책 (필수 준수)
+
+## 1. 서비스 독립성 설계 원칙
+
+- 아래 기능은 처음부터 하나의 서비스로 분리 가능한 단위로 설계한다.
+- 각 기능은 단순 내부 모듈이 아니라, 향후 별도 배포, 별도 운영, 별도 API 상품화가 가능해야 한다.
+- 각 기능은 반드시 아래 경계를 문서에 분리해 기록한다.
+  - 기능 목적
+  - 단독 서비스로서의 가치
+  - 책임 범위
+  - 비책임 범위
+  - API 계약
+  - 데이터 소유권
+  - 의존 서비스
+  - 분리 배포 시 필요한 최소 조건
+- 다른 기능의 DB 테이블, 내부 함수, 화면 상태를 직접 참조하지 않는다.
+- 기능 간 연결은 오직 계약된 API, 이벤트, DTO로만 수행한다.
+- 공통 로직이 보일 때도 바로 공통 유틸로 합치지 않는다.
+- 먼저 “이 로직이 독립 서비스로 유지 가능한가”를 검토한 뒤, 독립성이 깨지지 않을 때만 공통화한다.
+- 설계안이나 구현안이 나오면 반드시 아래 질문으로 검토한다.
+  - 이 기능을 지금 당장 별도 서비스로 분리해도 성립하는가
+  - 성립하지 않는다면 어떤 결합 지점 때문에 막히는가
+  - 그 결합 지점을 먼저 끊을 수 있는가
+- 임시 편의성보다 서비스 경계 보존을 우선한다.
+
+## 1-1. DB 스키마 분리 원칙
+
+- 물리 DB는 현재 `/Users/gy/Documents/dev/docs/.env` 의 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` 를 사용하는 하나의 Supabase 프로젝트를 기준으로 한다.
+- 다만 기능별 데이터 소유권은 테이블명 prefix가 아니라 스키마로 구분한다.
+- 전자서명 도메인의 정본 테이블은 모두 `signing.*` 아래에 둔다.
+  - `signing.sign_requests`
+  - `signing.sign_authentications`
+  - `signing.signatures`
+  - `signing.signature_audit_logs`
+- 앱 코드에서 전자서명 도메인 테이블을 접근할 때는 `schema('signing')` 계약을 사용한다.
+- 서류 클라우드 관리 도메인의 정본 테이블은 모두 `documents.*` 아래에 둔다.
+  - `documents.document_registry`
+  - `documents.document_versions`
+  - `documents.document_artifacts`
+- 앱 코드에서 서류 클라우드 관리 도메인 테이블을 접근할 때는 `schema('documents')` 계약을 사용한다.
+- 현장 체크리스트 도메인의 정본 테이블은 모두 `sites.*` 아래에 둔다.
+  - `sites.site_registry`
+  - `sites.required_document_rules`
+  - `sites.site_checklist_snapshots`
+  - `sites.site_checklist_items`
+- 앱 코드에서 현장 체크리스트 도메인 테이블을 접근할 때는 `schema('sites')` 계약을 사용한다.
+- 템플릿 등록 도메인의 정본 테이블은 모두 `templates.*` 아래에 둔다.
+  - `templates.template_registry`
+  - `templates.template_field_definitions`
+  - `templates.template_label_bindings`
+  - `templates.template_signature_areas`
+- 앱 코드에서 템플릿 등록 도메인 테이블을 접근할 때는 `schema('templates')` 계약을 사용한다.
+- 템플릿 추출 도메인의 정본 테이블은 모두 `template_extracts.*` 아래에 둔다.
+  - `template_extracts.extract_drafts`
+  - `template_extracts.extract_field_candidates`
+- 앱 코드에서 템플릿 추출 도메인 테이블을 접근할 때는 `schema('template_extracts')` 계약을 사용한다.
+- 사진 라벨링 도메인의 정본 테이블은 모두 `photo_labels.*` 아래에 둔다.
+  - `photo_labels.photo_registry`
+  - `photo_labels.photo_label_assignments`
+  - `photo_labels.photo_label_suggestions`
+  - `photo_labels.site_photo_label_requirements`
+- 앱 코드에서 사진 라벨링 도메인 테이블을 접근할 때는 `schema('photo_labels')` 계약을 사용한다.
+- 일괄 정보 입력 도메인의 정본 테이블은 모두 `bulk_ops.*` 아래에 둔다.
+  - `bulk_ops.bulk_operation_previews`
+  - `bulk_ops.bulk_operation_preview_items`
+  - `bulk_ops.bulk_operation_commits`
+- 앱 코드에서 일괄 정보 입력 도메인 테이블을 접근할 때는 `schema('bulk_ops')` 계약을 사용한다.
+- 일괄 요청 도메인의 정본 테이블은 모두 `request_links.*` 아래에 둔다.
+  - `request_links.request_link_registry`
+  - `request_links.request_link_submit_audits`
+- 앱 코드에서 일괄 요청 도메인 테이블을 접근할 때는 `schema('request_links')` 계약을 사용한다.
+- 변환 저장 도메인의 정본 테이블은 모두 `exports.*` 아래에 둔다.
+  - `exports.export_job_registry`
+- 앱 코드에서 변환 저장 도메인 테이블을 접근할 때는 `schema('exports')` 계약을 사용한다.
+- 문자 발송 도메인의 정본 테이블은 모두 `messaging.*` 아래에 둔다.
+  - `messaging.sms_sender_registry`
+  - `messaging.sms_recipient_registry`
+  - `messaging.sms_dispatch_registry`
+  - `messaging.sms_dispatch_targets`
+  - `messaging.sms_dispatch_events`
+  - `messaging.sms_service_settings`
+  - `messaging.email_dispatch_registry`
+  - `messaging.email_dispatch_targets`
+  - `messaging.email_dispatch_events`
+- 앱 코드에서 문자 발송 도메인 테이블을 접근할 때는 `schema('messaging')` 계약을 사용한다.
+- 같은 기능의 DB 객체를 public 스키마와 signing 스키마에 이중으로 두지 않는다.
+- 같은 기능의 DB 객체를 public 스키마와 documents 스키마에 이중으로 두지 않는다.
+- 같은 기능의 DB 객체를 public 스키마와 sites 스키마에 이중으로 두지 않는다.
+- 같은 기능의 DB 객체를 public 스키마와 templates 스키마에 이중으로 두지 않는다.
+- 같은 기능의 DB 객체를 public 스키마와 template_extracts 스키마에 이중으로 두지 않는다.
+- 같은 기능의 DB 객체를 public 스키마와 photo_labels 스키마에 이중으로 두지 않는다.
+- 기존 public 전자서명 테이블이 있는 DB는 신규 개발 전에 먼저 스키마 마이그레이션을 완료해야 한다.
+- PostgREST 가 `signing`, `documents`, `sites`, `templates`, `template_extracts`, `photo_labels`, `bulk_ops`, `request_links`, `exports`, `messaging` 스키마를 읽을 수 있어야 `schema(...)` 기반 코드가 동작한다.
+- UI에서 바로 반영되지 않으면 `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, signing, documents, sites, templates, template_extracts, photo_labels, bulk_ops, request_links, exports, messaging';` 와 `NOTIFY pgrst, 'reload config';`, `NOTIFY pgrst, 'reload schema';` 를 사용한다.
+
+## 2. 코드와 문서는 어떤 LLM이 읽어도 이해 가능해야 한다
+
+- 파일명, 함수명, 타입명, 주석, 체크리스트명을 보고 히스토리를 몰라도 현재 목적과 제한 조건을 이해할 수 있어야 한다.
+- 의도가 중요한 분기에는 “왜 이런 제한이 필요한지”를 주석이나 문서로 남긴다.
+- 이미 결정된 정책이 있으면 새로운 이름을 임의로 만들지 않고 같은 용어를 계속 사용한다.
+- 후속 구현이 필요한 지점은 검색 가능한 고정 표식으로 남긴다.
+  - 예: `AUTH_GATE_POST_INTEGRATION_REQUIRED`
+- 설계 문서의 체크리스트명과 코드 주석, diff 문서명이 서로 연결되도록 맞춘다.
+
+## 3. 프론트 UI 수정 정책
+
+- UI 변경이 필요한 경우 현재 서비스와 동일한 UI 디자이너가 설계한 것처럼 보여야 한다.
+- `/Users/gy/Documents/dev/docs/src/components` 폴더는 기본적으로 수정 금지다.
+- UI 구현 시에는 기존 컴포넌트를 적극 재사용한다.
+- `/Users/gy/Documents/dev/docs/src/app` 아래 기존 페이지를 먼저 참고한 뒤 같은 톤과 레이아웃 원칙을 따른다.
+- 예외적으로 새 UI 파일이 필요할 수는 있으나, 그 경우에도 수정 대상 파일은 정확한 파일 경로로만 제안해야 한다.
+- 폴더 단위 허용은 금지한다.
+- `/Users/gy/Documents/dev/docs/docs/designCloning` 폴더는 템플릿 참고용이며, 구현 소스로 직접 사용하거나 그 안에 실제 서비스를 작성하면 안 된다.
+
+## 4. 수정 전 이해확정 절차
+
+- 모든 수정은 아래 순서를 반드시 따른다.
+1. 현재 요청에 대한 이해 내용을 목록으로 정리한다.
+2. 이번 작업에서 바꾸려는 파일을 정확한 경로로 제안한다.
+3. 사용자가 이해 내용과 수정 범위를 명시적으로 확정한다.
+4. 확정된 파일의 수정 직전 상태를 `docs/diff`에 기록한다.
+5. 그 다음에만 실제 수정에 착수한다.
+- 사용자의 `확정`이 없는 상태에서는 수정하지 않는다.
+- 확정 없는 추정 구현은 금지한다.
+
+## 5. 변경 기록과 롤백 보장
+
+- 코드 또는 문서를 수정하는 모든 실행은 수정 전 상태를 반드시 `docs/diff`에 남긴다.
+- diff 기록이 없으면 작업을 진행하지 않는다.
+- diff 기록은 아래 둘 중 하나여야 한다.
+  - 파일 전체 원본
+  - 수정 구간을 복원할 수 있는 충분한 원본
+- 권장 파일명 규칙은 아래와 같다.
+  - `YYYY-MM-DD_<CHECKLIST-ID>_<파일명>.before.md`
+- 하나의 실행에서 여러 파일을 수정하면 파일마다 각각 원본을 남긴다.
+- 나중에 어떤 diff 문서가 어떤 체크리스트 작업에 대응하는지 바로 추적할 수 있어야 한다.
+
+## 6. 확정 범위 외 수정 금지
+
+- 사용자가 확정한 범위를 넘어서는 변경은 하지 않는다.
+- 기능상 편의나 코드 정리를 이유로 관련 없는 파일을 손대면 안 된다.
+- 인코딩, 레이아웃, 공통 스타일, 컴포넌트 구조를 임의로 건드리지 않는다.
+- 화이트리스트 외 파일이 필요하면 즉시 중단하고, 정확한 파일 경로를 제안한 뒤 사용자 승인을 받는다.
+
+## 7. 체크리스트와 diff 연결 의무
+
+- 모든 설계 항목은 체크리스트 ID를 가져야 한다.
+- 체크리스트 ID는 구현 기록, 주석, 테스트 기록, diff 문서에서 동일하게 사용한다.
+- 권장 형식은 아래와 같다.
+  - `SIGN-INTEGRITY-01`
+  - `AUTH-VERIFY-02`
+  - `DOC-CLOUD-01`
+- diff 문서에는 반드시 해당 체크리스트 ID를 포함한다.
+- 구현이 완료되면 문서 안의 체크리스트 상태를 함께 갱신한다.
+
+## 8. MCP 테스트 의무
+
+- 매 실행마다 `supabase` MCP와 `chrome-devtools` MCP를 사용해 의도한 결과를 확인한다.
+- 단, DB를 실제로 바꾸는 작업은 MCP로 직접 실행하지 않는다.
+- DB 변경이 필요하면 아래 절차를 따른다.
+1. SQL 파일을 사람이 읽을 수 있는 형태로 작성한다.
+2. 사용자가 직접 SQL Editor에서 실행한다.
+3. 실행 후 `supabase` MCP로 반영 상태를 조회한다.
+4. 결과를 이 문서 하단 테스트 기록에 남긴다.
+- UI가 변경되면 `chrome-devtools` MCP로 실제 화면을 열고 확인한다.
+- 테스트 기록에는 최소 아래를 남긴다.
+  - 실행 날짜
+  - 체크리스트 ID
+  - 테스트 도구
+  - 테스트 범위
+  - 결과
+  - 남은 위험
+- 문서 개정만 수행한 경우에도 MCP 사용 결과를 기록한다.
+
+# 수정 허용 화이트리스트 (필수 준수)
+
+## A. 이번 문서 개정에서 즉시 수정 가능한 파일
+
+- `/Users/gy/Documents/dev/docs/docs/total-todo.md`
+- `/Users/gy/Documents/dev/docs/docs/diff/2026-04-11-total-todo.before.md`
+
+## B. 전자 서명과 본인 인증 후속 구현 1차 제안 파일
+
+- `/Users/gy/Documents/dev/docs/src/app/api/sign/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/test-sign/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/services/signService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/signAuthService.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/crypto.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/authProviders.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/authEvidence.ts`
+- `/Users/gy/Documents/dev/docs/docs/cert.md`
+- `/Users/gy/Documents/dev/docs/docs/cert-todo.md`
+- `/Users/gy/Documents/dev/docs/docs/applied/setup-db.sql`
+- `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-auth-bootstrap.sql`
+- `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-signing-schema-migration.sql`
+- `/Users/gy/Documents/dev/docs/docs/applied/verify-signing-schema-migration.sql`
+
+## C. 서류 관리 기능 1차 구현 제안 파일
+
+- `/Users/gy/Documents/dev/docs/src/app/documents/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/app/api/documents/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/sites/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/app/api/sites/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/api/sites/checklist/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/templates/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/app/api/templates/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/[draftId]/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/[draftId]/approve/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/templates/extract/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/app/photos/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/app/api/photos/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/api/photos/labels/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/bulk-ops/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/app/api/bulk-ops/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/api/request-links/route.ts`
+- `/Users/gy/Documents/dev/docs/src/app/exports/page.tsx`
+- `/Users/gy/Documents/dev/docs/src/app/api/exports/route.ts`
+- `/Users/gy/Documents/dev/docs/src/services/documentService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/siteChecklistService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/templateService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/templateExtractService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/photoLabelService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/bulkEditService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/requestLinkService.ts`
+- `/Users/gy/Documents/dev/docs/src/services/exportService.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/documentDtos.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/siteChecklistDtos.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/templateDtos.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/templateExtractDtos.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/photoLabelDtos.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/bulkOperationDtos.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/requestLinkDtos.ts`
+- `/Users/gy/Documents/dev/docs/src/lib/exportDtos.ts`
+- `/Users/gy/Documents/dev/docs/docs/run-this-supabase-document-bootstrap.sql`
+- `/Users/gy/Documents/dev/docs/docs/run-this-supabase-site-checklist-bootstrap.sql`
+- `/Users/gy/Documents/dev/docs/docs/run-this-supabase-template-bootstrap.sql`
+- `/Users/gy/Documents/dev/docs/docs/run-this-supabase-template-extract-bootstrap.sql`
+- `/Users/gy/Documents/dev/docs/docs/run-this-supabase-photo-label-bootstrap.sql`
+- `/Users/gy/Documents/dev/docs/docs/run-this-supabase-bulk-ops-bootstrap.sql`
+- `/Users/gy/Documents/dev/docs/docs/run-this-supabase-export-bootstrap.sql`
+
+## D. 화이트리스트 운영 규칙
+
+- B와 C 항목은 향후 구현을 위한 1차 제안 목록이다.
+- 실제 구현 시에는 그 실행에서 사용할 파일만 다시 좁혀서 사용자 확정을 받아야 한다.
+- 위 목록에 없는 파일은 자동 허용되지 않는다.
+- `/Users/gy/Documents/dev/docs/src/components` 아래 파일은 기본적으로 수정 금지다.
+
+# 현재 우선 구현 순서
+
+1. 서류 클라우드 관리
+2. 현장별 필요 서류 누락 방지 기능
+3. 템플릿 등록
+4. 템플릿 추출
+5. 서류와 연계된 현장별 사진 라벨링 보관
+6. 일괄 정보 입력
+7. 일괄 요청
+8. 변환 저장
+9. 본인 인증 기능 마무리
+
+- 본인 인증 기능은 내부 준비가 되어 있어도 외부 사업자 등록과 공급사 키 발급이 끝나야 마무리할 수 있다.
+- 반면 서류 관리 기능은 독립 서비스 단위로 먼저 설계, 구현, 테스트할 수 있다.
+- 따라서 현재는 서류 관리 기능을 우선 구현하는 것이 전체 진도를 가장 안정적으로 올리는 순서다.
+
+# 무결성 기능
+
+- 구현 상태: [✓] 구현 완료. 본인 인증 연동 후 최종 상태 축소만 남음.
+- 기능 목적:
+  - 서명 대상 문서가 요청 시점과 서명 시점 사이에 바뀌지 않았음을 증명한다.
+- 단독 서비스로서의 가치:
+  - 문서 무결성 검증만 별도 API로 제공해도 전자계약, 전자서명, 문서보관 서비스의 핵심 보안 기능이 된다.
+- 책임 범위:
+  - 문서 해시 계산
+  - 요청 시점 해시 고정
+  - 서명 시점 해시 재검사
+  - 감사 로그 기록
+  - 위변조 방지 DB 제약 검증
+- 비책임 범위:
+  - 본인 인증 공급사 연동
+  - 서명 이미지 UI 편집
+  - 문서 보관 정책 전체
+- API 계약:
+  - `POST /api/sign` with `action: REQUEST`
+    - 입력 DTO: `documentId`, `documentContent`, `signerInfo`, `consentText`
+    - 출력 DTO: `requestId`, `documentHash`, `consentTextHash`, `status`
+  - `POST /api/sign` with `action: EXECUTE`
+    - 입력 DTO: `requestId`, `documentContent`, `signatureData`
+    - 출력 DTO: `signatureId`, `requestId`, `status`
+- 데이터 소유권:
+  - `sign_requests`
+  - `signatures`
+  - `signature_audit_logs`
+- 의존 서비스:
+  - 현재는 없음
+  - 본인 인증 기능이 붙으면 인증 상태 확인 계약만 사용
+- 분리 배포 시 필요한 최소 조건:
+  - SHA-256 해시 계산 로직
+  - 서명 요청 저장소
+  - 감사 로그 저장소
+  - 검증 API
+- 체크리스트:
+  - [✓] `SIGN-INTEGRITY-01` 요청 생성 시 문서 해시와 메타데이터를 고정한다.
+  - [✓] `SIGN-INTEGRITY-02` 서명 시 요청 해시와 서명 해시가 일치해야 한다.
+  - [✓] `SIGN-INTEGRITY-03` 감사 로그에 요청 시점과 서명 시점 해시가 남아야 한다.
+  - [✓] `SIGN-INTEGRITY-04` 잘못된 상태 전이와 잘못된 서명 insert를 DB에서 차단한다.
+  - [진행중] `SIGN-SCHEMA-01` 전자서명 도메인 테이블을 public 에서 signing 스키마로 이동한다.
+  - [✓] `SIGN-SCHEMA-02` 앱 코드가 `schema('signing')` 으로만 전자서명 도메인 테이블을 접근하게 한다.
+  - [✓] `SIGN-SCHEMA-03` 신규 DB용 SQL과 기존 DB용 스키마 마이그레이션 SQL을 분리 작성한다.
+  - [ ] `SIGN-INTEGRITY-05` 본인 인증 연동 후 `authenticated -> signed`만 허용하도록 최종 축소한다.
+- 관련 구현 파일:
+  - `/Users/gy/Documents/dev/docs/src/services/signService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/crypto.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/sign/route.ts`
+  - `/Users/gy/Documents/dev/docs/docs/cert.md`
+  - `/Users/gy/Documents/dev/docs/docs/applied/setup-db.sql`
+  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-signing-schema-migration.sql`
+
+# 본인 인증 기능
+
+- 구현 상태: [외부대기] 내부 골격 완료, 공급사 실연동 대기.
+- 기능 목적:
+  - 실제 서명자가 본인인지 확인한 뒤에만 서명을 완료시킨다.
+- 단독 서비스로서의 가치:
+  - 하나의 인증 허브 서비스로 분리하면 다른 제품이나 다른 서명 흐름에도 재사용 가능하다.
+- 책임 범위:
+  - 인증 요청 발행
+  - 인증 상태 조회
+  - 인증 취소
+  - callback 수신
+  - 인증 결과 검증
+  - 인증 결과를 서명 요청에 연결
+- 비책임 범위:
+  - 문서 무결성 계산 자체
+  - 서류 템플릿 편집
+  - 알림 발송 전체
+- API 계약:
+  - `POST /api/sign` with `action: AUTH_REQUEST`
+    - 입력 DTO: `requestId`, `providerKey`, `consentText`, `requester`
+    - 출력 DTO: `authRequestId`, `providerKey`, `status`, `redirectUrl?`
+  - `POST /api/sign` with `action: AUTH_STATUS`
+    - 입력 DTO: `authRequestId`
+    - 출력 DTO: `status`, `providerPayloadSummary`
+  - `POST /api/sign` with `action: AUTH_CANCEL`
+    - 입력 DTO: `authRequestId`
+    - 출력 DTO: `status`
+  - `POST /api/sign` with `action: AUTH_VERIFY`
+    - 입력 DTO: `authRequestId`, `verificationPayload`
+    - 출력 DTO: `status`, `verifiedAt`, `authenticatedRequestStatus`
+  - `POST /api/sign` with `action: AUTH_CALLBACK`
+    - 입력 DTO: `providerKey`, `callbackPayload`
+    - 출력 DTO: `status`, `mappedAuthStatus`
+- 데이터 소유권:
+  - `sign_authentications`
+  - 인증 결과 해시
+  - 공급사 응답 요약 메타데이터
+- 의존 서비스:
+  - 무결성 기능의 `requestId`, `documentHash`, `consentTextHash` 계약
+  - 외부 공급사: BaroCert, PASS/휴대폰 본인확인
+- 분리 배포 시 필요한 최소 조건:
+  - 공급사 API 키
+  - callback endpoint
+  - 결과 검증 로직
+  - 인증 저장소
+- 체크리스트:
+  - [✓] `AUTH-01` 인증 요청, 조회, 취소, 검증, callback 내부 흐름을 구현한다.
+  - [✓] `AUTH-02` 인증 결과 해시와 민감정보 보호 저장 구조를 둔다.
+  - [✓] `AUTH-03` `verified` 인증 결과가 있어야 `authenticated` 상태로 갈 수 있게 한다.
+  - [ ] `AUTH-04` BaroCert 토스 실제 연동을 붙인다.
+  - [ ] `AUTH-05` BaroCert 카카오, 네이버 실제 연동을 붙인다.
+  - [ ] `AUTH-06` PASS 또는 NICE callback과 결과 검증을 붙인다.
+  - [ ] `AUTH-07` 무결성 기능의 임시 `pending -> signed` 허용을 제거한다.
+- 관련 구현 파일:
+  - `/Users/gy/Documents/dev/docs/src/services/signAuthService.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/signService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/authProviders.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/authEvidence.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/sign/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/test-sign/page.tsx`
+  - `/Users/gy/Documents/dev/docs/docs/cert.md`
+  - `/Users/gy/Documents/dev/docs/docs/cert-todo.md`
+
+# 서류 클라우드 관리
+
+- 구현 상태: [진행중] 2차 상세 조회/버전 추가 구현 완료
+- 기능 목적:
+  - 모든 문서를 현장, 종류, 버전, 상태 기준으로 보관하고 조회할 수 있게 만든다.
+- 단독 서비스로서의 가치:
+  - 문서 레지스트리와 버전 저장소만 별도 서비스여도 다른 업무 시스템에서 공통 문서 백본으로 사용할 수 있다.
+- 책임 범위:
+  - 문서 메타데이터 등록
+  - HTML 정본 저장
+  - 출력본 목록 관리
+  - 최신본/이전본 구분
+  - soft delete 정책
+- 비책임 범위:
+  - 템플릿 자동 추출
+  - 본인 인증
+  - 알림 발송
+- API 계약:
+  - `POST /api/documents`
+    - 입력 DTO: `siteId`, `documentTypeKey`, `templateId?`, `htmlCanonical`, `labelValues`
+    - 출력 DTO: `documentId`, `versionId`, `status`
+  - `GET /api/documents/:documentId`
+    - 출력 DTO: `document`, `latestVersion`, `artifacts`
+  - `POST /api/documents/:documentId/version`
+    - 입력 DTO: `htmlCanonical`, `labelValues`, `changeReason`
+    - 출력 DTO: `versionId`, `versionNumber`
+  - `GET /api/documents`
+    - 쿼리: `siteId`, `status`, `documentTypeKey`, `latestOnly`
+- 데이터 소유권:
+  - 문서 메타데이터
+  - 문서 버전
+  - HTML 정본
+  - 출력본 메타데이터
+- 의존 서비스:
+  - 없음
+  - 템플릿 서비스는 선택적으로 `templateId`만 참조
+- 분리 배포 시 필요한 최소 조건:
+  - 문서 DB
+  - HTML 저장소
+  - 출력본 저장소
+  - 문서 조회 API
+- 체크리스트:
+  - [✓] `DOC-CLOUD-01` 문서 메타데이터와 버전 데이터를 분리한다.
+  - [✓] `DOC-CLOUD-02` HTML 정본과 출력본 메타데이터를 분리 저장한다.
+  - [✓] `DOC-CLOUD-03` 최신본과 이력 조회 API를 제공한다.
+  - [✓] `DOC-CLOUD-04` soft delete 정책을 정의한다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/documents/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/app/api/documents/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/documents/[documentId]/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/documents/[documentId]/version/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/documentService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/documentDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-document-bootstrap.sql`
+
+# 현장별 필요 서류 누락 방지 기능
+
+- 구현 상태: [진행중] 1차 규칙 저장/체크리스트 계산 구현 완료
+- 기능 목적:
+  - 현장을 만들 때 필요한 서류를 자동 계산하고 누락 서류를 바로 보여준다.
+- 단독 서비스로서의 가치:
+  - 현장 개설 체크리스트 서비스만 분리해도 서류 준비 누락 방지 도구로 독립 판매가 가능하다.
+- 책임 범위:
+  - 공종별 필수 서류 규칙 저장
+  - 현장 생성 시 체크리스트 계산
+  - 누락, 작성중, 완료 상태 표시
+- 비책임 범위:
+  - 실제 문서 본문 편집
+  - 본인 인증
+  - 파일 변환
+- API 계약:
+  - `POST /api/sites`
+    - 입력 DTO: `siteName`, `tradeKeys[]`, `openDate`, `requiredDocumentRules[]?`
+    - 출력 DTO: `siteId`, `generatedChecklistCount`
+  - `POST /api/sites/checklist`
+    - 입력 DTO: `siteId`, `requiredDocumentRules[]?`
+    - 출력 DTO: `checklistVersion`, `itemCount`
+  - `GET /api/sites/:siteId/checklist`
+    - 출력 DTO: `requiredDocuments[]`, `missingCount`, `completedCount`
+- 데이터 소유권:
+  - 공종 규칙
+  - 필수 서류 카탈로그
+  - 현장 체크리스트 스냅샷
+- 의존 서비스:
+  - 서류 클라우드 관리의 문서 상태 조회 계약
+- 분리 배포 시 필요한 최소 조건:
+  - 공종 규칙 저장소
+  - 현장 체크리스트 생성기
+  - 현장 체크리스트 조회 API
+- 체크리스트:
+  - [✓] `SITE-CHECK-01` 공종별 필수 서류 규칙을 저장한다.
+  - [✓] `SITE-CHECK-02` 현장 생성 시 체크리스트를 자동 계산한다.
+  - [✓] `SITE-CHECK-03` 같은 문서가 중복 계산되면 한 항목으로 합친다.
+  - [✓] `SITE-CHECK-04` 문서 상태와 연결해 누락 여부를 표시한다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/sites/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/app/api/sites/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/sites/checklist/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/sites/[siteId]/checklist/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/siteChecklistService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/siteChecklistDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-site-checklist-bootstrap.sql`
+
+# 템플릿 등록
+
+- 구현 상태: [진행중] 1차 저장 구조 구현 완료
+- 기능 목적:
+  - 업로드된 양식을 재사용 가능한 HTML 템플릿과 라벨 구조로 변환한다.
+- 단독 서비스로서의 가치:
+  - 템플릿 등록 서비스만 분리되어도 다양한 문서 양식을 구조화된 웹 양식으로 변환하는 플랫폼이 된다.
+- 책임 범위:
+  - 원본 양식 입력
+  - HTML 레이아웃 변환
+  - 필드 스키마 정의
+  - 라벨 매핑 정의
+  - 서명 영역 라벨 등록
+- 비책임 범위:
+  - 최종 본인 인증
+  - 대량 요청 링크 발송
+  - 출력물 저장
+- API 계약:
+  - `POST /api/templates`
+    - 입력 DTO: `templateName`, `sourceDocumentName?`, `sourceDocumentId?`, `draftHtml`, `layoutResizeMode`
+    - 출력 DTO: `template`
+  - `POST /api/templates/:templateId/fields`
+    - 입력 DTO: `fields[]`, `signatureAreas[]`
+    - 출력 DTO: `templateId`, `savedFieldCount`, `savedSignatureAreaCount`, `labelBindingCount`
+  - `GET /api/templates/:templateId`
+    - 출력 DTO: `template`, `fields[]`, `labelBindings[]`, `signatureAreas[]`, `labelMap`
+- 데이터 소유권:
+  - 템플릿 정의
+  - 템플릿 필드 스키마
+  - 라벨 매핑
+  - 서명 영역 좌표 정의
+- 의존 서비스:
+  - 현재는 없음
+  - 다음 단계의 템플릿 추출 서비스가 원본 문서를 읽어 `draftHtml` 초안을 만들면 그 결과만 입력 계약으로 받는다.
+- 분리 배포 시 필요한 최소 조건:
+  - 템플릿 저장소
+  - HTML 레이아웃 저장소
+  - 필드 스키마 편집 API
+  - 라벨 바인딩 저장소
+  - 서명 영역 저장소
+- 체크리스트:
+  - [ ] `TPL-REG-01` 원본 문서를 HTML 레이아웃 초안으로 자동 변환한다.
+  - [✓] `TPL-REG-02` 필드 스키마와 라벨 매핑을 별도 저장한다.
+  - [✓] `TPL-REG-03` `layout_resize_mode`를 `fixed`, `grow_height`, `grow_width`로 구분한다.
+  - [✓] `TPL-REG-04` 서명 영역도 라벨과 좌표로 저장한다.
+  - [✓] `TPL-REG-05` 최근 템플릿 목록과 자동 조회 흐름을 제공한다.
+  - [✓] `TPL-REG-06` 최근 템플릿 선택 상태와 열기 UX를 분명하게 표시한다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/templates/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/app/api/templates/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/templates/[templateId]/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/templates/[templateId]/fields/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/templateService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/templateDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-template-bootstrap.sql`
+
+# 템플릿 추출
+
+- 구현 상태: [진행중] 1차 초안 추출/승인 구현 완료
+- 기능 목적:
+  - 값이 이미 입력된 문서를 읽고 재사용 가능한 템플릿 초안을 생성한다.
+- 단독 서비스로서의 가치:
+  - 이미 채워진 문서를 구조화된 양식으로 되돌리는 역방향 템플릿 추출 서비스로 독립 가치가 있다.
+- 책임 범위:
+  - 문서 구조 분석
+  - 고정 문구와 입력값 분리
+  - 표 구조 복원
+  - 라벨 후보 추천
+  - 초안 저장
+  - 승인 전 검토 상태 저장
+- 비책임 범위:
+  - 최종 승인 후 실사용 템플릿 배포
+  - 문서 본문 최종 보관
+  - PDF, DOCX, HWP 바이너리 파싱
+  - 외부 OCR 또는 실제 LLM 문서 이해 엔진 운영
+- API 계약:
+  - `POST /api/templates/extract`
+    - 입력 DTO: `sourceTitle?`, `sourceKind`, `sourceContent`, `similarTemplateIds?`
+    - 출력 DTO: `draft`, `candidates[]`, `reviewSummary`
+  - `GET /api/templates/extract/:draftId`
+    - 출력 DTO: `draft`, `candidates[]`, `reviewSummary`
+  - `POST /api/templates/extract/:draftId/approve`
+    - 입력 DTO: `templateName`, `layoutResizeMode?`, `reviewedFields[]`
+    - 출력 DTO: `templateId`, `approvedFieldCount`, `skippedFieldCount`
+- 데이터 소유권:
+  - 추출 초안
+  - generated draft HTML
+  - 필드별 confidence
+  - 사용자 검토 결과
+- 의존 서비스:
+  - 템플릿 등록 서비스
+  - 유사 템플릿 ID 힌트가 있을 때만 템플릿 등록 도메인과 약하게 연결된다.
+- 분리 배포 시 필요한 최소 조건:
+  - 문서 분석 엔진
+  - draft 저장소
+  - 검토 승인 API
+  - 정식 템플릿 생성 계약
+- 체크리스트:
+  - [✓] `TPL-EXT-01` 고정 문구와 입력값을 분리한다.
+  - [✓] `TPL-EXT-02` 표 구조를 유지한 draft를 생성한다.
+  - [✓] `TPL-EXT-03` 낮은 확신 필드를 `검토 필요`로 남긴다.
+  - [✓] `TPL-EXT-04` 승인 전에는 정식 템플릿으로 승격하지 않는다.
+  - [진행중] `TPL-EXT-05` 파일 업로드에서 본문을 추출해 기존 draft 생성 흐름으로 넘긴다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/[draftId]/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/[draftId]/approve/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/templates/extract/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/services/templateExtractService.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/templateExtractFileService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/templateExtractDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-template-extract-bootstrap.sql`
+
+# 서류와 연계된 현장별 사진 라벨링 보관
+
+- 구현 상태: [진행중] 2차 요구 라벨 규칙/누락 경고 구현 진행중
+- 기능 목적:
+  - 현장 사진을 서류 라벨과 연결해 보관하고 필요한 사진 누락을 줄인다.
+- 단독 서비스로서의 가치:
+  - 사진 증빙 관리와 라벨 추천만으로도 현장 관리 도구의 독립 서비스가 된다.
+- 책임 범위:
+  - 현장 사진 메타데이터 저장
+  - 사진 라벨 저장
+  - 추천 라벨 저장
+  - 추천 라벨 검토 상태 저장
+  - 현장별 요구 라벨 규칙 저장
+  - 요구 라벨 대비 누락 경고 계산
+- 비책임 범위:
+  - 문서 본문 직접 수정
+  - 서명 실행
+  - 실제 이미지 바이너리 업로드 저장
+  - 비전 모델 연동
+- API 계약:
+  - `POST /api/photos`
+    - 입력 DTO: `siteId`, `photoUrl?`, `storagePath?`, `photoTitle?`, `description?`, `capturedAt?`
+    - 출력 DTO: `photo`
+  - `GET /api/photos`
+    - 쿼리: `siteId`, `limit`
+    - 출력 DTO: `photos[]`
+  - `POST /api/photos/labels`
+    - 입력 DTO: `photoId`, `manualLabels[]`, `suggestedLabels[]`
+    - 출력 DTO: `photoId`, `manualLabelCount`, `suggestedLabelCount`
+  - `POST /api/photos/requirements`
+    - 입력 DTO: `siteId`, `requirements[]`
+    - 출력 DTO: `siteId`, `requirementCount`, `requirements[]`
+  - `GET /api/sites/:siteId/photo-label-gaps`
+    - 출력 DTO: `requirementCount`, `coveredCount`, `reviewNeededCount`, `missingCount`, `requirements[]`
+- 데이터 소유권:
+  - 현장 사진 메타데이터
+  - 수동 사진 라벨
+  - 추천 라벨 결과
+  - 현장별 사진 요구 라벨 규칙
+- 의존 서비스:
+  - 현재는 없음
+  - 다음 단계에서 현장 체크리스트 및 서류 서비스와 labelKey 계약으로 연결 범위를 넓힌다.
+- 분리 배포 시 필요한 최소 조건:
+  - 사진 메타데이터 저장소
+  - 라벨 저장소
+  - 추천 결과 저장소
+  - 요구 라벨 규칙 저장소
+  - 누락 경고 계산기
+  - 체크리스트:
+  - [✓] `PHOTO-LABEL-01` 사진을 `siteId`와 연결 저장한다.
+  - [✓] `PHOTO-LABEL-02` 한 사진에 여러 라벨을 붙일 수 있게 한다.
+  - [✓] `PHOTO-LABEL-03` 라벨 추천은 자동 확정하지 않고 검토 단계를 둔다.
+  - [✓] `PHOTO-LABEL-04` 문서 요구 라벨 누락 경고를 제공한다.
+  - [진행중] `PHOTO-LABEL-05` 실제 사진 업로드와 Storage 저장을 제공한다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/photos/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/app/api/photos/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/photos/upload/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/photos/labels/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/photos/requirements/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/sites/[siteId]/photo-label-gaps/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/photoLabelService.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/photoLabelRequirementService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/photoLabelDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-photo-label-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-photo-label-gap-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-photo-storage-bootstrap.sql`
+
+# 일괄 정보 입력
+
+- 구현 상태: [진행중] 1차 preview/commit 구조 구현 완료
+- 기능 목적:
+  - 같은 라벨을 가진 여러 문서에 같은 정보를 한 번에 넣거나 수정하거나 삭제한다.
+- 단독 서비스로서의 가치:
+  - 반복 입력 제거 도구만으로도 문서 운영 자동화 서비스로 독립 가치가 높다.
+- 책임 범위:
+  - 대상 문서 선택
+  - 대상 라벨 선택
+  - 미리보기 계산
+  - 일괄 반영
+  - 작업 이력 보관
+- 비책임 범위:
+  - 문서 렌더러 자체
+  - 본인 인증 공급사 연동
+  - 서명 라벨 일괄 수정
+- API 계약:
+  - `POST /api/bulk-ops/preview`
+    - 입력 DTO: `documentIds[]`, `labelChanges[]`
+    - 출력 DTO: `previewId`, `affectedFields[]`, `warnings[]`
+  - `POST /api/bulk-ops/commit`
+    - 입력 DTO: `previewId`, `confirmedBy`
+    - 출력 DTO: `jobId`, `updatedDocumentCount`
+- 데이터 소유권:
+  - bulk operation preview
+  - bulk operation commit history
+  - field-level change log
+- 의존 서비스:
+  - 서류 클라우드 관리 서비스
+  - 템플릿 등록 서비스
+  - 본인 인증 기능, 단 서명 라벨 처리 시에만
+- 분리 배포 시 필요한 최소 조건:
+  - 변경 대상 계산기
+  - 변경 미리보기 저장소
+  - 작업 이력 저장소
+- 체크리스트:
+  - [진행중] `BULK-EDIT-01` 같은 타입의 라벨만 묶어 처리한다.
+  - [진행중] `BULK-EDIT-02` 적용 전 미리보기를 제공한다.
+  - [진행중] `BULK-EDIT-03` 실제 반영 이력을 저장한다.
+  - [진행중] `BULK-EDIT-04` 서명 라벨은 추가 권한과 본인확인 조건을 붙인다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/bulk-ops/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/app/api/bulk-ops/preview/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/bulk-ops/commit/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/bulkEditService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/bulkOperationDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-bulk-ops-bootstrap.sql`
+
+# 일괄 요청
+
+- 구현 상태: [진행중] 1차 생성/열람/제출/감사로그 구현 완료
+- 기능 목적:
+  - 특정 라벨만 제한적으로 수정할 수 있는 요청 링크를 메일, 문자로 보낸다.
+- 단독 서비스로서의 가치:
+  - 제한 입력 링크 서비스는 외부 협력사 데이터 수집 제품으로도 독립 가능하다.
+- 책임 범위:
+  - 허용 라벨 범위 정의
+  - 수신자와 만료일 정의
+  - 요청 링크 발행
+  - 토큰 검증
+  - 제출 이력 보관
+- 비책임 범위:
+  - 문서 본문 전체 보관
+  - 최종 서명 검증
+  - 실제 메일/SMS 발송 연동
+- API 계약:
+  - `POST /api/request-links`
+    - 입력 DTO: `documentId`, `allowedLabels[]`, `recipient`, `expiresAt`
+    - 출력 DTO: `requestLinkId`, `token`, `maskedUrl`
+  - `GET /api/request-links/:token`
+    - 출력 DTO: `documentSummary`, `allowedLabels[]`, `expiresAt`
+  - `POST /api/request-links/:token/submit`
+    - 입력 DTO: `labelValues`
+    - 출력 DTO: `status`, `updatedLabels[]`
+- 데이터 소유권:
+  - 요청 링크
+  - 토큰 해시
+  - 허용 라벨 범위
+  - 제출 감사 로그
+- 의존 서비스:
+  - 서류 클라우드 관리 서비스
+  - 템플릿 등록 서비스
+  - 외부 알림 발송 서비스
+- 분리 배포 시 필요한 최소 조건:
+  - 토큰 검증 저장소
+  - 제출 API
+  - 알림 발송 연동
+- 체크리스트:
+  - [진행중] `REQ-LINK-01` 허용 라벨 범위를 토큰과 함께 저장한다.
+  - [진행중] `REQ-LINK-02` 만료일과 1회성 여부를 검증한다.
+  - [진행중] `REQ-LINK-03` 허용되지 않은 라벨 수정은 차단한다.
+  - [진행중] `REQ-LINK-04` 누가 언제 무엇을 바꿨는지 감사 로그를 남긴다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/api/request-links/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/request-links/[token]/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/request-links/[token]/submit/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/request-links/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/app/request-links/[token]/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/services/requestLinkService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/requestLinkDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-request-links-bootstrap.sql`
+
+# 문자 발송
+
+- 구현 상태: [진행중] Solapi 기반 독립 도메인 1차 구현 진행중
+- 기능 목적:
+  - 발신번호에서 수신번호로 링크 또는 안내 메시지를 문자로 발송한다.
+- 단독 서비스로서의 가치:
+  - 문자 발송 기능만 별도 서비스로 분리해도 다른 제품의 알림/인증/링크 전달 채널로 재사용할 수 있다.
+- 책임 범위:
+  - 발신번호 레지스트리 관리
+  - 수신번호 레지스트리 관리
+  - Solapi 발송 요청 생성
+  - 발송 상태/이벤트 저장
+- 비책임 범위:
+  - 요청 링크 생성
+  - 문서 수정 제출
+  - 본인 인증
+- API 계약:
+  - `POST /api/messaging/sms/senders`
+  - `POST /api/messaging/sms/recipients`
+  - `POST /api/messaging/sms/send`
+  - `POST /api/messaging/email/send`
+- 데이터 소유권:
+  - 발신번호 레지스트리
+  - 수신번호 레지스트리
+  - SMS 발송 registry
+  - SMS 발송 event log
+  - 이메일 발송 registry
+  - 이메일 발송 target
+  - 이메일 발송 event log
+- 의존 서비스:
+  - Solapi
+  - 요청 링크 서비스는 필요 시 이 서비스를 호출만 한다.
+- 분리 배포 시 필요한 최소 조건:
+  - Solapi API Key/Secret
+  - 이메일 provider API Key/발신자 주소
+  - sender/recipient 저장소
+  - dispatch 저장소
+- 체크리스트:
+  - [진행중] `MESSAGING-01` messaging 스키마와 독립 API를 만든다.
+  - [진행중] `MESSAGING-02` Solapi 발송 인증과 dispatch 이력을 남긴다.
+  - [진행중] `MESSAGING-03` delivery callback 또는 상태 동기화를 붙인다.
+  - [진행중] `MESSAGING-04` request-links 에서 messaging 계약만 호출하도록 유지한다.
+  - [진행중] `MESSAGING-05` 기본 발신번호와 메시지 접두사를 messaging 정본 설정으로 관리한다.
+  - [진행중] `MESSAGING-07` request-links 에서 이메일 발송도 messaging 계약으로 분리한다.
+  - 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/lib/messagingDtos.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/messagingService.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/solapiSmsService.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/messaging/sms/senders/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/messaging/sms/recipients/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/messaging/sms/send/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/messaging/sms/sync/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/messaging/sms/settings/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/messaging/email/send/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/request-links/page.tsx`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-messaging-bootstrap.sql`
+
+# 변환 저장
+
+- 구현 상태: [진행중] 1차 job/artifact 메타데이터 구조 구현 완료
+- 기능 목적:
+  - HTML 정본을 PDF, DOCX, HWP 형식으로 안전하게 변환하고 이력을 남긴다.
+- 단독 서비스로서의 가치:
+  - 렌더링과 변환 엔진만 별도 서비스여도 다양한 문서 플랫폼의 출력 백엔드가 될 수 있다.
+- 책임 범위:
+  - 변환 작업 생성
+  - 출력 포맷별 job 실행
+  - 결과 파일 메타데이터 저장
+  - 어떤 버전에서 만든 출력물인지 기록
+- 비책임 범위:
+  - HTML 정본 편집
+  - 본인 인증
+  - 체크리스트 계산
+  - 실제 PDF/DOCX/HWP 바이너리 렌더링 엔진
+- API 계약:
+  - `POST /api/exports`
+    - 입력 DTO: `documentId`, `versionId`, `targetFormat`
+    - 출력 DTO: `exportJobId`, `status`
+  - `GET /api/exports/:exportJobId`
+    - 출력 DTO: `status`, `artifactId?`, `error?`
+  - `GET /api/documents/:documentId/artifacts`
+    - 출력 DTO: `artifacts[]`
+- 데이터 소유권:
+  - export jobs
+  - export artifacts
+  - render metadata
+- 의존 서비스:
+  - 서류 클라우드 관리 서비스
+  - 템플릿 등록 서비스
+  - 외부 변환기, 특히 HWP
+- 분리 배포 시 필요한 최소 조건:
+  - job queue
+  - 변환 워커
+  - 출력본 저장소
+- 체크리스트:
+  - [진행중] `EXPORT-01` HTML 정본 기준으로 PDF 변환을 지원한다.
+  - [진행중] `EXPORT-02` DOCX 변환을 지원한다.
+  - [진행중] `EXPORT-03` HWP 변환 경로를 정의한다.
+  - [진행중] `EXPORT-04` 각 출력물이 어떤 문서 버전에서 생성되었는지 저장한다.
+  - [진행중] `EXPORT-05` PDF 실제 다운로드 응답을 지원한다.
+  - [진행중] `EXPORT-06` DOCX 실제 다운로드 응답을 지원한다.
+  - [진행중] `EXPORT-07` HWP 외부 변환기 handoff/callback 계약을 지원한다.
+- 1차 제안 파일:
+  - `/Users/gy/Documents/dev/docs/src/app/exports/page.tsx`
+  - `/Users/gy/Documents/dev/docs/src/app/api/exports/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/exports/[exportJobId]/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/app/api/documents/[documentId]/artifacts/route.ts`
+  - `/Users/gy/Documents/dev/docs/src/services/exportService.ts`
+  - `/Users/gy/Documents/dev/docs/src/lib/exportDtos.ts`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-export-bootstrap.sql`
+
+# 문서 개정 체크리스트
+
+- [✓] `DOC-DESIGN-01` 실행 정책과 수정 절차를 문서에 반영했다.
+- [✓] `DOC-DESIGN-02` 파일 단위 화이트리스트를 문서에 반영했다.
+- [✓] `DOC-DESIGN-03` 각 기능을 독립 서비스 관점으로 재정의했다.
+- [✓] `DOC-DESIGN-04` 기능별 체크리스트와 diff 연계 기준을 추가했다.
+- [✓] `DOC-DESIGN-05` 수정 전 원본 파일을 `docs/diff`에 백업했다.
+- [진행중] `SIGN-SCHEMA-01` signing 스키마 전환 설계와 1차 구현 파일 목록을 문서에 반영했다.
+- [✓] `SIGN-SCHEMA-02` `src/services/signService.ts`, `src/services/signAuthService.ts` 가 `schema('signing')` 을 사용하도록 정렬했다.
+- [✓] `SIGN-SCHEMA-03` `docs/applied/setup-db.sql`, `docs/applied/run-this-supabase-auth-bootstrap.sql`, `docs/applied/run-this-supabase-signing-schema-migration.sql`, `docs/applied/verify-signing-schema-migration.sql` 을 작성했다.
+- [✓] `DOC-CLOUD-01` `src/services/documentService.ts`, `src/lib/documentDtos.ts`, `src/app/api/documents/route.ts`, `src/app/documents/page.tsx`, `docs/run-this-supabase-document-bootstrap.sql` 을 작성했다.
+- [✓] `DOC-CLOUD-03` `src/app/api/documents/[documentId]/route.ts`, `src/app/api/documents/[documentId]/version/route.ts`, `src/services/documentService.ts`, `src/app/documents/page.tsx` 에 상세 조회와 버전 추가를 구현했다.
+- [✓] `SITE-CHECK-01` `src/lib/siteChecklistDtos.ts`, `src/services/siteChecklistService.ts`, `src/app/api/sites/route.ts`, `src/app/api/sites/checklist/route.ts`, `src/app/api/sites/[siteId]/checklist/route.ts`, `src/app/sites/page.tsx`, `docs/run-this-supabase-site-checklist-bootstrap.sql` 을 작성했다.
+- [✓] `TPL-REG-01` `src/lib/templateDtos.ts`, `src/services/templateService.ts`, `src/app/api/templates/route.ts`, `src/app/api/templates/[templateId]/route.ts`, `src/app/api/templates/[templateId]/fields/route.ts`, `src/app/templates/page.tsx`, `docs/run-this-supabase-template-bootstrap.sql` 을 작성했다.
+- [✓] `TPL-REG-05` `src/services/templateService.ts`, `src/app/api/templates/route.ts`, `src/app/templates/page.tsx`, `src/app/templates/extract/page.tsx` 에 최근 템플릿 목록과 생성된 템플릿 바로 열기 흐름을 추가했다.
+- [✓] `TPL-REG-06` `src/app/templates/page.tsx` 에 선택됨 표시와 목록 열기 UX를 추가했다.
+- [✓] `TPL-EXT-01` `src/lib/templateExtractDtos.ts`, `src/services/templateExtractService.ts`, `src/app/api/templates/extract/route.ts`, `src/app/api/templates/extract/[draftId]/route.ts`, `src/app/api/templates/extract/[draftId]/approve/route.ts`, `src/app/templates/extract/page.tsx`, `docs/run-this-supabase-template-extract-bootstrap.sql` 을 작성했다.
+- [진행중] `TPL-EXT-05` `src/services/templateExtractFileService.ts`, `src/app/api/templates/extract/route.ts`, `src/services/templateExtractService.ts`, `src/app/templates/extract/page.tsx` 에 txt/html/docx 업로드 본문 추출과 기존 draft 생성 연결 흐름을 추가했다.
+- [✓] `PHOTO-LABEL-01` `src/lib/photoLabelDtos.ts`, `src/services/photoLabelService.ts`, `src/app/api/photos/route.ts`, `src/app/api/photos/labels/route.ts`, `src/app/photos/page.tsx`, `docs/run-this-supabase-photo-label-bootstrap.sql` 을 작성했다.
+- [✓] `PHOTO-LABEL-04` `src/services/photoLabelRequirementService.ts`, `src/app/api/photos/requirements/route.ts`, `src/app/api/sites/[siteId]/photo-label-gaps/route.ts`, `src/app/photos/page.tsx`, `docs/run-this-supabase-photo-label-gap-bootstrap.sql` 에 요구 라벨 규칙 저장과 누락 경고 계산 흐름을 추가했다.
+- [진행중] `PHOTO-LABEL-05` `src/app/api/photos/upload/route.ts`, `src/services/photoLabelService.ts`, `src/lib/photoLabelDtos.ts`, `src/app/photos/page.tsx`, `docs/run-this-supabase-photo-storage-bootstrap.sql` 에 실제 Storage 업로드와 업로드 메타데이터 기록 흐름을 추가했다.
+- [진행중] `BULK-EDIT-01` `src/lib/bulkOperationDtos.ts`, `src/services/bulkEditService.ts`, `src/app/api/bulk-ops/preview/route.ts`, `src/app/api/bulk-ops/commit/route.ts`, `src/app/bulk-ops/page.tsx`, `docs/run-this-supabase-bulk-ops-bootstrap.sql` 에 일반 라벨 preview/commit 1차 흐름을 추가했다.
+- [진행중] `APP-HOME-01` `src/app/page.tsx`, `src/app/globals.css` 에 구현 페이지 홈 진입점과 전역 그림자 제거 규칙을 추가했다.
+- [진행중] `REQ-LINK-01` `src/lib/requestLinkDtos.ts`, `src/services/requestLinkService.ts`, `src/app/api/request-links/route.ts`, `src/app/api/request-links/[token]/route.ts`, `src/app/api/request-links/[token]/submit/route.ts`, `src/app/request-links/page.tsx`, `src/app/request-links/[token]/page.tsx`, `docs/run-this-supabase-request-links-bootstrap.sql` 에 제한 입력 링크 1차 흐름을 추가했다.
+- [진행중] `EXPORT-01` `src/lib/exportDtos.ts`, `src/services/exportService.ts`, `src/app/api/exports/route.ts`, `src/app/api/exports/[exportJobId]/route.ts`, `src/app/api/documents/[documentId]/artifacts/route.ts`, `src/app/exports/page.tsx`, `docs/run-this-supabase-export-bootstrap.sql` 에 export job과 artifact 메타데이터 1차 흐름을 추가했다.
+- [진행중] `EXPORT-05` `src/services/exportRendererService.ts`, `src/app/api/exports/[exportJobId]/download/route.ts`, `src/services/exportService.ts`, `src/app/exports/page.tsx` 에 PDF 다운로드 2차 흐름을 추가했다.
+- [진행중] `EXPORT-06` `src/services/exportRendererService.ts`, `src/services/exportService.ts`, `src/app/exports/page.tsx` 에 DOCX 다운로드 2차 흐름을 추가했다.
+- [진행중] `EXPORT-07` `src/services/exportHwpHandoffService.ts`, `src/app/api/exports/[exportJobId]/handoff/route.ts`, `src/app/api/exports/hwp-callback/route.ts`, `src/app/exports/page.tsx` 에 HWP handoff/callback 2차 흐름을 추가했다.
+- [진행중] `EXPORT-UI-01` `src/app/exports/page.tsx` 에 내부 job/artifact 복잡성을 숨기고 PDF/DOCX/HWP 버튼 중심 화면으로 단순화했다.
+- [ ] `DOC-DESIGN-06` 다음 구현 턴에서 실제 선택 기능에 맞는 좁은 화이트리스트를 다시 확정한다.
+
+# 테스트 기록
+
+- 날짜: 2026-04-11
+  - 체크리스트 ID: `DOC-DESIGN-01`, `DOC-DESIGN-02`, `DOC-DESIGN-03`, `DOC-DESIGN-04`, `DOC-DESIGN-05`
+  - Supabase MCP: `list_tables`, `get_project_url` 호출을 시도했으나 둘 다 `MCP error -32600: You do not have permission to perform this action`으로 실패했다.
+  - Chrome DevTools MCP: `new_page`, `list_pages` 호출을 시도했으나 둘 다 기존 브라우저 프로필 잠금으로 실패했다.
+  - 결과: 문서 개정 자체는 완료했으나, 이번 실행에서는 MCP 환경 권한과 브라우저 세션 충돌 때문에 자동 검증을 끝까지 수행하지 못했다.
+  - 남은 위험: 다음 구현 턴 시작 전에 Supabase MCP 권한과 Chrome DevTools 세션 상태를 먼저 정상화해야 한다. 문서만 수정되었으므로 실제 기능 동작 검증은 다음 기능 구현 턴에서 재실행해야 한다.
+- 날짜: 2026-04-11
+  - 체크리스트 ID: `SIGN-SCHEMA-01`, `SIGN-SCHEMA-02`, `SIGN-SCHEMA-03`
+  - 코드 번들 검증: `src/services/signService.ts`, `src/services/signAuthService.ts`, `src/app/api/sign/route.ts` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['signing'])` 호출을 시도했으나 `MCP error -32600: You do not have permission to perform this action` 으로 실패했다.
+  - Chrome DevTools MCP: `new_page(http://localhost:4000/test-sign)` 호출을 시도했으나 기존 브라우저 프로필 잠금으로 실패했다.
+  - 결과: 코드와 SQL 파일 작성은 완료되었으나, 실제 DB 반영 여부와 UI 동작은 MCP 환경 제약 때문에 자동 확인하지 못했다.
+  - 남은 위험: 사용자가 `run-this-supabase-signing-schema-migration.sql` 과 `setup-db.sql` 을 적용하기 전까지 실제 DB는 여전히 public 테이블 또는 이전 스키마를 사용할 수 있다. 또한 Supabase API Exposed schemas 에 `signing` 을 추가하지 않으면 앱 코드가 runtime 에서 실패한다.
+- 날짜: 2026-04-11
+  - 체크리스트 ID: `DOC-CLOUD-01`, `DOC-CLOUD-02`, `DOC-CLOUD-04`
+  - 코드 번들 검증: `src/services/documentService.ts`, `src/app/api/documents/route.ts`, `src/app/documents/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['documents'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `http://localhost:4000/documents` 페이지를 실제로 열었고, 화면은 렌더링되었으나 API 응답이 `문서 목록 조회 실패: Invalid schema: documents` 로 나타났다.
+  - 결과: UI 골격과 코드 번들은 정상이다. 다만 `documents` 스키마 bootstrap SQL 과 PostgREST schema 목록 반영이 아직 적용되지 않아 런타임 API는 실패한다.
+  - 남은 위험: 사용자가 `docs/run-this-supabase-document-bootstrap.sql` 을 실행하고, 필요 시 `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, signing, documents'; NOTIFY pgrst, 'reload config'; NOTIFY pgrst, 'reload schema';` 를 적용하기 전까지 `/api/documents` 는 정상 동작하지 않는다. 또한 `DOC-CLOUD-03` 의 상세 조회, 이력 조회, 버전 추가 라우트는 아직 구현되지 않았다.
+- 날짜: 2026-04-11
+  - 체크리스트 ID: `DOC-CLOUD-03`
+  - 코드 번들 검증: `src/services/documentService.ts`, `src/app/api/documents/[documentId]/route.ts`, `src/app/api/documents/[documentId]/version/route.ts`, `src/app/documents/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['documents'])` 호출을 다시 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `http://localhost:4000/documents` 에서 기존 문서 `8eb338b2-b08c-4a86-9253-f3498a881108` 의 상세 조회를 수행했고, 이어서 변경 사유 `DOC-CLOUD-03 자동검증` 으로 새 버전을 저장해 최신 버전이 `2`, 버전 개수가 `2` 로 증가한 것을 확인했다.
+  - 결과: 문서 상세 조회와 버전 추가 API 및 화면 흐름이 실제 브라우저 기준으로 동작한다.
+  - 남은 위험: `src/app/api/documents/route.ts` 파일 안의 초기 주석은 이번 화이트리스트 범위 밖이라 아직 `DOC-CLOUD-03` 완료 상태를 반영하지 못했다. 또한 Supabase MCP 권한이 없어 테이블 조회 자동 검증은 계속 막혀 있다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `SITE-CHECK-01`, `SITE-CHECK-02`, `SITE-CHECK-03`, `SITE-CHECK-04`
+  - 코드 번들 검증: `src/services/siteChecklistService.ts`, `src/app/api/sites/route.ts`, `src/app/api/sites/checklist/route.ts`, `src/app/api/sites/[siteId]/checklist/route.ts`, `src/app/sites/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['sites'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: 새 페이지를 열어 `/sites` 를 검증하려 했으나 기존 브라우저 프로필 충돌로 실패했다.
+  - 로컬 HTTP 확인: `curl http://localhost:4000/sites` 와 `curl http://localhost:4000/api/sites` 를 시도했으나 이 실행 환경에서는 둘 다 HTTP `000` 으로 실패했다.
+  - 결과: 코드와 문서, SQL 준비는 완료됐다. 다만 이번 실행에서는 `sites` 스키마 SQL 미적용 상태와 DevTools/HTTP 환경 제약 때문에 실제 런타임 검증까지는 완료하지 못했다.
+  - 남은 위험: 사용자가 `docs/run-this-supabase-site-checklist-bootstrap.sql` 을 실행하고, 필요 시 `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, signing, documents, sites'; NOTIFY pgrst, 'reload config'; NOTIFY pgrst, 'reload schema';` 를 적용하기 전까지 `/api/sites*` 는 `Invalid schema: sites` 류 오류로 실패할 수 있다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `TPL-REG-01`, `TPL-REG-02`, `TPL-REG-03`, `TPL-REG-04`
+  - 코드 번들 검증: `src/services/templateService.ts`, `src/app/api/templates/route.ts`, `src/app/api/templates/[templateId]/route.ts`, `src/app/api/templates/[templateId]/fields/route.ts`, `src/app/templates/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['templates'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: 이번 턴에서 템플릿 메타데이터, draft HTML, 필드 스키마, 라벨 바인딩, 서명 영역 저장 구조를 구현했고 코드 번들은 정상이다. 원본 문서 자동 변환은 아직 구현하지 않았다.
+  - 남은 위험: 이번 실행에서는 Supabase MCP 권한과 Chrome DevTools 세션 충돌로 `/templates` 런타임 검증을 자동으로 끝내지 못했다. 사용자가 `docs/run-this-supabase-template-bootstrap.sql` 을 실행하고, 필요 시 `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, signing, documents, sites, templates'; NOTIFY pgrst, 'reload config'; NOTIFY pgrst, 'reload schema';` 를 적용하기 전까지 `/api/templates*` 는 `Invalid schema: templates` 류 오류로 실패할 수 있다. 또한 `TPL-REG-01` 자동 추출은 다음 `템플릿 추출` 단계에서 이어서 구현해야 한다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `TPL-REG-02`
+  - 사용자 런타임 결과: 템플릿 `b4d0db93-05a5-407f-ae77-f8693237d712` 저장 후 상세 조회에서 필드 수, 라벨 바인딩 수, 서명 영역 수가 모두 `0` 으로 보였다.
+  - 수정 내용: `src/app/api/templates/[templateId]/route.ts` 에 `dynamic = 'force-dynamic'` 과 `Cache-Control: no-store` 를 추가했고, `src/app/templates/page.tsx` 의 상세 조회 fetch 에 `cache: 'no-store'` 와 timestamp query 를 추가했다.
+  - 코드 번들 검증: `src/app/api/templates/[templateId]/route.ts`, `src/app/templates/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['templates'])` 호출을 다시 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 다시 시도했으나 기존 브라우저 프로필 충돌로 실패했다.
+  - 결과: 상세 조회 stale cache 로 인해 저장 직후 `0개` 상태가 남아 보일 가능성을 제거했다.
+  - 남은 위험: 이번 실행 환경에서는 로컬 `/templates` 재검증을 자동으로 완료하지 못했다. 사용자가 같은 템플릿에서 `필드 저장`을 다시 실행해 필드 수, 라벨 바인딩 수, 서명 영역 수가 증가하는지 확인해야 한다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `TPL-EXT-01`, `TPL-EXT-02`, `TPL-EXT-03`, `TPL-EXT-04`
+  - 코드 번들 검증: `src/services/templateExtractService.ts`, `src/app/api/templates/extract/route.ts`, `src/app/api/templates/extract/[draftId]/route.ts`, `src/app/api/templates/extract/[draftId]/approve/route.ts`, `src/app/templates/extract/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: 이번 턴에서 HTML 또는 text 본문을 붙여 넣어 draft HTML, 후보 필드, 검토 상태를 저장하고, 승인 시 템플릿 등록 서비스로 정식 템플릿을 생성하는 1차 흐름을 구현했다.
+  - 남은 위험: 사용자가 `docs/run-this-supabase-template-extract-bootstrap.sql` 을 실행하고, 필요 시 `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, signing, documents, sites, templates, template_extracts'; NOTIFY pgrst, 'reload config'; NOTIFY pgrst, 'reload schema';` 를 적용하기 전까지 `/api/templates/extract*` 는 `Invalid schema: template_extracts` 류 오류로 실패할 수 있다. 또한 실제 파일 업로드 파서와 외부 OCR/LLM 추출은 아직 구현하지 않았다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `TPL-EXT-05`
+  - 코드 번들 검증: `src/services/templateExtractFileService.ts`, `src/services/templateExtractService.ts`, `src/app/api/templates/extract/route.ts`, `src/app/templates/extract/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임에서는 `template_extracts.*` 데이터를 실제로 사용하고 있으므로, MCP 연결 대상과 사용자 실행 DB가 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: `/templates/extract` 에서 txt/html/docx 파일 업로드를 받을 수 있게 했고, `파일 형식 판별 -> 본문 추출 -> 기존 draft 생성 서비스 호출` 구조를 추가했다. `docx` 는 현재 단계에서 업로드 시 HTML 초안으로 정규화한 뒤 기존 규칙 기반 분석기로 넘긴다.
+  - 남은 위험: 이번 실행에서는 MCP 환경 불일치 때문에 실제 브라우저 업로드 검증을 끝까지 자동으로 확인하지 못했다. 또한 `pdf`, 이미지 OCR, 외부 LLM 추출은 아직 범위 밖이다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `TPL-REG-05`
+  - 사용자 런타임 결과: `템플릿 추출` 승인으로 템플릿 `44d69afe-febb-481e-b3e7-7858b9446e9d` 생성은 성공했지만, `/templates` 새로고침 후에는 최근 저장 결과와 조회 대상이 비어 보여 템플릿을 다시 찾기 어려웠다.
+  - 수정 내용: `GET /api/templates` 최근 목록 API를 추가했고, `/templates` 에 최근 템플릿 목록과 query 기반 자동 조회를 추가했으며, `/templates/extract` 승인 완료 카드에 생성된 템플릿 바로 열기 링크를 추가했다.
+  - 코드 번들 검증: `src/services/templateService.ts`, `src/app/api/templates/route.ts`, `src/app/templates/page.tsx`, `src/app/templates/extract/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['templates','template_extracts'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `TPL-REG-06`
+  - 사용자 런타임 결과: 최근 템플릿 목록 데이터는 보였지만, 클릭해도 선택 전환이 눈에 띄지 않아 항목이 눌리지 않는 것처럼 보였다.
+  - 수정 내용: `/templates` 최근 목록 항목에 `선택됨` 표시를 추가했고, 카드 전체 클릭과 별도 `열기` 버튼을 함께 두었으며, 현재 선택 템플릿 기준으로 상단 요약 카드가 동기화되도록 정리했다.
+  - 코드 번들 검증: `src/app/templates/page.tsx` 를 `esbuild` 로 번들했고 성공했다.
+  - Supabase MCP: `list_tables(schemas=['templates','template_extracts'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 이번 실행에서는 Chrome DevTools 자동 검증이 계속 막혀 있어 사용자가 최근 템플릿 목록에서 다른 템플릿을 눌렀을 때 상세 영역이 즉시 바뀌는지, 그리고 `/templates?templateId=...` 흐름이 유지되는지 한 번 더 확인해야 한다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `PHOTO-LABEL-01`, `PHOTO-LABEL-02`, `PHOTO-LABEL-03`
+  - 코드 번들 검증: `src/services/photoLabelService.ts`, `src/app/api/photos/route.ts`, `src/app/api/photos/labels/route.ts`, `src/app/photos/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['photo_labels'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: 이번 턴에서 사진 메타데이터, 수동 라벨, 추천 라벨, 추천 검토 상태를 분리 저장하는 1차 구조를 구현했다.
+  - 남은 위험: 사용자가 `docs/run-this-supabase-photo-label-bootstrap.sql` 을 실행하고, 필요 시 `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, signing, documents, sites, templates, template_extracts, photo_labels'; NOTIFY pgrst, 'reload config'; NOTIFY pgrst, 'reload schema';` 를 적용하기 전까지 `/api/photos*` 는 `Invalid schema: photo_labels` 류 오류로 실패할 수 있다. 또한 실제 이미지 업로드와 문서 요구 라벨 누락 경고는 아직 구현하지 않았다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `PHOTO-LABEL-04`
+  - 코드 번들 검증: `src/services/photoLabelRequirementService.ts`, `src/app/api/photos/requirements/route.ts`, `src/app/api/sites/[siteId]/photo-label-gaps/route.ts`, `src/app/photos/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['photo_labels'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: 현장별 요구 라벨 규칙 저장, `covered/review_needed/missing` 누락 경고 계산, `/photos` 누락 경고 UI 골격, 실행용 SQL 파일을 추가했다.
+  - 남은 위험: 사용자가 `docs/run-this-supabase-photo-label-gap-bootstrap.sql` 을 실행하기 전까지 `/api/photos/requirements` 와 `/api/sites/:siteId/photo-label-gaps` 는 실패할 수 있다. 또한 이번 실행에서는 MCP 제약 때문에 `/photos` 화면의 실제 누락 경고 흐름을 자동 검증하지 못했다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `PHOTO-LABEL-05`
+  - 코드 번들 검증: `src/services/photoLabelService.ts`, `src/app/api/photos/route.ts`, `src/app/api/photos/upload/route.ts`, `src/app/photos/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['photo_labels'])` 호출 결과가 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임에서는 `photo_labels.*` 데이터를 실제로 사용하고 있으므로, MCP 연결 대상과 사용자 실행 DB가 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: `/photos` 화면을 실제 업로드 중심으로 단순화했고, `Storage 업로드 -> photo_registry 메타데이터 저장 -> 기존 라벨/누락 경고 흐름 재사용` 구조를 추가했다.
+  - 남은 위험: 사용자가 `docs/run-this-supabase-photo-storage-bootstrap.sql` 을 실행하기 전까지 새 업로드 메타데이터 컬럼과 Storage 버킷이 준비되지 않는다. 또한 이번 실행에서는 MCP 환경 불일치 때문에 실제 브라우저 업로드와 DB 반영을 자동으로 끝까지 검증하지 못했다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `BULK-EDIT-01`, `BULK-EDIT-02`, `BULK-EDIT-03`
+  - 코드 번들 검증: `src/services/bulkEditService.ts`, `src/app/api/bulk-ops/preview/route.ts`, `src/app/api/bulk-ops/commit/route.ts`, `src/app/bulk-ops/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['bulk_ops'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: 일반 라벨에 대한 preview/commit 구조, field-level preview item 저장, commit history 저장, 서명 라벨 차단 주석과 `/bulk-ops` UI 골격을 추가했다.
+  - 남은 위험: `bulk_ops` SQL 이 적용되기 전까지 `/api/bulk-ops/*` 는 실패할 수 있다. 또한 이번 1차는 서명 라벨과 객체/배열 값은 intentionally blocked 이다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `APP-HOME-01`
+  - 코드 번들 검증: `src/app/page.tsx` 를 `esbuild` 로 번들했고 성공했다.
+  - Supabase MCP: `list_tables(schemas=['documents'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: 홈 화면에서 현재 구현된 사용자용 페이지들로 바로 이동할 수 있게 했고, app 레벨에서 모든 그림자 효과를 제거하는 전역 규칙을 추가했다.
+  - 남은 위험: 전역 그림자 제거는 app 레벨 공통 스타일로 적용되므로, 이후 특정 화면에서 그림자를 다시 쓰고 싶어도 현재 정책상 모두 제거된다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `REQ-LINK-01`, `REQ-LINK-02`, `REQ-LINK-03`, `REQ-LINK-04`
+  - 코드 번들 검증: `src/services/requestLinkService.ts`, `src/app/api/request-links/route.ts`, `src/app/api/request-links/[token]/route.ts`, `src/app/api/request-links/[token]/submit/route.ts`, `src/app/request-links/page.tsx`, `src/app/request-links/[token]/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['request_links'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: 토큰 해시 저장, 만료/1회성 검증, 허용 라벨 제한 제출, 제출 감사 로그, 관리자/수신자용 UI 골격을 추가했다.
+  - 남은 위험: `request_links` SQL 이 적용되기 전까지 `/api/request-links/*` 는 실패할 수 있다. 또한 이번 1차는 실제 메일/SMS 발송 연동 없이 수동 개방 링크로만 검증한다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `EXPORT-01`, `EXPORT-02`, `EXPORT-03`, `EXPORT-04`
+  - 코드 번들 검증: `src/services/exportService.ts`, `src/app/api/exports/route.ts`, `src/app/api/exports/[exportJobId]/route.ts`, `src/app/api/documents/[documentId]/artifacts/route.ts`, `src/app/exports/page.tsx`, `src/app/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['exports'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 결과: export job 생성 API, job 상세 조회 API, 문서 artifact 목록 API, `/exports` 화면 골격, 홈 화면 진입 링크, 실행용 SQL 파일을 추가했고 코드 번들 기준으로는 모두 정상이다.
+  - 남은 위험: `exports` SQL 이 적용되기 전까지 `/api/exports*` 는 실패할 수 있다. 또한 이번 1차는 실제 바이너리 렌더링 없이 메타데이터만 저장한다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `EXPORT-01`, `EXPORT-02`
+  - 사용자 런타임 결과: `pdf`, `docx` 생성 시 `new row for relation "document_artifacts" violates check constraint "document_artifacts_status_check"` 오류가 발생했고, `hwp` 는 `external_required` 상태로 정상 생성되었다.
+  - 원인: `documents.document_artifacts.status` 허용값은 `queued`, `processing`, `ready`, `failed` 인데 `src/services/exportService.ts` 가 artifact 저장 시 잘못된 값 `completed` 를 넣고 있었다.
+  - 수정 내용: `src/services/exportService.ts` 에서 artifact status 를 `ready` 로 변경했고, artifact 저장 또는 export job 완료 처리 실패 시 `exports.export_job_registry.status = 'failed'` 와 `error_message` 를 남기도록 보강했다.
+  - 코드 번들 검증: 수정 후 `src/services/exportService.ts`, `src/app/api/exports/route.ts`, `src/app/api/exports/[exportJobId]/route.ts`, `src/app/api/documents/[documentId]/artifacts/route.ts`, `src/app/exports/page.tsx` 를 다시 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['exports'])` 호출을 다시 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 다시 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 사용자 브라우저 기준으로 `pdf`, `docx` 재시도가 아직 남아 있다. DB 스키마는 수정하지 않았으므로 기존 `documents` 제약이 그대로 유지되는지 전제로 동작한다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `EXPORT-05`, `EXPORT-06`
+  - 목표: `pdf` export job 이 생성된 뒤 실제 PDF 바이트를 다운로드 API 로 응답한다.
+  - 수정 내용: `src/services/exportRendererService.ts` 에 최소 PDF 렌더러와 DOCX zip 렌더러를 추가했고, `src/services/exportService.ts` 에 PDF/DOCX 다운로드 payload 생성과 artifact 메타데이터 갱신을 추가했으며, `src/app/api/exports/[exportJobId]/download/route.ts` 와 `src/app/exports/page.tsx` 에 다운로드 진입점을 추가했다.
+  - 코드 번들 검증: `src/services/exportRendererService.ts`, `src/services/exportService.ts`, `src/app/api/exports/[exportJobId]/download/route.ts`, `src/app/exports/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - 추가 로컬 검증:
+    - `src/services/exportRendererService.ts` 를 CJS 로 번들해 직접 실행했고, PDF 출력 바이트가 `%PDF-1.4` 헤더로 시작하며 길이 `1229` 인 응답을 생성하는 것을 확인했다.
+    - 같은 방식으로 DOCX 출력 바이트를 생성해 `/tmp/export-smoke.docx` 로 저장했고, `unzip -l` 결과 `[Content_Types].xml`, `_rels/.rels`, `docProps/core.xml`, `docProps/app.xml`, `word/document.xml` 5개 엔트리가 정상 포함된 zip 구조임을 확인했다.
+  - Supabase MCP: `list_tables(schemas=['exports'])` 호출을 시도했으나 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: DOCX 는 최소 동작 zip 구조이므로 복잡한 표/스타일 fidelity 는 아직 낮다. `hwp` 는 여전히 외부 연계 대기 상태다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `EXPORT-07`
+  - 목표: `hwp` export job 에 대해 외부 변환기 handoff payload 와 callback 완료/실패 계약을 제공한다.
+  - 수정 내용: `src/services/exportHwpHandoffService.ts` 에 callback token 해시 검증, handoff payload 생성, completed/failed callback 처리 로직을 추가했고, `src/app/api/exports/[exportJobId]/handoff/route.ts`, `src/app/api/exports/hwp-callback/route.ts`, `src/app/exports/page.tsx` 에 handoff 준비와 callback 시뮬레이션 흐름을 추가했다.
+  - 코드 번들 검증: `src/services/exportHwpHandoffService.ts`, `src/app/api/exports/[exportJobId]/handoff/route.ts`, `src/app/api/exports/hwp-callback/route.ts`, `src/app/exports/page.tsx`, `src/services/exportService.ts` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - Supabase MCP: `list_tables(schemas=['exports'])` 호출은 성공했지만 결과가 `{"tables":[]}` 로 돌아왔다. 사용자 런타임에서 이미 `exports.export_job_registry` 가 동작하고 있어 현재 MCP 연결 대상과 실제 사용자 DB가 다르거나, MCP 컨텍스트가 비어 있을 가능성이 있다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 이번 2차는 외부 변환기와 실제 네트워크 통신하지 않는다. handoff payload와 callback API 계약만 내부적으로 검증한다.
+- 날짜: 2026-04-12
+  - 체크리스트 ID: `EXPORT-UI-01`
+  - 배경: 내부적으로는 export job, artifact, handoff/callback 기록이 필요하지만 사용자 화면에 그 복잡성이 그대로 노출되어 버튼 한 번으로 쓰기 어렵다는 피드백이 있었다.
+  - 수정 내용: `/exports` 화면에서 포맷 선택 드롭다운과 raw metadata JSON, 내부 ID/경로 중심 표시를 제거하고, `PDF 다운로드`, `DOCX 다운로드`, `HWP 변환 요청` 버튼 중심으로 단순화했다. PDF/DOCX 는 생성 후 바로 다운로드되고, HWP 는 요청 후 handoff/callback 상태만 간단히 보여준다.
+  - 코드 번들 검증: `src/app/exports/page.tsx` 를 `esbuild` 로 번들했고 성공했다.
+  - Supabase MCP: `list_tables(schemas=['exports'])` 호출은 성공했지만 결과가 `{"tables":[]}` 로 돌아왔다. 사용자 런타임과는 불일치하므로 현재 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 내부 구조는 유지되므로 로그/아티팩트가 누적된다. 사용자 화면은 단순해졌지만 운영자용 상세 진단 화면은 아직 별도로 분리되지 않았다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-06`
+  - 사용자 런타임 결과: `/Users/gy/Documents/dev/docs/docs/[별첨 1] MEJAI 사업계획서.docx` 업로드 시 후보 필드 라벨 앞에 `&lt;w:tcPr&gt;`, `&lt;w:top...&gt;` 같은 Word XML 조각이 함께 섞여 나왔다. 로그는 `/Users/gy/Documents/dev/docs/docs/log.md` 에 기록되었다.
+  - 원인: `src/services/templateExtractFileService.ts` 의 DOCX 정규식이 `<w:t...>` 패턴을 너무 넓게 잡아 `<w:top...>` 같은 다른 태그도 텍스트 태그로 오인했다. 같은 계열 오염 가능성을 줄이기 위해 `w:tr`, `w:tc`, `w:p` 태그 경계도 함께 좁혔다.
+  - 수정 내용: `src/services/templateExtractFileService.ts` 에 실제 태그 경계를 강제하는 `WORD_TEXT_TAG_PATTERN`, `WORD_ROW_TAG_PATTERN`, `WORD_CELL_TAG_PATTERN`, `WORD_PARAGRAPH_TAG_PATTERN` 상수를 추가했고, 추출 텍스트에서 남은 XML 조각은 `stripXmlTags()` 로 제거하도록 보강했다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractFileService.ts` 를 `esbuild` 로 번들했고 성공했다.
+  - 추가 로컬 검증: 실제 문서 `/Users/gy/Documents/dev/docs/docs/[별첨 1] MEJAI 사업계획서.docx` 에 대해 `word/document.xml` 을 읽어 첫 8개 표 행을 다시 추출했고, `창업아이템명`, `산출물`, `직업`, `기업(예정)명`, `메자이` 등 XML 조각 없는 셀 텍스트만 반환되는 것을 확인했다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 이번 수정은 DOCX XML 오염만 교정했다. PDF, 이미지 OCR, 외부 LLM 추출은 여전히 범위 밖이며, 브라우저 실제 업로드 재검증은 사용자 런타임 확인이 필요하다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-07`
+  - 사용자 런타임 결과: XML 조각 오염은 사라졌지만, `/Users/gy/Documents/dev/docs/docs/[별첨 1] MEJAI 사업계획서.docx` 업로드 시 후보 필드가 `63개`로 너무 많이 생성되었고, `순번`, `1`, `2`, `3`, 표 머리글 등 실제 입력 필드가 아닌 항목까지 `review_needed` 로 남았다.
+  - 수정 내용:
+    - `src/services/templateExtractFileService.ts` 에서 DOCX 표 행을 `2열 라벨-값` 또는 `4열 라벨-값-라벨-값` 구조로만 정규화하고, `5열 이상 머리글/데이터 행`은 후보 추출 대상에서 제외했다.
+    - `src/services/templateExtractService.ts` 에서 숫자만 있는 라벨, `순번`, `이미지`, `직위`, `구성 상태`, `보유 역량` 같은 표 머리글성 라벨, 값이 비어 있는 행, 라벨과 값이 사실상 동일한 행을 후보에서 제외하도록 `isUsefulExtractPair()` 와 `dedupePairsByLabel()` 를 추가했다.
+    - 같은 파일에 `창업아이템명`, `산출물`, `기업(예정)명`, `직업` 같은 사업계획서 계열 known label 규칙을 추가했다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractService.ts`, `src/services/templateExtractFileService.ts` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - 추가 로컬 검증: 같은 DOCX를 다시 분석한 결과, 후보성 pair 가 `63개` 수준에서 `33개` 수준으로 줄었고, 상위 라벨은 `창업아이템명`, `산출물`, `직업`, `기업(예정)명`, `아이템 개요`, `문제 인식 (Problem)` 등 실제 의미 있는 항목 중심으로 남았다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 사업계획서처럼 장문의 표 문서는 여전히 `review_needed` 후보가 꽤 많이 남을 수 있다. 이번 단계는 “명백한 잡음 제거”까지이며, 도메인별 필드군 템플릿과 OCR/LLM 기반 의미 분류는 다음 단계 과제다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-08`
+  - 목표: 사업계획서형 DOCX에서 `명 칭`, `범 주`, `구분` 같은 단독 머리글성 후보를 더 줄이고, 장문 설명형 항목은 `textarea` 후보로 분류한다.
+  - 수정 내용:
+    - `src/services/templateExtractService.ts` 에 `EXTRACT_HEADER_LIKE_VALUES` 와 `isHeaderLikePair()` 를 추가해 `기대한 안전장치 / 실제 결과`, `추진 기간 / 세부 내용` 같은 머리글성 pair 를 후보에서 제외했다.
+    - 같은 파일에 `명칭`, `범주`, `구분` 기본 제외 규칙을 추가했다.
+    - `아이템 개요`, `문제 인식`, `실현 가능성`, `성장전략`, `팀 구성` 계열은 known label 로 인식되면 `textarea` 후보로 분류하도록 보강했다.
+    - `직업`, `기업명` 같은 known label 이 짧은 값이라는 이유로 잘못 제거되지 않도록 `isKnownExtractLabel()` 예외를 추가했다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractService.ts` 를 `esbuild` 로 번들했고 성공했다.
+  - 추가 로컬 검증: 같은 DOCX를 다시 분석한 결과 후보성 pair 가 `33개` 수준에서 `24개` 수준으로 추가 감소했고, 상위 항목은 `창업아이템명`, `산출물`, `직업`, `기업(예정)명`, `아이템 개요`, `문제 인식`, `실현 가능성`, `성장전략`, `팀 구성` 중심으로 정리되었다. `명 칭`, `범 주`, `구분` 은 후보에서 빠졌다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 사례/실행계획/예산 표처럼 실제 문서 안의 설명성 행은 아직 `review_needed` 후보로 남는다. 이번 단계는 사업계획서형 머리글 제거와 textarea 분류까지이며, 문서 종류별 전용 템플릿 사전과 LLM 의미 분류는 다음 단계 과제다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-09`
+  - 사용자 런타임 결과: 위 정제 규칙 적용 후 `/templates/extract` 재시도에서 `normalized is not defined` 런타임 오류가 발생해 초안 생성이 중단되었다. 결과 로그는 `/Users/gy/Documents/dev/docs/docs/log.md` 에 기록되었다.
+  - 원인: `src/services/templateExtractService.ts` 의 `inferCandidate()` 안에서 `textareaLike` 판정 시 `normalized` 변수를 참조했지만, 해당 함수 범위에 `const normalized = labelText.toLowerCase()` 선언이 빠져 있었다.
+  - 수정 내용: `inferCandidate()` 내부에 `const normalized = labelText.toLowerCase();` 를 추가해 런타임 오류를 복구했다. 이번 턴은 품질 보강이 아니라 추출 재동작 복구만 수행했다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractService.ts` 를 `esbuild` 로 번들했고 성공했다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 런타임 복구 후 실제 브라우저 업로드 재검증이 다시 필요하다. 품질 보강 효과는 오류 없이 초안이 생성된 뒤에만 재평가할 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-10`
+  - 목표: `/templates/extract` 에서 PDF 업로드도 받을 수 있게 하고, 텍스트 레이어가 있는 PDF는 기존 추출 흐름으로 연결한다.
+  - 수정 내용:
+    - `src/services/templateExtractFileService.ts` 에 PDF 분기를 추가했고, macOS 기본 `swift + PDFKit` 를 사용해 페이지 텍스트를 읽어 `sourceKind='text'` 로 기존 추출기로 넘기도록 구현했다.
+    - 같은 파일에서 업로드 허용 형식을 `txt, html, docx, pdf` 로 확장했다.
+    - `src/app/templates/extract/page.tsx` 의 파일 선택 `accept` 와 안내 문구를 `pdf`까지 반영하도록 수정했다.
+    - `swift` 실행 시 시스템 cache 권한 오류가 발생하지 않도록 `SWIFT_MODULECACHE_PATH`, `CLANG_MODULE_CACHE_PATH` 를 업로드용 임시 디렉터리로 강제했다.
+  - 동작 원칙: 텍스트 레이어가 있는 PDF만 1차 지원한다. 스캔 PDF처럼 텍스트가 추출되지 않으면 `현재는 텍스트가 포함된 PDF만 추출할 수 있습니다` 오류를 반환한다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractFileService.ts`, `src/app/templates/extract/page.tsx` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - 추가 로컬 검증: 시스템에 `/usr/bin/swift` 와 `PDFKit` 사용이 가능한 것을 확인했고, 실제 문서 `/Users/gy/Documents/dev/docs/docs/[별첨 1] MEJAI 사업계획서.pdf` 에 대해 텍스트 레이어를 추출해 `창업아이템명`, `산출물`, `직업`, `기업(예정)명`, `아이템 개요` 등이 stdout 으로 출력되는 것을 확인했다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 이미지 기반 OCR 과 스캔 PDF 지원은 아직 없다. 이번 단계는 텍스트 PDF만 대상으로 한다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-11`
+  - 사용자 런타임 결과: `작업지시서_대구침산더샵.pdf` 업로드 시 PDF 텍스트는 읽혔지만, 전체 본문이 거의 한 줄로 이어져 `양식명(코드)` 하나에 모든 내용이 붙은 것처럼 추출되었다. 그 결과 후보 필드는 `1개`만 생성되었고 `fieldType: date` 도 잘못 분류되었다.
+  - 수정 내용:
+    - `src/services/templateExtractFileService.ts` 에 `PDF_FORM_LABELS` 목록과 `normalizePdfExtractedText()` 를 추가해 `양식명(코드)`, `문서번호`, `발급일`, `프로젝트`, `제목`, `작성자`, `발급자`, `접수자`, `공사착수일`, `공사완료일` 등 폼형 라벨 앞에 강제로 줄바꿈과 `:` 구분자를 넣어 텍스트를 정규화했다.
+    - `src/services/templateExtractService.ts` 의 날짜 추론은 값이 짧고 거의 날짜만 있는 경우에만 `date` 로 분류하도록 좁혔다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractFileService.ts`, `src/services/templateExtractService.ts` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - 추가 로컬 검증: PDF 텍스트 추출 자체는 `swift + PDFKit` 로 성공하지만, 이번 턴의 별도 one-off 스모크 스크립트는 Swift 문장을 한 줄로 뭉쳐 작성해 구문 오류가 났다. 앱 코드 안의 멀티라인 스크립트와는 별개다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: PDF 전용 정규화는 아직 1차 규칙이다. 라벨 앞뒤 공백 배치가 다른 PDF나 표가 심하게 깨진 PDF는 여전히 품질이 낮을 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-13`
+  - 기준 문서: `/Users/gy/Documents/dev/docs/docs/작업지시서_대구침산더샵.pdf`
+  - 목표: 작업지시서형 폼 PDF에서 `양식명(코드)`, `문서번호`, `작성자`, `발급일`, `프로젝트`, `계약`, `접수자`, `제목`, `공사착수일`, `공사완료일`, `특기사항`, `첨부파일` 같은 라벨-값을 구조화된 HTML 초안으로 추출한다.
+  - 수정 내용:
+    - `src/services/templateExtractPdfService.ts` 를 새로 추가해 PDFKit 텍스트 추출, 작업지시서형 폼 메타데이터 정규화, 섹션 구간 분리를 PDF 전용 서비스로 분리했다.
+    - `src/services/templateExtractFileService.ts` 는 PDF 분기에서 새 `TemplateExtractPdfService.extractPdfSource()` 를 호출하도록 바꿨다.
+    - PDF 전처리 단계에서 `구 분`, `CE ...`, `PM ...`, `발급자 서명`, `접수자 서명`, `전자서명 완료` 같은 메타데이터 잡음 줄을 제거하고, `1. 공 사 내 용`, `1-1. 대표수량 및 단가`, `2. 공사착수일`, `2-1. 공사완료일`, `3. 검사의 방법`, `4. 대금 지급방법`, `5. 원재료 지급시 조건`, `6. 공급원가 변동에 따른 하도급 대금의 조정`, `7. 특기사항`, `8. 첨부파일` 같은 섹션을 별도 행으로 구조화했다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractPdfService.ts`, `src/services/templateExtractFileService.ts` 를 `esbuild` 로 번들했고 모두 성공했다.
+  - 추가 로컬 검증:
+    - 실제 `/Users/gy/Documents/dev/docs/docs/작업지시서_대구침산더샵.pdf` 를 새 PDF 서비스에 직접 넣어 HTML 초안을 생성했다.
+    - 결과가 `양식명(코드)`, `문서번호`, `작성자`, `발급일`, `프로젝트`, `발급자`, `계약`, `접수자`, `제목`, `공사 내용`, `대표수량 및 단가`, `하도급 대금`, `공사착수일`, `공사완료일`, `검사의 방법`, `검사의 시기`, `대금 지급방법`, `대금 지급시기`, `원재료 지급시 조건`, `공급원가 변동에 따른 하도급 대금의 조정`, `특기사항`, `첨부파일` 행으로 분리되는 것을 확인했다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 이번 단계는 텍스트 레이어가 있는 폼 PDF에 최적화되어 있다. 스캔 PDF, 좌표 기반 표 복원, OCR 품질 보강은 아직 남아 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `TPL-EXT-14`
+  - 목표: `작업지시서_대구침산더샵.pdf` 에서 이미 구조화된 행이 `Generated Draft HTML` 에 고정 텍스트로 남지 않고 placeholder 후보로 승격되게 만든다.
+  - 수정 내용:
+    - `src/services/templateExtractService.ts` 에 `EXTRACT_STRUCTURED_PDF_LABEL_RULES` 를 추가했다.
+    - `작성자`, `발급자`, `접수자`, `검사의 시기`, `대금 지급방법`, `대금 지급시기`, `원재료 지급시 조건`, `양식명(코드)`, `문서번호`, `프로젝트`, `계약`, `제목`, `공사 내용`, `대표수량 및 단가`, `하도급 대금`, `공사착수일`, `공사완료일`, `검사의 방법`, `공급원가 변동에 따른 하도급 대금의 조정`, `특기사항`, `첨부파일` 을 known field 로 올렸다.
+    - 각 행은 `writer_name`, `issuer_name`, `receiver_name`, `inspection_timing`, `payment_method`, `payment_timing`, `material_supply_conditions` 같은 안정된 라벨 키로 매핑되도록 정리했다.
+  - 기대 효과: PDF 전처리에서 이미 분리된 행은 `extractPairsFromHtml()` 단계에서 더 이상 header-like pair 로 버려지지 않고, placeholder 로 치환된 초안 행과 후보 필드로 저장된다.
+  - 코드 번들 검증: 수정 후 `src/services/templateExtractService.ts` 를 `esbuild` 로 번들했고 성공했다.
+  - Supabase MCP: `list_tables(schemas=['template_extracts'])` 호출 결과가 다시 `{"tables":[]}` 로 돌아왔다. 현재 사용자 런타임과 불일치하므로 MCP 연결 대상이 실제 사용자 DB와 다를 가능성이 높다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필이 이미 실행 중이라 `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 오류로 실패했다.
+  - 남은 위험: 실제 브라우저 업로드 재확인이 아직 필요하다. 이번 단계는 후보 승격 로직만 바꿨고, PDF 전처리 구조 자체는 `TPL-EXT-13` 상태를 유지한다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `APP-NOSHADOW-01`
+  - 원인: `/src/app` 개별 페이지에서 `Card className="... shadow-sm"` 를 직접 사용하고 있었다. 전역 `globals.css` 의 box-shadow 무효화 규칙이 있어도 정책상 코드에 그림자 클래스를 남겨두면 안 된다.
+  - 수정 내용: `src/app/documents/page.tsx`, `src/app/sites/page.tsx`, `src/app/templates/page.tsx`, `src/app/templates/extract/page.tsx`, `src/app/photos/page.tsx`, `src/app/bulk-ops/page.tsx` 의 `shadow-sm` 를 제거했다.
+  - 전수 점검: 현재 `/src/app` 아래 `shadow` 사용은 `globals.css` 의 전역 무효화 주석과 규칙만 남고, 실제 page-level `shadow-*` 클래스는 제거했다.
+  - Supabase MCP: UI 정책 정리 턴에서도 `list_tables` 는 `{"tables":[]}` 만 반환했다. 현재 사용자 런타임과 불일치한다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필 잠금으로 실패했다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `APP-NOSHADOW-02`
+  - 목적: 이후 다른 LLM 이 새 페이지를 추가하거나 수정하더라도 `/src/app` 에 `shadow-*` 클래스를 다시 넣지 못하게 자동 검사로 고정한다.
+  - 수정 내용: `scripts/check-no-shadow-in-app.mjs` 를 추가해 `/src/app` 아래 코드 파일을 순회하며 `shadow-*`, `shadow[...]` 클래스를 찾으면 즉시 실패하도록 했다.
+  - 실행 연결: `package.json` 의 `lint` 에 `node scripts/check-no-shadow-in-app.mjs && eslint .` 를 연결하고, 개별 실행용 `check:no-shadow-app` 스크립트도 추가했다. 이렇게 해두면 ESLint 설정이 아직 없더라도 그림자 검사는 항상 먼저 실행된다.
+  - 기대 효과: 앞으로 다른 LLM 이 페이지 UI에 그림자를 넣으면 `npm run lint` 단계에서 바로 실패하므로, “별도 요청 없으면 그림자 금지” 정책이 코드 수준에서 유지된다.
+  - Supabase MCP: `list_tables` 는 여전히 `{"tables":[]}` 만 반환했다. 현재 사용자 런타임과 불일치한다.
+  - Chrome DevTools MCP: `list_pages` 호출을 시도했으나 기존 브라우저 프로필 잠금으로 실패했다.
+  - 로컬 실행 결과: `npm run check:no-shadow-app` 는 성공했다. `npm run lint` 는 기존 저장소에 `eslint.config.js|mjs|cjs` 가 없어 ESLint 9 기본 설정 오류로 실패했다. 이 오류는 이번 그림자 검사가 아니라 저장소의 기존 lint 설정 문제다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-01`, `MESSAGING-02`
+  - 목표: 문자 발송 기능을 request-links 부속이 아니라 messaging 독립 도메인으로 분리하고, Solapi SMS 발송 1차 흐름을 연결한다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 에 sender, recipient, dispatch, event DTO를 추가했다.
+    - `src/services/solapiSmsService.ts` 에 Solapi HMAC 인증과 `/messages/v4/send` 호출 로직을 추가했다.
+    - `src/services/messagingService.ts` 에 `messaging` 스키마 기준 sender/recipient registry, dispatch registry, dispatch events 저장 흐름을 추가했다.
+    - `src/app/api/messaging/sms/senders/route.ts`, `src/app/api/messaging/sms/recipients/route.ts`, `src/app/api/messaging/sms/send/route.ts` 로 독립 API를 만들었다.
+    - `src/services/requestLinkService.ts` 에 `getRequestLinkById()` 를 추가해 request-links 가 messaging 서비스 계약만 호출할 수 있게 했다.
+    - `src/app/request-links/page.tsx` 에 발신번호 등록, 수신번호 등록, 문자 발송 UI를 추가했다. UI는 단순하지만 뒤에서는 dispatch 생성 -> Solapi 호출 -> 이벤트 저장 순서가 유지된다.
+    - `docs/run-this-supabase-messaging-bootstrap.sql` 에 `messaging.sms_sender_registry`, `messaging.sms_recipient_registry`, `messaging.sms_dispatch_registry`, `messaging.sms_dispatch_events` 생성 SQL을 추가했다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/app/api/messaging/sms/send/route.ts` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - Supabase MCP: `list_tables(schemas=['messaging'])` 호출은 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `http://localhost:4000/request-links` 로 이동 성공
+    - 페이지 스냅샷 기준으로 `문자 발송용 번호 등록`, `발신번호 등록`, `수신번호 등록`, `문자 발송` 섹션이 실제로 렌더링되는 것을 확인했다.
+  - 남은 위험:
+    - 사용자가 `docs/run-this-supabase-messaging-bootstrap.sql` 을 실행하기 전에는 registry/dispatch API가 실패할 수 있다.
+    - Solapi 키가 있어도 Solapi 콘솔에서 발신번호 등록이 먼저 끝나 있어야 실제 발송이 성공한다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-04`
+  - 목표: `/request-links` 페이지를 새로고침한 뒤에도 기존 요청 링크를 다시 선택하고 문자 발송에 사용할 수 있게 만든다.
+  - 원인:
+    - 기존 구현은 `latestCreated.requestLink.id` 가 메모리에 있을 때만 문자 발송이 가능했다.
+    - 따라서 새로고침 후에는 발신번호/수신번호 드롭다운은 살아 있어도 `문자 발송` 버튼이 내부적으로 `먼저 요청 링크를 생성하세요.` 로 끝났다.
+    - 또한 `messaging` 스키마 GRANT 가 bootstrap SQL 에 빠져 있어 초기 설치 시 `permission denied for schema messaging` 오류가 발생할 수 있었다.
+  - 수정 내용:
+    - `src/services/requestLinkService.ts` 에 최근 요청 링크 목록 조회와, 발송 직전에 새 토큰 URL 을 재발급하는 `issueDispatchUrl()` 계약을 추가했다.
+    - `src/app/api/request-links/route.ts` 에 `GET /api/request-links` 를 추가해 최근 요청 링크 목록 조회와 `dispatchUrlFor=<requestLinkId>` 기반 발송 URL 재발급을 처리하도록 했다.
+    - `src/app/request-links/page.tsx` 에 최근 요청 링크 목록과 선택 UI를 추가하고, 문자 발송은 “방금 생성한 링크”가 아니라 “현재 선택한 링크” 기준으로 수행하도록 바꿨다.
+    - `docs/run-this-supabase-messaging-bootstrap.sql` 에 `messaging` 스키마 GRANT 와 default privileges SQL 을 추가해 초기 설치 시 권한 오류가 재발하지 않게 했다.
+  - 기대 효과:
+    - 사용자는 새로고침 후에도 최근 요청 링크를 다시 선택해 문자 발송을 실행할 수 있다.
+    - 문자 발송 시 request-links 도메인은 토큰 재발급만 담당하고, 실제 발송 정본과 이벤트 저장은 계속 messaging 도메인이 소유한다.
+  - 코드 번들 검증:
+    - `src/services/requestLinkService.ts` 번들 성공
+    - `src/app/api/request-links/route.ts` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - Supabase MCP: `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: 기존 브라우저 프로필 잠금으로 실패했다. 이번 턴은 자동 UI 검증을 끝까지 수행하지 못했다.
+  - 남은 위험:
+    - 기존에 이미 발급된 토큰 원문은 DB에 저장하지 않으므로, 문자 발송 직전에는 항상 새 토큰 URL 을 재발급한다. 이전 토큰은 그 시점부터 무효화된다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-05`
+  - 목표: `REQUEST_LINK_SMS_DEFAULT_SENDER`, `REQUEST_LINK_SMS_MESSAGE_PREFIX` 를 .env 임시값이 아니라 messaging 독립 도메인의 정본 설정으로 관리한다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 에 `SmsSettingsDto`, `SmsSettingsUpdateInput` 을 추가했다.
+    - `src/services/messagingService.ts` 에 `getSmsSettings()`, `updateSmsSettings()` 를 추가하고 `messaging.sms_service_settings` 를 정본 저장소로 사용하도록 했다.
+    - `src/services/messagingService.ts` 의 `sendSms()` 는 `senderId` 가 비어 있으면 `messaging.sms_service_settings.default_sender_phone_number` 를 fallback 으로 사용하도록 바꿨다.
+    - `src/app/api/messaging/sms/settings/route.ts` 를 추가해 설정 조회/저장을 독립 API 로 분리했다.
+    - `src/app/request-links/page.tsx` 에 `문자 발송 기본 설정` 섹션을 추가하고, 기본 발신번호와 메시지 접두사를 저장할 수 있게 했다.
+    - 문자 발송 메시지는 저장된 `messagePrefix` 를 앞에 붙여 전송하도록 했다.
+    - 실행용 SQL 은 사용자 정책에 맞게 `docs/run-this-supabase-messaging-bootstrap.sql` 로 새로 기록했다. 여기에는 `messaging.sms_service_settings` 와 권한 GRANT 가 포함된다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/app/api/messaging/sms/settings/route.ts` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사: `npm run check:no-shadow-app` 성공
+  - Supabase MCP: `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP: 구현 후 설정값이 반영되는지 확인을 시도해야 한다. 이번 기록 시점에는 아직 사용자 SQL 재실행 전이다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-05`
+  - 추가 UI 정리:
+    - `REQUEST_LINK_SMS_MESSAGE_PREFIX` 라는 기술 용어를 화면에 그대로 노출하지 않고 `문자 앞머리 문구` 로 바꿨다.
+    - 기본 발신번호는 자유 입력이 아니라 `등록된 발신번호 중 선택` 방식으로 바꿨다.
+    - 발신번호 등록 영역의 제목은 `새 발신번호 등록` 으로 바꿔, 기본 설정과 등록 기능이 서로 다른 역할이라는 점이 드러나게 정리했다.
+  - Chrome DevTools MCP:
+    - `/request-links` 를 실제로 열고 `기본 발신번호`, `문자 앞머리 문구`, `새 발신번호 등록` 문구와 입력 구조가 렌더링되는 것을 확인해야 한다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-06`
+  - 목표: `/request-links` 에서 수신번호를 여러 개 선택하면 문자 발송 버튼 한 번으로 여러 번호에 발송되게 만든다.
+  - 설계 원칙:
+    - UI 는 단순하게 `수신번호 여러 개 선택 -> 문자 발송` 만 보이게 유지한다.
+    - 내부 정본은 `messaging` 도메인이 소유하며, batch 요약과 recipient 별 결과를 분리한다.
+    - request-links 는 계속 messaging API 계약만 호출하고, messaging.* 테이블을 직접 다루지 않는다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 에 `recipientIds`, `targets`, `recipientCount`, `sentCount`, `failedCount` 계약을 추가했다.
+    - `src/services/messagingService.ts` 는 단일 recipient 전제를 버리고 batch dispatch + target 저장 흐름으로 확장했다. 정본은 `messaging.sms_dispatch_registry` 와 `messaging.sms_dispatch_targets` 로 분리된다.
+    - `src/services/solapiSmsService.ts` 는 one-click batch 발송을 recipient fan-out 방식으로 수행하도록 `sendSmsBatch()` 를 추가했다. 이렇게 해두면 recipient 별 성공/실패를 정확히 남길 수 있다.
+    - `src/app/request-links/page.tsx` 는 수신번호 선택 UI를 checkbox 목록으로 바꾸고, 선택된 여러 번호를 `/api/messaging/sms/send` 로 전달하도록 수정했다.
+    - `docs/run-this-supabase-messaging-bootstrap.sql` 은 사용자 정책에 맞게 `docs/` 아래에 재기록했고, `messaging.sms_dispatch_targets` 와 batch count 컬럼(`recipient_count`, `sent_count`, `failed_count`) 추가 SQL을 포함한다.
+  - 기대 효과:
+    - 사용자는 수신번호를 여러 개 체크한 뒤 버튼 한 번으로 발송할 수 있다.
+    - 내부에서는 recipient 별 결과가 따로 저장되므로 이후 delivery webhook, 재시도, 실패분 재발송 기능으로 확장하기 쉽다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/services/solapiSmsService.ts` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `/request-links` 를 isolated context 로 열고, `수신번호` 섹션이 단일 select 가 아니라 checkbox 목록으로 바뀐 것을 확인했다.
+    - checkbox 를 실제로 클릭했을 때 `선택된 수신번호: 1개` 로 증가하는 것까지 확인했다.
+  - 남은 위험:
+    - 사용자는 새 `docs/run-this-supabase-messaging-bootstrap.sql` 을 다시 실행해 `messaging.sms_dispatch_targets` 와 batch count 컬럼을 반영해야 한다.
+    - 현재 Solapi 연동은 recipient 별 fan-out 이므로, provider 그룹 ID 단일 정본은 저장하지 않는다. 대신 recipient 별 provider 결과와 batch 요약을 남긴다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-07`
+  - 목표: 요청 링크 이메일 발송도 `messaging` 독립 도메인이 소유하고, `/request-links` 는 단순 버튼으로만 호출하게 만든다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 에 이메일 발송 DTO(`EmailDispatchRecordDto`, `EmailDispatchTargetDto`, `EmailDispatchEventDto`, `EmailSendInput`, `EmailSendResult`)를 유지/보강했다.
+    - `src/services/emailDispatchService.ts` 를 추가해 Resend 기반 발송 adapter 를 분리했다. provider 키가 없으면 `provider_not_configured` 를 반환한다.
+    - `src/services/messagingService.ts` 에 `sendEmail()` 을 추가하고, 정본 저장소를 `messaging.email_dispatch_registry`, `messaging.email_dispatch_targets`, `messaging.email_dispatch_events` 로 분리했다.
+    - `src/app/api/messaging/email/send/route.ts` 를 추가해 이메일 발송을 독립 API 로 노출했다.
+    - `src/app/request-links/page.tsx` 에 선택한 요청 링크 기준 `이메일 발송` 버튼과 최근 이메일 발송 결과 요약을 추가했다.
+    - `docs/run-this-supabase-messaging-bootstrap.sql` 에 이메일 발송 registry/targets/events 테이블과 updated_at trigger 를 추가했다.
+  - 기대 효과:
+    - request-links 도메인은 이메일 발송 구현 세부사항을 모르고, messaging 계약만 호출한다.
+    - 사용자는 선택한 요청 링크에 대해 버튼 한 번으로 이메일 발송을 시도할 수 있다.
+    - provider 미설정 상태도 `provider_not_configured` 로 정본 이력에 남는다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/services/emailDispatchService.ts` 번들 성공
+    - `src/app/api/messaging/email/send/route.ts` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `/request-links` 에 `이메일 발송` 카드와 버튼이 실제로 렌더링되는 것을 확인했다.
+    - 버튼 클릭 시 현재 DB 에 `messaging.email_dispatch_registry` 가 아직 없어 `schema cache` 오류가 발생하는 것도 확인했다.
+  - 남은 위험:
+    - 사용자는 새 `docs/run-this-supabase-messaging-bootstrap.sql` 을 다시 실행해 이메일 dispatch 테이블을 반영해야 한다.
+    - Resend 설정(`RESEND_API_KEY`, `REQUEST_LINK_EMAIL_FROM`)이 없으면 실제 발송은 `provider_not_configured` 로 남는다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-03`
+  - 목표: Solapi 문자 발송이 `sent` 에서 끝나지 않고 `delivered / failed` 상태까지 후속 동기화되게 만든다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 에 `SmsSyncInput`, `SmsSyncResult` 를 추가했다.
+    - `src/services/solapiSmsService.ts` 에 `lookupMessagesByProviderIds()` 를 추가했다. Solapi 메시지 조회 응답의 `statusCode`, `status`, `reason` 를 읽어 내부 상태로 매핑한다.
+    - `src/services/messagingService.ts` 에 `syncSmsDispatchStatus()` 를 추가했다. dispatch target 의 `provider_message_id` 를 기준으로 상태를 다시 읽고, target/dispatch 집계를 갱신한 뒤 기존 허용 이벤트 타입인 `provider_response` 로 저장한다.
+    - `src/app/api/messaging/sms/sync/route.ts` 를 추가해 상태 동기화를 독립 API 로 노출했다.
+    - `src/app/request-links/page.tsx` 에 `문자 상태 동기화` 버튼을 추가했다.
+  - 코드 번들 검증:
+    - `src/services/solapiSmsService.ts` 번들 성공
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/app/api/messaging/sms/sync/route.ts` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `/request-links` 에 `문자 상태 동기화` 버튼 렌더링을 확인하려 했으나 기존 브라우저 프로필 잠금으로 실패했다.
+  - 남은 위험:
+    - Solapi 조회 응답 구조가 계정/상품 설정에 따라 다를 수 있어, `messageList` 외 구조를 쓰는 경우 추가 매핑 보강이 필요할 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-03`
+  - 버그 수정:
+    - `sms_dispatch_events.event_type` 제약은 `dispatch_requested`, `provider_response`, `dispatch_failed` 만 허용하는데, 초기 sync 구현이 `status_synced` 를 저장하려고 해 500 오류를 일으킬 수 있었다.
+    - 현재는 sync 이벤트도 기존 허용 타입인 `provider_response` 로 저장하도록 수정했다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-03`
+  - 버그 수정:
+    - Solapi 문자 상태 동기화가 `200`으로 끝나도 상태가 계속 `sent`에 머무는 문제를 보강했다.
+    - 발송 응답이 `messageId` 대신 `groupId`만 주는 경우에도 target 의 `provider_message_id`에 `groupId`를 저장하도록 수정했다.
+    - `src/services/solapiSmsService.ts` 의 조회 로직은 이제 `messageId` 우선, `groupId` fallback 으로 Solapi `messages` / `groups` 목록 API를 순차 조회한다.
+    - `src/services/messagingService.ts` 는 발송 이벤트에 `providerGroupId`, `providerPayloadSummary` 도 함께 남겨 이후 식별자 추적이 가능하게 했다.
+  - 코드 번들 검증:
+    - `src/services/solapiSmsService.ts` 번들 성공
+    - `src/services/messagingService.ts` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - 계정 유형에 따라 Solapi 조회 응답 필드명이 다르면 `groupList` / `messageList` 외 추가 매핑이 더 필요할 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-11`
+  - 목표: 문자 발송 도메인을 `/request-links` 부속 UI가 아니라 독립 운영 화면 `/messaging` 으로 분리한다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 에 `SmsDispatchHistoryItemDto` 를 추가했다.
+    - `src/services/messagingService.ts` 에 `listSmsDispatches(limit)` 를 추가해 dispatch 와 target 목록을 한 번에 읽는 독립 조회 계약을 만들었다.
+    - `src/app/api/messaging/sms/dispatches/route.ts` 를 추가해 최근 문자 발송 이력 조회 API 를 노출했다.
+    - `src/app/messaging/page.tsx` 를 추가했다. 이 페이지는 발신번호/수신번호 등록, 기본 설정 저장, 최근 발송 이력 조회, 상태 동기화만 담당한다.
+    - `src/app/request-links/page.tsx` 는 요청 링크 생성과 실제 발송 실행에 집중하도록 바꾸고, 번호 등록/설정 UI 는 `/messaging` 링크로 분리했다.
+    - `src/app/page.tsx` 홈 화면에 `/messaging` 진입 링크를 추가했다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/app/api/messaging/sms/dispatches/route.ts` 번들 성공
+    - `src/app/messaging/page.tsx` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+    - `src/app/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - 독립 운영 화면은 현재 SMS 중심이다. 이메일 dispatch 목록/재시도 운영은 후속 단계에서 분리해야 한다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-12`
+  - 목표: `/messaging` 운영 화면을 실제 운영자가 보기 쉬운 상태로 정리한다.
+  - 수정 내용:
+    - `src/app/messaging/page.tsx` 에서 기본 목록은 `recipientCount > 0` 이고 상태가 `delivered`, `sent`, `failed` 인 유효 발송만 먼저 보여주도록 정리했다.
+    - `provider_not_configured`, `recipientCount = 0`, `queued`, `sending`, `manual_required` 같은 잡음성 이력은 `전체 이력 보기` 토글 아래로 접었다.
+    - 따라서 운영 화면 첫 진입 시에는 최근 유효 발송 중심으로만 보이고, 필요할 때만 전체 이력을 확장해 볼 수 있다.
+  - 코드 번들 검증:
+    - `src/app/messaging/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - 현재 이력 필터는 단순 상태 기반이다. 향후 운영 요구가 생기면 날짜 범위, requestLinkId, phoneNumber 기준 검색이 추가로 필요하다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `MESSAGING-13`
+  - 목표: `/messaging` 기본 목록에서 같은 요청 링크/같은 수신번호 조합의 과거 중복 dispatch 를 숨긴다.
+  - 수정 내용:
+    - `src/app/messaging/page.tsx` 에서 `requestLinkId + recipientPhoneNumber set` 기준으로 최신 dispatch 하나만 기본 목록에 남기고, 나머지 중복 이력은 `전체 이력 보기`로 내렸다.
+    - 페이지 상단 배지를 `MESSAGING-12` 에서 `MESSAGING-13` 으로 갱신했다.
+  - 코드 번들 검증:
+    - `src/app/messaging/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - 현재 중복 기준은 `requestLinkId + recipientPhoneNumber set` 이다. 향후 메시지 본문/발신번호까지 구분해야 하는 운영 요구가 생기면 기준을 더 확장해야 한다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `REQ-LINK-06`
+  - 목표: `/request-links` 를 링크 생성/전송 실행 화면으로 더 단순화한다.
+  - 수정 내용:
+    - `src/app/request-links/page.tsx` 의 문자 발송 카드 설명을 실행 중심으로 축약했다.
+    - 문자 발송 카드에 `/messaging` 상세 운영 화면 이동 링크를 추가했다.
+    - 최신 문자 발송 결과 카드는 `Dispatch ID`, `Provider`, `이벤트 수` 같은 운영 세부를 숨기고 상태/건수/상위 3개 target 상태만 보이게 줄였다.
+    - 자세한 이력과 등록/설정 관리는 `/messaging` 에서 보도록 역할을 더 분리했다.
+  - 코드 번들 검증:
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['request_links'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - `/request-links` 도 여전히 문자 수신번호 선택 UI 를 포함한다. 향후 더 단순화하려면 “기본 수신 그룹” 개념을 messaging 쪽에 추가해야 한다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `REQ-LINK-07`
+  - 목표: `/request-links` 에서 발신번호 선택을 없애고 `/messaging` 의 기본 발신번호를 자동 사용한다.
+  - 수정 내용:
+    - `src/app/request-links/page.tsx` 에서 발신번호 선택 UI 와 관련 상태를 제거했다.
+    - 문자 발송은 이제 `smsSettings.defaultSenderPhoneNumber` 가 있을 때만 실행되고, 별도 `senderId` 입력 없이 `/api/messaging/sms/send` 를 호출한다.
+    - 화면 배지를 `REQ-LINK-07` 로 갱신하고, 문자 발송 설명을 “기본 발신번호 자동 사용” 기준으로 정리했다.
+    - 문자 발송 카드 상단 문구도 `저장된 기본 발신번호` 에서 `자동 사용 발신번호` 로 바꿔 실제 동작을 더 직접적으로 드러냈다.
+  - 코드 번들 검증:
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['request_links','messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - 문자 발송은 여전히 수신번호를 수동 선택한다. 다음 단계에서 기본 수신 그룹 또는 링크별 수신자 사전 연결을 넣으면 더 단순화할 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `REQ-LINK-08`
+  - 목표: `/request-links` 에서 수신번호 선택도 없애고 `/messaging` 의 기본 수신번호 그룹을 자동 사용한다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 의 `SmsSettingsDto`, `SmsSettingsUpdateInput` 에 `defaultRecipientIds` 를 추가했다.
+    - `src/services/messagingService.ts` 는 `sms_service_settings.default_recipient_ids` 를 읽고 저장하며, 저장 시 활성 수신번호인지 검증한다.
+    - `docs/run-this-supabase-messaging-bootstrap.sql` 에 `messaging.sms_service_settings.default_recipient_ids text[]` 컬럼 생성/보강 SQL 을 추가했다.
+    - `src/app/messaging/page.tsx` 에서 기본 수신번호 그룹 checkbox 선택 UI 를 추가했고, `/request-links` 자동 발송 그룹이라는 설명을 넣었다.
+    - `src/app/request-links/page.tsx` 에서 수신번호 checkbox 를 제거하고, 문자 발송 시 `smsSettings.defaultRecipientIds` 를 그대로 사용하도록 단순화했다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/app/messaging/page.tsx` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - `default_recipient_ids` 는 SQL 재실행 후에야 실제 DB 에 생긴다. 적용 전에는 `/messaging` 기본 설정 저장이 실패할 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `REQ-LINK-09`
+  - 목표: 문서별 기본 발신번호를 지정하고, `/request-links` 에서는 그 값을 기본 적용하되 사용자가 해제할 수 있게 한다.
+  - 수정 내용:
+    - `docs/run-this-supabase-messaging-bootstrap.sql` 에 `messaging.sms_document_sender_registry(document_id, sender_id)` 정본 테이블과 updated_at trigger 를 추가했다.
+    - `src/lib/messagingDtos.ts` 에 `SmsDocumentSenderBindingDto` 를 추가하고, `SmsSettingsDto` 는 문서별 발신번호 바인딩 목록을 함께 내려주도록 바꿨다.
+    - `src/services/messagingService.ts` 는 `getSmsSettings()` 에서 문서별 발신번호 바인딩을 함께 조회하고, `updateSmsSettings()` 에서 문서별 바인딩 upsert/delete 를 처리하도록 확장했다.
+    - `src/app/messaging/page.tsx` 에서 `현장 ID` 기준 문서 목록을 읽어, 문서마다 기본 발신번호를 저장할 수 있는 UI 를 추가했다.
+    - `src/app/request-links/page.tsx` 는 수신번호 수동 선택 구조로 되돌리고, 선택한 요청 링크 문서에 문서별 기본 발신번호가 있으면 `문서 기본 발신번호 사용` 체크를 기본 활성화한다.
+    - 사용자가 그 체크를 해제하면 전역 기본 발신번호 fallback 으로 문자 발송한다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/app/messaging/page.tsx` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - `sms_document_sender_registry` 는 SQL 재실행 후에야 실제 DB 에 생긴다. 적용 전에는 문서별 기본 발신번호 저장이 실패할 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `REQ-LINK-10`
+  - 목표: 문서별 기본 수신번호도 `messaging` 정본으로 저장하고, `/request-links` 에서는 문서별 기본 수신번호를 기본 선택 상태로 띄우되 발송 전 다시 확인할 수 있게 한다.
+  - 수정 내용:
+    - `src/lib/messagingDtos.ts` 에 `SmsDocumentRecipientBindingDto` 와 `SmsSettingsUpdateInput.documentRecipientBindings` 를 추가했다.
+    - `src/services/messagingService.ts` 는 `messaging.sms_document_recipient_registry` 를 함께 조회해 `documentRecipientBindings` 를 내려주고, 설정 저장 시 문서별 기본 수신번호 검증/삭제/삽입을 처리하도록 확장했다.
+    - `src/app/messaging/page.tsx` 에서 문서마다 기본 발신번호와 기본 수신번호를 함께 저장할 수 있게 바꿨다.
+    - `src/app/request-links/page.tsx` 는 문서별 기본 발신번호를 자동 사용하고, 문서별 기본 수신번호를 checkbox 기본 선택 상태로 반영하도록 바꿨다.
+    - `/request-links` 에서 발신번호 override UI 는 제거하고, 수신번호는 매번 확인 가능한 실행 UI 로 유지했다.
+    - `docs/run-this-supabase-messaging-bootstrap.sql` 에 `messaging.sms_document_recipient_registry(document_id, recipient_id)` 테이블과 updated_at trigger 를 추가했다.
+  - 코드 번들 검증:
+    - `src/services/messagingService.ts` 번들 성공
+    - `src/app/messaging/page.tsx` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['messaging'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - `sms_document_recipient_registry` 는 SQL 재실행 후에야 실제 DB 에 생긴다. 적용 전에는 문서별 기본 수신번호 저장이 실패할 수 있다.
+- 날짜: 2026-04-13
+  - 체크리스트 ID: `PHOTO-LABEL-06`
+  - 목표: 현장 체크리스트와 사진 증빙 요구 상태를 같은 계약으로 묶어 `/sites` 화면에서 문서 완료와 사진 증빙 완료를 함께 보이게 한다.
+  - 수정 내용:
+    - `src/lib/siteChecklistDtos.ts` 에 `SiteChecklistPhotoEvidenceStatus`, `SiteChecklistPhotoEvidenceDto` 를 추가하고, 체크리스트 항목/요약 DTO 가 사진 증빙 요약을 함께 담도록 확장했다.
+    - `src/services/siteChecklistService.ts` 가 `PhotoLabelRequirementService.getSitePhotoLabelGaps(siteId)` 를 함께 호출하도록 바꿨다.
+    - 문서 종류별 `documentTypeKey` 로 사진 요구 라벨을 묶어 각 체크리스트 항목의 `photoEvidence` 에 연결했다.
+    - 사이트 전체 요약에도 `photoRequirementCount`, `photoCoveredCount`, `photoReviewNeededCount`, `photoMissingCount` 를 추가했다.
+    - `src/app/sites/page.tsx` 에서 사이트 요약 카드와 각 체크리스트 카드에 사진 증빙 상태 배지와 요구 라벨 요약을 함께 표시하도록 바꿨다.
+  - 코드 번들 검증:
+    - `src/services/siteChecklistService.ts` 번들 성공
+    - `src/app/api/sites/[siteId]/checklist/route.ts` 번들 성공
+    - `src/app/sites/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['sites','photo_labels'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `list_pages()` 호출 시 기존 chrome-profile 이 이미 실행 중이라는 오류로 이번 턴에도 검증하지 못했다.
+  - 남은 위험:
+    - `document_type_key` 가 없는 사진 요구 라벨은 사이트 전체 요약에는 포함되지만 특정 체크리스트 카드에는 연결되지 않는다.
+- 날짜: 2026-04-14
+  - 체크리스트 ID: `SITE-CHECK-02`
+  - 목표: `/sites` 에서 `siteId` 를 외워 입력하지 않고, 저장된 현장을 목록에서 선택해 체크리스트를 조회/재계산할 수 있게 한다.
+  - 수정 내용:
+    - `src/lib/siteChecklistDtos.ts` 에 `SiteListResult` 를 추가했다.
+    - `src/services/siteChecklistService.ts` 에 `listSites()` 를 추가하고, `sites.site_registry` 를 `updated_at desc` 로 읽어 현장 목록을 반환하게 했다.
+    - `src/app/api/sites/route.ts` 에 `GET /api/sites` 를 추가했다.
+    - `src/app/sites/page.tsx` 는 초기 로드 시 현장 목록을 읽고, 텍스트 입력 대신 선택형 `select` 로 현장을 고르게 바꿨다.
+    - 현장 생성 후에는 목록을 다시 읽고 새 현장을 즉시 기본 선택하도록 연결했다.
+    - Turbopack route 에서 `SiteChecklistService.listSites is not a function` 이 보이던 런타임 이슈를 피하기 위해 `listSites` 를 named export 로 분리하고 route 가 직접 호출하도록 바꿨다.
+  - 코드 번들 검증:
+    - `src/services/siteChecklistService.ts` 번들 성공
+    - `src/app/api/sites/route.ts` 번들 성공
+    - `src/app/sites/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['sites'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `/sites` 실제 화면을 열어 현장 선택 combobox 가 렌더링되고, `서울 A현장 (a242f858-ea43-4191-878e-6324ea2e4b5d)` 가 자동 선택되는 것을 확인했다.
+  - 남은 위험:
+    - 현재는 현장 목록만 자동 로드한다. 체크리스트 본문은 사용자가 `체크리스트 조회` 버튼을 눌러야 불러온다.
+- 날짜: 2026-04-14
+  - 체크리스트 ID: `GLOBAL-PICKER-01`
+  - 목표: 서비스 전역의 ID 입력 UI 를 공용 리스트 선택 UI 로 통일하고, 사용자가 `siteId`, `documentId`, `templateId`, `draftId`, `photoId` 를 외워 입력하지 않게 한다.
+  - 수정 내용:
+    - `src/components/ui/EntityPicker.tsx` 를 추가했다. 입력 표면과 클릭 시 열리는 목록 패널을 한 컴포넌트로 묶고, 검색/선택/선택 해제를 공용 계약으로 통일했다.
+    - `src/app/documents/page.tsx` 에서 현장 선택, 템플릿 선택, 문서 상세 선택을 `EntityPicker` 로 교체했다.
+    - `src/app/sites/page.tsx` 에서 현장 선택을 `EntityPicker` 로 교체했다.
+    - `src/app/templates/page.tsx` 에서 템플릿 상세 조회용 선택 UI 를 `EntityPicker` 로 교체했다.
+    - `src/app/templates/extract/page.tsx` 에서 draft 조회 선택 UI 를 `EntityPicker` 로 교체하고, 최근 draft 목록을 localStorage 로 유지하게 했다.
+    - `src/app/photos/page.tsx` 에서 현장 선택과 사진 선택을 `EntityPicker` 로 교체했다.
+    - `src/app/bulk-ops/page.tsx` 에서 현장 선택을 `EntityPicker` 로 교체했다.
+    - `src/app/exports/page.tsx` 에서 현장 선택과 문서 선택을 `EntityPicker` 로 교체했다.
+    - `src/app/request-links/page.tsx` 에서 현장 선택과 문서 선택을 `EntityPicker` 로 교체했다.
+    - `src/app/messaging/page.tsx` 에서 현장 선택, 기본 발신번호 선택, 문서별 발신번호 선택을 `EntityPicker` 로 교체했다.
+  - 코드 번들 검증:
+    - `src/components/ui/EntityPicker.tsx` 번들 성공
+    - `src/app/documents/page.tsx` 번들 성공
+    - `src/app/sites/page.tsx` 번들 성공
+    - `src/app/templates/page.tsx` 번들 성공
+    - `src/app/templates/extract/page.tsx` 번들 성공
+    - `src/app/photos/page.tsx` 번들 성공
+    - `src/app/bulk-ops/page.tsx` 번들 성공
+    - `src/app/exports/page.tsx` 번들 성공
+    - `src/app/request-links/page.tsx` 번들 성공
+    - `src/app/messaging/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['sites','templates'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `/sites` 실제 화면에서 `서울 A현장 a242f858-ea43-4191-878e-6324ea2e4b5d 선택` 트리거가 렌더링되고, 클릭 시 `목록 검색` 입력과 리스트 항목 패널이 열리는 것을 확인했다.
+    - `/request-links` 실제 화면에서 현장/문서 선택 UI 가 같은 `EntityPicker` 패턴으로 렌더링되는 것을 확인했다.
+  - 남은 위험:
+    - `test-sign` 같은 테스트 페이지는 이번 통일 범위에 포함하지 않았다.
+    - enum 선택(`수신 채널`, `layout_resize_mode`, `sourceKind`)은 ID 선택 문제가 아니므로 네이티브 select 로 남겨두었다.
+- 날짜: 2026-04-14
+  - 체크리스트 ID: `GLOBAL-PICKER-02`
+  - 목표: 공용 `EntityPicker` 의 트리거와 펼침 패널을 `designCloning` 기준의 밀도와 상태 표현에 더 가깝게 보정한다.
+  - 수정 내용:
+    - `src/components/ui/EntityPicker.tsx` 한 파일만 수정해 서비스 전역 선택 UI 에 동일하게 반영되도록 했다.
+    - 트리거를 `Input` 계열 톤에 더 가깝게 정리하고, 우측 `선택/닫기` 텍스트는 제거한 뒤 작은 chevron 아이콘만 남겼다.
+    - 펼침 패널은 `rounded-2xl border border-slate-300 bg-slate-50` 톤으로 정리하고, 리스트 행은 `AppSidebar` 활성 행과 같은 `border-slate-200 bg-slate-100` 기준으로 통일했다.
+    - 검색창/빈 상태/선택 해제 행의 간격과 텍스트 밀도를 전반적으로 줄여 `designCloning` 의 패널/사이드바 패턴과 더 비슷한 감도로 맞췄다.
+  - 코드 번들 검증:
+    - `src/components/ui/EntityPicker.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['sites','templates'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - `/sites`, `/documents`, `/request-links`, `/messaging`, `/templates`, `/templates/extract`, `/photos`, `/exports`, `/bulk-ops` 를 실제로 열어 공용 picker 패턴이 전역 적용된 것을 확인했다.
+    - `/documents` 와 `/sites` 에서 picker 를 직접 열어 `목록 검색` 입력과 리스트 패널이 같은 구조로 열리는 것도 확인했다.
+  - 남은 위험:
+    - 아직 테스트 범위에 포함하지 않은 페이지에서 별도 선택 UI 를 새로 만들면 이 공용 패턴이 깨질 수 있다. 이후 신규 ID 선택은 반드시 `EntityPicker` 를 써야 한다.
+- 날짜: 2026-04-14
+  - 체크리스트 ID: `BULK-EDIT-04`
+  - 목표: `signature` 계열 라벨은 무조건 차단하지 않고, verified 본인확인 기록과 추가 승인자 조건이 있을 때만 미리보기/반영이 가능하게 한다.
+  - 수정 내용:
+    - `src/lib/bulkOperationDtos.ts` 에 `BulkSignatureAuthorizationInput` 을 추가하고, preview/commit 입력 DTO 가 `signatureAuthorization` 을 선택적으로 받도록 확장했다.
+    - `src/services/signAuthService.ts` 에 최근 verified 본인확인 기록 목록과 단건 verified 인증 문맥을 읽는 `listVerifiedAuthentications`, `getVerifiedAuthenticationContext` 를 추가했다.
+    - `src/app/api/sign/authentications/route.ts` 를 추가해 `/api/sign/authentications` 에서 최근 verified 인증 목록을 조회할 수 있게 했다.
+    - `src/services/bulkEditService.ts` 는 서명 라벨이 포함되면 `signatureAuthorization` 을 검증하고, 인증 기록이 없거나 선택한 인증 문서와 대상 문서가 다르면 해당 항목을 `blocked` 로 남기도록 바꿨다.
+    - commit 단계에서도 같은 인증을 다시 검증하고, apply 대상 서명 라벨 문서와 인증 문서가 다르면 반영을 중단하도록 재검증을 추가했다.
+    - `src/app/bulk-ops/page.tsx` 는 라벨 변경 JSON 에 서명 라벨이 포함될 때만 verified 본인확인 기록 picker 를 보여주고, 현재 `확정자` 값을 추가 승인자로 함께 보내도록 바꿨다.
+  - 코드 번들 검증:
+    - `src/services/signAuthService.ts` 번들 성공
+    - `src/services/bulkEditService.ts` 번들 성공
+    - `src/app/api/sign/authentications/route.ts` 번들 성공
+    - `src/app/bulk-ops/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - 로컬 검증:
+    - 개발 서버에 직접 HTTP smoke test 를 시도했지만, 이 세션의 shell 에서는 `http://localhost:4000` 연결이 열려 있지 않아 API 응답 검증은 수행하지 못했다.
+    - 페이지 코드는 서명 라벨이 포함될 때만 본인확인 picker 를 렌더링하도록 변경했다.
+  - Supabase MCP:
+    - `list_tables(schemas=['signing'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - 기존 chrome profile 잠금으로 이번 턴에도 직접 화면 검증하지 못했다.
+  - 남은 위험:
+    - verified 인증 레코드는 `sign_requests.document_id` 기준으로 한 문서에만 묶인다. 따라서 여러 문서를 한 번에 서명 라벨 수정할 때는 문서 불일치 항목이 `blocked` 로 남는 것이 정상 동작이다.
+- 날짜: 2026-04-14
+  - 체크리스트 ID: `BULK-EDIT-05`
+  - 목표: `/bulk-ops` 를 개발자용 JSON 화면에서 사용자용 단계형 화면으로 단순화하고, 서명 항목은 왜 막히는지 사람이 이해할 수 있게 바꾼다.
+  - 수정 내용:
+    - `src/app/bulk-ops/page.tsx` 에 단일 변경용 기본 입력 흐름을 추가했다. 사용자는 이제 기본 화면에서 `바꿀 항목`, `변경 방식`, `새 값`만 고르면 되고, JSON 직접 입력은 `고급 입력 열기` 아래로 숨겼다.
+    - 라벨 선택은 사람이 읽는 항목명(`담당자 이름`, `현장명`, `작업일`, `관리자 서명`) 중심으로 보이고, 선택한 문서에서 이미 쓰는 항목도 함께 목록에 뜨게 했다.
+    - 서명 항목이 선택되면 `검증 완료된 본인확인 기록` 영역을 별도로 보여주고, 문서를 2개 이상 고른 경우에는 인증 picker 대신 `서명 항목은 한 번에 한 문서만 수정` 안내를 먼저 보여주도록 바꿨다.
+    - `src/services/bulkEditService.ts` 는 서명 라벨이 포함되고 대상 문서가 여러 개면 미리보기에서 곧바로 `blocked` 와 함께 `문서를 1개만 선택` 경고를 남기도록 바꿨다.
+    - 인증 문서가 맞지 않는 경우 경고 문구도 UUID 대신 `선택한 본인확인 기록은 현재 문서용이 아닙니다` 형태로 바꿨다.
+    - `src/services/signAuthService.ts` 는 bulk-ops 용 목록에서 문서에 연결되지 않은 verified 인증은 제외하도록 정리했다.
+  - 코드 번들 검증:
+    - `src/services/signAuthService.ts` 번들 성공
+    - `src/services/bulkEditService.ts` 번들 성공
+    - `src/app/api/sign/authentications/route.ts` 번들 성공
+    - `src/app/bulk-ops/page.tsx` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['signing','bulk_ops'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - 기존 chrome profile 잠금으로 이번 턴에도 직접 화면 검증하지 못했다.
+  - 남은 위험:
+    - 현재 기본 입력 흐름은 한 번에 한 항목 변경에 맞춘다. 여러 항목을 동시에 바꿔야 하는 경우에는 여전히 `고급 JSON 입력`을 열어야 한다.
+- 날짜: 2026-04-14
+  - 체크리스트 ID: `BULK-EDIT-06`
+  - 목표: `/bulk-ops` 에서 `/test-sign` 으로 이동하지 않고 같은 화면 안에서 서명용 본인확인 요청 생성과 검증 완료 처리까지 할 수 있게 한다.
+  - 수정 내용:
+    - `src/app/bulk-ops/page.tsx` 에 `서명자 이름`, `본인확인 시작`, `검증 완료 처리` UI 를 추가했다.
+    - 서명 항목 + 문서 1개 선택 상태에서만 위 버튼이 보이고 동작한다.
+    - `본인확인 시작` 은 기존 `/api/sign` 의 `REQUEST` 와 `AUTH_REQUEST` 를 순서대로 호출해 sign request 와 auth request 를 생성한다.
+    - `검증 완료 처리` 는 같은 문서의 최신 HTML 정본과 동의문을 사용해 `/api/sign` 의 `AUTH_VERIFY` 를 호출하고, 성공 후 verified 인증 목록을 다시 읽어 picker 에 반영한다.
+    - bulk-ops 사용자는 이제 같은 화면에서 verified 인증을 만들고 곧바로 서명 라벨 미리보기를 다시 계산할 수 있다.
+  - 코드 번들 검증:
+    - `src/app/bulk-ops/page.tsx` 번들 성공
+    - `src/app/api/sign/route.ts` 번들 성공
+  - 그림자 정책 검사:
+    - `npm run check:no-shadow-app` 성공
+  - Supabase MCP:
+    - `list_tables(schemas=['signing'])` 호출은 여전히 `Auth required` 로 실패했다.
+  - Chrome DevTools MCP:
+    - 기존 chrome profile 잠금으로 이번 턴에도 직접 화면 검증하지 못했다.
+  - 남은 위험:
+    - 현재 bulk-ops 내 본인확인 흐름은 테스트용 검증 값(`birthdate`, `phone`, `ci`, `di`)을 내부 mock 데이터로 넣는다. 실제 공급사 연동 전까지는 운영용 최종 UX 가 아니라 연결용 흐름이다.

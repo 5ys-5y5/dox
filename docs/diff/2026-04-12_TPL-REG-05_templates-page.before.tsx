@@ -1,0 +1,372 @@
+'use client';
+
+import * as React from 'react';
+import { Badge } from '../../components/ui/Badge';
+import { Button } from '../../components/ui/Button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
+import { Input } from '../../components/ui/Input';
+import type {
+  TemplateDetailResult,
+  TemplateLayoutResizeMode,
+  TemplateRecordDto,
+} from '../../lib/templateDtos';
+
+const defaultDraftHtml = `<section data-template-root="true">
+  <h1>안전관리계획서 템플릿</h1>
+  <table>
+    <tr>
+      <th>현장명</th>
+      <td><span data-label="site_name"></span></td>
+    </tr>
+    <tr>
+      <th>작업일</th>
+      <td><span data-label="work_date"></span></td>
+    </tr>
+  </table>
+  <div data-signature-area="safety_manager_signature"></div>
+</section>`;
+
+const defaultFieldsJson = JSON.stringify(
+  [
+    {
+      fieldKey: 'site_name',
+      fieldType: 'text',
+      fieldLabel: '현장명',
+      labelKey: 'site_name',
+      required: true,
+      placeholder: '현장명을 입력하세요',
+      layoutBlockId: 'site_name_cell',
+      sortOrder: 1,
+    },
+    {
+      fieldKey: 'work_date',
+      fieldType: 'date',
+      fieldLabel: '작업일',
+      labelKey: 'work_date',
+      required: true,
+      layoutBlockId: 'work_date_cell',
+      sortOrder: 2,
+    },
+  ],
+  null,
+  2
+);
+
+const defaultSignatureAreasJson = JSON.stringify(
+  [
+    {
+      labelKey: 'safety_manager_signature',
+      signerRoleName: '안전책임자',
+      pageIndex: 1,
+      x: 420,
+      y: 280,
+      width: 160,
+      height: 60,
+      required: true,
+      sortOrder: 1,
+    },
+  ],
+  null,
+  2
+);
+
+export default function TemplatesPage() {
+  const [templateName, setTemplateName] = React.useState('안전관리계획서 템플릿');
+  const [sourceDocumentName, setSourceDocumentName] = React.useState('안전관리계획서 원본.docx');
+  const [layoutResizeMode, setLayoutResizeMode] =
+    React.useState<TemplateLayoutResizeMode>('grow_height');
+  const [draftHtml, setDraftHtml] = React.useState(defaultDraftHtml);
+  const [fieldsText, setFieldsText] = React.useState(defaultFieldsJson);
+  const [signatureAreasText, setSignatureAreasText] = React.useState(defaultSignatureAreasJson);
+  const [selectedTemplateId, setSelectedTemplateId] = React.useState('');
+  const [createdTemplate, setCreatedTemplate] = React.useState<TemplateRecordDto | null>(null);
+  const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  const loadTemplate = React.useCallback(async (templateId: string) => {
+    const normalizedTemplateId = templateId.trim();
+
+    if (!normalizedTemplateId) {
+      setTemplateDetail(null);
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      // TEMPLATE_DETAIL_NO_CACHE_REQUIRED
+      // 필드 저장 직후 stale GET 응답을 재사용하지 않도록 cache bypass 를 강제합니다.
+      const response = await fetch(`/api/templates/${normalizedTemplateId}?ts=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.message || '템플릿 조회에 실패했습니다.');
+      }
+
+      setTemplateDetail(result.data);
+      setSelectedTemplateId(normalizedTemplateId);
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '템플릿 조회에 실패했습니다.';
+      setMessage(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleCreateTemplate = async () => {
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateName,
+          sourceDocumentName,
+          draftHtml,
+          layoutResizeMode,
+        }),
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.message || '템플릿 저장에 실패했습니다.');
+      }
+
+      setCreatedTemplate(result.data);
+      setSelectedTemplateId(result.data.id);
+      setMessage('템플릿 메타데이터와 레이아웃 초안이 저장되었습니다.');
+      await loadTemplate(result.data.id);
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '템플릿 저장에 실패했습니다.';
+      setMessage(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveFields = async () => {
+    const normalizedTemplateId = selectedTemplateId.trim();
+
+    if (!normalizedTemplateId) {
+      setMessage('필드와 서명 영역을 저장할 templateId를 먼저 선택하세요.');
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/templates/${normalizedTemplateId}/fields`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: JSON.parse(fieldsText),
+          signatureAreas: JSON.parse(signatureAreasText),
+        }),
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.message || '템플릿 필드 저장에 실패했습니다.');
+      }
+
+      setMessage(
+        `필드 ${result.data.savedFieldCount}개, 서명 영역 ${result.data.savedSignatureAreaCount}개, 라벨 바인딩 ${result.data.labelBindingCount}개를 저장했습니다.`
+      );
+      await loadTemplate(normalizedTemplateId);
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '템플릿 필드 저장에 실패했습니다.';
+      setMessage(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-2">
+          <Badge variant="slate">TPL-REG-01</Badge>
+          <h1 className="text-3xl font-semibold text-slate-950">템플릿 등록</h1>
+          <p className="max-w-3xl text-sm text-slate-600">
+            템플릿 메타데이터, HTML 레이아웃 초안, 필드 스키마, 라벨 바인딩, 서명 영역을 저장하는 1차 골격입니다.
+          </p>
+          <p className="max-w-3xl text-xs text-slate-500">
+            지금 단계는 수동 입력 저장입니다. 원본 문서를 읽어 자동 초안을 만드는 기능은 다음 `템플릿 추출` 단계에서 구현합니다.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => void loadTemplate(selectedTemplateId)} disabled={loading}>
+            템플릿 조회
+          </Button>
+          <Button onClick={handleCreateTemplate} disabled={loading}>
+            템플릿 저장
+          </Button>
+        </div>
+      </div>
+
+      {message ? (
+        <Card className="border-slate-200 bg-slate-50">
+          <CardContent className="p-4 text-sm text-slate-700">{message}</CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle>템플릿 메타데이터와 HTML 초안</CardTitle>
+            <CardDescription>
+              자동 변환 전 단계이므로, 지금은 사용자가 draft HTML과 `layout_resize_mode`를 직접 입력합니다.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-800">템플릿 이름</label>
+                <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-800">원본 문서 이름</label>
+                <Input
+                  value={sourceDocumentName}
+                  onChange={(event) => setSourceDocumentName(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-800">레이아웃 확장 정책</label>
+              <select
+                value={layoutResizeMode}
+                onChange={(event) => setLayoutResizeMode(event.target.value as TemplateLayoutResizeMode)}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="fixed">fixed</option>
+                <option value="grow_height">grow_height</option>
+                <option value="grow_width">grow_width</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-800">Draft HTML</label>
+              <textarea
+                value={draftHtml}
+                onChange={(event) => setDraftHtml(event.target.value)}
+                className="flex min-h-[320px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-6">
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle>최근 템플릿 저장 결과</CardTitle>
+              <CardDescription>가장 최근 저장한 템플릿의 핵심 메타데이터를 보여줍니다.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-slate-700">
+              {createdTemplate ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="green">{createdTemplate.status}</Badge>
+                    <span className="font-medium text-slate-900">{createdTemplate.templateName}</span>
+                  </div>
+                  <p>템플릿 ID: {createdTemplate.id}</p>
+                  <p>레이아웃 정책: {createdTemplate.layoutResizeMode}</p>
+                  <p>원본 문서: {createdTemplate.sourceDocumentName || '-'}</p>
+                </>
+              ) : (
+                <p className="text-slate-500">아직 저장된 템플릿이 없습니다.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle>필드 스키마와 서명 영역 저장</CardTitle>
+              <CardDescription>
+                필드 스키마, 라벨 바인딩, 서명 영역은 템플릿 저장 후 별도 단계로 저장합니다.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col gap-2 md:flex-row">
+                <Input
+                  value={selectedTemplateId}
+                  onChange={(event) => setSelectedTemplateId(event.target.value)}
+                  placeholder="templateId를 입력하세요"
+                />
+                <Button variant="outline" onClick={handleSaveFields} disabled={loading}>
+                  필드 저장
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-800">필드 스키마 JSON</label>
+                <textarea
+                  value={fieldsText}
+                  onChange={(event) => setFieldsText(event.target.value)}
+                  className="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-800">서명 영역 JSON</label>
+                <textarea
+                  value={signatureAreasText}
+                  onChange={(event) => setSignatureAreasText(event.target.value)}
+                  className="flex min-h-[180px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle>저장된 템플릿 상세</CardTitle>
+              <CardDescription>
+                필드 스키마, 라벨 바인딩, 서명 영역이 분리 저장되었는지 확인합니다.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {templateDetail ? (
+                <>
+                  <div className="rounded-xl border border-slate-200 p-4 text-sm text-slate-600">
+                    <p className="font-medium text-slate-900">{templateDetail.template.templateName}</p>
+                    <p>템플릿 ID: {templateDetail.template.id}</p>
+                    <p>레이아웃 정책: {templateDetail.template.layoutResizeMode}</p>
+                    <p>필드 수: {templateDetail.fields.length}</p>
+                    <p>라벨 바인딩 수: {templateDetail.labelBindings.length}</p>
+                    <p>서명 영역 수: {templateDetail.signatureAreas.length}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-slate-800">라벨 맵</p>
+                    {templateDetail.labelMap.length === 0 ? (
+                      <p className="text-sm text-slate-500">저장된 라벨 맵이 없습니다.</p>
+                    ) : (
+                      templateDetail.labelMap.map((entry) => (
+                        <div key={entry.labelKey} className="rounded-lg border border-slate-200 p-3 text-sm text-slate-600">
+                          <p className="font-medium text-slate-900">{entry.labelKey}</p>
+                          <p>필드 키: {entry.fieldKeys.join(', ') || '-'}</p>
+                          <p>서명 영역 ID 수: {entry.signatureAreaIds.length}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-slate-500">조회된 템플릿이 없습니다.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}

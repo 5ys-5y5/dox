@@ -177,3 +177,11 @@ h4 {
 .scrollbar-hide {
   -ms-overflow-style: none;
 }
+
+/* APP-HOME-01_GLOBAL_NO_SHADOW
+   현재 서비스 전역에서 그림자 효과를 쓰지 않는 정책입니다.
+   개별 컴포넌트의 shadow 유틸리티를 수정하지 않고도 화면 결과를 일관되게 맞추기 위해
+   app 레벨에서 box-shadow 를 모두 무효화합니다. */
+[class*="shadow"] {
+  box-shadow: none !important;
+}

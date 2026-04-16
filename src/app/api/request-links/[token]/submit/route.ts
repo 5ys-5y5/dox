@@ -1,0 +1,31 @@
+import { NextResponse } from 'next/server';
+import { RequestLinkService } from '../../../../../services/requestLinkService';
+
+type RouteContext = {
+  params: Promise<{
+    token: string;
+  }>;
+};
+
+export async function POST(request: Request, context: RouteContext) {
+  try {
+    const body = await request.json();
+    const { token } = await context.params;
+    const result = await RequestLinkService.submitRequestLink(token, body);
+
+    return NextResponse.json(
+      { success: true, data: result },
+      {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      }
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+
+    console.error('Request Link Submit API POST Error:', error);
+
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
+}

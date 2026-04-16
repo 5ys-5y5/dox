@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "node scripts/check-no-shadow-in-app.mjs && eslint .",
+    "check:no-shadow-app": "node scripts/check-no-shadow-in-app.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

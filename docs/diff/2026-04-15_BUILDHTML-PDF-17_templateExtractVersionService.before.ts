@@ -1,0 +1,82 @@
+import type { TemplateExtractEngineVersion, TemplateExtractResolvedSource } from '../lib/templateExtractDtos';
+import { TemplateExtractFileService } from './templateExtractFileService';
+import { TemplateExtractPdfService } from './templateExtractPdfService';
+import { TemplateExtractSnapshotV05Service } from './templateExtractSnapshotV05Service';
+import { TemplateExtractSnapshotV07Service } from './templateExtractSnapshotV07Service';
+import { TemplateExtractSnapshotV08Service } from './templateExtractSnapshotV08Service';
+import { TemplateExtractSnapshotV09Service } from './templateExtractSnapshotV09Service';
+import { TemplateExtractSnapshotV10Service } from './templateExtractSnapshotV10Service';
+import { TemplateExtractSnapshotV11Service } from './templateExtractSnapshotV11Service';
+import { TemplateExtractSnapshotV12Service } from './templateExtractSnapshotV12Service';
+import { TemplateExtractSnapshotV13Service } from './templateExtractSnapshotV13Service';
+import { TemplateExtractSnapshotV14Service } from './templateExtractSnapshotV14Service';
+import { TemplateExtractSnapshotV15Service } from './templateExtractSnapshotV15Service';
+
+const getFileExtension = (fileName: string) => {
+  const matched = fileName.trim().toLowerCase().match(/\.([a-z0-9]+)$/);
+  return matched?.[1] || '';
+};
+
+const isPdfUpload = (fileName: string, mimeType: string) => {
+  const extension = getFileExtension(fileName);
+  return mimeType === 'application/pdf' || extension === 'pdf';
+};
+
+export const TemplateExtractVersionService = {
+  normalizeVersion(value: unknown): TemplateExtractEngineVersion {
+    if (
+      value === '5' ||
+      value === '7' ||
+      value === '8' ||
+      value === '9' ||
+      value === '10' ||
+      value === '11' ||
+      value === '12' ||
+      value === '13' ||
+      value === '14' ||
+      value === '15' ||
+      value === '16'
+    ) {
+      return value;
+    }
+
+    return '16';
+  },
+
+  async resolveUploadSource(
+    fileName: string,
+    mimeType: string,
+    bytes: Uint8Array,
+    version: TemplateExtractEngineVersion
+  ): Promise<TemplateExtractResolvedSource> {
+    if (!isPdfUpload(fileName, mimeType)) {
+      return TemplateExtractFileService.resolveUploadSource(fileName, mimeType, bytes);
+    }
+
+    switch (version) {
+      case '5':
+        return TemplateExtractSnapshotV05Service.extractPdfSource(fileName, bytes);
+      case '7':
+        return TemplateExtractSnapshotV07Service.extractPdfSource(fileName, bytes);
+      case '8':
+        return TemplateExtractSnapshotV08Service.extractPdfSource(fileName, bytes);
+      case '9':
+        return TemplateExtractSnapshotV09Service.extractPdfSource(fileName, bytes);
+      case '10':
+        return TemplateExtractSnapshotV10Service.extractPdfSource(fileName, bytes);
+      case '11':
+        return TemplateExtractSnapshotV11Service.extractPdfSource(fileName, bytes);
+      case '12':
+        return TemplateExtractSnapshotV12Service.extractPdfSource(fileName, bytes);
+      case '13':
+        return TemplateExtractSnapshotV13Service.extractPdfSource(fileName, bytes);
+      case '14':
+        return TemplateExtractSnapshotV14Service.extractPdfSource(fileName, bytes);
+      case '15':
+        return TemplateExtractSnapshotV15Service.extractPdfSource(fileName, bytes);
+      case '16':
+      default:
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes);
+    }
+  },
+};
