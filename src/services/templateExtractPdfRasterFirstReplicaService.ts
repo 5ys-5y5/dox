@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,6 +40,21 @@ type RasterFirstReplicaResponse = {
 };
 
 const PYTHON_SCRIPT_PATH = join(process.cwd(), 'scripts', 'template-extract-raster-first-replica.py');
+const LOCAL_VENV_PYTHON_PATH = join(process.cwd(), '.venv-template-extract-v2', 'bin', 'python');
+
+const resolvePythonBinary = () => {
+  const configuredPythonBinary = process.env.TEMPLATE_EXTRACT_PYTHON_BIN?.trim();
+
+  if (configuredPythonBinary) {
+    return configuredPythonBinary;
+  }
+
+  if (existsSync(LOCAL_VENV_PYTHON_PATH)) {
+    return LOCAL_VENV_PYTHON_PATH;
+  }
+
+  return 'python3';
+};
 
 const parseRasterFirstResponse = (stdout: string): RasterFirstReplicaResponse => {
   let parsed: unknown;
@@ -84,26 +100,27 @@ const buildPipelineTrace = (response: RasterFirstReplicaResponse): TemplateExtra
   frameDiagnostics: null,
 });
 
-const buildDependencyErrorMessage = (stderr: string, errorMessage: string) => {
+const buildDependencyErrorMessage = (stderr: string, errorMessage: string, pythonBinary: string) => {
   const diagnostic = `${stderr}\n${errorMessage}`.trim();
+  const runtimeHint = ` 사용 Python: ${pythonBinary}. 로컬에서는 TEMPLATE_EXTRACT_PYTHON_BIN으로 venv Python을 지정할 수 있습니다.`;
 
   if (/No module named ['"]?fitz|ModuleNotFoundError:.*fitz/i.test(diagnostic)) {
-    return '템플릿 추출 실패: v2.01 변환기에 필요한 PyMuPDF(fitz)가 설치되어 있지 않습니다.';
+    return `템플릿 추출 실패: v2.01 변환기에 필요한 PyMuPDF(fitz)가 설치되어 있지 않습니다.${runtimeHint}`;
   }
 
   if (/No module named ['"]?cv2|ModuleNotFoundError:.*cv2/i.test(diagnostic)) {
-    return '템플릿 추출 실패: v2.01 변환기에 필요한 OpenCV(cv2)가 설치되어 있지 않습니다.';
+    return `템플릿 추출 실패: v2.01 변환기에 필요한 OpenCV(cv2)가 설치되어 있지 않습니다.${runtimeHint}`;
   }
 
   if (/No module named ['"]?pytesseract|ModuleNotFoundError:.*pytesseract/i.test(diagnostic)) {
-    return '템플릿 추출 실패: v2.01 변환기에 필요한 pytesseract가 설치되어 있지 않습니다.';
+    return `템플릿 추출 실패: v2.01 변환기에 필요한 pytesseract가 설치되어 있지 않습니다.${runtimeHint}`;
   }
 
   if (/tesseract|TesseractNotFoundError/i.test(diagnostic)) {
-    return '템플릿 추출 실패: v2.01 변환기에 필요한 Tesseract OCR 런타임을 찾지 못했습니다.';
+    return `템플릿 추출 실패: v2.01 변환기에 필요한 Tesseract OCR 런타임을 찾지 못했습니다.${runtimeHint}`;
   }
 
-  return `템플릿 추출 실패: v2.01 raster-first 변환기 실행 중 오류가 발생했습니다. (${errorMessage})`;
+  return `템플릿 추출 실패: v2.01 raster-first 변환기 실행 중 오류가 발생했습니다. (${errorMessage})${runtimeHint}`;
 };
 
 export const TemplateExtractPdfRasterFirstReplicaService = {
@@ -118,7 +135,7 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
     try {
       await writeFile(tempPdfPath, bytes);
 
-      const pythonBinary = process.env.TEMPLATE_EXTRACT_PYTHON_BIN || 'python3';
+      const pythonBinary = resolvePythonBinary();
       const { stdout } = await execFileAsync(
         pythonBinary,
         [
@@ -160,7 +177,7 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
         ? String((error as { stderr: string }).stderr)
         : '';
 
-      throw new Error(buildDependencyErrorMessage(stderr, message));
+      throw new Error(buildDependencyErrorMessage(stderr, message, resolvePythonBinary()));
     } finally {
       await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }

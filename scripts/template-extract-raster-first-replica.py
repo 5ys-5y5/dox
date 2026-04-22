@@ -18,6 +18,14 @@ CLONE_ID = "pdf-raster-first-v2.01"
 CLONE_BUILDER = "pdf_raster_first_editable_checkbox_v2_01"
 
 
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def rounded(value: float) -> float:
+    return round(float(value), 2)
+
+
 def load_reference_converter():
     if not REFERENCE_CONVERTER.exists():
         raise FileNotFoundError(f"reference converter not found: {REFERENCE_CONVERTER}")
@@ -33,13 +41,15 @@ def load_reference_converter():
     return module
 
 
-def body_fragment_from_full_html(full_html: str) -> str:
+def body_fragment_from_full_html(full_html: str, render_model: dict) -> str:
     style_blocks = "\n".join(re.findall(r"<style>[\s\S]*?</style>", full_html, flags=re.IGNORECASE))
     body_match = re.search(r"<body[^>]*>([\s\S]*?)</body>", full_html, flags=re.IGNORECASE)
     body_inner = body_match.group(1).strip() if body_match else full_html.strip()
     body_inner = re.sub(r"<style>[\s\S]*?</style>", "", body_inner, flags=re.IGNORECASE).strip()
+    render_model_json = json.dumps(render_model, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
     return f'''<section data-template-extract-draft="true" data-template-clone="{CLONE_ID}">
+  <script type="application/json" data-template-render-model="positioned-v1">{render_model_json}</script>
   <div class="template-clone template-clone--raster-first-v2-01">
 {style_blocks}
 {body_inner}
@@ -90,6 +100,169 @@ def build_model_summary(pages) -> dict:
     }
 
 
+def rich_line_text(line) -> str:
+    parts = []
+
+    for fragment in getattr(line, "fragments", []):
+        if getattr(fragment, "kind", "") == "choice":
+            mark = "[x]" if getattr(fragment, "checked", False) else "[ ]"
+            text = getattr(fragment, "text", "") or ""
+            parts.append(f"{mark} {text}".strip())
+            continue
+
+        parts.append(getattr(fragment, "text", "") or "")
+
+    return " ".join(part for part in parts if part).strip()
+
+
+def rich_line_options(line) -> list:
+    options = []
+
+    for fragment in getattr(line, "fragments", []):
+        if getattr(fragment, "kind", "") != "choice":
+            continue
+
+        options.append({
+            "label": getattr(fragment, "text", "") or "",
+            "checked": bool(getattr(fragment, "checked", False)),
+        })
+
+    return options
+
+
+def build_text_items_for_region(rect, text: str, font_pt: float, bold: bool, rich_lines: list) -> list:
+    font_size = rounded(clamp(float(font_pt or 11.0) * 0.95, 8.0, 14.0))
+    line_height = rounded(max(font_size * 1.22, 9.0))
+    font_weight = 700 if bold else 400
+    pad_x = clamp(font_size * 0.38, 3.5, 7.0)
+    pad_y = clamp(font_size * 0.28, 2.5, 6.0)
+    left = rect.x0 + pad_x
+    top = rect.y0 + pad_y
+    width = max(1.0, rect.width - pad_x * 2)
+    max_lines = max(1, int(max(1.0, rect.height - pad_y * 2) // max(1.0, line_height)))
+    lines = list(rich_lines or [])
+
+    if not lines:
+        normalized_lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    else:
+        normalized_lines = [rich_line_text(line) for line in lines]
+
+    if not normalized_lines and text:
+        normalized_lines = [str(text).strip()]
+
+    items = []
+
+    for index, line_text in enumerate(normalized_lines[:max_lines]):
+        item_top = top + line_height * index
+        height = max(1.0, min(line_height, rect.y1 - item_top))
+
+        if height <= 0:
+            continue
+
+        options = rich_line_options(lines[index]) if index < len(lines) else []
+
+        if options:
+            items.append({
+                "kind": "status_options",
+                "left": rounded(left),
+                "top": rounded(item_top),
+                "width": rounded(width),
+                "height": rounded(height),
+                "fontSize": font_size,
+                "lineHeight": line_height,
+                "fontWeight": font_weight,
+                "options": options,
+            })
+            continue
+
+        if not line_text:
+            continue
+
+        items.append({
+            "kind": "plain_text",
+            "left": rounded(left),
+            "top": rounded(item_top),
+            "width": rounded(width),
+            "height": rounded(height),
+            "fontSize": font_size,
+            "lineHeight": line_height,
+            "fontWeight": font_weight,
+            "text": line_text,
+        })
+
+    return items
+
+
+def build_frame_segments_for_table(table) -> list:
+    segments = []
+
+    for y_value in getattr(table, "y_lines", []):
+        segments.append({
+            "orientation": "h",
+            "left": rounded(table.bbox.x0),
+            "top": rounded(y_value),
+            "width": rounded(table.bbox.width),
+        })
+
+    for x_value in getattr(table, "x_lines", []):
+        segments.append({
+            "orientation": "v",
+            "left": rounded(x_value),
+            "top": rounded(table.bbox.y0),
+            "height": rounded(table.bbox.height),
+        })
+
+    return segments
+
+
+def build_render_model(pages) -> dict:
+    render_pages = []
+
+    for page in pages:
+        frame_segments = []
+        text_items = []
+
+        for table in getattr(page, "tables", []):
+            frame_segments.extend(build_frame_segments_for_table(table))
+
+            for cell in getattr(table, "cells", []):
+                text_items.extend(
+                    build_text_items_for_region(
+                        cell.rect,
+                        getattr(cell, "text", "") or "",
+                        getattr(cell, "font_pt", 11.0),
+                        bool(getattr(cell, "bold", False)),
+                        getattr(cell, "lines", []) or [],
+                    )
+                )
+
+        for block in getattr(page, "text_blocks", []):
+            text_items.extend(
+                build_text_items_for_region(
+                    block.bbox,
+                    getattr(block, "text", "") or "",
+                    getattr(block, "font_pt", 11.0),
+                    bool(getattr(block, "bold", False)),
+                    getattr(block, "lines", []) or [],
+                )
+            )
+
+        render_pages.append({
+            "pageNumber": int(getattr(page, "number", len(render_pages) + 1)),
+            "width": rounded(getattr(page, "width", 0.0)),
+            "height": rounded(getattr(page, "height", 0.0)),
+            "frameSegments": frame_segments,
+            "textItems": text_items,
+        })
+
+    return {
+        "version": "positioned-v1",
+        "cloneId": CLONE_ID,
+        "pageCount": len(render_pages),
+        "pages": render_pages,
+    }
+
+
 def convert(input_pdf: Path, scale: float, raster_scale: float, ocr_lang: str) -> dict:
     converter = load_reference_converter()
     doc = converter.fitz.open(str(input_pdf))
@@ -98,7 +271,8 @@ def convert(input_pdf: Path, scale: float, raster_scale: float, ocr_lang: str) -
         for index, page in enumerate(doc)
     ]
     full_html = converter.render_document(pages, input_pdf.stem, scale)
-    fragment_html = body_fragment_from_full_html(full_html)
+    render_model = build_render_model(pages)
+    fragment_html = body_fragment_from_full_html(full_html, render_model)
     summary = build_model_summary(pages)
 
     return {
@@ -109,6 +283,7 @@ def convert(input_pdf: Path, scale: float, raster_scale: float, ocr_lang: str) -
         "documentFamily": "generic_form",
         "cloneBuilder": CLONE_BUILDER,
         "modelSummary": summary,
+        "renderModel": render_model,
         "diagnostics": {
             "fallbackApplied": False,
             "fallbackReason": None,
