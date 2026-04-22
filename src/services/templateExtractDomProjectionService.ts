@@ -4,6 +4,16 @@ import { TemplateExtractValueBindingService } from './templateExtractValueBindin
 const TEMPLATE_VALUE_PATTERN =
   /<([a-z0-9:-]+)([^>]*?)\sdata-template-value="([^"]+)"([^>]*)>([\s\S]*?)<\/\1>/gi;
 const ROW_PATTERN = /<tr[^>]*>\s*<th[^>]*>([\s\S]*?)<\/th>\s*<td([^>]*)>([\s\S]*?)<\/td>\s*<\/tr>/gi;
+const RASTER_FIRST_V2_CLONE_PATTERN = /\sdata-template-clone="pdf-raster-first-v2\.01"/i;
+const EDITABLE_TEXT_SPAN_PATTERN =
+  /<span([^>]*?\sclass="[^"]*\beditable-text\b[^"]*"[^>]*)>([\s\S]*?)<\/span>/gi;
+
+type RasterFirstEditableFragment = {
+  fragmentIndex: number;
+  attrs: string;
+  rawValueHtml: string;
+  text: string;
+};
 
 const mergeClassName = (rawAttrs: string, className: string) => {
   const classMatch = rawAttrs.match(/\sclass="([^"]*)"/i);
@@ -96,8 +106,138 @@ const buildTableCellPlaceholder = (labelKey: string, rawValueHtml: string, label
   return inline;
 };
 
+const extractRasterFirstEditableFragments = (sourceHtml: string): RasterFirstEditableFragment[] => {
+  const fragments: RasterFirstEditableFragment[] = [];
+  const pattern = new RegExp(EDITABLE_TEXT_SPAN_PATTERN.source, EDITABLE_TEXT_SPAN_PATTERN.flags);
+  let matched: RegExpExecArray | null;
+  let spanIndex = 0;
+
+  while ((matched = pattern.exec(sourceHtml))) {
+    const fragmentIndex = spanIndex;
+    spanIndex += 1;
+    const rawValueHtml = matched[2] || '';
+    const text = TemplateExtractValueBindingService.stripHtml(rawValueHtml);
+
+    if (!text || text.length > 120) {
+      continue;
+    }
+
+    fragments.push({
+      fragmentIndex,
+      attrs: matched[1] || '',
+      rawValueHtml,
+      text,
+    });
+  }
+
+  return fragments;
+};
+
+const looksLikeRasterFirstLabel = (text: string, index: number) => {
+  const normalized = text.trim();
+
+  if (!normalized || normalized.length > 40) {
+    return false;
+  }
+
+  if (TemplateExtractValueBindingService.inferKnownFieldForLabel(normalized, index)) {
+    return true;
+  }
+
+  return /[:：]$/.test(normalized);
+};
+
+const looksLikeStandaloneValue = (text: string) => {
+  const normalized = text.trim();
+
+  if (!normalized || normalized.length > 80) {
+    return false;
+  }
+
+  return /[0-9가-힣A-Za-z]/.test(normalized);
+};
+
+const addAttributeToSpan = (attrs: string, name: string, value: string) => {
+  if (new RegExp(`\\s${name}=`, 'i').test(attrs)) {
+    return attrs;
+  }
+
+  return `${attrs} ${name}="${TemplateExtractValueBindingService.escapeHtml(value)}"`;
+};
+
+const projectRasterFirstEditableClone = (sourceHtml: string): TemplateExtractProjectionResult | null => {
+  if (!RASTER_FIRST_V2_CLONE_PATTERN.test(sourceHtml)) {
+    return null;
+  }
+
+  const registry = TemplateExtractValueBindingService.createProjectionRegistry();
+  const fragments = extractRasterFirstEditableFragments(sourceHtml);
+  const labelKeyByFragmentIndex = new Map<number, string>();
+
+  for (let index = 0; index < fragments.length - 1; index += 1) {
+    const labelFragment = fragments[index];
+    const valueFragment = fragments[index + 1];
+
+    if (!looksLikeRasterFirstLabel(labelFragment.text, registry.candidates.length)) {
+      continue;
+    }
+
+    if (
+      !looksLikeStandaloneValue(valueFragment.text) ||
+      looksLikeRasterFirstLabel(valueFragment.text, registry.candidates.length)
+    ) {
+      continue;
+    }
+
+    const labelText = labelFragment.text.replace(/[:：]\s*$/, '').trim();
+    const candidate = registry.registerPair({
+      labelText,
+      valueText: valueFragment.text,
+      valueHtml: valueFragment.rawValueHtml,
+    });
+
+    if (!candidate) {
+      continue;
+    }
+
+    labelKeyByFragmentIndex.set(valueFragment.fragmentIndex, candidate.labelKey);
+  }
+
+  if (registry.pairs.length === 0) {
+    return null;
+  }
+
+  let fragmentIndex = 0;
+  const generatedDraftHtml = sourceHtml.replace(
+    EDITABLE_TEXT_SPAN_PATTERN,
+    (fullMatch, attrs: string, rawValueHtml: string) => {
+      const labelKey = labelKeyByFragmentIndex.get(fragmentIndex);
+      fragmentIndex += 1;
+
+      if (!labelKey) {
+        return fullMatch;
+      }
+
+      const nextAttrs = addAttributeToSpan(attrs, 'data-template-value', labelKey);
+      return `<span${nextAttrs}>${rawValueHtml}</span>`;
+    }
+  );
+
+  return {
+    pairs: registry.pairs,
+    candidates: registry.candidates,
+    generatedDraftHtml,
+  };
+};
+
 export const TemplateExtractDomProjectionService = {
   projectCloneHtml(sourceHtml: string): TemplateExtractProjectionResult {
+    const rasterFirstProjection = projectRasterFirstEditableClone(sourceHtml);
+
+    if (rasterFirstProjection) {
+      return rasterFirstProjection;
+    }
+
     const registry = TemplateExtractValueBindingService.createProjectionRegistry();
 
     const cloneAwareHtml = sourceHtml.replace(

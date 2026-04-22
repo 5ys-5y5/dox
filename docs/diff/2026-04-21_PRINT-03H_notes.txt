@@ -1,0 +1,1 @@
+PRINT-03H: replace page-global frame axes with table-local rule clusters inspired by Google Docs per-table column/row sizing.

@@ -42,9 +42,62 @@ export const TemplateExtractVersionService = {
       value === '16' ||
       value === '17' ||
       value === '18' ||
-      value === '19'
+      value === '19' ||
+      value === '20' ||
+      value === '21' ||
+      value === '22' ||
+      value === '23' ||
+      value === '24' ||
+      value === '25' ||
+      value === '26' ||
+      value === '27' ||
+      value === '28' ||
+      value === '29' ||
+      value === '30' ||
+      value === '31' ||
+      value === '32'
     ) {
       return value;
+    }
+
+    if (value === 'v2.01' || value === '2.01') {
+      return '32';
+    }
+
+    if (typeof value === 'string') {
+      const legacyMatched = value.trim().match(/^v?1\.(\d{2})$/i);
+      const legacyVersion = legacyMatched?.[1]?.replace(/^0/, '');
+
+      if (
+        legacyVersion === '5' ||
+        legacyVersion === '7' ||
+        legacyVersion === '8' ||
+        legacyVersion === '9' ||
+        legacyVersion === '10' ||
+        legacyVersion === '11' ||
+        legacyVersion === '12' ||
+        legacyVersion === '13' ||
+        legacyVersion === '14' ||
+        legacyVersion === '15' ||
+        legacyVersion === '16' ||
+        legacyVersion === '17' ||
+        legacyVersion === '18' ||
+        legacyVersion === '19' ||
+        legacyVersion === '20' ||
+        legacyVersion === '21' ||
+        legacyVersion === '22' ||
+        legacyVersion === '23' ||
+        legacyVersion === '24' ||
+        legacyVersion === '25' ||
+        legacyVersion === '26' ||
+        legacyVersion === '27' ||
+        legacyVersion === '28' ||
+        legacyVersion === '29' ||
+        legacyVersion === '30' ||
+        legacyVersion === '31'
+      ) {
+        return legacyVersion;
+      }
     }
 
     return '19';
@@ -128,8 +181,35 @@ export const TemplateExtractVersionService = {
       case '18':
         return TemplateExtractSnapshotV18Service.extractPdfSource(fileName, bytes);
       case '19':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '19');
+      case '20':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '20');
+      case '21':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '21');
+      case '22':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '22');
+      case '23':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '23');
+      case '24':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '24');
+      case '25':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '25');
+      case '26':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '26');
+      case '27':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '27');
+      case '28':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '28');
+      case '29':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '29');
+      case '30':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '30');
+      case '31':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '31');
+      case '32':
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '32');
       default:
-        return TemplateExtractPdfService.extractPdfSource(fileName, bytes);
+        return TemplateExtractPdfService.extractPdfSource(fileName, bytes, '19');
     }
   },
 };

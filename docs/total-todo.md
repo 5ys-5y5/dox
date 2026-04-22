@@ -73,6 +73,106 @@
   - 2단계 key-value/value 제거 품질도 직전 활성 버전을 깨지 않을 것
 - 둘 중 하나라도 퇴화하면 새 버전은 비교용 snapshot 으로만 남기고 활성 기본값으로 올리지 않는다.
 
+## EXTRACTOR 진행 체크리스트
+
+- [진행중] `MEASURE-01`
+  - 범위: v20/v21 우열 판단용 측정 체계 검증
+  - 강제 규칙:
+    - `offline quality` 는 acceptance metric 으로 사용 금지
+    - `올바른 측정 -> 측정에서 벗어나는 지점 식별 -> 구현 후 동일 측정 검증` 루프만 허용
+    - 동일 샘플/동일 렌더 조건에서 `1px 이내 일치 비율` 을 남기지 못하면 “개선”이라고 기록하지 않을 것
+  - 현재 판단:
+    - 현행 `offline quality` 는 구조 휴리스틱이라서 v20/v21 시각 유사도 우열 판단용으로 부적합
+  - 다음 액션:
+    - 렌더 기반 비교 경로를 먼저 확정
+    - 그 전까지 heuristic pass/fail 과 heuristic 후보 선택을 모두 승격 근거로 사용하지 않기
+    - UI/로그에는 시각 유사도를 `미측정`으로만 표시하고 구조 진단값은 별도 표기로 분리하기
+
+- [진행중] `ENHANCE-10`
+  - 범위: `v21` 을 `html-only bridge` 로 복구하고 image-first 경로 제거
+  - 기준:
+    - `full-page image`, `bitmap background`, `raster overlay` 가 최종 산출물에 들어가면 즉시 실패
+    - `95점` 미만 후보는 폐기
+    - 목표는 `99점`
+  - 우선 회귀 샘플:
+    - `/Users/gy/Documents/dev/docs/docs/작업지시서_사일동 주상복합.pdf`
+    - `/Users/gy/Documents/dev/docs/docs/사업자등록증.pdf`
+  - 관련 diff:
+    - `docs/diff/2026-04-17_ENHANCE-05C_templateExtractPdfService.before.ts`
+    - `docs/diff/2026-04-17_ENHANCE-08B_extract-page.before.tsx`
+    - `docs/diff/2026-04-17_ENHANCE-09_buildhtml.before.md`
+
+- [진행중] `ENHANCE-11`
+  - 범위: `v21` heuristic candidate arbitration 제거 및 v20 bridge 복구
+  - 기준:
+    - `offline quality` 를 후보 선택 점수로 사용하지 않을 것
+    - 실제 픽셀 측정기 구현 전까지 `v21` 은 `v20` HTML 생성 경로를 재사용할 것
+    - UI와 로그에서는 구조 진단값을 시각 유사도로 표기하지 않을 것
+  - 우선 회귀 샘플:
+    - `/Users/gy/Documents/dev/docs/docs/작업지시서_사일동 주상복합.pdf`
+    - `/Users/gy/Documents/dev/docs/docs/사업자등록증.pdf`
+  - 관련 diff:
+    - `docs/diff/2026-04-17_ENHANCE-11_templateExtractPdfService.before.ts`
+    - `docs/diff/2026-04-17_ENHANCE-11_buildhtml.before.md`
+    - `docs/diff/2026-04-17_ENHANCE-11_total-todo.before.md`
+
+- [진행중] `ENHANCE-12`
+  - 범위: `pdf-html-grid` 실문서형 스타일 보정 + browserless quality 정렬
+  - 기준:
+    - empty helper cell 을 source cell 로 과대계산하지 않을 것
+    - `segment=0` 인 text-layer 문서를 table 기반 HTML 이라는 이유만으로 감점하지 않을 것
+    - `pageContractScore` 는 부동소수 오차를 허용할 것
+  - 최신 offline 결과:
+    - `작업지시서_대구침산더샵.pdf`: `pass=true`, `0.9950`
+    - `작업지시서_사일동 주상복합.pdf`: `pass=true`, `0.9950`
+    - `사업자등록증.pdf`: `pass=false`, `0.8714`
+  - 다음 병목:
+    - 스캔형 문서의 `textAnchorScore`
+  - 관련 diff:
+    - `docs/diff/2026-04-17_ENHANCE-12_templateExtractPdfHtmlCloneService.before.ts`
+    - `docs/diff/2026-04-17_ENHANCE-12_templateExtractReplicaHtmlNormalizerService.before.ts`
+    - `docs/diff/2026-04-17_ENHANCE-12_templateExtractReplicaOfflineQualityService.before.ts`
+    - `docs/diff/2026-04-17_ENHANCE-09_total-todo.before.md`
+    - `docs/diff/2026-04-17_ENHANCE-09_enhance.before.md`
+
+- [진행중] `EXTRACTOR-01`
+  - 범위: `v20` PDF 입력의 `digital/scanned` source-mode 판별, `work_order/certificate/generic_form` family 판별, clone HTML root trace 속성 기록
+  - 관련 diff:
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_templateExtractDtos.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_templateExtractVersionService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_templateExtractPdfService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_templateExtractPdfTextRecoveryService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_templateExtractPdfLayoutService.before.ts`
+- [진행중] `EXTRACTOR-02`
+  - 범위: `TemplateExtractPdfTopologyModel` 정본 추가, digital layout / scanned rule 공통 topology summary 구성
+  - 관련 diff:
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_templateExtractPdfGeometryService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_buildhtml.before.md`
+    - `docs/diff/2026-04-17_EXTRACTOR-01-EXTRACTOR-02_total-todo.before.md`
+- [진행중] `EXTRACTOR-03`
+  - 범위: `work_order` family builder 진입점 분리, scanned OCR rule model 을 work-order builder 입력으로 정규화, `v20` work-order 경로 통합
+  - 2차 전환: `v20` work-order 가 legacy layout renderer 를 타지 않도록 `TemplateExtractWorkOrderTopologyBuilderService` 를 추가하고, digital/scanned 모두 공통 topology DTO 에서 직접 `pdf-work-order-topology-v20` 을 생성
+  - 3차 안정화: 실제 업로드 샘플 4건 기준으로 topology 결과가 legacy 대비 약하면 `pdf-form-v20` legacy renderer 또는 `pdf-frame-v20` fallback 으로 자동 복귀시키고, `pipelineTrace.cloneBuilder` 에 실제 선택 builder 를 기록
+  - 관련 diff:
+    - `docs/diff/2026-04-17_EXTRACTOR-03_templateExtractPdfService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03_templateExtractPdfLayoutService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03_templateExtractPdfTextRecoveryService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03_templateExtractPdfTopologyService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03_templateExtractPdfFamilyService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03_buildhtml.before.md`
+    - `docs/diff/2026-04-17_EXTRACTOR-03_total-todo.before.md`
+    - `docs/diff/2026-04-17_EXTRACTOR-03B_templateExtractPdfService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03B_templateExtractPdfTopologyService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03B_templateExtractWorkOrderBuilderService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03B_templateExtractDtos.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03B_buildhtml.before.md`
+    - `docs/diff/2026-04-17_EXTRACTOR-03B_total-todo.before.md`
+    - `docs/diff/2026-04-17_EXTRACTOR-03C_templateExtractWorkOrderBuilderService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03C_templateExtractWorkOrderTopologyBuilderService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03C_templateExtractPdfService.before.ts`
+    - `docs/diff/2026-04-17_EXTRACTOR-03C_buildhtml.before.md`
+    - `docs/diff/2026-04-17_EXTRACTOR-03C_total-todo.before.md`
+
 # 실행 정책 (필수 준수)
 
 ## 1. 서비스 독립성 설계 원칙
@@ -2801,3 +2901,8 @@
   - 남은 위험:
     - 서버 API 가 최종 응답만 반환하므로, 서버 내부 처리율은 실제 수치가 아니라 단계형 진행률로 표시한다.
     - 파일 업로드 경로도 서버 분석 구간은 별도 스트리밍이 없어 `업로드 완료 -> 분석 중 -> 완료` 흐름으로 보인다.
+## Immediate Guardrail
+
+- [ ] `mask_vector` visible clone 금지 유지
+- [ ] `rendered ink -> exact line extraction -> editable text overlay` 경로만 개선 대상으로 유지
+- [ ] `1px` 점수와 editable HTML 원칙을 동시에 만족하지 못하는 실험은 즉시 폐기

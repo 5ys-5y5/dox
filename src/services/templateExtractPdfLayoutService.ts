@@ -59,6 +59,11 @@ type SectionHeadingHint = {
 };
 
 type WorkOrderGridMetrics = {
+  pageWidth: number;
+  pageHeight: number;
+  contentLeft: number;
+  contentTop: number;
+  contentWidth: number;
   outerLeft: number;
   outerRight: number;
   topRow: [number, number];
@@ -454,6 +459,9 @@ const parseStatusOverview = (statusLines: string[]): ParsedStatusOverview => {
 const getFirstPage = (layout?: TemplateExtractPdfLayoutModel | null): TemplateExtractPdfPage | null =>
   layout?.pages?.[0] || null;
 
+const toReplicaPageTop = (page: TemplateExtractPdfPage, line: TemplateExtractPdfLine) =>
+  Math.max(0, Number((page.height - line.y - line.height).toFixed(2)));
+
 const getNormalizedPageLines = (page: TemplateExtractPdfPage | null): TemplateExtractPdfLine[] => {
   if (!page) {
     return [];
@@ -605,8 +613,15 @@ const buildWorkOrderGridMetrics = (layout?: TemplateExtractPdfLayoutModel | null
     findValueStartForLabel(pageLines, /^1-2\./) ?? findValueStartForLabel(pageLines, /^2-1\./) ?? 414,
     414
   );
+  const contentTop = Math.min(...pageLines.map((line) => toReplicaPageTop(page, line)));
+  const contentWidth = Math.max(1, outerRight - outerLeft);
 
   return {
+    pageWidth: page.width,
+    pageHeight: page.height,
+    contentLeft: outerLeft,
+    contentTop,
+    contentWidth,
     outerLeft,
     outerRight,
     topRow: toPercentages([topDocLabelX - outerLeft, outerRight - topDocLabelX]) as [number, number],
@@ -647,7 +662,100 @@ const buildWorkOrderGridMetrics = (layout?: TemplateExtractPdfLayoutModel | null
   };
 };
 
-const buildCloneStyleHtml = (version: '13' | '14' | '15' | '16' | '17' | '18' | '19') => `    <style>
+const buildCloneStyleHtml = (version: '13' | '14' | '15' | '16' | '17' | '18' | '19' | '20' | '23') => {
+  if (version === '23') {
+    return `    <style>
+      .template-clone--pdf-form-v23 {
+        width: fit-content;
+        margin: 0 auto;
+        background: transparent;
+        color: #111827;
+        font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+        line-height: 1.2;
+      }
+
+      .template-clone__pdf-semantic-page {
+        position: relative;
+        margin: 0 auto 16px;
+        background: #ffffff;
+        overflow: hidden;
+        box-sizing: border-box;
+      }
+
+      .template-clone__pdf-semantic-flow {
+        position: absolute;
+      }
+
+      .template-clone__workorder-grid {
+        width: 100%;
+        margin: 0;
+      }
+
+      .template-clone__grid-block {
+        display: grid;
+        border-left: 1px solid #111827;
+      }
+
+      .template-clone__grid-block + .template-clone__grid-block {
+        margin-top: -1px;
+      }
+
+      .template-clone__grid-cell {
+        border-top: 1px solid #111827;
+        border-right: 1px solid #111827;
+        border-bottom: 1px solid #111827;
+        padding: 3px 4px;
+        font-size: 11px;
+        min-height: 18px;
+        background: #ffffff;
+        box-sizing: border-box;
+        white-space: pre-wrap;
+      }
+
+      .template-clone__grid-cell--label,
+      .template-clone__grid-cell--heading {
+        font-weight: 700;
+        background: #ffffff;
+      }
+
+      .template-clone__grid-cell--title {
+        min-height: 22px;
+      }
+
+      .template-clone__grid-inline-label {
+        font-weight: 700;
+      }
+
+      .template-clone__grid-inline-value > span,
+      .template-clone__grid-inline-value[data-template-value],
+      .template-clone__grid-multiline > span {
+        display: inline-block;
+        width: 100%;
+        min-height: 12px;
+      }
+
+      .template-clone__grid-status-options {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .template-clone__grid-status-option-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .template-clone__check-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        white-space: nowrap;
+      }
+    </style>`;
+  }
+
+  return `    <style>
       .template-clone--pdf-form-v${version} {
         width: 920px;
         margin: 0 auto;
@@ -861,6 +969,7 @@ const buildCloneStyleHtml = (version: '13' | '14' | '15' | '16' | '17' | '18' | 
         font-size: 11px;
       }
     </style>`;
+};
 
 const buildMetadataHtml = (metadataFields: PdfMetadataField[]) => {
   const metadataByLabel = new Map(metadataFields.map((field) => [field.label, field.value]));
@@ -1570,19 +1679,54 @@ ${bodyRows}
 const buildStructuredCloneHtml = (
   structured: StructuredWorkOrder,
   layout?: TemplateExtractPdfLayoutModel | null,
-  version: '13' | '14' | '15' | '16' | '17' | '18' | '19' = '19'
-) => `<section data-template-extract-draft="true" data-template-clone="pdf-form-v${version}">
+  version: '13' | '14' | '15' | '16' | '17' | '18' | '19' | '20' | '23' = '19'
+) => {
+  if (version === '23') {
+    const page = getFirstPage(layout);
+    const metrics = buildWorkOrderGridMetrics(layout);
+
+    if (page && metrics) {
+      return `<section data-template-extract-draft="true" data-template-clone="pdf-form-v23">
+  <div class="template-clone template-clone--pdf-form-v23">
+${buildCloneStyleHtml('23')}
+    <div class="template-clone__pdf-semantic-page" data-page="1" data-page-number="1" style="width:${page.width.toFixed(
+      2
+    )}px;height:${page.height.toFixed(2)}px;">
+      <div class="template-clone__pdf-semantic-flow" style="left:${metrics.contentLeft.toFixed(
+        2
+      )}px;top:${metrics.contentTop.toFixed(2)}px;width:${metrics.contentWidth.toFixed(2)}px;">
+${buildWorkOrderGridHtmlV18(structured, layout)}
+      </div>
+    </div>
+  </div>
+</section>`;
+    }
+  }
+
+  return `<section data-template-extract-draft="true" data-template-clone="pdf-form-v${version}">
   <div class="template-clone template-clone--pdf-form-v${version}">
 ${buildCloneStyleHtml(version)}
     <h1>작업지시서</h1>
-${version === '18' || version === '19' ? buildWorkOrderGridHtmlV18(structured, layout) : version === '17' ? buildUnifiedWorkOrderTableHtml(structured) : `${buildMetadataHtml(structured.metadataFields)}
+${version === '18' || version === '19' || version === '20' ? buildWorkOrderGridHtmlV18(structured, layout) : version === '17' ? buildUnifiedWorkOrderTableHtml(structured) : `${buildMetadataHtml(structured.metadataFields)}
 ${buildStatusHtml(structured.statusLines)}
 ${buildSectionsHtml(structured.sections, layout)}`}
 ${buildFooterHtml(structured.footerNotes)}
   </div>
 </section>`;
+};
 
 export const TemplateExtractPdfLayoutService = {
+  buildGenericCloneHtml(sourceTitle: string, layout?: TemplateExtractPdfLayoutModel | null) {
+    if (!layout || layout.pages.length === 0) {
+      return null;
+    }
+
+    return TemplateExtractPdfHtmlCloneService.buildCloneHtml(
+      sourceTitle,
+      TemplateExtractPdfGeometryService.buildGeometry(layout)
+    );
+  },
+
   // BUILDHTML-PDF-18
   // text layer가 있는 작업지시서형 PDF는 의미 기반 table 재조립보다
   // 실제 row band 와 field phrasing 을 먼저 보존하는 grid-form clone 을 우선합니다.
@@ -1590,7 +1734,7 @@ export const TemplateExtractPdfLayoutService = {
     sourceTitle: string,
     rawText: string,
     layout?: TemplateExtractPdfLayoutModel | null,
-    version: '13' | '14' | '15' | '16' | '17' | '18' | '19' = '19'
+    version: '13' | '14' | '15' | '16' | '17' | '18' | '19' | '20' | '23' = '19'
   ) {
     const structured = parseStructuredWorkOrder(rawText);
 
@@ -1602,9 +1746,6 @@ export const TemplateExtractPdfLayoutService = {
       return null;
     }
 
-    return TemplateExtractPdfHtmlCloneService.buildCloneHtml(
-      sourceTitle,
-      TemplateExtractPdfGeometryService.buildGeometry(layout)
-    );
+    return this.buildGenericCloneHtml(sourceTitle, layout);
   },
 };

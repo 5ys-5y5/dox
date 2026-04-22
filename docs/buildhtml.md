@@ -95,6 +95,57 @@ DOCX 기준 성공 조건:
 ## 실행 정책 (필수 준수)
 아래 정책은 본 설계 또는 후속 수정에서 100% 준수한다. 간결하게 요약하지 않고, 실제 실행 단계에서 누락이 없도록 상세하게 기록한다.
 
+## EXTRACTOR 기반 1차 구현 고정
+
+### 체크리스트 ID: `EXTRACTOR-01`
+
+- 목적:
+  PDF 입력을 `digital` / `scanned` 로 먼저 판별하고, 같은 단계에서 `work_order` / `certificate` / `generic_form` family 를 고정한다.
+- 이번 1차 구현에서는 `v20`을 비교 버전으로 추가하고, 기존 `v19` 의미는 변경하지 않는다.
+- 판별 결과는 DB 컬럼을 늘리지 않고 clone HTML root data attribute 에 기록한다.
+- 기록 항목:
+  - `data-template-engine-version`
+  - `data-template-source-mode`
+  - `data-template-document-family`
+  - `data-template-family-confidence`
+  - `data-template-family-reasons`
+  - `data-template-clone-builder`
+
+### 체크리스트 ID: `EXTRACTOR-02`
+
+- 목적:
+  digital layout model 과 scanned rule model 을 공통 topology DTO 로 정규화한다.
+- 이번 1차 구현의 topology 정본은 아래를 포함한다.
+  - `rowBands`
+  - `columnEdges`
+  - `horizontalSegments`
+  - `verticalSegments`
+  - `textBlocks`
+  - `cellCandidates`
+  - `summary`
+- topology summary 역시 clone HTML root data attribute 로 추적한다.
+- 이번 단계는 topology 를 정본화하는 단계이며, builder 전면 교체는 다음 단계에서 수행한다.
+
+### 체크리스트 ID: `EXTRACTOR-03`
+
+- 목적:
+  `work_order` family 를 별도 builder service 로 분리하고, digital/scanned 양쪽 모두 같은 family builder 계열로 연결한다.
+- 이번 단계의 최소 구현 원칙:
+  - `TemplateExtractWorkOrderBuilderService` 가 work-order family HTML 생성의 진입점이 된다.
+  - digital work-order 는 layout model 을 그대로 사용한다.
+  - scanned work-order 는 OCR rule model 을 synthetic layout/rawText 로 정규화한 뒤 같은 builder 계열로 연결한다.
+  - `pdfService` 는 work-order family 선택 시 layout/text-recovery 구현 세부를 직접 고르지 않는다.
+- 이번 단계는 work-order family 진입점을 고정하는 단계이며, topology 기반 master form 정밀화는 후속 단계에서 계속 개선한다.
+- 2차 전환 원칙:
+  - `v20` work-order 는 더 이상 `rawText -> parseStructuredWorkOrder -> legacy grid html` 경로를 사용하지 않는다.
+  - 새 경로는 `TemplateExtractPdfTopologyModel -> TemplateExtractWorkOrderTopologyBuilderService` 로 고정한다.
+  - digital/scanned 모두 같은 `pdf-work-order-topology-v20` clone id 를 사용한다.
+  - OCR/text 는 form 구조를 만드는 입력이 아니라, 이미 정해진 topology cell 안에 텍스트와 value marker 를 붙이는 보조 입력으로만 쓴다.
+- 3차 안정화 원칙:
+  - 실제 업로드 기준으로 topology builder 의 field coverage 가 legacy work-order renderer 보다 약하면 자동으로 legacy renderer 로 복귀한다.
+  - scanned work-order 에서 `textBlockCount` 또는 `cellCandidateCount` 가 0 이면 빈 topology table 을 출력하지 않고 frame fallback 으로 복귀한다.
+  - `pipelineTrace.cloneBuilder` 는 family 추정값이 아니라 실제로 선택된 builder 를 기록한다.
+
 ### 0. 서비스 독립성 설계 원칙 (필수 준수)
 아래 기능들은 처음부터 “하나의 서비스로 분리 가능한 단위”로 설계한다.
 각 기능은 단순 내부 모듈이 아니라, 향후 별도 배포/운영/API 상품화가 가능해야 한다.
@@ -757,6 +808,63 @@ DB 스키마 변경이 있는 경우:
 ---
 
 ## 현재 시점의 최종 판단
+### 측정 규율
+
+1. `offline quality` 는 구조 휴리스틱이며 acceptance metric 이 아니다.
+2. `pass=true/false`, `overallScore`, `vectorTopologyScore` 만으로 v20/v21 우열을 판단하는 행위는 금지한다.
+3. “개선”이라고 부를 수 있는 기준은 오직 `동일 조건에서 렌더된 PDF 출력` 과 `동일 조건에서 렌더된 HTML 출력` 의 `1px 이내 일치 비율` 뿐이다.
+4. 구조 진단값으로 후보 HTML을 교체하거나 버전을 승격하는 것은 금지한다.
+5. 실제 픽셀 중첩률 측정이 붙기 전까지 `v21` 은 `v20` HTML 생성 경로를 재사용하는 bridge 로만 유지한다.
+6. 따라서 후속 구현은 반드시 아래 순서를 따른다.
+7. `올바른 측정`
+8. `측정에서 벗어나는 지점 식별`
+9. `그 지점만 수정`
+10. `동일 측정으로 재검증`
+11. 이 루프를 벗어난 수정은 폐기 대상이다.
+
+### 2026-04-17 `ENHANCE-10`
+
+1. `hybrid bitmap/text-layer` 구현은 폐기했다.
+2. 폐기 이유는 `PDF 내용을 HTML 선/텍스트/셀로 재구성한다`는 목표를 직접 위반했기 때문이다.
+3. `v21` 은 다시 `v20` 계열 builder 를 재사용하는 `html-only bridge` 로 되돌렸다.
+4. `작업지시서_사일동 주상복합.pdf`, `사업자등록증.pdf` 는 image similarity 가 아니라 `html-only visual fidelity` 회귀 샘플로 유지한다.
+5. 이후 품질 게이트는 계속 유지하되, background image 를 포함한 산출물은 즉시 탈락 처리한다.
+
+### 2026-04-17 `ENHANCE-11`
+
+1. 이 단계의 기존 `candidate arbitration` 설계는 폐기했다.
+2. 폐기 이유는 후보 선택이 실제 픽셀 측정이 아니라 `offline quality` 구조 진단값에 의존했기 때문이다.
+3. 현재 `v21` 은 디지털/스캔 모두 `v20` HTML 생성 경로를 재사용하는 bridge 로만 유지한다.
+4. page metric 주입은 계속 유지하지만, 그것은 선택 점수가 아니라 디버깅용 root metadata 로만 쓴다.
+5. 실제 픽셀 측정기가 붙기 전에는 후보 비교 실험을 다시 활성화하지 않는다.
+
+### 2026-04-17 `ENHANCE-12`
+
+1. `pdf-html-grid` 기본 스타일에서 shadow, outer border, padding 같은 문서 외 장식을 제거했다.
+2. empty helper cell 은 offline topology 평가에서 실제 source cell 로 세지 않도록 normalizer 를 보정했다.
+3. source topology 에 `horizontal/vertical segment = 0` 인 text-layer 문서는 table/row 기반 HTML 을 불이익 없이 평가하도록 quality gate 를 조정했다.
+4. gate 의 `pageContractScore === 1` 비교는 부동소수 오차를 허용하도록 바꿨다.
+5. fresh offline 결과:
+   - `작업지시서_대구침산더샵.pdf`: `generic_layout`, `pass=true`, `0.9950`
+   - `작업지시서_사일동 주상복합.pdf`: `generic_layout`, `pass=true`, `0.9950`
+   - `사업자등록증.pdf`: `generic_layout_scanned`, `pass=false`, `0.8714`
+6. 위 수치는 visual acceptance 가 아니라 heuristic 이므로, v20 대비 실제 우열 판단 근거로 사용하면 안 된다.
+7. 현재 다음 병목은 스캔형 문서의 `textAnchorScore` 이다.
+
+### 2026-04-18 `ENHANCE-13`
+
+1. `offline quality` 의 `passed` 값은 이제 visual acceptance 의미를 갖지 않는다.
+2. 현재 구현에서는 구조 휴리스틱이더라도 `passed=false` 로 고정해서 오해를 막는다.
+3. 구조 진단값은 `visual similarity result` 가 아니라 `structural diagnostics` 로만 표기한다.
+4. 디지털 문서에서 높은 heuristic score 가 나와도, 그것은 “측정이 충분하다”는 뜻이 아니라 “이제 렌더 비교로 검증할 차례”라는 뜻이다.
+
+### 2026-04-19 `MEASURE-01`
+
+1. 사용자가 실제 PDF와 HTML을 병치했을 때, `offlineMetrics = 0.95 ~ 1.0`이어도 체감 일치도는 `50% 미만`인 사례가 확인됐다.
+2. 따라서 `v21` 의 heuristic candidate arbitration 은 제거한다.
+3. `v21` 은 실제 픽셀 측정기 구현 전까지 `v20` 생성 경로를 그대로 재사용한다.
+4. UI와 로그에서도 시각 유사도는 `미측정`으로만 표기하고, 구조 진단값은 별도 보조 정보로 분리한다.
+
 현재 서비스는 아직 `원문 클로닝 기반 템플릿 생성기`가 아니다.
 
 현재는 다음 중간 상태다.
@@ -773,3 +881,8 @@ DB 스키마 변경이 있는 경우:
 따라서 후속 구현은 후보 개수 조정이나 label 튜닝보다, 반드시 `BUILDHTML-05`의 geometry 기반 real HTML clone 을 먼저 성립시켜야 한다.
 
 이 문서는 그 구현의 기준 문서다.
+## 2026-04-20 Guardrail
+
+- `mask_vector` 류의 픽셀 잉크 복제는 측정 보조/선 추출 보조로만 사용한다.
+- 최종 HTML visible layer 는 `line/rect/text` 중심 SVG 또는 일반 HTML 이어야 한다.
+- 사용자가 텍스트를 직접 수정할 수 없는 가시 출력은 점수가 높아도 실패로 간주한다.

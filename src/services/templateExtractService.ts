@@ -16,6 +16,7 @@ import type {
 } from '../lib/templateExtractDtos';
 import { TemplateService } from './templateService';
 import { TemplateExtractCloneService } from './templateExtractCloneService';
+import { TemplateExtractReplicaHtmlNormalizerService } from './templateExtractReplicaHtmlNormalizerService';
 import { TemplateExtractValueBindingService } from './templateExtractValueBindingService';
 
 type ExtractDraftRow = {
@@ -165,6 +166,16 @@ export const TemplateExtractService = {
       sourceTitle,
       sourceContent
     );
+    const pipelineTrace =
+      resolvedSource.pipelineTrace ||
+      (resolvedSource.sourceKind === 'html'
+        ? TemplateExtractReplicaHtmlNormalizerService.parsePipelineTraceFromHtml(sourceContent)
+        : null);
+    const qualityReport =
+      resolvedSource.qualityReport ||
+      (resolvedSource.sourceKind === 'html'
+        ? TemplateExtractReplicaHtmlNormalizerService.parseQualityReportFromHtml(sourceContent)
+        : null);
     const client = getSupabase();
     const extractsClient = extractsSchema(client);
 
@@ -230,6 +241,8 @@ export const TemplateExtractService = {
       draft: toDraftDto(draft),
       candidates,
       reviewSummary: TemplateExtractValueBindingService.buildConfidenceSummary(candidates),
+      pipelineTrace,
+      qualityReport,
     };
   },
 
@@ -253,11 +266,21 @@ export const TemplateExtractService = {
     }
 
     const candidateDtos = candidates.map(toCandidateDto);
+    const pipelineTrace =
+      draft.source_kind === 'html'
+        ? TemplateExtractReplicaHtmlNormalizerService.parsePipelineTraceFromHtml(draft.source_content)
+        : null;
+    const qualityReport =
+      draft.source_kind === 'html'
+        ? TemplateExtractReplicaHtmlNormalizerService.parseQualityReportFromHtml(draft.source_content)
+        : null;
 
     return {
       draft: toDraftDto(draft),
       candidates: candidateDtos,
       reviewSummary: TemplateExtractValueBindingService.buildConfidenceSummary(candidateDtos),
+      pipelineTrace,
+      qualityReport,
     };
   },
 

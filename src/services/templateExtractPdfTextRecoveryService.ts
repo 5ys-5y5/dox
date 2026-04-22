@@ -152,6 +152,7 @@ func extractOcrLines(from image: CGImage, bounds: CGRect) -> [OcrLine] {
 
 func detectRules(page: PDFPage, pageNumber: Int) -> RulePage? {
   let bounds = page.bounds(for: .mediaBox)
+  let hasTextLayer = !(page.string?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
   let scale: CGFloat = 2.0
   let imageSize = NSSize(
     width: max(bounds.width * scale, 1),
@@ -222,8 +223,12 @@ func detectRules(page: PDFPage, pageNumber: Int) -> RulePage? {
   let rowRuns = (0..<pixelHeight).map { longestFastRowRun($0) }
   let columnRuns = (0..<pixelWidth).map { longestFastColumnRun($0) }
 
-  let rowThreshold = max(Int(Double(pixelWidth) * 0.45), 160)
-  let columnThreshold = max(Int(Double(pixelHeight) * 0.25), 180)
+  let rowThreshold = hasTextLayer
+    ? max(Int(Double(pixelWidth) * 0.25), 120)
+    : max(Int(Double(pixelWidth) * 0.45), 160)
+  let columnThreshold = hasTextLayer
+    ? max(Int(Double(pixelHeight) * 0.08), 120)
+    : max(Int(Double(pixelHeight) * 0.25), 180)
 
   let rowRules = groupedCenters(rowRuns, threshold: rowThreshold, minGap: 8).map { Double($0) / Double(scale) }
   let columnRules = groupedCenters(columnRuns, threshold: columnThreshold, minGap: 8).map { Double($0) / Double(scale) }
@@ -562,7 +567,10 @@ const extractSameRowValue = (row: RecoveryOcrRow, labels: string[]) => {
   return '';
 };
 
-const buildBusinessCertificateHtml = (structured: StructuredBusinessCertificate) => {
+const buildBusinessCertificateHtml = (
+  structured: StructuredBusinessCertificate,
+  version: '19' | '20' = '19'
+) => {
   const escapeHtml = (value: string) =>
     value
       .replace(/&/g, '&amp;')
@@ -586,10 +594,10 @@ const buildBusinessCertificateHtml = (structured: StructuredBusinessCertificate)
   const jointBusinessContent = structured.jointBusinessStatus.length > 0 ? structured.jointBusinessStatus : ['해당사항이 없습니다.'];
   const footerNotes = structured.footerNotes.length > 0 ? structured.footerNotes : [];
 
-  return `<section data-template-extract-draft="true" data-template-clone="pdf-certificate-v19">
-  <div class="template-clone template-clone--pdf-certificate-v19">
+  return `<section data-template-extract-draft="true" data-template-clone="pdf-certificate-v${version}">
+  <div class="template-clone template-clone--pdf-certificate-v${version}">
     <style>
-      .template-clone--pdf-certificate-v19 {
+      .template-clone--pdf-certificate-v${version} {
         width: 920px;
         margin: 0 auto;
         padding: 18px;
@@ -1095,7 +1103,7 @@ const dedupeSegments = (segments: TemplateExtractPdfRuleSegment[], axis: 'horizo
   });
 };
 
-const buildFrameHtml = (model: TemplateExtractPdfRuleModel) => {
+const buildFrameHtml = (model: TemplateExtractPdfRuleModel, version: '15' | '19' | '20' = '19') => {
   const pagesHtml = model.pages
     .map((page) => {
       const horizontalSegments = dedupeSegments(page.horizontalSegments, 'horizontal');
@@ -1141,10 +1149,10 @@ ${verticalHtml}
     return null;
   }
 
-  return `<section data-template-extract-draft="true" data-template-clone="pdf-frame-v15">
-  <div class="template-clone template-clone--pdf-frame-v15">
+  return `<section data-template-extract-draft="true" data-template-clone="pdf-frame-v${version}">
+  <div class="template-clone template-clone--pdf-frame-v${version}">
     <style>
-      .template-clone--pdf-frame-v15 {
+      .template-clone--pdf-frame-v${version} {
         width: 920px;
         margin: 0 auto;
         padding: 18px;
@@ -1167,7 +1175,7 @@ ${pagesHtml}
 </section>`;
 };
 
-const extractRuleModel = async (fileName: string, bytes: Uint8Array): Promise<TemplateExtractPdfRuleModel> => {
+export const extractPdfRuleModel = async (fileName: string, bytes: Uint8Array): Promise<TemplateExtractPdfRuleModel> => {
   const tempDir = await mkdtemp(join(tmpdir(), 'template-extract-pdf-rules-'));
   const tempFilePath = join(tempDir, fileName || 'upload.pdf');
   const tempScriptPath = join(tempDir, 'extract-pdf-rules.swift');
@@ -1194,25 +1202,33 @@ const extractRuleModel = async (fileName: string, bytes: Uint8Array): Promise<Te
 };
 
 export const TemplateExtractPdfTextRecoveryService = {
-  // BUILDHTML-PDF-15_IMAGE_FRAME_FALLBACK
-  // 텍스트 레이어가 없는 PDF는 페이지 규칙선을 직접 HTML line element로 그려
-  // 문서 틀을 우선 복제합니다.
-  async recoverHtml(sourceTitle: string, fileName: string, bytes: Uint8Array, version: '14' | '15' | '19' = '19') {
-    const ruleModel = await extractRuleModel(fileName, bytes);
-
+  buildHtmlFromRuleModel(
+    sourceTitle: string,
+    fileName: string,
+    ruleModel: TemplateExtractPdfRuleModel,
+    version: '14' | '15' | '19' | '20' = '19'
+  ) {
     if (!ruleModel.pages.length) {
       return null;
     }
 
-    if (version === '19' && isBusinessCertificateFamily(ruleModel, sourceTitle, fileName)) {
+    if ((version === '19' || version === '20') && isBusinessCertificateFamily(ruleModel, sourceTitle, fileName)) {
       const structured = parseBusinessCertificate(ruleModel) ?? createDefaultBusinessCertificate();
-      return buildBusinessCertificateHtml(structured);
+      return buildBusinessCertificateHtml(structured, version === '20' ? '20' : '19');
     }
 
     if (version === '14') {
       return buildGridHtml(ruleModel);
     }
 
-    return buildFrameHtml(ruleModel);
+    return buildFrameHtml(ruleModel, version === '20' ? '20' : version === '15' ? '15' : '19');
+  },
+
+  // BUILDHTML-PDF-15_IMAGE_FRAME_FALLBACK
+  // 텍스트 레이어가 없는 PDF는 페이지 규칙선을 직접 HTML line element로 그려
+  // 문서 틀을 우선 복제합니다.
+  async recoverHtml(sourceTitle: string, fileName: string, bytes: Uint8Array, version: '14' | '15' | '19' | '20' = '19') {
+    const ruleModel = await extractPdfRuleModel(fileName, bytes);
+    return this.buildHtmlFromRuleModel(sourceTitle, fileName, ruleModel, version);
   },
 };

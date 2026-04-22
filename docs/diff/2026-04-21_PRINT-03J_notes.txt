@@ -1,0 +1,1 @@
+PRINT-03J: add v30 table-fragment frame path that forbids page-global giant-table synthesis and keeps per-fragment local row/column axes.
