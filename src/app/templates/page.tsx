@@ -7,6 +7,9 @@ import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
 import { EntityPicker } from '../../components/ui/EntityPicker';
 import { Input } from '../../components/ui/Input';
+import TemplateDraftWorkspace, {
+  type TemplateDraftWorkspaceHandle,
+} from '../../components/template/TemplateDraftWorkspace';
 import type {
   TemplateDetailResult,
   TemplateFieldInput,
@@ -84,19 +87,6 @@ const defaultSignatureAreas: TemplateSignatureAreaInput[] = [
   },
 ];
 
-const renderPreview = (html: string) => {
-  if (!html.trim()) {
-    return <p className="text-sm text-slate-500">아직 생성된 HTML 초안이 없습니다.</p>;
-  }
-
-  return (
-    <div
-      className="prose prose-sm max-w-none text-slate-800"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-};
-
 export default function TemplatesPage() {
   const searchParams = useSearchParams();
   const templateIdFromQuery = searchParams.get('templateId')?.trim() || '';
@@ -122,6 +112,7 @@ export default function TemplatesPage() {
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const draftWorkspaceRef = React.useRef<TemplateDraftWorkspaceHandle | null>(null);
 
   const activeTemplateId = templateDetail?.template.id || selectedTemplateId.trim() || '';
   const currentTemplateSummary =
@@ -155,6 +146,11 @@ export default function TemplatesPage() {
     setDraftHtml(nextDraftHtml);
     setAdvancedDraftHtml(nextDraftHtml);
   }, []);
+
+  const getCurrentTemplateDraftHtml = React.useCallback(
+    () => draftWorkspaceRef.current?.getCurrentDraftHtml().trim() || draftHtml.trim(),
+    [draftHtml]
+  );
 
   const syncTemplateQuery = React.useCallback((templateId: string) => {
     if (typeof window === 'undefined') {
@@ -363,7 +359,7 @@ export default function TemplatesPage() {
         body: JSON.stringify({
           templateName,
           sourceDocumentName,
-          draftHtml,
+          draftHtml: getCurrentTemplateDraftHtml(),
           layoutResizeMode,
         }),
       });
@@ -417,6 +413,22 @@ export default function TemplatesPage() {
     setMessage(null);
 
     try {
+      const htmlUpdateResponse = await fetch(`/api/templates/${normalizedTemplateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateName,
+          sourceDocumentName,
+          draftHtml: getCurrentTemplateDraftHtml(),
+          layoutResizeMode,
+        }),
+      });
+      const htmlUpdateResult = await htmlUpdateResponse.json();
+
+      if (!htmlUpdateResult.success) {
+        throw new Error(htmlUpdateResult.message || '템플릿 HTML 저장에 실패했습니다.');
+      }
+
       const response = await fetch(`/api/templates/${normalizedTemplateId}/fields`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -432,7 +444,7 @@ export default function TemplatesPage() {
       }
 
       setMessage(
-        `항목 다시 저장 완료. 필드 ${result.data.savedFieldCount}개, 서명 영역 ${result.data.savedSignatureAreaCount}개`
+        `템플릿 저장 완료. HTML 1건, 필드 ${result.data.savedFieldCount}개, 서명 영역 ${result.data.savedSignatureAreaCount}개`
       );
       await loadTemplate(normalizedTemplateId);
     } catch (error) {
@@ -574,17 +586,12 @@ export default function TemplatesPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>생성된 HTML 초안</CardTitle>
-              <CardDescription>왼쪽에서 초안을 크게 보고, 오른쪽에서 저장만 결정하면 됩니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="min-h-[420px] rounded-xl border border-slate-200 bg-white p-6">
-                {renderPreview(draftHtml)}
-              </div>
-            </CardContent>
-          </Card>
+          <TemplateDraftWorkspace
+            ref={draftWorkspaceRef}
+            sourceKind={sourceKind}
+            sourceContent={sourceContent}
+            draftHtml={draftHtml}
+          />
         </div>
 
         <div className="space-y-6">

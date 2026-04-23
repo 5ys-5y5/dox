@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Input } from './Input';
 
@@ -25,6 +25,9 @@ type EntityPickerProps = {
   className?: string;
   triggerClassName?: string;
   panelClassName?: string;
+  optionLayout?: 'stacked' | 'inline';
+  onDeleteOption?: (option: EntityPickerOption) => void;
+  deleteOptionLabel?: string;
 };
 
 export function EntityPicker({
@@ -39,6 +42,9 @@ export function EntityPicker({
   className,
   triggerClassName,
   panelClassName,
+  optionLayout = 'stacked',
+  onDeleteOption,
+  deleteOptionLabel = '항목 삭제',
 }: EntityPickerProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -86,6 +92,8 @@ export function EntityPicker({
     }
   }, [open]);
 
+  const inlineOptionLayout = optionLayout === 'inline';
+
   return (
     <div ref={rootRef} className={cn('relative w-full', className)}>
       <button
@@ -100,12 +108,29 @@ export function EntityPicker({
           triggerClassName
         )}
       >
-        <div className="min-w-0 flex-1">
-          <div className={cn('truncate text-sm leading-5', selectedOption ? 'text-slate-900' : 'text-slate-400')}>
+        <div
+          className={cn(
+            'min-w-0 flex-1 text-left',
+            inlineOptionLayout ? 'flex items-baseline gap-2' : ''
+          )}
+        >
+          <div
+            className={cn(
+              'min-w-0 truncate text-sm font-normal leading-5',
+              selectedOption ? 'text-slate-900' : 'text-slate-400'
+            )}
+          >
             {selectedOption?.label || placeholder}
           </div>
           {selectedOption?.meta ? (
-            <div className="mt-0.5 truncate text-[11px] leading-4 text-slate-500">{selectedOption.meta}</div>
+            <div
+              className={cn(
+                'truncate text-[11px] font-normal leading-4 text-slate-500',
+                inlineOptionLayout ? 'max-w-[48%] shrink-0' : 'mt-0.5'
+              )}
+            >
+              {selectedOption.meta}
+            </div>
           ) : null}
         </div>
         <ChevronDown
@@ -156,16 +181,12 @@ export function EntityPicker({
                   const selected = option.id === value;
 
                   return (
-                    <button
+                    <div
                       key={option.id}
-                      type="button"
-                      disabled={option.disabled}
-                      onClick={() => {
-                        onChange(option.id);
-                        setOpen(false);
-                      }}
+                      role="option"
+                      aria-selected={selected}
                       className={cn(
-                        'flex w-full flex-col rounded-xl border px-3 py-2.5 text-left transition-colors',
+                        'flex w-full items-center rounded-xl border text-left transition-colors',
                         option.disabled
                           ? 'cursor-not-allowed border-transparent bg-white opacity-50'
                           : selected
@@ -173,11 +194,52 @@ export function EntityPicker({
                             : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-white'
                       )}
                     >
-                      <span className="text-sm font-medium leading-5 text-slate-900">{option.label}</span>
-                      {option.meta ? (
-                        <span className="mt-0.5 text-[11px] leading-4 text-slate-500">{option.meta}</span>
+                      <button
+                        type="button"
+                        disabled={option.disabled}
+                        onClick={() => {
+                          onChange(option.id);
+                          setOpen(false);
+                        }}
+                        className={cn(
+                          'flex min-w-0 flex-1 px-3 py-2.5 text-left',
+                          inlineOptionLayout ? 'items-baseline gap-2' : 'flex-col'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'min-w-0 truncate text-sm leading-5 text-slate-900',
+                            inlineOptionLayout ? 'font-normal' : 'font-medium'
+                          )}
+                        >
+                          {option.label}
+                        </span>
+                        {option.meta ? (
+                          <span
+                            className={cn(
+                              'truncate text-[11px] font-normal leading-4 text-slate-500',
+                              inlineOptionLayout ? 'max-w-[48%] shrink-0' : 'mt-0.5'
+                            )}
+                          >
+                            {option.meta}
+                          </span>
+                        ) : null}
+                      </button>
+                      {onDeleteOption ? (
+                        <button
+                          type="button"
+                          aria-label={`${deleteOptionLabel}: ${option.label}`}
+                          title={deleteOptionLabel}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onDeleteOption(option);
+                          }}
+                          className="mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-200"
+                        >
+                          <Trash2 aria-hidden="true" className="h-4 w-4" />
+                        </button>
                       ) : null}
-                    </button>
+                    </div>
                   );
                 })
               ) : (

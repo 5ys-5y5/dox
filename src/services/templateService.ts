@@ -12,6 +12,9 @@ import type {
   TemplateRecordDto,
   TemplateSignatureAreaDto,
   TemplateSignatureAreaInput,
+  TemplateDeleteResult,
+  TemplateUpdateInput,
+  TemplateUpdateResult,
 } from '../lib/templateDtos';
 
 type TemplateRegistryRow = {
@@ -368,6 +371,119 @@ export const TemplateService = {
       labelBindings,
       signatureAreas,
       labelMap: buildLabelMap(labelBindings, signatureAreas),
+    };
+  },
+
+  async updateTemplate(templateId: string, params: TemplateUpdateInput): Promise<TemplateUpdateResult> {
+    const normalizedTemplateId = templateId.trim();
+
+    if (!normalizedTemplateId) {
+      throw new Error('템플릿 수정 실패: templateId가 필요합니다.');
+    }
+
+    const { template, error: templateError } = await getTemplateById(normalizedTemplateId);
+
+    if (templateError || !template) {
+      throw new Error(`템플릿 수정 실패: ${templateError?.message || '템플릿을 찾을 수 없습니다.'}`);
+    }
+
+    const nextTemplateName =
+      params.templateName !== undefined ? params.templateName.trim() : template.template_name;
+    const nextSourceDocumentName =
+      params.sourceDocumentName !== undefined
+        ? params.sourceDocumentName?.trim() || null
+        : template.source_document_name;
+    const nextDraftHtml =
+      params.draftHtml !== undefined ? params.draftHtml.trim() : template.draft_html;
+    const nextLayoutResizeMode =
+      params.layoutResizeMode !== undefined
+        ? normalizeLayoutResizeMode(params.layoutResizeMode)
+        : template.layout_resize_mode;
+
+    if (!nextTemplateName) {
+      throw new Error('템플릿 수정 실패: templateName이 비어 있습니다.');
+    }
+
+    if (!nextDraftHtml) {
+      throw new Error('템플릿 수정 실패: draftHtml이 비어 있습니다.');
+    }
+
+    const { data, error } = await templatesSchema()
+      .from('template_registry')
+      .update({
+        template_name: nextTemplateName,
+        source_document_name: nextSourceDocumentName,
+        draft_html: nextDraftHtml,
+        layout_resize_mode: nextLayoutResizeMode,
+      })
+      .eq('id', normalizedTemplateId)
+      .select('*')
+      .single();
+
+    const updatedTemplate = data as TemplateRegistryRow | null;
+
+    if (error || !updatedTemplate) {
+      throw new Error(`템플릿 수정 실패: ${error?.message || '템플릿을 수정할 수 없습니다.'}`);
+    }
+
+    return {
+      template: toTemplateRecordDto(updatedTemplate),
+    };
+  },
+
+  async deleteTemplate(templateId: string): Promise<TemplateDeleteResult> {
+    const normalizedTemplateId = templateId.trim();
+
+    if (!normalizedTemplateId) {
+      throw new Error('템플릿 삭제 실패: templateId가 필요합니다.');
+    }
+
+    const client = getSupabase();
+    const templatesClient = templatesSchema(client);
+
+    const { error: deleteBindingError } = await templatesClient
+      .from('template_label_bindings')
+      .delete()
+      .eq('template_id', normalizedTemplateId);
+
+    if (deleteBindingError) {
+      throw new Error(`템플릿 삭제 실패: 라벨 바인딩 삭제 중 오류가 발생했습니다. (${deleteBindingError.message})`);
+    }
+
+    const { error: deleteFieldError } = await templatesClient
+      .from('template_field_definitions')
+      .delete()
+      .eq('template_id', normalizedTemplateId);
+
+    if (deleteFieldError) {
+      throw new Error(`템플릿 삭제 실패: 필드 삭제 중 오류가 발생했습니다. (${deleteFieldError.message})`);
+    }
+
+    const { error: deleteSignatureError } = await templatesClient
+      .from('template_signature_areas')
+      .delete()
+      .eq('template_id', normalizedTemplateId);
+
+    if (deleteSignatureError) {
+      throw new Error(`템플릿 삭제 실패: 서명 영역 삭제 중 오류가 발생했습니다. (${deleteSignatureError.message})`);
+    }
+
+    const { data: deletedTemplates, error: deleteTemplateError } = await templatesClient
+      .from('template_registry')
+      .delete()
+      .eq('id', normalizedTemplateId)
+      .select('id');
+
+    if (deleteTemplateError) {
+      throw new Error(`템플릿 삭제 실패: 템플릿 삭제 중 오류가 발생했습니다. (${deleteTemplateError.message})`);
+    }
+
+    if (!deletedTemplates || deletedTemplates.length === 0) {
+      throw new Error('템플릿 삭제 실패: 템플릿을 찾을 수 없습니다.');
+    }
+
+    return {
+      templateId: normalizedTemplateId,
     };
   },
 

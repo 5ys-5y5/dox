@@ -17,6 +17,13 @@ export type TemplateCreateInput = {
   layoutResizeMode: TemplateLayoutResizeMode;
 };
 
+export type TemplateUpdateInput = {
+  templateName?: string;
+  sourceDocumentName?: string | null;
+  draftHtml?: string;
+  layoutResizeMode?: TemplateLayoutResizeMode;
+};
+
 export type TemplateLayoutDraftInput = {
   sourceTitle?: string | null;
   sourceKind: 'html' | 'text';
@@ -129,4 +136,12 @@ export type TemplateFieldsSaveResult = {
   savedFieldCount: number;
   savedSignatureAreaCount: number;
   labelBindingCount: number;
+};
+
+export type TemplateUpdateResult = {
+  template: TemplateRecordDto;
+};
+
+export type TemplateDeleteResult = {
+  templateId: string;
 };

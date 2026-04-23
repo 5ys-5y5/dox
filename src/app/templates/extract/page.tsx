@@ -22,7 +22,11 @@ import type {
   TemplateExtractSourceKind,
   TemplateExtractVisualSimilarityReport,
 } from '../../../lib/templateExtractDtos';
-import type { TemplateLayoutResizeMode } from '../../../lib/templateDtos';
+import type {
+  TemplateDetailResult,
+  TemplateLayoutResizeMode,
+  TemplateRecordDto,
+} from '../../../lib/templateDtos';
 import { TemplateExtractVisualSimilarityClient } from '../../../lib/templateExtractVisualSimilarityClient';
 
 const defaultSourceContent = `<section>
@@ -116,6 +120,12 @@ type FrameResizeState = {
   node: HTMLElement;
   rect: FrameNodeRect;
 };
+type TemplateValueResolveEvent = {
+  clientX?: number;
+  clientY?: number;
+  nativeEvent?: Event;
+  composedPath?: () => EventTarget[];
+};
 type FlattenedFramePreviewMarkup = {
   html: string;
   styleText: string;
@@ -148,58 +158,6 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-valign',
 ] as const;
 
-const VISUAL_SIMILARITY_PROGRESS_STEPS: Array<{
-  key: VisualSimilarityProgressStepKey;
-  label: string;
-  description: string;
-}> = [
-  {
-    key: 'uploading',
-    label: '1. PDF 업로드',
-    description: '브라우저에서 측정용 원본 PDF를 서버로 전송합니다.',
-  },
-  {
-    key: 'rendering_pdf',
-    label: '2. PDF 페이지 렌더',
-    description: '서버에서 원본 PDF를 페이지 PNG로 렌더합니다.',
-  },
-  {
-    key: 'preparing_pdf_pages',
-    label: '3. PDF 페이지 준비',
-    description: '브라우저에서 PDF PNG를 비교용 canvas로 정규화합니다.',
-  },
-  {
-    key: 'rendering_html',
-    label: '4. HTML 페이지 렌더',
-    description: '서버에서 output HTML을 실제 브라우저 PNG로 렌더합니다.',
-  },
-  {
-    key: 'preparing_replica_pages',
-    label: '5. HTML 페이지 준비',
-    description: '브라우저에서 HTML PNG를 비교용 canvas로 정규화합니다.',
-  },
-  {
-    key: 'comparing_pages',
-    label: '6. 픽셀 비교',
-    description: '페이지별로 1px 허용 오차 기준 잉크 픽셀을 비교합니다.',
-  },
-  {
-    key: 'aggregating',
-    label: '7. 결과 집계',
-    description: '페이지별 overlap 결과를 합산해 최종 비율을 계산합니다.',
-  },
-];
-
-const VISUAL_SIMILARITY_STEP_ORDER: Record<VisualSimilarityProgressStepKey, number> = {
-  uploading: 0,
-  rendering_pdf: 1,
-  preparing_pdf_pages: 2,
-  rendering_html: 3,
-  preparing_replica_pages: 4,
-  comparing_pages: 5,
-  aggregating: 6,
-};
-
 const toReviewedFields = (detail: TemplateExtractDetailResult): TemplateExtractReviewedFieldInput[] =>
   detail.candidates.map((candidate) => ({
     candidateKey: candidate.candidateKey,
@@ -223,6 +181,58 @@ const reviewedFieldValueText = (
   field: TemplateExtractReviewedFieldInput,
   candidate: TemplateExtractCandidateDto | undefined
 ) => stringifyTemplateDefaultValue(field.defaultValue ?? candidate?.detectedValue ?? '');
+
+const toTemplateExtractDetailFromTemplate = (
+  detail: TemplateDetailResult
+): TemplateExtractDetailResult => {
+  const candidates: TemplateExtractCandidateDto[] = detail.fields.map((field, index) => ({
+    id: `template-field:${field.id}`,
+    draftId: `template:${detail.template.id}`,
+    candidateKey: `template-candidate:${field.fieldKey}`,
+    fieldKey: field.fieldKey,
+    labelKey: field.fieldKey,
+    fieldType: field.fieldType,
+    fieldLabel: field.fieldLabel,
+    detectedValue: stringifyTemplateDefaultValue(field.defaultValue),
+    placeholder: field.placeholder,
+    defaultValue: field.defaultValue,
+    options: field.options || [],
+    required: field.required,
+    layoutBlockId: field.layoutBlockId,
+    confidenceScore: 1,
+    reviewStatus: 'accepted',
+    extractionReason: 'registered_template',
+    sortOrder: field.sortOrder ?? index,
+  }));
+
+  const reviewSummary = {
+    candidateCount: candidates.length,
+    acceptedCount: candidates.length,
+    reviewNeededCount: 0,
+    rejectedCount: 0,
+    averageConfidenceScore: candidates.length ? 1 : 0,
+  };
+
+  return {
+    draft: {
+      id: `template:${detail.template.id}`,
+      sourceTitle: detail.template.templateName,
+      sourceKind: 'html',
+      sourceContent: detail.template.draftHtml,
+      generatedDraftHtml: detail.template.draftHtml,
+      status: 'approved',
+      confidenceSummary: reviewSummary,
+      similarTemplateIds: [],
+      approvedTemplateId: detail.template.id,
+      createdAt: detail.template.createdAt,
+      updatedAt: detail.template.updatedAt,
+    },
+    candidates,
+    reviewSummary,
+    pipelineTrace: null,
+    qualityReport: null,
+  };
+};
 
 const stripDraftPreviewUiState = (html: string) => {
   if (!html.trim()) {
@@ -286,12 +296,79 @@ const findClosestTemplateValueElement = (node: Node | null) => {
   return element?.closest<HTMLElement>('[data-template-value]') || null;
 };
 
-const resolveTemplateValueElementFromTarget = (target: EventTarget | null) => {
+const findTemplateValueElementInEditableScope = (element: HTMLElement | null) => {
+  const editableElement = element?.closest<HTMLElement>('[contenteditable="true"], [data-template-edit-scope]');
+
+  if (!editableElement) {
+    return null;
+  }
+
+  if (editableElement.matches('[data-template-value]')) {
+    return editableElement;
+  }
+
+  const valueElements = Array.from(editableElement.querySelectorAll<HTMLElement>('[data-template-value]'));
+
+  return valueElements.length === 1 ? valueElements[0] : null;
+};
+
+const resolveTemplateValueElementFromTarget = (
+  target: EventTarget | null,
+  event?: TemplateValueResolveEvent
+) => {
   const directTarget = target instanceof Node ? target : null;
   const directMatch = findClosestTemplateValueElement(directTarget);
 
   if (directMatch) {
     return directMatch;
+  }
+
+  const targetElement = directTarget instanceof HTMLElement ? directTarget : directTarget?.parentElement || null;
+  const editableScopeMatch = findTemplateValueElementInEditableScope(targetElement);
+
+  if (editableScopeMatch) {
+    return editableScopeMatch;
+  }
+
+  const nativeEvent = event?.nativeEvent || event;
+  const eventPath = nativeEvent?.composedPath?.() || [];
+
+  for (const pathItem of eventPath) {
+    const pathMatch = findClosestTemplateValueElement(pathItem instanceof Node ? pathItem : null);
+
+    if (pathMatch) {
+      return pathMatch;
+    }
+
+    const pathEditableMatch = findTemplateValueElementInEditableScope(
+      pathItem instanceof HTMLElement ? pathItem : null
+    );
+
+    if (pathEditableMatch) {
+      return pathEditableMatch;
+    }
+  }
+
+  if (
+    typeof document !== 'undefined' &&
+    typeof event?.clientX === 'number' &&
+    typeof event?.clientY === 'number'
+  ) {
+    for (const pointElement of document.elementsFromPoint(event.clientX, event.clientY)) {
+      const pointMatch = findClosestTemplateValueElement(pointElement);
+
+      if (pointMatch) {
+        return pointMatch;
+      }
+
+      const pointEditableMatch = findTemplateValueElementInEditableScope(
+        pointElement instanceof HTMLElement ? pointElement : null
+      );
+
+      if (pointEditableMatch) {
+        return pointEditableMatch;
+      }
+    }
   }
 
   if (typeof window === 'undefined') {
@@ -773,57 +850,6 @@ const formatPercent = (value: number | null | undefined) => {
   return `${(value * 100).toFixed(2)}%`;
 };
 
-const getVisualSimilarityCurrentStep = (progress: VisualSimilarityProgressState) => {
-  if (progress.phase === 'completed') {
-    return VISUAL_SIMILARITY_PROGRESS_STEPS.length;
-  }
-
-  if (!progress.activeStep) {
-    return 0;
-  }
-
-  return VISUAL_SIMILARITY_STEP_ORDER[progress.activeStep] + 1;
-};
-
-const getVisualSimilarityStepState = (
-  progress: VisualSimilarityProgressState,
-  stepKey: VisualSimilarityProgressStepKey
-) => {
-  const currentOrder = progress.activeStep ? VISUAL_SIMILARITY_STEP_ORDER[progress.activeStep] : -1;
-  const stepOrder = VISUAL_SIMILARITY_STEP_ORDER[stepKey];
-
-  if (progress.phase === 'completed') {
-    return 'done' as const;
-  }
-
-  if (progress.phase === 'failed') {
-    if (progress.activeStep === stepKey) {
-      return 'failed' as const;
-    }
-
-    return stepOrder < currentOrder ? ('done' as const) : ('pending' as const);
-  }
-
-  if (progress.activeStep === stepKey) {
-    return 'active' as const;
-  }
-
-  return stepOrder < currentOrder ? ('done' as const) : ('pending' as const);
-};
-
-const formatVisualSimilarityStepStateLabel = (state: ReturnType<typeof getVisualSimilarityStepState>) => {
-  if (state === 'done') {
-    return '완료';
-  }
-  if (state === 'active') {
-    return '계산 중';
-  }
-  if (state === 'failed') {
-    return '오류';
-  }
-  return '대기';
-};
-
 const toVisualSimilarityStepKey = (phase: string): VisualSimilarityProgressStepKey => {
   if (phase === 'loading_html' || phase === 'capturing_pages') {
     return 'preparing_replica_pages';
@@ -864,7 +890,6 @@ export default function TemplateExtractPage() {
   const [selectedDraftId, setSelectedDraftId] = React.useState('');
   const [reviewedFields, setReviewedFields] = React.useState<TemplateExtractReviewedFieldInput[]>([]);
   const [selectedCandidateKey, setSelectedCandidateKey] = React.useState<string | null>(null);
-  const [advancedReviewedFieldsText, setAdvancedReviewedFieldsText] = React.useState('[]');
   const [templateName, setTemplateName] = React.useState('안전관리계획서 템플릿 초안');
   const [layoutResizeMode, setLayoutResizeMode] =
     React.useState<TemplateLayoutResizeMode>('grow_height');
@@ -872,6 +897,9 @@ export default function TemplateExtractPage() {
   const [visualSimilarityReport, setVisualSimilarityReport] =
     React.useState<TemplateExtractVisualSimilarityReport | null>(null);
   const [recentDrafts, setRecentDrafts] = React.useState<RecentDraftOption[]>([]);
+  const [registeredTemplates, setRegisteredTemplates] = React.useState<TemplateRecordDto[]>([]);
+  const [selectedRegisteredTemplateId, setSelectedRegisteredTemplateId] = React.useState('');
+  const [loadedTemplateId, setLoadedTemplateId] = React.useState<string | null>(null);
   const [approveResult, setApproveResult] = React.useState<{
     templateId: string;
     approvedFieldCount: number;
@@ -889,6 +917,9 @@ export default function TemplateExtractPage() {
     stage: '',
     detail: '',
   });
+  const [draftProgressAction, setDraftProgressAction] =
+    React.useState<TemplateExtractExtractionStage>('full');
+  const [progressPanelExpanded, setProgressPanelExpanded] = React.useState(false);
   const progressTimerRef = React.useRef<number | null>(null);
   const visualProgressTimerRef = React.useRef<number | null>(null);
   const visualMeasurementFrameRef = React.useRef<HTMLIFrameElement | null>(null);
@@ -945,6 +976,17 @@ export default function TemplateExtractPage() {
       { accepted: 0, reviewNeeded: 0, rejected: 0 }
     );
   }, [reviewedFields]);
+
+  const registeredTemplateOptions = React.useMemo(
+    () =>
+      registeredTemplates.map((template) => ({
+        id: template.id,
+        label: template.templateName,
+        meta: template.id,
+        keywords: [template.sourceDocumentName || ''],
+      })),
+    [registeredTemplates]
+  );
 
   const flattenedFramePreview = React.useMemo(
     () => flattenFramePreviewMarkup(draftDetail?.draft.generatedDraftHtml || ''),
@@ -1019,9 +1061,31 @@ export default function TemplateExtractPage() {
     }
   }, []);
 
+  const loadRegisteredTemplates = React.useCallback(async () => {
+    try {
+      const response = await fetch('/api/templates?limit=12', {
+        cache: 'no-store',
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.message || '등록된 템플릿 목록을 불러오지 못했습니다.');
+      }
+
+      const templates = (result.data || []) as TemplateRecordDto[];
+      setRegisteredTemplates(templates);
+      setSelectedRegisteredTemplateId((previous) => previous || templates[0]?.id || '');
+    } catch {
+      // template registry failures must not block extract flow
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadRegisteredTemplates();
+  }, [loadRegisteredTemplates]);
+
   const syncReviewedFields = React.useCallback((nextFields: TemplateExtractReviewedFieldInput[]) => {
     setReviewedFields(nextFields);
-    setAdvancedReviewedFieldsText(JSON.stringify(nextFields, null, 2));
   }, []);
 
   const getCurrentDraftPreviewHtml = React.useCallback(() => {
@@ -1545,6 +1609,7 @@ export default function TemplateExtractPage() {
         }
 
         setDraftDetail(result.data);
+        setLoadedTemplateId(null);
         setPreviewPaneMode('draft');
         setSelectedDraftId(normalizedDraftId);
         syncReviewedFields(toReviewedFields(result.data));
@@ -1559,6 +1624,177 @@ export default function TemplateExtractPage() {
     [persistRecentDraft, syncReviewedFields]
   );
 
+  const loadRegisteredTemplate = React.useCallback(
+    async (templateId: string) => {
+      const normalizedTemplateId = templateId.trim();
+
+      if (!normalizedTemplateId) {
+        return;
+      }
+
+      setLoading(true);
+      setMessage(null);
+
+      try {
+        const response = await fetch(`/api/templates/${normalizedTemplateId}?ts=${Date.now()}`, {
+          cache: 'no-store',
+        });
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.message || '정식 템플릿 조회에 실패했습니다.');
+        }
+
+        const templateDetail = result.data as TemplateDetailResult;
+        const extractDetail = toTemplateExtractDetailFromTemplate(templateDetail);
+
+        setDraftDetail(extractDetail);
+        setLoadedTemplateId(normalizedTemplateId);
+        setSelectedRegisteredTemplateId(normalizedTemplateId);
+        setSelectedDraftId('');
+        setPreviewPaneMode('draft');
+        setTemplateName(templateDetail.template.templateName);
+        setSourceTitle(templateDetail.template.templateName);
+        setSourceContent(templateDetail.template.draftHtml);
+        syncReviewedFields(toReviewedFields(extractDetail));
+        setApproveResult(null);
+        setVisualSimilarityReport(null);
+        setMessage(`정식 템플릿 ${normalizedTemplateId} 를 불러왔습니다.`);
+      } catch (error) {
+        const nextMessage =
+          error instanceof Error ? error.message : '정식 템플릿 조회에 실패했습니다.';
+        setMessage(nextMessage);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [syncReviewedFields]
+  );
+
+  const handleSaveRegisteredTemplate = React.useCallback(async () => {
+    const normalizedTemplateId = loadedTemplateId?.trim() || '';
+
+    if (!normalizedTemplateId) {
+      setMessage('저장할 정식 템플릿이 없습니다.');
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/templates/${normalizedTemplateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateName,
+          sourceDocumentName: sourceTitle,
+          draftHtml: getCurrentDraftPreviewHtml(),
+          layoutResizeMode,
+        }),
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.message || '정식 템플릿 저장에 실패했습니다.');
+      }
+
+      const updatedTemplate = (result.data?.template || null) as TemplateRecordDto | null;
+
+      if (updatedTemplate) {
+        setRegisteredTemplates((previous) =>
+          [updatedTemplate, ...previous.filter((item) => item.id !== updatedTemplate.id)].slice(0, 12)
+        );
+      }
+
+      setMessage(`정식 템플릿 ${normalizedTemplateId} 저장을 완료했습니다.`);
+    } catch (error) {
+      const nextMessage =
+        error instanceof Error ? error.message : '정식 템플릿 저장에 실패했습니다.';
+      setMessage(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [getCurrentDraftPreviewHtml, layoutResizeMode, loadedTemplateId, sourceTitle, templateName]);
+
+  const handleDeleteRegisteredTemplate = React.useCallback(async (templateId?: string) => {
+    const normalizedTemplateId = (templateId || selectedRegisteredTemplateId).trim();
+
+    if (!normalizedTemplateId || typeof window === 'undefined') {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `정식 템플릿 ${normalizedTemplateId} 를 삭제합니다. 필드와 서명 영역도 함께 삭제됩니다.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/templates/${normalizedTemplateId}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.message || '정식 템플릿 삭제에 실패했습니다.');
+      }
+
+      const nextTemplates = registeredTemplates.filter((template) => template.id !== normalizedTemplateId);
+      setRegisteredTemplates(nextTemplates);
+      setSelectedRegisteredTemplateId((previous) =>
+        previous === normalizedTemplateId ? nextTemplates[0]?.id || '' : previous
+      );
+
+      if (loadedTemplateId === normalizedTemplateId) {
+        setLoadedTemplateId(null);
+        setDraftDetail(null);
+        setSelectedDraftId('');
+        syncReviewedFields([]);
+        setPreviewPaneMode('source');
+        setApproveResult(null);
+        setVisualSimilarityReport(null);
+      }
+
+      setMessage(`정식 템플릿 ${normalizedTemplateId} 를 삭제했습니다.`);
+    } catch (error) {
+      const nextMessage =
+        error instanceof Error ? error.message : '정식 템플릿 삭제에 실패했습니다.';
+      setMessage(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    loadedTemplateId,
+    registeredTemplates,
+    selectedRegisteredTemplateId,
+    syncReviewedFields,
+  ]);
+
+  const handleDeleteRecentDraft = React.useCallback((draft: { id: string }) => {
+    const normalizedDraftId = draft.id.trim();
+
+    if (!normalizedDraftId) {
+      return;
+    }
+
+    setRecentDrafts((previous) => {
+      const nextDrafts = previous.filter((item) => item.id !== normalizedDraftId);
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(RECENT_DRAFTS_STORAGE_KEY, JSON.stringify(nextDrafts));
+      }
+
+      return nextDrafts;
+    });
+    setSelectedDraftId((previous) => (previous === normalizedDraftId ? '' : previous));
+  }, []);
+
   const handleCreateDraft = async (extractionStage: TemplateExtractExtractionStage = 'full') => {
     if (extractionStage === 'frames' && !selectedFile) {
       setMessage('프레임 그룹 생성은 PDF 업로드에서만 지원합니다.');
@@ -1570,7 +1806,21 @@ export default function TemplateExtractPage() {
     setMessage(null);
     setApproveResult(null);
     setVisualSimilarityReport(null);
+    setDraftProgressAction(extractionStage);
+    setProgressPanelExpanded(true);
     clearDraftProgressTimer();
+    clearVisualSimilarityProgressTimer();
+    setVisualSimilarityProgress({
+      visible: false,
+      phase: 'idle',
+      activeStep: null,
+      percent: 0,
+      stage: '',
+      detail: '',
+    });
+    visualMeasurementLogFileNameRef.current = '';
+    lastVisualMeasurementLogEventKeyRef.current = '';
+    lastVisualMeasurementKeyRef.current = '';
     setDraftProgress({
       visible: true,
       phase: selectedFile ? 'uploading' : 'processing',
@@ -1644,6 +1894,7 @@ export default function TemplateExtractPage() {
           : '원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다.',
       });
       setDraftDetail(result.data);
+      setLoadedTemplateId(null);
       setPreviewPaneMode('draft');
       setSelectedDraftId(result.data.draft.id);
       syncReviewedFields(toReviewedFields(result.data));
@@ -1726,7 +1977,7 @@ export default function TemplateExtractPage() {
       setDraftHtmlCopied(true);
       window.setTimeout(() => setDraftHtmlCopied(false), 1800);
     } catch {
-      setMessage('생성된 HTML 코드를 복사하지 못했습니다.');
+      setMessage('HTML을 복사하지 못했습니다.');
     }
   };
 
@@ -1962,6 +2213,7 @@ export default function TemplateExtractPage() {
     setVisualSimilarityMeasuring(true);
     setVisualSimilarityReport(null);
     setMessage(null);
+    setProgressPanelExpanded(true);
     clearVisualSimilarityProgressTimer();
     setVisualSimilarityProgress({
       visible: true,
@@ -2082,47 +2334,52 @@ export default function TemplateExtractPage() {
   ]);
 
   React.useEffect(() => {
-    if (
-      !selectedFile ||
-      !draftDetail ||
-      draftDetail.draft.sourceKind !== 'html' ||
-      (!/\.pdf$/i.test(selectedFile.name) && selectedFile.type !== 'application/pdf')
-    ) {
-      setVisualSimilarityReport(null);
-      clearVisualSimilarityProgressTimer();
-      visualMeasurementLogFileNameRef.current = '';
-      lastVisualMeasurementLogEventKeyRef.current = '';
-      setVisualSimilarityProgress({
-        visible: false,
-        phase: 'idle',
-        activeStep: null,
-        percent: 0,
-        stage: '',
-        detail: '',
-      });
-      lastVisualMeasurementKeyRef.current = '';
+    const isEligible =
+      !!selectedFile &&
+      !!draftDetail &&
+      draftDetail.draft.sourceKind === 'html' &&
+      (/\.pdf$/i.test(selectedFile.name) || selectedFile.type === 'application/pdf');
+
+    if (isEligible) {
+      const measurementKey = [
+        draftDetail.draft.id,
+        selectedFile.name,
+        selectedFile.size,
+        selectedFile.lastModified,
+      ].join('::');
+
+      if (lastVisualMeasurementKeyRef.current !== measurementKey) {
+        setVisualSimilarityReport(null);
+        clearVisualSimilarityProgressTimer();
+        visualMeasurementLogFileNameRef.current = '';
+        lastVisualMeasurementLogEventKeyRef.current = '';
+        setVisualSimilarityProgress({
+          visible: false,
+          phase: 'idle',
+          activeStep: null,
+          percent: 0,
+          stage: '',
+          detail: '',
+        });
+      }
+
       return;
     }
 
-    const measurementKey = [
-      draftDetail.draft.id,
-      selectedFile.name,
-      selectedFile.size,
-      selectedFile.lastModified,
-    ].join('::');
-
-    if (lastVisualMeasurementKeyRef.current === measurementKey || visualSimilarityMeasuring) {
-      return;
-    }
-
-    void handleMeasureVisualSimilarity();
-  }, [
-    clearVisualSimilarityProgressTimer,
-    draftDetail,
-    handleMeasureVisualSimilarity,
-    selectedFile,
-    visualSimilarityMeasuring,
-  ]);
+    setVisualSimilarityReport(null);
+    clearVisualSimilarityProgressTimer();
+    visualMeasurementLogFileNameRef.current = '';
+    lastVisualMeasurementLogEventKeyRef.current = '';
+    setVisualSimilarityProgress({
+      visible: false,
+      phase: 'idle',
+      activeStep: null,
+      percent: 0,
+      stage: '',
+      detail: '',
+    });
+    lastVisualMeasurementKeyRef.current = '';
+  }, [clearVisualSimilarityProgressTimer, draftDetail, selectedFile]);
 
   const updateReviewedField = (
     candidateKey: string | undefined,
@@ -2980,9 +3237,21 @@ export default function TemplateExtractPage() {
       return;
     }
 
-    const valueElement = resolveTemplateValueElementFromTarget(event.target);
+    const valueElement = resolveTemplateValueElementFromTarget(event.target, event);
 
     if (!valueElement) {
+      if ('clientX' in event) {
+        window.requestAnimationFrame(() => {
+          const nextValueElement = resolveTemplateValueElementFromTarget(event.target, event);
+          const nextCandidateKey = candidateKeyByLabelKey.get(
+            nextValueElement?.getAttribute('data-template-value') || ''
+          );
+
+          if (nextCandidateKey) {
+            setSelectedCandidateKey(nextCandidateKey);
+          }
+        });
+      }
       return;
     }
 
@@ -3056,20 +3325,6 @@ export default function TemplateExtractPage() {
     selection.collapseToEnd();
   };
 
-  const handleAdvancedReviewedFieldsChange = (value: string) => {
-    setAdvancedReviewedFieldsText(value);
-
-    try {
-      const parsed = JSON.parse(value) as TemplateExtractReviewedFieldInput[];
-
-      if (Array.isArray(parsed)) {
-        setReviewedFields(parsed);
-      }
-    } catch {
-      // keep raw text until json becomes valid again
-    }
-  };
-
   const previewSourceKind = draftDetail?.draft.sourceKind || sourceKind;
   const previewSourceContent = draftDetail?.draft.sourceContent || sourceContent;
   const hasGeneratedDraftHtml = Boolean((draftDetail?.draft.generatedDraftHtml || '').trim());
@@ -3077,6 +3332,37 @@ export default function TemplateExtractPage() {
   const pipelineTrace = draftDetail?.pipelineTrace || null;
   const qualityReport = draftDetail?.qualityReport || null;
   const offlineMetrics = qualityReport?.offlineMetrics || null;
+  const viewingRegisteredTemplate = Boolean(loadedTemplateId);
+  const unifiedProgressSource = visualSimilarityProgress.visible ? 'visual' : draftProgress.visible ? 'draft' : 'idle';
+  const unifiedProgress =
+    unifiedProgressSource === 'visual'
+      ? {
+          title: '유사도 측정',
+          percent: visualSimilarityProgress.percent,
+          phase: visualSimilarityProgress.phase,
+          stage: visualSimilarityProgress.stage || '시각 유사도 측정 중',
+          detail:
+            visualSimilarityProgress.detail ||
+            '원본 PDF와 output HTML을 같은 기준으로 비교하고 있습니다.',
+        }
+      : unifiedProgressSource === 'draft'
+        ? {
+            title: draftProgressAction === 'frames' ? '프레임 그룹 생성' : '전체 추출',
+            percent: draftProgress.percent,
+            phase: draftProgress.phase,
+            stage: draftProgress.stage || '초안을 생성하고 있습니다.',
+            detail: draftProgress.detail || '원본 문서를 읽고 템플릿 초안을 준비하고 있습니다.',
+          }
+        : {
+            title: '진행 상태',
+            percent: 0,
+            phase: 'idle',
+            stage: '작업 대기 중입니다.',
+            detail: '프레임 그룹 생성, 전체 추출, 유사도 측정 진행률이 여기에 표시됩니다.',
+          };
+  const unifiedProgressFailed = unifiedProgress.phase === 'failed';
+  const unifiedProgressCompleted = unifiedProgress.phase === 'completed';
+  const unifiedProgressActive = unifiedProgressSource !== 'idle' && !unifiedProgressFailed && !unifiedProgressCompleted;
   const frameEditorActive =
     draftDetail?.draft.generatedDraftHtml?.includes('data-template-extraction-stage="frames"') &&
     draftDetail?.draft.generatedDraftHtml?.includes('data-template-frame-group-version="v1.06"');
@@ -3190,21 +3476,25 @@ export default function TemplateExtractPage() {
             문서를 올리면 왼쪽에서 원본과 추출 초안을 크게 보고, 오른쪽에서 필요한 항목만 검토한 뒤 바로 템플릿으로 저장합니다.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void loadDraft(selectedDraftId)} disabled={loading}>
-            최근 초안 열기
+        <div className="flex flex-wrap gap-2 md:justify-end">
+          <Button
+            variant="outline"
+            onClick={handleMeasureVisualSimilarity}
+            disabled={loading || !draftDetail || !selectedFile || visualSimilarityMeasuring}
+          >
+            {visualSimilarityMeasuring ? `유사도 ${visualSimilarityProgress.percent}%` : '유사도 측정'}
           </Button>
           <Button
             variant="outline"
             onClick={() => void handleCreateDraft('frames')}
-            disabled={loading || !selectedFile}
+            disabled={loading || visualSimilarityMeasuring || !selectedFile}
           >
             프레임 그룹 생성
           </Button>
           <select
             value={frameGroupVersion}
             onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
-            disabled={loading}
+            disabled={loading || visualSimilarityMeasuring}
             className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
@@ -3213,13 +3503,13 @@ export default function TemplateExtractPage() {
               </option>
             ))}
           </select>
-          <Button onClick={() => void handleCreateDraft('full')} disabled={loading}>
+          <Button onClick={() => void handleCreateDraft('full')} disabled={loading || visualSimilarityMeasuring}>
             전체 추출
           </Button>
           <select
             value={engineVersion}
             onChange={(event) => setEngineVersion(event.target.value as TemplateExtractEngineVersion)}
-            disabled={loading}
+            disabled={loading || visualSimilarityMeasuring}
             className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             {TEMPLATE_EXTRACT_ENGINE_VERSION_OPTIONS.map((option) => (
@@ -3237,77 +3527,8 @@ export default function TemplateExtractPage() {
         </Card>
       ) : null}
 
-      {draftProgress.visible ? (
-        <Card className="border-slate-200 bg-white">
-          <CardContent className="space-y-3 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">{draftProgress.stage}</p>
-                <p className="text-xs text-slate-600">{draftProgress.detail}</p>
-              </div>
-              <Badge
-                variant={
-                  draftProgress.phase === 'completed'
-                    ? 'green'
-                    : draftProgress.phase === 'failed'
-                      ? 'slate'
-                      : 'slate'
-                }
-              >
-                {draftProgress.percent}%
-              </Badge>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={draftProgress.percent}
-                className={`h-full rounded-full transition-[width] duration-300 ${
-                  draftProgress.phase === 'failed' ? 'bg-slate-500' : 'bg-slate-900'
-                }`}
-                style={{ width: `${draftProgress.percent}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>파일 업로드</span>
-              <span>문서 분석</span>
-              <span>초안 조립</span>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <div className="grid gap-6 lg:grid-cols-[1.45fr_0.85fr]">
         <div className="space-y-6">
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>원본 문서 입력</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">원본 제목</label>
-                  <Input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">업로드 파일</label>
-                  <input
-                    type="file"
-                    accept=".txt,.html,.htm,.docx,.pdf,text/plain,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
-                    onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                <p>선택된 파일: {selectedFile ? selectedFile.name : '없음'}</p>
-                <p>파일 형식: {selectedFile?.type || '-'}</p>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card className="flex flex-col gap-6 border-slate-200 p-6">
             <CardHeader className="flex flex-col gap-3 p-0 md:flex-row md:items-start md:justify-between">
               <div className="space-y-1">
@@ -3374,285 +3595,9 @@ export default function TemplateExtractPage() {
             )}
           </Card>
 
-          <Card className="border-slate-200">
-            <CardContent className="space-y-3 p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-slate-900">생성된 HTML 코드</p>
-                  <p className="text-xs text-slate-600">
-                    브라우저를 다시 열지 않고도 품질을 확인할 수 있게, 현재 생성된 HTML 원문을 그대로 복사합니다.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={handleCopyDraftHtml}
-                  disabled={!draftDetail?.draft.generatedDraftHtml}
-                >
-                  {draftHtmlCopied ? '복사됨' : 'HTML 코드 복사'}
-                </Button>
-              </div>
-              <details className="rounded-lg border border-slate-200 bg-white p-4">
-                <summary className="cursor-pointer text-sm font-medium text-slate-800">
-                  생성된 HTML 코드 보기
-                </summary>
-                <pre className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-xs text-slate-100">
-                  {draftDetail?.draft.generatedDraftHtml?.trim() || '아직 생성된 HTML이 없습니다.'}
-                </pre>
-              </details>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="space-y-6">
-          <Card className="border-slate-200">
-            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="space-y-1">
-                <CardTitle>초안 요약</CardTitle>
-                <CardDescription>방금 만든 초안과 현재 검토 상태입니다.</CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  onClick={handleMeasureVisualSimilarity}
-                  disabled={!draftDetail || !selectedFile || visualSimilarityMeasuring}
-                >
-                  {visualSimilarityMeasuring
-                    ? `시각 유사도 측정 중 ${visualSimilarityProgress.percent}%`
-                    : '시각 유사도 측정'}
-                </Button>
-                <Button variant="outline" onClick={handleCopyDraftLog} disabled={!draftDetail || draftLogWriting}>
-                  {draftLogWriting ? '로그 저장 중' : '로그 복사'}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-slate-700">
-              {draftDetail ? (
-                <>
-                  {visualSimilarityProgress.visible ? (
-                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold">시각 유사도 측정 진행</div>
-                          <div className="mt-1 truncate text-sm font-semibold text-sky-950">
-                            {draftDetail.draft.sourceTitle || '제목 없음'}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs font-semibold">
-                          {visualSimilarityProgress.phase !== 'completed' &&
-                          visualSimilarityProgress.phase !== 'failed' ? (
-                            <span
-                              className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-sky-300 border-t-sky-700"
-                              aria-hidden="true"
-                            />
-                          ) : null}
-                          <span>
-                            {visualSimilarityProgress.phase === 'completed'
-                              ? '완료'
-                              : visualSimilarityProgress.phase === 'failed'
-                                ? '오류'
-                                : '계산 중'}
-                          </span>
-                          <span>{visualSimilarityProgress.percent}%</span>
-                        </div>
-                      </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-sky-100">
-                        <div
-                          className={`h-full rounded-full transition-[width] duration-300 ${
-                            visualSimilarityProgress.phase === 'failed' ? 'bg-rose-500' : 'bg-sky-600'
-                          }`}
-                          style={{ width: `${visualSimilarityProgress.percent}%` }}
-                        />
-                      </div>
-                      <div className="mt-3 text-sm font-semibold">{visualSimilarityProgress.stage}</div>
-                      <div className="mt-1 text-xs opacity-90">{visualSimilarityProgress.detail}</div>
-                      <div className="mt-3 rounded-lg border border-sky-200/80 bg-white/70 px-3 py-2 text-[11px] text-sky-900">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-semibold">
-                            세부 단계 {getVisualSimilarityCurrentStep(visualSimilarityProgress)} /{' '}
-                            {VISUAL_SIMILARITY_PROGRESS_STEPS.length}
-                          </span>
-                          <span className="opacity-80">
-                            {VISUAL_SIMILARITY_PROGRESS_STEPS.find(
-                              (step) => step.key === visualSimilarityProgress.activeStep
-                            )?.label || '대기'}
-                          </span>
-                        </div>
-                        <div className="mt-1 font-semibold">{visualSimilarityProgress.stage}</div>
-                        <div className="mt-1 opacity-80">{visualSimilarityProgress.detail}</div>
-                      </div>
-                      <div className="relative mt-3">
-                        <div
-                          className="overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-                          style={{ maxHeight: '104px', overscrollBehaviorY: 'contain', touchAction: 'pan-y' }}
-                        >
-                          <div className="space-y-2">
-                            {VISUAL_SIMILARITY_PROGRESS_STEPS.map((step) => {
-                              const stepState = getVisualSimilarityStepState(visualSimilarityProgress, step.key);
-                              const stepLabel = formatVisualSimilarityStepStateLabel(stepState);
-                              const active = stepState === 'active';
-                              const done = stepState === 'done';
-                              const failed = stepState === 'failed';
-
-                              return (
-                                <div
-                                  key={step.key}
-                                  className={`rounded-lg px-2 py-1.5 text-[11px] transition-colors ${
-                                    active
-                                      ? 'bg-sky-100 text-sky-950'
-                                      : done
-                                        ? 'bg-white/80 text-sky-900'
-                                        : failed
-                                          ? 'bg-rose-50 text-rose-900'
-                                          : 'bg-transparent text-sky-800/80'
-                                  }`}
-                                >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <div className="font-semibold">{step.label}</div>
-                                      <div className="mt-0.5 opacity-75">{step.description}</div>
-                                    </div>
-                                    <div className="shrink-0 font-semibold">{stepLabel}</div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="green">{draftDetail.draft.status}</Badge>
-                    {qualityReport ? (
-                      <Badge variant="slate">
-                        {qualityReport.mode === 'offline' ? 'diagnostic-only' : `${qualityReport.mode}:${qualityReport.passed ? 'pass' : 'review'}`}
-                      </Badge>
-                    ) : null}
-                    {visualSimilarityReport?.measured ? (
-                      <Badge variant={visualSimilarityReport.passed ? 'green' : 'slate'}>
-                        frame:{formatPercent(visualSimilarityReport.frameScore ?? visualSimilarityReport.overallScore)}
-                      </Badge>
-                    ) : null}
-                    {visualSimilarityMeasuring || visualSimilarityProgress.visible ? (
-                      <Badge
-                        variant={
-                          visualSimilarityProgress.phase === 'completed'
-                            ? 'green'
-                            : visualSimilarityProgress.phase === 'failed'
-                              ? 'red'
-                              : 'amber'
-                        }
-                      >
-                        측정 상태:
-                        {visualSimilarityProgress.phase === 'completed'
-                          ? ' 완료'
-                          : visualSimilarityProgress.phase === 'failed'
-                            ? ' 오류'
-                            : ` ${visualSimilarityProgress.stage || '진행 중'}`}
-                      </Badge>
-                    ) : null}
-                    {pipelineTrace ? (
-                      <Badge variant="slate">{formatTemplateExtractEngineVersionLabel(pipelineTrace.engineVersion)}</Badge>
-                    ) : null}
-                    <span className="font-medium text-slate-900">
-                      {draftDetail.draft.sourceTitle || '제목 없음'}
-                    </span>
-                  </div>
-                  <p>초안 ID: {draftDetail.draft.id}</p>
-                  <p>검토 대상: {reviewedFields.length}개</p>
-                  <p>승인 예정: {reviewedSummary.accepted}개</p>
-                  <p>추가 검토: {reviewedSummary.reviewNeeded}개</p>
-                  <p>제외: {reviewedSummary.rejected}개</p>
-                  {pipelineTrace ? (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                      <p className="font-medium text-slate-900">Pipeline Trace</p>
-                      <p>sourceMode: {pipelineTrace.sourceMode}</p>
-                      <p>documentFamily: {pipelineTrace.documentFamily}</p>
-                      <p>cloneBuilder: {pipelineTrace.cloneBuilder}</p>
-                      <p>familyConfidence: {formatScore(pipelineTrace.familyConfidenceScore)}</p>
-                      <p>
-                        topology: p{pipelineTrace.topologySummary.pageCount} / rb{pipelineTrace.topologySummary.rowBandCount} / hs
-                        {pipelineTrace.topologySummary.horizontalSegmentCount} / vs
-                        {pipelineTrace.topologySummary.verticalSegmentCount}
-                      </p>
-                    </div>
-                  ) : null}
-                  {visualSimilarityReport ? (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                      <p className="font-medium text-slate-900">시각 유사도 측정 결과</p>
-                      <p className="text-[11px] text-slate-700">
-                        현재 대표 값은 원본 PDF와 HTML의 선/표 프레임 잉크만 분리해 계산한 `1px 허용 오차 기준 프레임 중첩률`입니다.
-                        텍스트와 전체 잉크 중첩률은 보조 값으로만 표시합니다.
-                      </p>
-                      <p>measurementMode: {visualSimilarityReport.measurementMode}</p>
-                      <p>tolerancePx: {visualSimilarityReport.tolerancePx}</p>
-                      <p>minimumPassScore: {formatPercent(visualSimilarityReport.minimumPassScore)}</p>
-                      <p>scoreMode: {visualSimilarityReport.scoreMode || 'combined_ink_overlap'}</p>
-                      <p>frameScore: {formatPercent(visualSimilarityReport.frameScore ?? visualSimilarityReport.overallScore)}</p>
-                      <p>textScore: {formatPercent(visualSimilarityReport.textScore ?? 0)}</p>
-                      <p>combinedScore: {formatPercent(visualSimilarityReport.combinedScore ?? visualSimilarityReport.overallScore)}</p>
-                      <p>overallScore: {formatPercent(visualSimilarityReport.overallScore)}</p>
-                      <p>passed: {visualSimilarityReport.passed ? 'true' : 'false'}</p>
-                      <p>pageCount: {visualSimilarityReport.pageCount}</p>
-                      <p>measuredAt: {visualSimilarityReport.measuredAt}</p>
-                      {visualSimilarityReport.pageReports.length > 0 ? (
-                        <details className="mt-2 rounded border border-slate-200 bg-white p-2">
-                          <summary className="cursor-pointer font-medium text-slate-800">페이지별 결과 보기</summary>
-                          <div className="mt-2 space-y-1">
-                            {visualSimilarityReport.pageReports.map((pageReport) => (
-                              <p key={`visual-page-${pageReport.pageNumber}`}>
-                                p{pageReport.pageNumber}: frame{' '}
-                                {formatPercent(pageReport.frameLayerReport?.overlapRatio ?? pageReport.overlapRatio)} / text{' '}
-                                {formatPercent(pageReport.textLayerReport?.overlapRatio ?? 0)} / combined{' '}
-                                {formatPercent(pageReport.overlapRatio)}
-                              </p>
-                            ))}
-                          </div>
-                        </details>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {qualityReport ? (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                      <p className="font-medium text-slate-900">
-                        {visualSimilarityReport ? '구조 진단값' : '시각 유사도 측정 상태'}
-                      </p>
-                      <p className="text-[11px] text-amber-700">
-                        {visualSimilarityReport
-                          ? '아래 값은 시각 유사도 점수가 아니라, 어디서 틀어졌는지 좁혀 보기 위한 구조 진단값입니다.'
-                          : '시각 유사도는 아직 측정되지 않았습니다. 아래 값은 HTML 구조 진단용 보조 지표이며 시각 유사도 점수로 사용하면 안 됩니다.'}
-                      </p>
-                      {!visualSimilarityReport ? (
-                        <p>visualSimilarity: {visualSimilarityMeasuring ? '측정 진행 중' : '미측정'}</p>
-                      ) : null}
-                      <p>measurementMode: structural-diagnostics-only</p>
-                      <p>pageCount: {qualityReport.summary.pageCount}</p>
-                      <p>hardFailures: {qualityReport.summary.hardFailureCount}</p>
-                      <p>fallbackApplied: {qualityReport.fallbackApplied ? 'true' : 'false'}</p>
-                      {qualityReport.fallbackReason ? <p>fallbackReason: {qualityReport.fallbackReason}</p> : null}
-                      {offlineMetrics ? (
-                        <details className="mt-2 rounded border border-slate-200 bg-white p-2">
-                          <summary className="cursor-pointer font-medium text-slate-800">구조 진단값 보기</summary>
-                          <div className="mt-2 space-y-1">
-                            <p>pageContract: {formatScore(offlineMetrics.pageContractScore)}</p>
-                            <p>textAnchor: {formatScore(offlineMetrics.textAnchorScore)}</p>
-                            <p>vectorTopology: {formatScore(offlineMetrics.vectorTopologyScore)}</p>
-                            <p>textContent: {formatScore(offlineMetrics.textContentScore)}</p>
-                            <p>placeholderIntegrity: {formatScore(offlineMetrics.placeholderIntegrityScore)}</p>
-                            <p>diagnosticOverall: {formatScore(offlineMetrics.overallScore)}</p>
-                          </div>
-                        </details>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <p className="text-slate-500">아직 생성된 추출 초안이 없습니다.</p>
-              )}
-            </CardContent>
-          </Card>
-
           {frameEditorActive ? (
             <Card className="border-slate-200">
               <CardHeader>
@@ -3842,59 +3787,322 @@ export default function TemplateExtractPage() {
 
           <Card className="border-slate-200">
             <CardHeader>
-              <CardTitle>정식 템플릿 만들기</CardTitle>
-              <CardDescription>초안을 고른 뒤 템플릿 이름과 레이아웃 정책만 정하면 저장됩니다.</CardDescription>
+              <CardTitle>원본 문서 입력</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-800">최근 초안 선택</label>
-                <EntityPicker
-                  value={selectedDraftId}
-                  options={recentDrafts}
-                  onChange={setSelectedDraftId}
-                  placeholder="최근 초안을 선택하세요"
-                  emptyMessage="최근 초안이 없습니다."
-                  className="flex-1"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-800">템플릿 이름</label>
-                <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-800">레이아웃 확장 정책</label>
-                <select
-                  value={layoutResizeMode}
-                  onChange={(event) =>
-                    setLayoutResizeMode(event.target.value as TemplateLayoutResizeMode)
-                  }
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="fixed">fixed</option>
-                  <option value="grow_height">grow_height</option>
-                  <option value="grow_width">grow_width</option>
-                </select>
-              </div>
-
-              <Button variant="outline" onClick={handleApprove} disabled={loading || !draftDetail}>
-                정식 템플릿 만들기
-              </Button>
-
-              {approveResult ? (
-                <div className="rounded-xl border border-slate-200 p-4 text-sm text-slate-600">
-                  <p className="font-medium text-slate-900">생성 완료</p>
-                  <p>템플릿 ID: {approveResult.templateId}</p>
-                  <p>승인 항목 수: {approveResult.approvedFieldCount}</p>
-                  <a
-                    href={`/templates?templateId=${approveResult.templateId}`}
-                    className="mt-3 inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                  >
-                    생성된 템플릿 열기
-                  </a>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-800">원본 제목</label>
+                  <Input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} />
                 </div>
-              ) : null}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-800">업로드 파일</label>
+                  <input
+                    type="file"
+                    accept=".txt,.html,.htm,.docx,.pdf,text/plain,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+                    onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <p>선택된 파일: {selectedFile ? selectedFile.name : '없음'}</p>
+                <p>파일 형식: {selectedFile?.type || '-'}</p>
+              </div>
+
+              <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-sm font-medium text-slate-800">템플릿 관리</label>
+                  {viewingRegisteredTemplate ? <Badge variant="green">현재 편집 중</Badge> : null}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-500">등록된 정식 템플릿</label>
+                  <div className="flex flex-col gap-2 md:flex-row">
+                    <EntityPicker
+                      value={selectedRegisteredTemplateId}
+                      options={registeredTemplateOptions}
+                      onChange={setSelectedRegisteredTemplateId}
+                      placeholder="정식 템플릿을 선택하세요"
+                      emptyMessage="저장된 템플릿이 없습니다."
+                      className="flex-1"
+                      triggerClassName="h-9 min-h-9 items-center rounded-md py-1"
+                      optionLayout="inline"
+                      onDeleteOption={(option) => void handleDeleteRegisteredTemplate(option.id)}
+                      deleteOptionLabel="정식 템플릿 삭제"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void loadRegisteredTemplate(selectedRegisteredTemplateId)}
+                      disabled={loading || !selectedRegisteredTemplateId.trim()}
+                    >
+                      정식 템플릿 불러오기
+                    </Button>
+                  </div>
+                </div>
+
+                {!viewingRegisteredTemplate ? (
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-500">최근 초안 선택</label>
+                    <EntityPicker
+                      value={selectedDraftId}
+                      options={recentDrafts}
+                      onChange={setSelectedDraftId}
+                      placeholder="최근 초안을 선택하세요"
+                      emptyMessage="최근 초안이 없습니다."
+                      className="flex-1"
+                      triggerClassName="h-9 min-h-9 items-center rounded-md py-1"
+                      optionLayout="inline"
+                      onDeleteOption={handleDeleteRecentDraft}
+                      deleteOptionLabel="최근 초안 삭제"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    현재 정식 템플릿 ID: {loadedTemplateId}
+                  </div>
+                )}
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-500">템플릿 이름</label>
+                    <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-500">레이아웃 확장 정책</label>
+                    <select
+                      value={layoutResizeMode}
+                      onChange={(event) =>
+                        setLayoutResizeMode(event.target.value as TemplateLayoutResizeMode)
+                      }
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="fixed">fixed</option>
+                      <option value="grow_height">grow_height</option>
+                      <option value="grow_width">grow_width</option>
+                    </select>
+                  </div>
+                </div>
+
+                {viewingRegisteredTemplate ? (
+                  <Button
+                    variant="outline"
+                    onClick={handleSaveRegisteredTemplate}
+                    disabled={loading || !draftDetail}
+                  >
+                    현재 정식 템플릿 저장
+                  </Button>
+                ) : (
+                  <Button variant="outline" onClick={handleApprove} disabled={loading || !draftDetail}>
+                    정식 템플릿 만들기
+                  </Button>
+                )}
+
+                {approveResult ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                    <p className="font-medium text-slate-900">생성 완료</p>
+                    <p>템플릿 ID: {approveResult.templateId}</p>
+                    <p>승인 항목 수: {approveResult.approvedFieldCount}</p>
+                    <a
+                      href={`/templates?templateId=${approveResult.templateId}`}
+                      className="mt-3 inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-white"
+                    >
+                      생성된 템플릿 열기
+                    </a>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold">진행 상태</div>
+                    <div className="mt-1 truncate text-sm font-semibold text-sky-950">{unifiedProgress.title}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={
+                        unifiedProgressCompleted
+                          ? 'green'
+                          : unifiedProgressFailed
+                            ? 'red'
+                            : unifiedProgressActive
+                              ? 'amber'
+                              : 'slate'
+                      }
+                    >
+                      {unifiedProgressCompleted
+                        ? '완료'
+                        : unifiedProgressFailed
+                          ? '오류'
+                          : unifiedProgressActive
+                            ? '진행 중'
+                            : '대기'}
+                    </Badge>
+                    <span className="font-semibold">{unifiedProgress.percent}%</span>
+                    {unifiedProgressSource === 'draft' ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-sky-200 bg-white/80 text-sky-950 hover:bg-white"
+                        onClick={handleCopyDraftHtml}
+                        disabled={!draftDetail?.draft.generatedDraftHtml}
+                      >
+                        {draftHtmlCopied ? '복사됨' : 'HTML 복사'}
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-sky-200 bg-white/80 text-sky-950 hover:bg-white"
+                      onClick={handleCopyDraftLog}
+                      disabled={!draftDetail || draftLogWriting || viewingRegisteredTemplate}
+                    >
+                      {draftLogWriting ? '로그 저장 중' : '로그 복사'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-sky-200 bg-white/80 text-sky-950 hover:bg-white"
+                      onClick={() => setProgressPanelExpanded((previous) => !previous)}
+                    >
+                      {progressPanelExpanded ? '최소화' : '펼치기'}
+                    </Button>
+                  </div>
+                </div>
+
+                {progressPanelExpanded ? (
+                  <>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-sky-100">
+                      <div
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={unifiedProgress.percent}
+                        className={`h-full rounded-full transition-[width] duration-300 ${
+                          unifiedProgressFailed
+                            ? 'bg-rose-500'
+                            : unifiedProgressCompleted
+                              ? 'bg-emerald-600'
+                              : 'bg-sky-600'
+                        }`}
+                        style={{ width: `${unifiedProgress.percent}%` }}
+                      />
+                    </div>
+                    <div className="mt-3 text-sm font-semibold">{unifiedProgress.stage}</div>
+                    <div className="mt-1 text-[11px] leading-5 opacity-90">{unifiedProgress.detail}</div>
+
+                    <div className="mt-3 rounded-md border border-sky-200 bg-white p-3 text-sm text-slate-700">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-semibold text-slate-950">결과</p>
+                          <p className="text-xs text-slate-500">
+                            {draftDetail ? draftDetail.draft.sourceTitle || '제목 없음' : '아직 생성된 결과가 없습니다.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {draftDetail ? (
+                        <>
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                            <Badge variant="green">{draftDetail.draft.status}</Badge>
+                            {qualityReport ? (
+                              <Badge variant="slate">
+                                {qualityReport.mode === 'offline' ? 'diagnostic-only' : `${qualityReport.mode}:${qualityReport.passed ? 'pass' : 'review'}`}
+                              </Badge>
+                            ) : null}
+                            {visualSimilarityReport?.measured ? (
+                              <Badge variant={visualSimilarityReport.passed ? 'green' : 'slate'}>
+                                frame:{formatPercent(visualSimilarityReport.frameScore ?? visualSimilarityReport.overallScore)}
+                              </Badge>
+                            ) : null}
+                            {pipelineTrace ? (
+                              <Badge variant="slate">{formatTemplateExtractEngineVersionLabel(pipelineTrace.engineVersion)}</Badge>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-3 grid gap-x-4 gap-y-1 text-xs text-slate-600 md:grid-cols-2">
+                            <p className="break-all">초안 ID: {draftDetail.draft.id}</p>
+                            <p>검토 대상: {reviewedFields.length}개</p>
+                            <p>승인 예정: {reviewedSummary.accepted}개</p>
+                            <p>추가 검토: {reviewedSummary.reviewNeeded}개</p>
+                            <p>제외: {reviewedSummary.rejected}개</p>
+                          </div>
+
+                          {pipelineTrace || visualSimilarityReport || qualityReport ? (
+                            <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
+                              <summary className="cursor-pointer font-medium text-slate-800">세부 값 보기</summary>
+                              <div className="mt-2 space-y-2">
+                                {pipelineTrace ? (
+                                  <div className="space-y-0.5">
+                                    <p className="font-medium text-slate-900">Pipeline Trace</p>
+                                    <p>sourceMode: {pipelineTrace.sourceMode}</p>
+                                    <p>documentFamily: {pipelineTrace.documentFamily}</p>
+                                    <p>cloneBuilder: {pipelineTrace.cloneBuilder}</p>
+                                    <p>familyConfidence: {formatScore(pipelineTrace.familyConfidenceScore)}</p>
+                                    <p>
+                                      topology: p{pipelineTrace.topologySummary.pageCount} / rb
+                                      {pipelineTrace.topologySummary.rowBandCount} / hs
+                                      {pipelineTrace.topologySummary.horizontalSegmentCount} / vs
+                                      {pipelineTrace.topologySummary.verticalSegmentCount}
+                                    </p>
+                                  </div>
+                                ) : null}
+
+                                {visualSimilarityReport ? (
+                                  <div className="space-y-0.5">
+                                    <p className="font-medium text-slate-900">시각 유사도 측정 결과</p>
+                                    <p>measurementMode: {visualSimilarityReport.measurementMode}</p>
+                                    <p>tolerancePx: {visualSimilarityReport.tolerancePx}</p>
+                                    <p>minimumPassScore: {formatPercent(visualSimilarityReport.minimumPassScore)}</p>
+                                    <p>scoreMode: {visualSimilarityReport.scoreMode || 'combined_ink_overlap'}</p>
+                                    <p>frameScore: {formatPercent(visualSimilarityReport.frameScore ?? visualSimilarityReport.overallScore)}</p>
+                                    <p>textScore: {formatPercent(visualSimilarityReport.textScore ?? 0)}</p>
+                                    <p>combinedScore: {formatPercent(visualSimilarityReport.combinedScore ?? visualSimilarityReport.overallScore)}</p>
+                                    <p>overallScore: {formatPercent(visualSimilarityReport.overallScore)}</p>
+                                    <p>passed: {visualSimilarityReport.passed ? 'true' : 'false'}</p>
+                                    <p>pageCount: {visualSimilarityReport.pageCount}</p>
+                                    <p>measuredAt: {visualSimilarityReport.measuredAt}</p>
+                                  </div>
+                                ) : null}
+
+                                {qualityReport ? (
+                                  <div className="space-y-0.5">
+                                    <p className="font-medium text-slate-900">
+                                      {visualSimilarityReport ? '구조 진단값' : '시각 유사도 측정 상태'}
+                                    </p>
+                                    {!visualSimilarityReport ? (
+                                      <p>visualSimilarity: {visualSimilarityMeasuring ? '측정 진행 중' : '미측정'}</p>
+                                    ) : null}
+                                    <p>measurementMode: structural-diagnostics-only</p>
+                                    <p>pageCount: {qualityReport.summary.pageCount}</p>
+                                    <p>hardFailures: {qualityReport.summary.hardFailureCount}</p>
+                                    <p>fallbackApplied: {qualityReport.fallbackApplied ? 'true' : 'false'}</p>
+                                    {qualityReport.fallbackReason ? <p>fallbackReason: {qualityReport.fallbackReason}</p> : null}
+                                    {offlineMetrics ? (
+                                      <>
+                                        <p>pageContract: {formatScore(offlineMetrics.pageContractScore)}</p>
+                                        <p>textAnchor: {formatScore(offlineMetrics.textAnchorScore)}</p>
+                                        <p>vectorTopology: {formatScore(offlineMetrics.vectorTopologyScore)}</p>
+                                        <p>textContent: {formatScore(offlineMetrics.textContentScore)}</p>
+                                        <p>placeholderIntegrity: {formatScore(offlineMetrics.placeholderIntegrityScore)}</p>
+                                        <p>diagnosticOverall: {formatScore(offlineMetrics.overallScore)}</p>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </details>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
 
@@ -4009,18 +4217,6 @@ export default function TemplateExtractPage() {
               )}
             </CardContent>
           </Card>
-
-          <details className="rounded-lg border border-slate-200 bg-white p-4">
-            <summary className="cursor-pointer text-sm font-medium text-slate-800">고급 JSON 편집</summary>
-            <div className="mt-3 space-y-2">
-              <label className="text-sm font-medium text-slate-800">검토 후보 JSON</label>
-              <textarea
-                value={advancedReviewedFieldsText}
-                onChange={(event) => handleAdvancedReviewedFieldsChange(event.target.value)}
-                className="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </div>
-          </details>
         </div>
       </div>
       <iframe

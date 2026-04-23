@@ -33,3 +33,48 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ success: false, message }, { status: 500 });
   }
 }
+
+export async function PATCH(request: Request, context: RouteContext) {
+  try {
+    const body = await request.json();
+    const { templateId } = await context.params;
+    const updateResult = await TemplateService.updateTemplate(templateId, body);
+
+    return NextResponse.json(
+      { success: true, data: updateResult },
+      {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      }
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+
+    console.error('Template Detail API PATCH Error:', error);
+
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
+}
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  try {
+    const { templateId } = await context.params;
+    const deleteResult = await TemplateService.deleteTemplate(templateId);
+
+    return NextResponse.json(
+      { success: true, data: deleteResult },
+      {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      }
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+
+    console.error('Template Detail API DELETE Error:', error);
+
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
+}
