@@ -198,7 +198,7 @@ const EXTRACT_STRUCTURED_PDF_LABEL_RULES = [
     confidenceScore: 0.84,
   },
   {
-    matches: ['발급자 서명자', '발급자서명'],
+    matches: ['발급자 서명자'],
     fieldKey: 'issuer_signer_name',
     labelKey: 'issuer_signer_name',
     fieldLabel: '발급자 서명자',
@@ -294,7 +294,7 @@ const EXTRACT_STRUCTURED_PDF_LABEL_RULES = [
     confidenceScore: 0.82,
   },
   {
-    matches: ['공급원가 변동에 따른 하도급 대금의 조정', '공급원가변동에따른'],
+    matches: ['공급원가 변동에 따른 하도급 대금의 조정'],
     fieldKey: 'price_adjustment_policy',
     labelKey: 'price_adjustment_policy',
     fieldLabel: '공급원가 변동에 따른 하도급 대금의 조정',
@@ -327,9 +327,6 @@ const average = (values: number[]) => {
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4));
 };
 
-const normalizeKnownFieldText = (value: string) =>
-  value.replace(/[\s*.:：()[\]-]+/g, '').trim().toLowerCase();
-
 const inferDateField = (value: string) => {
   const trimmed = value.trim();
 
@@ -338,7 +335,7 @@ const inferDateField = (value: string) => {
 
 const inferBooleanField = (value: string) => /^(예|아니오|Y|N|O|X|true|false)$/i.test(value.trim());
 
-const normalizeExtractLabel = (value: string) => normalizeKnownFieldText(value);
+const normalizeExtractLabel = (value: string) => value.replace(/\s+/g, '').trim().toLowerCase();
 
 const isNumericOnlyLabel = (value: string) => /^\d+(?:[.)-]?\d+)*$/.test(value.trim());
 
@@ -350,12 +347,12 @@ const getKnownFieldMatchScore = (
     matches: readonly string[];
   }>
 ) => {
-  const normalized = normalizeKnownFieldText(labelText);
+  const normalized = labelText.toLowerCase();
   let bestScore = 0;
 
   for (const rule of rules) {
     for (const match of rule.matches) {
-      const normalizedMatch = normalizeKnownFieldText(match);
+      const normalizedMatch = match.toLowerCase();
 
       if (normalized === normalizedMatch) {
         bestScore = Math.max(bestScore, normalizedMatch.length + 1000);
@@ -468,7 +465,7 @@ const inferKnownField = (labelText: string, index: number) => {
 };
 
 const isKnownExtractLabel = (labelText: string) => {
-  const normalized = normalizeKnownFieldText(labelText);
+  const normalized = labelText.toLowerCase();
 
   return (
     [
@@ -498,7 +495,7 @@ const isKnownExtractLabel = (labelText: string) => {
       '서명',
       'signature',
       'sign',
-    ].some((match) => normalized.includes(normalizeKnownFieldText(match)))
+    ].some((match) => normalized.includes(match.toLowerCase()))
   );
 };
 
@@ -753,7 +750,7 @@ export const TemplateExtractValueBindingService = {
     };
   },
 
-  createKnownEmptyCandidate(labelText: string, sortOrder?: number): TemplateExtractCandidateSeed | null {
+  createKnownEmptyCandidate(labelText: string, sortOrder?: number) {
     const knownField = inferKnownField(labelText, sortOrder || 0);
 
     if (!knownField) {

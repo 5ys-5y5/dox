@@ -315,11 +315,6 @@ export const TemplateExtractService = {
       throw new Error(`템플릿 추출 승인 실패: 후보 필드 조회 중 오류가 발생했습니다. (${candidateError.message})`);
     }
 
-    const approvedDraftHtml =
-      typeof params.generatedDraftHtml === 'string' && params.generatedDraftHtml.trim()
-        ? params.generatedDraftHtml.trim()
-        : draft.generated_draft_html;
-
     const reviewedFields =
       params.reviewedFields && params.reviewedFields.length > 0
         ? params.reviewedFields
@@ -370,7 +365,7 @@ export const TemplateExtractService = {
       templateName,
       sourceDocumentName: draft.source_title,
       sourceDocumentId: null,
-      draftHtml: approvedDraftHtml,
+      draftHtml: draft.generated_draft_html,
       layoutResizeMode: params.layoutResizeMode || DEFAULT_LAYOUT_MODE,
     });
 
@@ -392,7 +387,6 @@ export const TemplateExtractService = {
       .update({
         status: 'approved',
         approved_template_id: template.id,
-        generated_draft_html: approvedDraftHtml,
         confidence_summary: nextSummary,
       })
       .eq('id', normalizedDraftId);

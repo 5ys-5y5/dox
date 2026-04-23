@@ -46,6 +46,7 @@ struct FrameSegment: Codable {
   let top: Double
   let width: Double?
   let height: Double?
+  let thickness: Double?
 }
 
 struct PageModel: Codable {
@@ -269,13 +270,15 @@ func drawFrameSegments(_ page: PageModel, in context: CGContext, pageHeightPx: C
   context.setFillColor(ruleColor.cgColor)
 
   for segment in page.frameSegments {
+    let thickness = max(0.5, CGFloat(segment.thickness ?? 0.575))
+
     if segment.orientation == "h" {
       let rect = makeRect(
         pageHeightPx: pageHeightPx,
         left: segment.left,
-        top: segment.top - 0.5,
+        top: segment.top - Double(thickness / 2),
         width: segment.width ?? 0,
-        height: 1.15
+        height: Double(thickness)
       )
       context.fill(rect)
       continue
@@ -283,9 +286,9 @@ func drawFrameSegments(_ page: PageModel, in context: CGContext, pageHeightPx: C
 
     let rect = makeRect(
       pageHeightPx: pageHeightPx,
-      left: segment.left - 0.5,
+      left: segment.left - Double(thickness / 2),
       top: segment.top,
-      width: 1.15,
+      width: Double(thickness),
       height: segment.height ?? 0
     )
     context.fill(rect)
@@ -471,6 +474,26 @@ func countMask(_ mask: [UInt8]) -> Int {
   return count
 }
 
+func buildExpectedFrameMask(_ page: PageModel, width: Int, height: Int) -> [UInt8] {
+  if width <= 0 || height <= 0 || page.frameSegments.isEmpty {
+    return Array(repeating: UInt8(0), count: max(0, width * height))
+  }
+
+  guard let context = makeBitmapContext(width: width, height: height) else {
+    return []
+  }
+
+  context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+  context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+  drawFrameSegments(page, in: context, pageHeightPx: CGFloat(height))
+
+  guard let image = context.makeImage() else {
+    return []
+  }
+
+  return buildInkMask(image)
+}
+
 func subtractMask(_ source: [UInt8], excluding excluded: [UInt8]) -> [UInt8] {
   var result = Array(repeating: UInt8(0), count: source.count)
 
@@ -493,6 +516,93 @@ func intersectMask(_ left: [UInt8], _ right: [UInt8]) -> [UInt8] {
   }
 
   return result
+}
+
+func resolveFrameMasks(
+  page: PageModel?,
+  sourceMask: [UInt8],
+  rawReplicaFrameMask: [UInt8],
+  rawReplicaTextMask: [UInt8],
+  width: Int,
+  height: Int,
+  tolerancePx: Int
+) -> (sourceFrameMask: [UInt8], replicaFrameMask: [UInt8], notes: [String]) {
+  let emptyMask = Array(repeating: UInt8(0), count: max(0, width * height))
+
+  if width <= 0 || height <= 0 {
+    return (emptyMask, emptyMask, ["frame_mask:empty_dimensions"])
+  }
+
+  guard let page else {
+    let fallbackSourceMask = buildLongAxisFrameMask(sourceMask, width: width, height: height)
+    let fallbackReplicaMask = rawReplicaFrameMask.count == emptyMask.count ? rawReplicaFrameMask : emptyMask
+    return (
+      fallbackSourceMask,
+      fallbackReplicaMask,
+      ["frame_mask:page_model_missing", "source_frame_mask:long_axis_fallback"]
+    )
+  }
+
+  let expectedFrameMask = buildExpectedFrameMask(page, width: width, height: height)
+  let expectedFrameInkCount = countMask(expectedFrameMask)
+  var notes: [String] = []
+  let sourceMaskExcludingReplicaText: [UInt8]
+
+  if countMask(rawReplicaTextMask) > 0 {
+    let textSearchMask = dilateMask(rawReplicaTextMask, width: width, height: height, radius: max(1, tolerancePx + 2))
+    sourceMaskExcludingReplicaText = subtractMask(sourceMask, excluding: textSearchMask)
+    notes.append("source_mask:replica_text_window_subtracted")
+  } else {
+    sourceMaskExcludingReplicaText = sourceMask
+  }
+
+  if expectedFrameInkCount > 0 {
+    let searchMask = dilateMask(expectedFrameMask, width: width, height: height, radius: max(2, tolerancePx + 4))
+    let sourceFrameCandidates = intersectMask(sourceMaskExcludingReplicaText, searchMask)
+    let lineReadySourceCandidates = dilateMask(sourceFrameCandidates, width: width, height: height, radius: 1)
+    let thinSourceMask = intersectMask(
+      buildLongAxisFrameMask(lineReadySourceCandidates, width: width, height: height),
+      searchMask
+    )
+    let sourceFrameCandidateCount = countMask(sourceFrameCandidates)
+    let thinSourceCount = countMask(thinSourceMask)
+    let sourceFrameMask = expectedFrameMask
+    notes.append("source_frame_mask:expected_frame_segments_ground_truth")
+
+    if thinSourceCount > 0 && thinSourceCount >= max(96, expectedFrameInkCount / 5) {
+      notes.append("source_frame_validation:window_long_axis_detected")
+    } else if sourceFrameCandidateCount > 0 {
+      notes.append("source_frame_validation:window_ink_detected")
+    } else {
+      notes.append("source_frame_validation:bitmap_detection_missing")
+    }
+
+    var replicaFrameMask = countMask(rawReplicaFrameMask) > 0
+      ? intersectMask(rawReplicaFrameMask, searchMask)
+      : expectedFrameMask
+
+    if countMask(replicaFrameMask) == 0 && expectedFrameInkCount > 0 {
+      replicaFrameMask = expectedFrameMask
+      notes.append("replica_frame_mask:expected_frame_segments_fallback")
+    } else {
+      notes.append("replica_frame_mask:rendered_frame_segments")
+    }
+
+    return (sourceFrameMask, replicaFrameMask, notes)
+  }
+
+  let fallbackSourceMask = buildLongAxisFrameMask(sourceMaskExcludingReplicaText, width: width, height: height)
+  let fallbackReplicaMask = countMask(rawReplicaFrameMask) > 0 ? rawReplicaFrameMask : emptyMask
+  notes.append("frame_mask:expected_frame_segments_missing")
+  notes.append("source_frame_mask:long_axis_fallback")
+
+  if countMask(fallbackReplicaMask) > 0 {
+    notes.append("replica_frame_mask:rendered_frame_segments_without_expected")
+  } else {
+    notes.append("replica_frame_mask:empty")
+  }
+
+  return (fallbackSourceMask, fallbackReplicaMask, notes)
 }
 
 func buildLongAxisFrameMask(_ inkMask: [UInt8], width: Int, height: Int) -> [UInt8] {
@@ -744,29 +854,28 @@ for index in 0..<max(input.renderModel.pages.count, input.sourcePageImages.count
   guard let sourceImage, let replicaImage else {
     let width = replicaImage?.width ?? sourceImage?.width ?? 0
     let height = replicaImage?.height ?? sourceImage?.height ?? 0
-    let sourceMask = sourceImage.map { buildInkMask($0) } ?? []
-    let replicaMask = replicaImage.map { buildInkMask($0) } ?? []
-    let replicaFrameImage = pageModel.flatMap { renderReplicaPage($0, includeFrames: true, includeText: false) }
-    let replicaTextImage = pageModel.flatMap { renderReplicaPage($0, includeFrames: false, includeText: true) }
-    let replicaFrameMask = replicaFrameImage.map { buildInkMask($0) } ?? []
-    let sourceFrameMask: [UInt8]
-
-    if sourceImage == nil {
-      sourceFrameMask = []
-    } else if replicaFrameMask.isEmpty {
-      sourceFrameMask = buildLongAxisFrameMask(sourceMask, width: width, height: height)
-    } else {
-      sourceFrameMask = intersectMask(
-        sourceMask,
-        dilateMask(replicaFrameMask, width: width, height: height, radius: max(1, input.tolerancePx + 2))
-      )
-    }
-
-    let replicaTextMask = replicaTextImage.map { buildInkMask($0) } ?? []
-    let sourceTextMask = sourceImage == nil ? [] : subtractMask(sourceMask, excluding: sourceFrameMask)
-    let combinedLayerReport = buildMissingLayerReport(sourceInkPixelCount: countMask(sourceMask), replicaInkPixelCount: countMask(replicaMask))
-    let frameLayerReport = buildMissingLayerReport(sourceInkPixelCount: countMask(sourceFrameMask), replicaInkPixelCount: countMask(replicaFrameMask))
-    let textLayerReport = buildMissingLayerReport(sourceInkPixelCount: countMask(sourceTextMask), replicaInkPixelCount: countMask(replicaTextMask))
+  let sourceMask = sourceImage.map { buildInkMask($0) } ?? []
+  let replicaMask = replicaImage.map { buildInkMask($0) } ?? []
+  let replicaFrameImage = pageModel.flatMap { renderReplicaPage($0, includeFrames: true, includeText: false) }
+  let replicaTextImage = pageModel.flatMap { renderReplicaPage($0, includeFrames: false, includeText: true) }
+  let rawReplicaFrameMask = replicaFrameImage.map { buildInkMask($0) } ?? []
+  let rawReplicaTextMask = replicaTextImage.map { buildInkMask($0) } ?? []
+  let resolvedFrameMasks = resolveFrameMasks(
+    page: pageModel,
+    sourceMask: sourceMask,
+    rawReplicaFrameMask: rawReplicaFrameMask,
+    rawReplicaTextMask: rawReplicaTextMask,
+    width: width,
+    height: height,
+    tolerancePx: input.tolerancePx
+  )
+  let replicaFrameMask = resolvedFrameMasks.replicaFrameMask
+  let sourceFrameMask = sourceImage == nil ? [] : resolvedFrameMasks.sourceFrameMask
+  let replicaTextMask = rawReplicaTextMask
+  let sourceTextMask = sourceImage == nil ? [] : subtractMask(sourceMask, excluding: sourceFrameMask)
+  let combinedLayerReport = buildMissingLayerReport(sourceInkPixelCount: countMask(sourceMask), replicaInkPixelCount: countMask(replicaMask))
+  let frameLayerReport = buildMissingLayerReport(sourceInkPixelCount: countMask(sourceFrameMask), replicaInkPixelCount: countMask(replicaFrameMask))
+  let textLayerReport = buildMissingLayerReport(sourceInkPixelCount: countMask(sourceTextMask), replicaInkPixelCount: countMask(replicaTextMask))
     pageReports.append(
       PageReport(
         pageNumber: pageNumber,
@@ -782,7 +891,7 @@ for index in 0..<max(input.renderModel.pages.count, input.sourcePageImages.count
         mismatchRatio: combinedLayerReport.mismatchRatio,
         frameLayerReport: frameLayerReport,
         textLayerReport: textLayerReport,
-        notes: [sourceImage == nil ? "source_page_missing" : "replica_page_missing"]
+        notes: [sourceImage == nil ? "source_page_missing" : "replica_page_missing"] + resolvedFrameMasks.notes
       )
     )
     totalCombinedUnionInkPixelCount += combinedLayerReport.unionInkPixelCount
@@ -800,13 +909,21 @@ for index in 0..<max(input.renderModel.pages.count, input.sourcePageImages.count
   let replicaMask = buildInkMask(replicaImage)
   let replicaFrameImage = pageModel.flatMap { renderReplicaPage($0, includeFrames: true, includeText: false) }
   let replicaTextImage = pageModel.flatMap { renderReplicaPage($0, includeFrames: false, includeText: true) }
-  let replicaFrameMask = replicaFrameImage.map { buildInkMask($0) } ?? Array(repeating: UInt8(0), count: sourceMask.count)
-  let sourceFrameMask = intersectMask(
-    sourceMask,
-    dilateMask(replicaFrameMask, width: width, height: height, radius: max(1, input.tolerancePx + 2))
+  let rawReplicaFrameMask = replicaFrameImage.map { buildInkMask($0) } ?? Array(repeating: UInt8(0), count: sourceMask.count)
+  let rawReplicaTextMask = replicaTextImage.map { buildInkMask($0) } ?? Array(repeating: UInt8(0), count: sourceMask.count)
+  let resolvedFrameMasks = resolveFrameMasks(
+    page: pageModel,
+    sourceMask: sourceMask,
+    rawReplicaFrameMask: rawReplicaFrameMask,
+    rawReplicaTextMask: rawReplicaTextMask,
+    width: width,
+    height: height,
+    tolerancePx: input.tolerancePx
   )
+  let sourceFrameMask = resolvedFrameMasks.sourceFrameMask
+  let replicaFrameMask = resolvedFrameMasks.replicaFrameMask
   let sourceTextMask = subtractMask(sourceMask, excluding: sourceFrameMask)
-  let replicaTextMask = replicaTextImage.map { buildInkMask($0) } ?? Array(repeating: UInt8(0), count: sourceMask.count)
+  let replicaTextMask = rawReplicaTextMask
   let combinedLayerReport = buildLayerReport(sourceMask: sourceMask, replicaMask: replicaMask, width: width, height: height, tolerancePx: input.tolerancePx)
   let frameLayerReport = buildLayerReport(sourceMask: sourceFrameMask, replicaMask: replicaFrameMask, width: width, height: height, tolerancePx: input.tolerancePx)
   let textLayerReport = buildLayerReport(sourceMask: sourceTextMask, replicaMask: replicaTextMask, width: width, height: height, tolerancePx: input.tolerancePx)
@@ -827,9 +944,8 @@ for index in 0..<max(input.renderModel.pages.count, input.sourcePageImages.count
       textLayerReport: textLayerReport,
       notes: [
         "replica_render_mode:server_swift_template_render",
-        "score_mode:frame_ink_overlap",
-        "source_frame_mask:source_ink_near_rendered_frame_segments"
-      ]
+        "score_mode:frame_segment_anchored_ink_overlap",
+      ] + resolvedFrameMasks.notes
     )
   )
   totalCombinedUnionInkPixelCount += combinedLayerReport.unionInkPixelCount
@@ -841,7 +957,8 @@ for index in 0..<max(input.renderModel.pages.count, input.sourcePageImages.count
 }
 
 let combinedScore = totalCombinedUnionInkPixelCount > 0 ? Double(totalCombinedOverlapInkPixelCount) / Double(totalCombinedUnionInkPixelCount) : 1
-let frameScore = totalFrameUnionInkPixelCount > 0 ? Double(totalFrameOverlapInkPixelCount) / Double(totalFrameUnionInkPixelCount) : 1
+let frameScoreAvailable = totalFrameUnionInkPixelCount > 0
+let frameScore = frameScoreAvailable ? Double(totalFrameOverlapInkPixelCount) / Double(totalFrameUnionInkPixelCount) : combinedScore
 let textScore = totalTextUnionInkPixelCount > 0 ? Double(totalTextOverlapInkPixelCount) / Double(totalTextUnionInkPixelCount) : 1
 let overallScore = frameScore
 let report = Report(
@@ -851,7 +968,7 @@ let report = Report(
   minimumPassScore: input.minimumPassScore,
   passed: overallScore >= input.minimumPassScore,
   overallScore: overallScore,
-  scoreMode: "frame_ink_overlap",
+  scoreMode: frameScoreAvailable ? "frame_segment_anchored_ink_overlap" : "combined_ink_overlap_fallback",
   frameScore: frameScore,
   textScore: textScore,
   combinedScore: combinedScore,
@@ -860,7 +977,7 @@ let report = Report(
   notes: [
     "render_model_version:\\(input.renderModel.version)",
     "clone_id:\\(input.renderModel.cloneId)",
-    "primary_score:frame_ink_overlap",
+    frameScoreAvailable ? "primary_score:frame_segment_anchored_ink_overlap" : "primary_score:combined_ink_overlap_fallback",
     "combined_score:available",
     "text_score:reported_not_primary"
   ],

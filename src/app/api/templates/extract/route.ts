@@ -1,6 +1,18 @@
 import { NextResponse } from 'next/server';
+import type {
+  TemplateExtractExtractionStage,
+  TemplateExtractFrameGroupVersion,
+} from '../../../../lib/templateExtractDtos';
 import { TemplateExtractService } from '../../../../services/templateExtractService';
 import { TemplateExtractVersionService } from '../../../../services/templateExtractVersionService';
+
+const normalizeExtractionStage = (value: unknown): TemplateExtractExtractionStage =>
+  value === 'frames' ? 'frames' : 'full';
+
+const normalizeFrameGroupVersion = (value: unknown): TemplateExtractFrameGroupVersion =>
+  value === 'v1.01' || value === 'v1.02' || value === 'v1.03' || value === 'v1.04' || value === 'v1.05' || value === 'v1.06'
+    ? value
+    : 'v1.06';
 
 export async function POST(request: Request) {
   try {
@@ -16,12 +28,16 @@ export async function POST(request: Request) {
       }
 
       const engineVersion = TemplateExtractVersionService.normalizeVersion(formData.get('engineVersion'));
+      const extractionStage = normalizeExtractionStage(formData.get('extractionStage'));
+      const frameGroupVersion = normalizeFrameGroupVersion(formData.get('frameGroupVersion'));
 
       const resolvedSource = await TemplateExtractVersionService.resolveUploadSource(
         file.name,
         file.type || 'application/octet-stream',
         new Uint8Array(await file.arrayBuffer()),
-        engineVersion
+        engineVersion,
+        extractionStage,
+        frameGroupVersion
       );
 
       draft = await TemplateExtractService.createDraftFromResolvedSource(
@@ -39,6 +55,8 @@ export async function POST(request: Request) {
       draft = await TemplateExtractService.createDraft({
         ...body,
         engineVersion: TemplateExtractVersionService.normalizeVersion(body?.engineVersion),
+        extractionStage: normalizeExtractionStage(body?.extractionStage),
+        frameGroupVersion: normalizeFrameGroupVersion(body?.frameGroupVersion),
       });
     }
 

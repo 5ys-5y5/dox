@@ -4,31 +4,15 @@ import { TemplateExtractValueBindingService } from './templateExtractValueBindin
 const TEMPLATE_VALUE_PATTERN =
   /<([a-z0-9:-]+)([^>]*?)\sdata-template-value="([^"]+)"([^>]*)>([\s\S]*?)<\/\1>/gi;
 const ROW_PATTERN = /<tr[^>]*>\s*<th[^>]*>([\s\S]*?)<\/th>\s*<td([^>]*)>([\s\S]*?)<\/td>\s*<\/tr>/gi;
-const RASTER_FIRST_V201_CLONE_PATTERN = /\sdata-template-clone="pdf-raster-first-v2\.(?:01|12|13|14)"/i;
-const RASTER_FIRST_STRUCTURED_CLONE_PATTERN =
-  /\sdata-template-clone="pdf-raster-first-v2\.(?:2|02|03|04|05|11)"/i;
-const RASTER_FIRST_EDIT_TEXT_SPAN_PATTERN =
-  /<([a-z0-9:-]+)([^>]*?\sclass="[^"]*(?:\beditable-text\b|\bv201-edit-text\b|\bv202-edit-text\b)[^"]*"[^>]*)>([\s\S]*?)<\/\1>/gi;
-const RASTER_FIRST_CANONICAL_LABELS: Record<string, string> = {
-  공사내용: '공사 내용',
-  원재료지급시조건: '원재료 지급시 조건',
-  공급원가변동에따른: '공급원가 변동에 따른 하도급 대금의 조정',
-  발급자서명: '발급자 서명자',
-};
+const RASTER_FIRST_V2_CLONE_PATTERN = /\sdata-template-clone="pdf-raster-first-v2\.01"/i;
+const EDITABLE_TEXT_SPAN_PATTERN =
+  /<span([^>]*?\sclass="[^"]*\beditable-text\b[^"]*"[^>]*)>([\s\S]*?)<\/span>/gi;
 
 type RasterFirstEditableFragment = {
   fragmentIndex: number;
-  tagName: string;
   attrs: string;
   rawValueHtml: string;
   text: string;
-};
-
-type RasterFirstPositionedFragment = RasterFirstEditableFragment & {
-  left: number | null;
-  top: number | null;
-  width: number | null;
-  height: number | null;
 };
 
 const mergeClassName = (rawAttrs: string, className: string) => {
@@ -124,17 +108,14 @@ const buildTableCellPlaceholder = (labelKey: string, rawValueHtml: string, label
 
 const extractRasterFirstEditableFragments = (sourceHtml: string): RasterFirstEditableFragment[] => {
   const fragments: RasterFirstEditableFragment[] = [];
-  const pattern = new RegExp(
-    RASTER_FIRST_EDIT_TEXT_SPAN_PATTERN.source,
-    RASTER_FIRST_EDIT_TEXT_SPAN_PATTERN.flags
-  );
+  const pattern = new RegExp(EDITABLE_TEXT_SPAN_PATTERN.source, EDITABLE_TEXT_SPAN_PATTERN.flags);
   let matched: RegExpExecArray | null;
   let spanIndex = 0;
 
   while ((matched = pattern.exec(sourceHtml))) {
     const fragmentIndex = spanIndex;
     spanIndex += 1;
-    const rawValueHtml = matched[3] || '';
+    const rawValueHtml = matched[2] || '';
     const text = TemplateExtractValueBindingService.stripHtml(rawValueHtml);
 
     if (!text || text.length > 120) {
@@ -143,8 +124,7 @@ const extractRasterFirstEditableFragments = (sourceHtml: string): RasterFirstEdi
 
     fragments.push({
       fragmentIndex,
-      tagName: (matched[1] || 'span').toLowerCase(),
-      attrs: matched[2] || '',
+      attrs: matched[1] || '',
       rawValueHtml,
       text,
     });
@@ -153,56 +133,18 @@ const extractRasterFirstEditableFragments = (sourceHtml: string): RasterFirstEdi
   return fragments;
 };
 
-const parseStyleNumber = (attrs: string, name: string) => {
-  const dataMatched = attrs.match(new RegExp(`data-template-abs-${name}="([0-9.]+)"`, 'i'));
-
-  if (dataMatched) {
-    return Number(dataMatched[1]);
-  }
-
-  const matched = attrs.match(new RegExp(`${name}:([0-9.]+)px`, 'i'));
-  return matched ? Number(matched[1]) : null;
-};
-
-const extractRasterFirstPositionedFragments = (sourceHtml: string): RasterFirstPositionedFragment[] =>
-  extractRasterFirstEditableFragments(sourceHtml).map((fragment) => ({
-    ...fragment,
-    left: parseStyleNumber(fragment.attrs, 'left'),
-    top: parseStyleNumber(fragment.attrs, 'top'),
-    width: parseStyleNumber(fragment.attrs, 'width'),
-    height: parseStyleNumber(fragment.attrs, 'height') ?? parseStyleNumber(fragment.attrs, 'min-height'),
-  }));
-
-const normalizeRasterFirstOverlayLabel = (text: string) =>
-  {
-    const normalized = text
-    .replace(/[:：]\s*$/, '')
-    .replace(/^\d+(?:[-.]\d+)?[.)]?\s*/, '')
-    .replace(/\*/g, '')
-    .trim();
-    return RASTER_FIRST_CANONICAL_LABELS[normalized] || normalized;
-  };
-
 const looksLikeRasterFirstLabel = (text: string, index: number) => {
   const normalized = text.trim();
-  const cleaned = normalizeRasterFirstOverlayLabel(normalized);
 
   if (!normalized || normalized.length > 40) {
     return false;
   }
 
-  if (
-    TemplateExtractValueBindingService.inferKnownFieldForLabel(normalized, index)
-    || TemplateExtractValueBindingService.inferKnownFieldForLabel(cleaned, index)
-  ) {
+  if (TemplateExtractValueBindingService.inferKnownFieldForLabel(normalized, index)) {
     return true;
   }
 
-  if (/^\d+(?:[-.]\d+)?/.test(normalized) && cleaned.length > 0 && cleaned.length <= 40) {
-    return true;
-  }
-
-  return /[:：]$/.test(normalized) || /[:：]$/.test(cleaned);
+  return /[:：]$/.test(normalized);
 };
 
 const looksLikeStandaloneValue = (text: string) => {
@@ -223,146 +165,8 @@ const addAttributeToSpan = (attrs: string, name: string, value: string) => {
   return `${attrs} ${name}="${TemplateExtractValueBindingService.escapeHtml(value)}"`;
 };
 
-const hasRasterFirstPosition = (fragment: RasterFirstPositionedFragment) =>
-  fragment.left !== null && fragment.top !== null && fragment.width !== null;
-
-const compareRasterFirstFragments = (left: RasterFirstPositionedFragment, right: RasterFirstPositionedFragment) =>
-  (left.top ?? 0) - (right.top ?? 0) || (left.left ?? 0) - (right.left ?? 0);
-
-const isRasterFirstWideMetadataValue = (text: string) =>
-  /^(양식명|CE |PM |발 급 일|주상복합 |주상복합건축설비공사|완료 접수자서명)/.test(text.trim());
-
-const isRasterFirstWideFooterValue = (text: string) =>
-  /^(○|상기내용|협력사에서는|향후|무효입니다)/.test(text.trim());
-
-const isRasterFirstWideContinuationValue = (text: string) =>
-  /^(2전열교환기|250CMH|350CMH|500CMH|2실물량정산기준임)/.test(text.trim());
-
-const hasRasterFirstRightLabelMate = (
-  label: RasterFirstPositionedFragment,
-  rightLabels: RasterFirstPositionedFragment[]
-) => {
-  const labelTop = label.top ?? 0;
-  return rightLabels.some((candidate) => Math.abs((candidate.top ?? 0) - labelTop) <= 12);
-};
-
-const registerRasterFirstSequentialPairs = ({
-  labels,
-  values,
-  registry,
-  labelKeyByFragmentIndex,
-  shouldRegister,
-}: {
-  labels: RasterFirstPositionedFragment[];
-  values: RasterFirstPositionedFragment[];
-  registry: ReturnType<typeof TemplateExtractValueBindingService.createProjectionRegistry>;
-  labelKeyByFragmentIndex: Map<number, string>;
-  shouldRegister?: (
-    label: RasterFirstPositionedFragment,
-    value: RasterFirstPositionedFragment,
-    pairIndex: number
-  ) => boolean;
-}) => {
-  let valueIndex = 0;
-
-  for (const label of labels.sort(compareRasterFirstFragments)) {
-    const value = values[valueIndex];
-
-    if (!value) {
-      break;
-    }
-
-    valueIndex += 1;
-
-    if (shouldRegister && !shouldRegister(label, value, valueIndex - 1)) {
-      continue;
-    }
-
-    const labelText = normalizeRasterFirstOverlayLabel(label.text);
-
-    if (!labelText) {
-      continue;
-    }
-
-    const candidate = registry.registerPair({
-      labelText,
-      valueText: value.text,
-      valueHtml: value.rawValueHtml,
-    });
-
-    if (!candidate) {
-      continue;
-    }
-
-    labelKeyByFragmentIndex.set(value.fragmentIndex, candidate.labelKey);
-  }
-};
-
-const projectRasterFirstStructuredClone = (sourceHtml: string): TemplateExtractProjectionResult | null => {
-  if (!RASTER_FIRST_STRUCTURED_CLONE_PATTERN.test(sourceHtml)) {
-    return null;
-  }
-
-  const registry = TemplateExtractValueBindingService.createProjectionRegistry();
-  sourceHtml.replace(
-    TEMPLATE_VALUE_PATTERN,
-    (
-      fullMatch,
-      tagName: string,
-      leadingAttrs: string,
-      rawLabel: string,
-      trailingAttrs: string,
-      rawValueHtml: string
-    ) => {
-      const labelText = TemplateExtractValueBindingService.decodeHtmlEntities(rawLabel).trim();
-      const valueText = TemplateExtractValueBindingService.stripHtml(rawValueHtml);
-
-      if (!labelText) {
-        return fullMatch;
-      }
-
-      const candidate =
-        registry.registerPair(
-          {
-            labelText,
-            valueText,
-            valueHtml: rawValueHtml,
-          },
-          { allowKnownEmptyValue: true }
-        ) ||
-        (!valueText
-          ? TemplateExtractValueBindingService.createKnownEmptyCandidate(
-              labelText,
-              registry.candidates.length + 1
-            )
-          : null);
-
-      if (!candidate) {
-        return fullMatch;
-      }
-
-      if (!registry.candidates.includes(candidate)) {
-        registry.pairs.push({
-          labelText,
-          valueText,
-          valueHtml: rawValueHtml,
-        });
-        registry.candidates.push(candidate);
-      }
-
-      return fullMatch;
-    }
-  );
-
-  return {
-    pairs: registry.pairs,
-    candidates: registry.candidates,
-    generatedDraftHtml: sourceHtml,
-  };
-};
-
-const projectRasterFirstEditableCloneV201 = (sourceHtml: string): TemplateExtractProjectionResult | null => {
-  if (!RASTER_FIRST_V201_CLONE_PATTERN.test(sourceHtml)) {
+const projectRasterFirstEditableClone = (sourceHtml: string): TemplateExtractProjectionResult | null => {
+  if (!RASTER_FIRST_V2_CLONE_PATTERN.test(sourceHtml)) {
     return null;
   }
 
@@ -405,7 +209,7 @@ const projectRasterFirstEditableCloneV201 = (sourceHtml: string): TemplateExtrac
 
   let fragmentIndex = 0;
   const generatedDraftHtml = sourceHtml.replace(
-    RASTER_FIRST_EDIT_TEXT_SPAN_PATTERN,
+    EDITABLE_TEXT_SPAN_PATTERN,
     (fullMatch, attrs: string, rawValueHtml: string) => {
       const labelKey = labelKeyByFragmentIndex.get(fragmentIndex);
       fragmentIndex += 1;
@@ -428,8 +232,7 @@ const projectRasterFirstEditableCloneV201 = (sourceHtml: string): TemplateExtrac
 
 export const TemplateExtractDomProjectionService = {
   projectCloneHtml(sourceHtml: string): TemplateExtractProjectionResult {
-    const rasterFirstProjection = projectRasterFirstStructuredClone(sourceHtml)
-      || projectRasterFirstEditableCloneV201(sourceHtml);
+    const rasterFirstProjection = projectRasterFirstEditableClone(sourceHtml);
 
     if (rasterFirstProjection) {
       return rasterFirstProjection;

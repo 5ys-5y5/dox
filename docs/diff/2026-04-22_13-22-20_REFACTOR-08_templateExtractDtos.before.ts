@@ -3,16 +3,6 @@ import type { TemplateFieldType, TemplateLayoutResizeMode } from './templateDtos
 export type TemplateExtractSourceKind = 'html' | 'text';
 
 export type TemplateExtractEngineVersion =
-  | '47'
-  | '46'
-  | '45'
-  | '44'
-  | '43'
-  | '42'
-  | '36'
-  | '35'
-  | '34'
-  | '33'
   | '5'
   | '7'
   | '8'
@@ -47,16 +37,6 @@ export const TEMPLATE_EXTRACT_ENGINE_VERSION_OPTIONS: Array<{
   value: TemplateExtractEngineVersion;
   label: string;
 }> = [
-  { value: '47', label: 'v2.21' },
-  { value: '46', label: 'v2.2' },
-  { value: '45', label: 'v2.14' },
-  { value: '44', label: 'v2.13' },
-  { value: '43', label: 'v2.12' },
-  { value: '42', label: 'v2.11' },
-  { value: '36', label: 'v2.05' },
-  { value: '35', label: 'v2.04' },
-  { value: '34', label: 'v2.03' },
-  { value: '33', label: 'v2.02' },
   { value: '32', label: 'v2.01' },
   { value: '5', label: toLegacyV1Label('5') },
   { value: '7', label: toLegacyV1Label('7') },
@@ -105,20 +85,6 @@ export type TemplateExtractPdfTextSource = 'text_layer' | 'fallback_text' | 'ocr
 export type TemplateExtractPdfSourceMode = 'digital' | 'scanned';
 
 export type TemplateExtractDocumentFamily = 'work_order' | 'certificate' | 'generic_form';
-export type TemplateExtractExtractionStage = 'full' | 'frames';
-export type TemplateExtractFrameGroupVersion = 'v1.01' | 'v1.02' | 'v1.03' | 'v1.04' | 'v1.05' | 'v1.06';
-
-export const TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS: Array<{
-  value: TemplateExtractFrameGroupVersion;
-  label: string;
-}> = [
-  { value: 'v1.06', label: 'v1.06' },
-  { value: 'v1.05', label: 'v1.05' },
-  { value: 'v1.04', label: 'v1.04' },
-  { value: 'v1.03', label: 'v1.03' },
-  { value: 'v1.02', label: 'v1.02' },
-  { value: 'v1.01', label: 'v1.01' },
-];
 
 export type TemplateExtractCreateInput = {
   sourceTitle?: string | null;
@@ -126,8 +92,6 @@ export type TemplateExtractCreateInput = {
   sourceContent: string;
   similarTemplateIds?: string[];
   engineVersion?: TemplateExtractEngineVersion;
-  extractionStage?: TemplateExtractExtractionStage;
-  frameGroupVersion?: TemplateExtractFrameGroupVersion;
 };
 
 export type TemplateExtractResolvedSource = {
@@ -136,8 +100,6 @@ export type TemplateExtractResolvedSource = {
   sourceContent: string;
   originalFileName: string | null;
   originalMimeType: string | null;
-  extractionStage?: TemplateExtractExtractionStage;
-  frameGroupVersion?: TemplateExtractFrameGroupVersion;
   pipelineTrace?: TemplateExtractPdfPipelineTrace | null;
   qualityReport?: TemplateExtractReplicaQualityReport | null;
 };
@@ -327,8 +289,6 @@ export type TemplateExtractPdfFrameDiagnostics = {
 
 export type TemplateExtractPdfPipelineTrace = {
   engineVersion: TemplateExtractEngineVersion;
-  extractionStage?: TemplateExtractExtractionStage;
-  frameGroupVersion?: TemplateExtractFrameGroupVersion;
   sourceMode: TemplateExtractPdfSourceMode;
   documentFamily: TemplateExtractDocumentFamily;
   familyConfidenceScore: number;
@@ -462,14 +422,12 @@ export type TemplateExtractReplicaRenderFrameSegment =
       left: number;
       top: number;
       width: number;
-      thickness?: number;
     }
   | {
       orientation: 'v';
       left: number;
       top: number;
       height: number;
-      thickness?: number;
     };
 
 export type TemplateExtractReplicaRenderPage = {
@@ -591,7 +549,6 @@ export type TemplateExtractApproveInput = {
   templateName: string;
   layoutResizeMode?: TemplateLayoutResizeMode;
   reviewedFields?: TemplateExtractReviewedFieldInput[];
-  generatedDraftHtml?: string;
 };
 
 export type TemplateExtractApproveResult = {

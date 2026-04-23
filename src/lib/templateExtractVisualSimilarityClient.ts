@@ -1430,8 +1430,24 @@ const buildVisualSimilarityReport = (
     const sourceTextMask = subtractMask(sourceMask, sourceFrameMask);
     const replicaTextMask = subtractMask(replicaMask, replicaFrameMask);
     const compared = compareInkMasks(sourceMask, replicaMask, targetWidth, targetHeight, tolerancePx);
-    const frameLayerReport = compareInkMasks(sourceFrameMask, replicaFrameMask, targetWidth, targetHeight, tolerancePx);
+    const rawFrameLayerReport = compareInkMasks(
+      sourceFrameMask,
+      replicaFrameMask,
+      targetWidth,
+      targetHeight,
+      tolerancePx
+    );
+    const frameLayerReport =
+      rawFrameLayerReport.unionInkPixelCount > 0
+        ? rawFrameLayerReport
+        : {
+            ...rawFrameLayerReport,
+            overlapRatio: 0,
+            exactOverlapRatio: 0,
+            mismatchRatio: 0,
+          };
     const textLayerReport = compareInkMasks(sourceTextMask, replicaTextMask, targetWidth, targetHeight, tolerancePx);
+    const frameScoreAvailable = frameLayerReport.unionInkPixelCount > 0;
     const report: TemplateExtractVisualSimilarityPageReport = {
       pageNumber,
       width: targetWidth,
@@ -1448,9 +1464,10 @@ const buildVisualSimilarityReport = (
       textLayerReport,
       notes: [
         `replica_capture_mode:${replicaPage.captureMode}`,
-        'score_mode:frame_ink_overlap',
+        frameScoreAvailable ? 'score_mode:frame_ink_overlap' : 'score_mode:combined_ink_overlap',
         'source_frame_mask:long_axis_runs_24px',
         'replica_frame_mask:long_axis_runs_24px',
+        ...(frameScoreAvailable ? [] : ['frame_mask_union_missing']),
         ...(replicaPage.foreignObjectError
           ? [`replica_foreign_object_error:${replicaPage.foreignObjectError}`]
           : []),
@@ -1475,8 +1492,10 @@ const buildVisualSimilarityReport = (
 
   const combinedScore =
     totalCombinedUnionInkPixelCount > 0 ? totalCombinedOverlapInkPixelCount / totalCombinedUnionInkPixelCount : 1;
-  const frameScore =
-    totalFrameUnionInkPixelCount > 0 ? totalFrameOverlapInkPixelCount / totalFrameUnionInkPixelCount : 1;
+  const frameScoreAvailable = totalFrameUnionInkPixelCount > 0;
+  const frameScore = frameScoreAvailable
+    ? totalFrameOverlapInkPixelCount / totalFrameUnionInkPixelCount
+    : combinedScore;
   const textScore =
     totalTextUnionInkPixelCount > 0 ? totalTextOverlapInkPixelCount / totalTextUnionInkPixelCount : 1;
   const overallScore = frameScore;
@@ -1488,7 +1507,7 @@ const buildVisualSimilarityReport = (
     minimumPassScore,
     passed: overallScore >= minimumPassScore,
     overallScore,
-    scoreMode: 'frame_ink_overlap',
+    scoreMode: frameScoreAvailable ? 'frame_ink_overlap' : 'combined_ink_overlap',
     frameScore,
     textScore,
     combinedScore,
@@ -1496,7 +1515,7 @@ const buildVisualSimilarityReport = (
     pageCount,
     notes: [
       ...reportNotes,
-      'primary_score:frame_ink_overlap',
+      frameScoreAvailable ? 'primary_score:frame_ink_overlap' : 'primary_score:combined_ink_overlap',
       'combined_score:available',
       'text_score:reported_not_primary',
     ],

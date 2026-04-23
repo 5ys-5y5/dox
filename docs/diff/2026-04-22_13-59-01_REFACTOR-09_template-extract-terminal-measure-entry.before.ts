@@ -40,7 +40,7 @@ const resolveFrameScore = (report: { frameScore?: number; overallScore: number }
 const main = async () => {
   const args = parseArgs(process.argv.slice(2));
   const filePath = String(args.file || '').trim();
-  const version = TemplateExtractVersionService.normalizeVersion(args.version || '47');
+  const version = TemplateExtractVersionService.normalizeVersion(args.version || '32');
   const versionLabel = formatTemplateExtractEngineVersionLabel(version);
   const tolerancePx = Number.isFinite(Number(args.tolerancePx)) ? Math.max(0, Math.trunc(Number(args.tolerancePx))) : 1;
   const minimumPassScore = Number.isFinite(Number(args.minimumPassScore))
@@ -48,7 +48,7 @@ const main = async () => {
     : 0.95;
 
   if (!filePath) {
-    throw new Error('사용법: npm run template-extract:measure -- --file <pdf-path> [--version v2.2] [--minimumPassScore 0.95]');
+    throw new Error('사용법: npm run template-extract:measure -- --file <pdf-path> [--version v2.01] [--minimumPassScore 0.95]');
   }
 
   const fileName = basename(filePath);

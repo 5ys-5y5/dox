@@ -10,11 +10,14 @@ import { applyTemplateExtractEditableTextFit } from '../../../lib/templateExtrac
 import {
   formatTemplateExtractEngineVersionLabel,
   TEMPLATE_EXTRACT_ENGINE_VERSION_OPTIONS,
+  TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS,
 } from '../../../lib/templateExtractDtos';
 import type {
   TemplateExtractCandidateDto,
   TemplateExtractDetailResult,
   TemplateExtractEngineVersion,
+  TemplateExtractExtractionStage,
+  TemplateExtractFrameGroupVersion,
   TemplateExtractReviewedFieldInput,
   TemplateExtractSourceKind,
   TemplateExtractVisualSimilarityReport,
@@ -81,6 +84,69 @@ type VisualSimilarityProgressState = {
   stage: string;
   detail: string;
 };
+
+type DraftPreviewEditRole = 'editor' | 'admin';
+type PreviewPaneMode = 'source' | 'draft';
+type FrameEditorRole = 'group' | 'key' | 'value';
+type FrameNodeRect = { left: number; top: number; width: number; height: number };
+type FrameResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+type FrameNodeSnapshot = {
+  pageNumber: string;
+  attrs: Record<string, string>;
+  rowColor: string;
+  colColor: string;
+  rect: FrameNodeRect;
+  value: string;
+};
+type FrameDragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  anchorNode: HTMLElement;
+  nodes: Array<{
+    node: HTMLElement;
+    rect: FrameNodeRect;
+  }>;
+};
+type FrameResizeState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  direction: FrameResizeDirection;
+  node: HTMLElement;
+  rect: FrameNodeRect;
+};
+type FlattenedFramePreviewMarkup = {
+  html: string;
+  styleText: string;
+  cloneId: string;
+  extractionStage: string;
+  frameGroupVersion: string;
+  pageWidth: string;
+  pageMinHeight: string;
+};
+
+const V106_FRAME_NODE_SELECTOR = '[data-v106-frame-node="true"]';
+const V106_FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
+const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
+const FRAME_SELECTION_NODE_SELECTOR = `${V106_FRAME_NODE_SELECTOR}, ${RAW_FRAME_NODE_SELECTOR}`;
+const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
+const FRAME_GROUP_ATTR_NAMES = [
+  'data-template-frame-group',
+  'data-template-frame-color-group',
+  'data-template-frame-value-key',
+  'data-template-frame-source-text',
+  'data-template-frame-role',
+  'data-template-frame-parent-group',
+  'data-template-frame-chain-key',
+  'data-template-frame-chain-depth',
+  'data-template-frame-row-start',
+  'data-template-frame-row-end',
+  'data-template-frame-col-start',
+  'data-template-frame-col-end',
+  'data-template-frame-halign',
+  'data-template-frame-valign',
+] as const;
 
 const VISUAL_SIMILARITY_PROGRESS_STEPS: Array<{
   key: VisualSimilarityProgressStepKey;
@@ -150,21 +216,545 @@ const toReviewedFields = (detail: TemplateExtractDetailResult): TemplateExtractR
     reviewStatus: candidate.reviewStatus,
   }));
 
-const renderContentPreview = (sourceKind: TemplateExtractSourceKind, content: string) => {
+const stringifyTemplateDefaultValue = (value: unknown) =>
+  value === null || value === undefined ? '' : String(value);
+
+const reviewedFieldValueText = (
+  field: TemplateExtractReviewedFieldInput,
+  candidate: TemplateExtractCandidateDto | undefined
+) => stringifyTemplateDefaultValue(field.defaultValue ?? candidate?.detectedValue ?? '');
+
+const stripDraftPreviewUiState = (html: string) => {
+  if (!html.trim()) {
+    return '';
+  }
+
+  if (typeof document === 'undefined') {
+    return html
+      .replace(/\sdata-template-selected="true"/gi, '')
+      .replace(/\sdata-template-edit-enabled="(?:true|false)"/gi, '')
+      .replace(/\splaceholder="[^"]*"/gi, '');
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  container.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
+    element.removeAttribute('data-template-selected');
+  });
+  container.querySelectorAll<HTMLElement>('[data-template-edit-enabled]').forEach((element) => {
+    element.removeAttribute('data-template-edit-enabled');
+  });
+  container.querySelectorAll<HTMLElement>('[data-template-edit-scope="admin"]').forEach((element) => {
+    element.setAttribute('contenteditable', 'false');
+  });
+  container.querySelectorAll<HTMLElement>('[data-template-edit-scope="editor"]').forEach((element) => {
+    element.setAttribute('contenteditable', 'true');
+  });
+  container.querySelectorAll<HTMLElement>('[data-template-frame-input][placeholder]').forEach((element) => {
+    element.removeAttribute('placeholder');
+  });
+  container.querySelectorAll<HTMLElement>(V106_FRAME_RESIZE_HANDLE_SELECTOR).forEach((element) => {
+    element.remove();
+  });
+
+  return container.innerHTML;
+};
+
+const applyDraftPreviewEditPermissions = (root: HTMLElement, editRole: DraftPreviewEditRole) => {
+  const isAdmin = editRole === 'admin';
+
+  root.setAttribute('data-template-edit-role', editRole);
+  root.querySelectorAll<HTMLElement>('[data-template-edit-scope]').forEach((element) => {
+    const scope = element.getAttribute('data-template-edit-scope') || 'editor';
+    const enabled = scope !== 'admin' || isAdmin;
+    element.setAttribute('contenteditable', enabled ? 'true' : 'false');
+    element.setAttribute('data-template-edit-enabled', enabled ? 'true' : 'false');
+  });
+};
+
+const findTemplateValueElements = (root: HTMLElement, labelKey: string) =>
+  Array.from(root.querySelectorAll<HTMLElement>('[data-template-value]')).filter(
+    (element) => element.getAttribute('data-template-value') === labelKey
+  );
+
+const findClosestTemplateValueElement = (node: Node | null) => {
+  if (!node) {
+    return null;
+  }
+
+  const element = node instanceof HTMLElement ? node : node.parentElement;
+  return element?.closest<HTMLElement>('[data-template-value]') || null;
+};
+
+const resolveTemplateValueElementFromTarget = (target: EventTarget | null) => {
+  const directTarget = target instanceof Node ? target : null;
+  const directMatch = findClosestTemplateValueElement(directTarget);
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const selection = window.getSelection();
+  return (
+    findClosestTemplateValueElement(selection?.anchorNode || null) ||
+    findClosestTemplateValueElement(selection?.focusNode || null)
+  );
+};
+
+const markTemplateValueElementEdited = (element: HTMLElement) => {
+  element.setAttribute('data-template-edited', 'true');
+  element
+    .closest('.v201-choice-row, .v202-line--choice')
+    ?.setAttribute('data-template-edited', 'true');
+};
+
+const toggleChoiceBoxElement = (element: HTMLElement) => {
+  const nextValue = element.getAttribute('data-checked') === '1' ? '0' : '1';
+  element.setAttribute('data-checked', nextValue);
+  element.setAttribute('aria-checked', nextValue === '1' ? 'true' : 'false');
+  markTemplateValueElementEdited(element);
+};
+
+const templateValueElementText = (element: HTMLElement) =>
+  element.innerText
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
+    .join('\n')
+    .trim();
+
+const parseFramePx = (value: string | null | undefined) => {
+  const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => ({
+  left: parseFramePx(node.style.left),
+  top: parseFramePx(node.style.top),
+  width: Math.max(1, parseFramePx(node.style.width)),
+  height: Math.max(1, parseFramePx(node.style.height)),
+});
+
+const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
+  node.style.left = `${Math.round(rect.left)}px`;
+  node.style.top = `${Math.round(rect.top)}px`;
+  node.style.width = `${Math.max(1, Math.round(rect.width))}px`;
+  node.style.height = `${Math.max(1, Math.round(rect.height))}px`;
+};
+
+const clampFrameNodeRect = (
+  rect: FrameNodeRect,
+  bounds: { width: number; height: number },
+  minSize = 12
+): FrameNodeRect => {
+  const width = Math.max(minSize, Math.min(bounds.width, rect.width));
+  const height = Math.max(minSize, Math.min(bounds.height, rect.height));
+  const left = Math.max(0, Math.min(bounds.width - width, rect.left));
+  const top = Math.max(0, Math.min(bounds.height - height, rect.top));
+  return { left, top, width, height };
+};
+
+const frameRectsOverlapVertically = (left: FrameNodeRect, right: FrameNodeRect) =>
+  left.top < right.top + right.height - 2 && right.top < left.top + left.height - 2;
+
+const frameRectsOverlapHorizontally = (top: FrameNodeRect, bottom: FrameNodeRect) =>
+  top.left < bottom.left + bottom.width - 2 && bottom.left < top.left + top.width - 2;
+
+const getNextFrameSelection = (previous: string[], frameGroupId: string, isMultiSelect: boolean) => {
+  if (isMultiSelect) {
+    return previous.includes(frameGroupId)
+      ? previous.filter((value) => value !== frameGroupId)
+      : [...previous, frameGroupId];
+  }
+
+  return previous.includes(frameGroupId) ? previous : [frameGroupId];
+};
+
+const readSelectableFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
+  if (node.matches(V106_FRAME_NODE_SELECTOR)) {
+    return readFrameNodeRect(node);
+  }
+
+  const pageInner = node.closest<HTMLElement>('.page-inner');
+  const pageRect = pageInner?.getBoundingClientRect();
+  const rect = node.getBoundingClientRect();
+
+  return {
+    left: rect.left - (pageRect?.left || 0),
+    top: rect.top - (pageRect?.top || 0),
+    width: rect.width,
+    height: rect.height,
+  };
+};
+
+const applyFrameSelectionHighlight = (root: HTMLElement, selectedIds: string[]) => {
+  root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
+    element.removeAttribute('data-template-selected');
+    element.removeAttribute('data-template-primary-selected');
+    element.removeAttribute('data-template-selection-order');
+  });
+  root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_BADGE_CLASS}`).forEach((element) => {
+    element.remove();
+  });
+
+  if (!selectedIds.length) {
+    return;
+  }
+
+  root
+    .querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)
+    .forEach((node) => {
+      const groupId = node.getAttribute('data-template-frame-group') || '';
+      const selectedIndex = selectedIds.indexOf(groupId);
+
+      if (selectedIndex >= 0) {
+        node.setAttribute('data-template-selected', 'true');
+        node.setAttribute('data-template-selection-order', String(selectedIndex + 1));
+
+        if (selectedIndex === 0) {
+          node.setAttribute('data-template-primary-selected', 'true');
+        }
+
+        const badge = document.createElement('div');
+        badge.className = FRAME_SELECTION_BADGE_CLASS;
+        badge.setAttribute('aria-hidden', 'true');
+        badge.textContent = selectedIds.length > 1 ? `선택 ${selectedIndex + 1}` : '선택됨';
+        node.appendChild(badge);
+      }
+    });
+};
+
+const buildV106FrameNode = (snapshot: FrameNodeSnapshot) => {
+  const resizeHandles: Array<{
+    direction: FrameResizeDirection;
+    cursor: string;
+    style: Partial<CSSStyleDeclaration>;
+  }> = [
+    {
+      direction: 'n',
+      cursor: 'ns-resize',
+      style: { top: '-4px', left: '8px', right: '8px', height: '8px' },
+    },
+    {
+      direction: 's',
+      cursor: 'ns-resize',
+      style: { bottom: '-4px', left: '8px', right: '8px', height: '8px' },
+    },
+    {
+      direction: 'e',
+      cursor: 'ew-resize',
+      style: { top: '8px', right: '-4px', bottom: '8px', width: '8px' },
+    },
+    {
+      direction: 'w',
+      cursor: 'ew-resize',
+      style: { top: '8px', left: '-4px', bottom: '8px', width: '8px' },
+    },
+    {
+      direction: 'ne',
+      cursor: 'nesw-resize',
+      style: { top: '-4px', right: '-4px', width: '10px', height: '10px' },
+    },
+    {
+      direction: 'nw',
+      cursor: 'nwse-resize',
+      style: { top: '-4px', left: '-4px', width: '10px', height: '10px' },
+    },
+    {
+      direction: 'se',
+      cursor: 'nwse-resize',
+      style: { right: '-4px', bottom: '-4px', width: '10px', height: '10px' },
+    },
+    {
+      direction: 'sw',
+      cursor: 'nesw-resize',
+      style: { left: '-4px', bottom: '-4px', width: '10px', height: '10px' },
+    },
+  ];
+
+  const box = document.createElement('div');
+  box.className = 'v202-cell-box v202-frame-group';
+  box.setAttribute('data-v106-frame-node', 'true');
+  box.setAttribute('data-template-frame-page', snapshot.pageNumber);
+
+  for (const [name, value] of Object.entries(snapshot.attrs)) {
+    if (value) {
+      box.setAttribute(name, value);
+    }
+  }
+
+  box.style.position = 'absolute';
+  box.style.left = `${Math.round(snapshot.rect.left)}px`;
+  box.style.top = `${Math.round(snapshot.rect.top)}px`;
+  box.style.width = `${Math.max(1, Math.round(snapshot.rect.width))}px`;
+  box.style.height = `${Math.max(1, Math.round(snapshot.rect.height))}px`;
+  box.style.boxSizing = 'border-box';
+  box.style.border = '1px solid rgba(15, 23, 42, 0.55)';
+  box.style.background = snapshot.colColor || 'rgba(14, 165, 233, 0.14)';
+  box.style.overflow = 'hidden';
+  box.style.display = 'block';
+  box.style.cursor = 'grab';
+  box.style.userSelect = 'none';
+  box.style.touchAction = 'none';
+  box.style.setProperty('--v102-row-color', snapshot.rowColor);
+  box.style.setProperty('--v102-col-color', snapshot.colColor);
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'v202-frame-group-input';
+  textarea.value = '';
+  textarea.setAttribute('spellcheck', 'false');
+  textarea.setAttribute('data-template-frame-input', 'true');
+  textarea.setAttribute('readonly', 'true');
+  textarea.setAttribute('tabindex', '-1');
+  textarea.setAttribute('aria-hidden', 'true');
+  textarea.style.position = 'absolute';
+  textarea.style.inset = '0';
+  textarea.style.display = 'block';
+  textarea.style.width = '100%';
+  textarea.style.height = '100%';
+  textarea.style.padding = '0';
+  textarea.style.margin = '0';
+  textarea.style.border = '0';
+  textarea.style.background = 'transparent';
+  textarea.style.resize = 'none';
+  textarea.style.overflow = 'hidden';
+  textarea.style.boxSizing = 'border-box';
+  textarea.style.font = 'inherit';
+  textarea.style.color = 'transparent';
+  textarea.style.caretColor = 'transparent';
+  textarea.style.lineHeight = '1.2';
+  textarea.style.whiteSpace = 'pre-wrap';
+  textarea.style.outline = 'none';
+  textarea.style.pointerEvents = 'none';
+  textarea.style.userSelect = 'none';
+  textarea.style.textAlign = snapshot.attrs['data-template-frame-halign'] || 'left';
+
+  for (const name of FRAME_GROUP_ATTR_NAMES) {
+    const value = snapshot.attrs[name];
+    if (value) {
+      textarea.setAttribute(name, value);
+    }
+  }
+
+  box.appendChild(textarea);
+
+  resizeHandles.forEach(({ direction, cursor, style }) => {
+    const handle = document.createElement('div');
+    handle.setAttribute('data-v106-resize-handle', 'true');
+    handle.setAttribute('data-v106-resize-direction', direction);
+    handle.style.position = 'absolute';
+    handle.style.zIndex = '3';
+    handle.style.pointerEvents = 'auto';
+    handle.style.touchAction = 'none';
+    handle.style.cursor = cursor;
+    handle.style.background = 'transparent';
+    Object.assign(handle.style, style);
+    box.appendChild(handle);
+  });
+
+  return box;
+};
+
+const extractStyleValue = (styleText: string, property: string) => {
+  const match = styleText.match(new RegExp(`${property}\\s*:\\s*([^;]+)`, 'i'));
+  return match?.[1]?.trim() || '';
+};
+
+const flattenFramePreviewMarkup = (html: string): FlattenedFramePreviewMarkup | null => {
+  if (!html.trim() || typeof document === 'undefined' || !html.includes('data-template-extraction-stage="frames"')) {
+    return null;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+
+  const frameSection =
+    container.querySelector<HTMLElement>(':scope > section[data-template-extraction-stage="frames"]') ||
+    container.querySelector<HTMLElement>('section[data-template-extraction-stage="frames"]');
+
+  if (!frameSection) {
+    return null;
+  }
+
+  const pageSections = Array.from(frameSection.querySelectorAll<HTMLElement>(':scope > section.page'));
+
+  if (pageSections.length !== 1) {
+    return null;
+  }
+
+  const styleText = Array.from(frameSection.children)
+    .filter((node) => node.tagName === 'STYLE')
+    .map((node) => node.textContent || '')
+    .join('');
+
+  const fragment = document.createElement('div');
+  let firstPageWidth = '';
+  let firstPageMinHeight = '';
+
+  pageSections.forEach((pageSection, pageIndex) => {
+    const pageInner = pageSection.querySelector<HTMLElement>(':scope > .page-inner');
+
+    if (!pageInner) {
+      return;
+    }
+
+    const nextPageInner = pageInner.cloneNode(true) as HTMLElement;
+    const pageStyle = pageSection.getAttribute('style') || '';
+    const pageWidth = extractStyleValue(pageStyle, 'width');
+    const pageMinHeight = extractStyleValue(pageStyle, 'min-height');
+
+    if (!firstPageWidth && pageWidth) {
+      firstPageWidth = pageWidth;
+    }
+
+    if (!firstPageMinHeight && pageMinHeight) {
+      firstPageMinHeight = pageMinHeight;
+    }
+
+    nextPageInner.classList.add('template-clone', 'template-clone--raster-first-v2-structured');
+    nextPageInner.setAttribute(
+      'data-template-extraction-stage',
+      frameSection.getAttribute('data-template-extraction-stage') || 'frames'
+    );
+    nextPageInner.setAttribute(
+      'data-template-frame-group-version',
+      frameSection.getAttribute('data-template-frame-group-version') || ''
+    );
+    nextPageInner.setAttribute(
+      'data-template-clone-id',
+      frameSection.getAttribute('data-template-clone-id') || ''
+    );
+
+    if (pageWidth) {
+      nextPageInner.style.width = pageWidth;
+    }
+
+    if (pageMinHeight) {
+      nextPageInner.style.minHeight = pageMinHeight;
+    }
+
+    nextPageInner.style.margin = '0';
+    nextPageInner.style.padding = '0';
+    nextPageInner.style.display = 'block';
+    nextPageInner.setAttribute('data-page', pageSection.getAttribute('data-page') || String(pageIndex + 1));
+    fragment.appendChild(nextPageInner);
+  });
+
+  return {
+    html: fragment.innerHTML,
+    styleText,
+    cloneId: frameSection.getAttribute('data-template-clone-id') || '',
+    extractionStage: frameSection.getAttribute('data-template-extraction-stage') || 'frames',
+    frameGroupVersion: frameSection.getAttribute('data-template-frame-group-version') || '',
+    pageWidth: firstPageWidth,
+    pageMinHeight: firstPageMinHeight,
+  };
+};
+
+const normalizeFramePreviewForV106 = (root: HTMLElement) => {
+  const frameSection = root.querySelector<HTMLElement>(
+    'section[data-template-extraction-stage="frames"][data-template-frame-group-version="v1.06"]'
+  );
+
+  if (!frameSection || frameSection.getAttribute('data-v106-frame-editor-ready') === 'true') {
+    return false;
+  }
+
+  let transformed = false;
+
+  frameSection.querySelectorAll<HTMLElement>('.page').forEach((pageElement) => {
+    const pageInner = pageElement.querySelector<HTMLElement>(':scope > .page-inner') || pageElement;
+
+    if (!pageInner) {
+      return;
+    }
+
+    const frameGroups = Array.from(pageInner.querySelectorAll<HTMLElement>('.v202-frame-group'));
+
+    if (!frameGroups.length) {
+      return;
+    }
+
+    const pageRect = pageInner.getBoundingClientRect();
+    const snapshots: FrameNodeSnapshot[] = frameGroups.map((frameGroup) => {
+      const rect = frameGroup.getBoundingClientRect();
+      const host = frameGroup.closest<HTMLElement>('td, .v102-frame-band, .v202-text-box, .v202-cell-box') || frameGroup;
+      const computed = window.getComputedStyle(host);
+      const textarea = frameGroup.querySelector<HTMLTextAreaElement>('textarea');
+      const attrs = Object.fromEntries(
+        FRAME_GROUP_ATTR_NAMES.map((name) => [name, frameGroup.getAttribute(name) || textarea?.getAttribute(name) || ''])
+      );
+
+      return {
+        pageNumber: pageElement.getAttribute('data-page') || '1',
+        attrs,
+        rowColor: computed.getPropertyValue('--v102-row-color').trim() || 'rgba(59, 130, 246, 0.08)',
+        colColor: computed.getPropertyValue('--v102-col-color').trim() || 'rgba(14, 165, 233, 0.14)',
+        rect: {
+          left: rect.left - pageRect.left,
+          top: rect.top - pageRect.top,
+          width: rect.width,
+          height: rect.height,
+        },
+        value: textarea?.value || '',
+      };
+    });
+
+    pageInner.replaceChildren();
+    pageInner.style.position = 'relative';
+
+    const editorLayer = document.createElement('div');
+    editorLayer.className = 'v106-frame-editor-layer';
+    editorLayer.setAttribute('data-v106-frame-editor-layer', 'true');
+    editorLayer.style.position = 'absolute';
+    editorLayer.style.inset = '0';
+    editorLayer.style.pointerEvents = 'none';
+
+    snapshots.forEach((snapshot) => {
+      const node = buildV106FrameNode(snapshot);
+      node.style.pointerEvents = 'auto';
+      editorLayer.appendChild(node);
+    });
+
+    pageInner.appendChild(editorLayer);
+    transformed = true;
+  });
+
+  if (transformed) {
+    frameSection.setAttribute('data-v106-frame-editor-ready', 'true');
+  }
+
+  return transformed;
+};
+
+const renderContentPreview = (
+  sourceKind: TemplateExtractSourceKind,
+  content: string,
+  className = ''
+) => {
   if (!content.trim()) {
-    return <p className="text-sm text-slate-500">표시할 내용이 없습니다.</p>;
+    return (
+      <div className={className}>
+        <p className="p-6 text-sm text-slate-500">표시할 내용이 없습니다.</p>
+      </div>
+    );
   }
 
   if (sourceKind === 'html') {
     return (
       <div
-        className="prose prose-sm max-w-none text-slate-800"
+        className={className}
         dangerouslySetInnerHTML={{ __html: content }}
       />
     );
   }
 
-  return <pre className="whitespace-pre-wrap font-mono text-xs text-slate-700">{content}</pre>;
+  return <pre className={className}>{content}</pre>;
 };
 
 const formatScore = (value: number | null | undefined) => {
@@ -221,6 +811,19 @@ const getVisualSimilarityStepState = (
   return stepOrder < currentOrder ? ('done' as const) : ('pending' as const);
 };
 
+const formatVisualSimilarityStepStateLabel = (state: ReturnType<typeof getVisualSimilarityStepState>) => {
+  if (state === 'done') {
+    return '완료';
+  }
+  if (state === 'active') {
+    return '계산 중';
+  }
+  if (state === 'failed') {
+    return '오류';
+  }
+  return '대기';
+};
+
 const toVisualSimilarityStepKey = (phase: string): VisualSimilarityProgressStepKey => {
   if (phase === 'loading_html' || phase === 'capturing_pages') {
     return 'preparing_replica_pages';
@@ -246,10 +849,21 @@ export default function TemplateExtractPage() {
   const [sourceKind, setSourceKind] = React.useState<TemplateExtractSourceKind>('html');
   const [sourceContent, setSourceContent] = React.useState(defaultSourceContent);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
-  const [engineVersion, setEngineVersion] = React.useState<TemplateExtractEngineVersion>('32');
+  const [engineVersion, setEngineVersion] = React.useState<TemplateExtractEngineVersion>('47');
+  const [frameGroupVersion, setFrameGroupVersion] = React.useState<TemplateExtractFrameGroupVersion>('v1.06');
+  const [previewPaneMode, setPreviewPaneMode] = React.useState<PreviewPaneMode>('source');
+  const [draftPreviewEditRole, setDraftPreviewEditRole] = React.useState<DraftPreviewEditRole>('editor');
+  const [selectedFrameGroupIds, setSelectedFrameGroupIds] = React.useState<string[]>([]);
+  const [frameEditorValueKey, setFrameEditorValueKey] = React.useState('');
+  const [frameEditorRole, setFrameEditorRole] = React.useState<FrameEditorRole>('group');
+  const [frameEditorParentGroup, setFrameEditorParentGroup] = React.useState('');
+  const [frameEditorWidthPx, setFrameEditorWidthPx] = React.useState('');
+  const [frameEditorHeightPx, setFrameEditorHeightPx] = React.useState('');
+  const [frameMergePromptDismissed, setFrameMergePromptDismissed] = React.useState(false);
   const [similarTemplateIdsText, setSimilarTemplateIdsText] = React.useState('');
   const [selectedDraftId, setSelectedDraftId] = React.useState('');
   const [reviewedFields, setReviewedFields] = React.useState<TemplateExtractReviewedFieldInput[]>([]);
+  const [selectedCandidateKey, setSelectedCandidateKey] = React.useState<string | null>(null);
   const [advancedReviewedFieldsText, setAdvancedReviewedFieldsText] = React.useState('[]');
   const [templateName, setTemplateName] = React.useState('안전관리계획서 템플릿 초안');
   const [layoutResizeMode, setLayoutResizeMode] =
@@ -279,6 +893,9 @@ export default function TemplateExtractPage() {
   const visualProgressTimerRef = React.useRef<number | null>(null);
   const visualMeasurementFrameRef = React.useRef<HTMLIFrameElement | null>(null);
   const draftPreviewRef = React.useRef<HTMLDivElement | null>(null);
+  const draftPreviewHtmlRef = React.useRef('');
+  const frameDragStateRef = React.useRef<FrameDragState | null>(null);
+  const frameResizeStateRef = React.useRef<FrameResizeState | null>(null);
   const visualMeasurementLogFileNameRef = React.useRef('');
   const lastVisualMeasurementLogEventKeyRef = React.useRef('');
   const lastVisualMeasurementKeyRef = React.useRef<string>('');
@@ -302,6 +919,16 @@ export default function TemplateExtractPage() {
     return map;
   }, [draftDetail]);
 
+  const candidateKeyByLabelKey = React.useMemo(() => {
+    const map = new Map<string, string>();
+
+    for (const candidate of draftDetail?.candidates || []) {
+      map.set(candidate.labelKey, candidate.candidateKey);
+    }
+
+    return map;
+  }, [draftDetail]);
+
   const reviewedSummary = React.useMemo(() => {
     return reviewedFields.reduce(
       (summary, candidate) => {
@@ -318,6 +945,42 @@ export default function TemplateExtractPage() {
       { accepted: 0, reviewNeeded: 0, rejected: 0 }
     );
   }, [reviewedFields]);
+
+  const flattenedFramePreview = React.useMemo(
+    () => flattenFramePreviewMarkup(draftDetail?.draft.generatedDraftHtml || ''),
+    [draftDetail?.draft.generatedDraftHtml]
+  );
+  const previewDraftStyleText = flattenedFramePreview?.styleText || '';
+  const previewDraftHtml = flattenedFramePreview?.html || draftDetail?.draft.generatedDraftHtml || '';
+  const previewDraftCopyHtml = `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${previewDraftHtml}`;
+  const syncDraftPreviewSurfaceScale = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    if (!flattenedFramePreview) {
+      root.removeAttribute('data-template-preview-scaled');
+      root.style.removeProperty('--template-preview-scale');
+      root.style.removeProperty('--template-preview-source-width');
+      root.style.removeProperty('--template-preview-source-height');
+      return;
+    }
+
+    const sourceWidth = parseFramePx(flattenedFramePreview.pageWidth);
+    const sourceHeight = parseFramePx(flattenedFramePreview.pageMinHeight);
+    const viewportWidth = root.clientWidth;
+
+    if (!sourceWidth || !sourceHeight || !viewportWidth) {
+      return;
+    }
+
+    root.setAttribute('data-template-preview-scaled', 'true');
+    root.style.setProperty('--template-preview-scale', String(viewportWidth / sourceWidth));
+    root.style.setProperty('--template-preview-source-width', `${sourceWidth}px`);
+    root.style.setProperty('--template-preview-source-height', `${sourceHeight}px`);
+  }, [flattenedFramePreview]);
 
   const persistRecentDraft = React.useCallback((detail: TemplateExtractDetailResult) => {
     const nextEntry = {
@@ -360,6 +1023,188 @@ export default function TemplateExtractPage() {
     setReviewedFields(nextFields);
     setAdvancedReviewedFieldsText(JSON.stringify(nextFields, null, 2));
   }, []);
+
+  const getCurrentDraftPreviewHtml = React.useCallback(() => {
+    const liveHtml = draftPreviewRef.current?.innerHTML?.trim() || '';
+    const normalizedLiveHtml = stripDraftPreviewUiState(liveHtml);
+
+    if (flattenedFramePreview && normalizedLiveHtml) {
+      return `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedLiveHtml}`;
+    }
+
+    const fallbackHtml = draftPreviewHtmlRef.current || previewDraftCopyHtml;
+
+    return stripDraftPreviewUiState(liveHtml || fallbackHtml);
+  }, [flattenedFramePreview, previewDraftCopyHtml, previewDraftStyleText]);
+
+  React.useEffect(() => {
+    draftPreviewHtmlRef.current = previewDraftCopyHtml;
+    setSelectedFrameGroupIds([]);
+    setFrameEditorValueKey('');
+    setFrameEditorRole('group');
+    setFrameEditorParentGroup('');
+    setFrameEditorWidthPx('');
+    setFrameEditorHeightPx('');
+    setFrameMergePromptDismissed(false);
+  }, [draftDetail?.draft.id, previewDraftCopyHtml]);
+
+  React.useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const styleId = 'template-extract-draft-preview-frame-style';
+    const existing = document.getElementById(styleId);
+
+    if (!previewDraftStyleText.trim()) {
+      existing?.remove();
+      return;
+    }
+
+    const styleElement =
+      existing instanceof HTMLStyleElement ? existing : document.createElement('style');
+
+    styleElement.id = styleId;
+    styleElement.textContent = previewDraftStyleText;
+
+    if (!existing) {
+      document.head.appendChild(styleElement);
+    }
+
+    return () => {
+      styleElement.remove();
+    };
+  }, [previewDraftStyleText]);
+
+  React.useEffect(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    let frameId = 0;
+    const sync = () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      frameId = window.requestAnimationFrame(() => {
+        syncDraftPreviewSurfaceScale();
+      });
+    };
+    const observer = new ResizeObserver(() => sync());
+
+    observer.observe(root);
+    sync();
+
+    return () => {
+      observer.disconnect();
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [syncDraftPreviewSurfaceScale]);
+
+  React.useEffect(() => {
+    const availableCandidateKey = reviewedFields.find((field) => field.candidateKey)?.candidateKey || null;
+
+    if (!availableCandidateKey) {
+      setSelectedCandidateKey(null);
+      return;
+    }
+
+    if (
+      selectedCandidateKey &&
+      reviewedFields.some((field) => field.candidateKey === selectedCandidateKey)
+    ) {
+      return;
+    }
+
+    setSelectedCandidateKey(availableCandidateKey);
+  }, [reviewedFields, selectedCandidateKey]);
+
+  React.useEffect(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
+      element.removeAttribute('data-template-selected');
+    });
+
+    const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).filter(
+      (node) => !node.matches('[data-template-frame-input="true"]')
+    );
+
+    if (frameNodes.length > 0) {
+      applyFrameSelectionHighlight(root, selectedFrameGroupIds);
+      return;
+    }
+
+    const selectedField = reviewedFields.find((field) => field.candidateKey === selectedCandidateKey);
+
+    if (!selectedField?.labelKey) {
+      return;
+    }
+
+    findTemplateValueElements(root, selectedField.labelKey).forEach((element) => {
+      element.setAttribute('data-template-selected', 'true');
+    });
+  }, [draftDetail?.draft.generatedDraftHtml, reviewedFields, selectedCandidateKey, selectedFrameGroupIds]);
+
+  React.useEffect(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    applyDraftPreviewEditPermissions(root, draftPreviewEditRole);
+  }, [draftDetail?.draft.generatedDraftHtml, draftPreviewEditRole]);
+
+  const syncFrameEditorSelectionState = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root || selectedFrameGroupIds.length === 0) {
+      setFrameEditorValueKey('');
+      setFrameEditorRole('group');
+      setFrameEditorParentGroup('');
+      setFrameEditorWidthPx('');
+      setFrameEditorHeightPx('');
+      return;
+    }
+
+    const selectedNode = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
+      .filter((node) => !node.matches('[data-template-frame-input="true"]'))
+      .find(
+      (node) => (node.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+    );
+
+    if (!selectedNode) {
+      return;
+    }
+
+    const rect = readSelectableFrameNodeRect(selectedNode);
+    setFrameEditorValueKey(selectedNode.getAttribute('data-template-frame-value-key') || '');
+    setFrameEditorRole(
+      ((selectedNode.getAttribute('data-template-frame-role') as FrameEditorRole | null) || 'group')
+    );
+    setFrameEditorParentGroup(selectedNode.getAttribute('data-template-frame-parent-group') || '');
+    setFrameEditorWidthPx(String(Math.round(rect.width)));
+    setFrameEditorHeightPx(String(Math.round(rect.height)));
+  }, [selectedFrameGroupIds]);
+
+  React.useEffect(() => {
+    syncFrameEditorSelectionState();
+  }, [syncFrameEditorSelectionState]);
+
+  React.useEffect(() => {
+    if (selectedFrameGroupIds.length <= 1) {
+      setFrameMergePromptDismissed(false);
+    }
+  }, [selectedFrameGroupIds]);
 
   const clearDraftProgressTimer = React.useCallback(() => {
     if (progressTimerRef.current !== null) {
@@ -614,7 +1459,7 @@ export default function TemplateExtractPage() {
   );
 
   const createDraftWithFileUpload = React.useCallback(
-    (formData: FormData) =>
+    (formData: FormData, extractionStage: TemplateExtractExtractionStage = 'full') =>
       new Promise<{ success: boolean; data?: TemplateExtractDetailResult; message?: string }>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
 
@@ -643,8 +1488,10 @@ export default function TemplateExtractPage() {
         xhr.onload = () => {
           beginProcessingProgress(
             62,
-            '문서를 분석하고 있습니다.',
-            '원본 문서를 읽고 템플릿 초안과 추천 항목을 조립하고 있습니다.'
+            extractionStage === 'frames' ? '프레임 그룹을 분석하고 있습니다.' : '문서를 분석하고 있습니다.',
+            extractionStage === 'frames'
+              ? '원본 PDF에서 프레임 그룹 구조만 먼저 추출하고 있습니다.'
+              : '원본 문서를 읽고 템플릿 초안과 추천 항목을 조립하고 있습니다.'
           );
 
           try {
@@ -698,6 +1545,7 @@ export default function TemplateExtractPage() {
         }
 
         setDraftDetail(result.data);
+        setPreviewPaneMode('draft');
         setSelectedDraftId(normalizedDraftId);
         syncReviewedFields(toReviewedFields(result.data));
         persistRecentDraft(result.data);
@@ -711,7 +1559,13 @@ export default function TemplateExtractPage() {
     [persistRecentDraft, syncReviewedFields]
   );
 
-  const handleCreateDraft = async () => {
+  const handleCreateDraft = async (extractionStage: TemplateExtractExtractionStage = 'full') => {
+    if (extractionStage === 'frames' && !selectedFile) {
+      setMessage('프레임 그룹 생성은 PDF 업로드에서만 지원합니다.');
+      return;
+    }
+
+    const frameStage = extractionStage === 'frames';
     setLoading(true);
     setMessage(null);
     setApproveResult(null);
@@ -721,9 +1575,15 @@ export default function TemplateExtractPage() {
       visible: true,
       phase: selectedFile ? 'uploading' : 'processing',
       percent: selectedFile ? 4 : 12,
-      stage: selectedFile ? '파일을 업로드하고 있습니다.' : '문서를 준비하고 있습니다.',
+      stage: selectedFile
+        ? frameStage
+          ? 'PDF를 업로드하고 프레임 그룹을 준비하고 있습니다.'
+          : '파일을 업로드하고 있습니다.'
+        : '문서를 준비하고 있습니다.',
       detail: selectedFile
-        ? '브라우저에서 서버로 파일을 전송합니다.'
+        ? frameStage
+          ? '브라우저에서 서버로 PDF를 전송한 뒤 프레임 그룹만 먼저 추출합니다.'
+          : '브라우저에서 서버로 파일을 전송합니다.'
         : '붙여 넣은 원본 본문을 읽어 템플릿 초안을 준비합니다.',
     });
 
@@ -740,14 +1600,18 @@ export default function TemplateExtractPage() {
         formData.append('sourceTitle', sourceTitle);
         formData.append('similarTemplateIds', similarTemplateIds.join(','));
         formData.append('engineVersion', engineVersion);
+        formData.append('extractionStage', extractionStage);
+        formData.append('frameGroupVersion', frameGroupVersion);
         formData.append('file', selectedFile);
 
-        result = await createDraftWithFileUpload(formData);
+        result = await createDraftWithFileUpload(formData, extractionStage);
       } else {
         beginProcessingProgress(
           22,
-          '문서를 분석하고 있습니다.',
-          '원본 본문을 읽고 템플릿 초안과 추천 항목을 조립하고 있습니다.'
+          frameStage ? '프레임 그룹을 분석하고 있습니다.' : '문서를 분석하고 있습니다.',
+          frameStage
+            ? '원본 본문에서 프레임 그룹 구조만 분리하고 있습니다.'
+            : '원본 본문을 읽고 템플릿 초안과 추천 항목을 조립하고 있습니다.'
         );
         const response = await fetch('/api/templates/extract', {
           method: 'POST',
@@ -758,6 +1622,8 @@ export default function TemplateExtractPage() {
             sourceContent,
             similarTemplateIds,
             engineVersion,
+            extractionStage,
+            frameGroupVersion,
           }),
         });
         result = await response.json();
@@ -772,15 +1638,24 @@ export default function TemplateExtractPage() {
         visible: true,
         phase: 'completed',
         percent: 100,
-        stage: '초안 생성을 완료했습니다.',
-        detail: '원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다.',
+        stage: frameStage ? '프레임 그룹 생성을 완료했습니다.' : '초안 생성을 완료했습니다.',
+        detail: frameStage
+          ? '원본 문서에서 프레임 그룹만 먼저 분리했습니다.'
+          : '원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다.',
       });
       setDraftDetail(result.data);
+      setPreviewPaneMode('draft');
       setSelectedDraftId(result.data.draft.id);
       syncReviewedFields(toReviewedFields(result.data));
       persistRecentDraft(result.data);
+      const actualExtractionStage =
+        result.data?.pipelineTrace?.extractionStage === 'frames' ? 'frames' : extractionStage;
       const versionLabel = formatTemplateExtractEngineVersionLabel(engineVersion);
-      setMessage(`원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${versionLabel})`);
+      setMessage(
+        actualExtractionStage === 'frames'
+          ? `프레임 그룹 초안을 만들었습니다. (${frameGroupVersion}, ${versionLabel})`
+          : `원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${versionLabel})`
+      );
     } catch (error) {
       clearDraftProgressTimer();
       setDraftProgress((previous) => ({
@@ -816,6 +1691,7 @@ export default function TemplateExtractPage() {
           templateName,
           layoutResizeMode,
           reviewedFields,
+          generatedDraftHtml: getCurrentDraftPreviewHtml(),
         }),
       });
       const result = await response.json();
@@ -838,7 +1714,7 @@ export default function TemplateExtractPage() {
   };
 
   const handleCopyDraftHtml = async () => {
-    const html = draftDetail?.draft.generatedDraftHtml?.trim() || '';
+    const html = getCurrentDraftPreviewHtml().trim();
 
     if (!html) {
       setMessage('복사할 생성 HTML이 없습니다.');
@@ -873,7 +1749,7 @@ export default function TemplateExtractPage() {
           sourceTitle: draftDetail.draft.sourceTitle,
           sourceKind: draftDetail.draft.sourceKind,
           sourceContent: draftDetail.draft.sourceContent,
-          generatedDraftHtml: draftDetail.draft.generatedDraftHtml,
+          generatedDraftHtml: getCurrentDraftPreviewHtml(),
           engineVersion: pipelineTrace?.engineVersion || engineVersion,
           pipelineTrace,
           qualityReport,
@@ -1070,7 +1946,7 @@ export default function TemplateExtractPage() {
       return;
     }
 
-    const sourceHtml = draftDetail.draft.sourceContent.trim();
+    const sourceHtml = getCurrentDraftPreviewHtml() || draftDetail.draft.sourceContent.trim();
     const measurementKey = [
       draftDetail.draft.id,
       selectedFile.name,
@@ -1196,6 +2072,8 @@ export default function TemplateExtractPage() {
     clearVisualSimilarityProgressTimer,
     draftDetail,
     engineVersion,
+    frameGroupVersion,
+    getCurrentDraftPreviewHtml,
     postVisualMeasurementLog,
     requestVisualSimilarityRenderInputs,
     selectedFile,
@@ -1262,6 +2140,922 @@ export default function TemplateExtractPage() {
     );
   };
 
+  const requestPreviewTextFit = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root || typeof window === 'undefined') {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      applyTemplateExtractEditableTextFit(root);
+    });
+  }, []);
+
+  const getFrameEditorNodes = React.useCallback(
+    (root?: HTMLElement | null) =>
+      Array.from(
+        (root || draftPreviewRef.current)?.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR) || []
+      ).filter((node) => !node.matches('[data-template-frame-input="true"]')),
+    []
+  );
+
+  const syncDraftPreviewHtmlRef = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+    if (!root) {
+      return;
+    }
+
+    const normalizedHtml = stripDraftPreviewUiState(root.innerHTML);
+    draftPreviewHtmlRef.current = flattenedFramePreview
+      ? `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedHtml}`
+      : normalizedHtml;
+  }, [flattenedFramePreview, previewDraftStyleText]);
+
+  const applyFrameEditorMetadata = React.useCallback(
+    (
+      nodes: HTMLElement[],
+      patch: {
+        valueKey?: string;
+        role?: FrameEditorRole;
+        parentGroup?: string;
+      }
+    ) => {
+      nodes.forEach((node) => {
+        const textarea = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
+
+        if (patch.valueKey !== undefined) {
+          const nextValueKey = patch.valueKey.trim();
+          if (nextValueKey) {
+            node.setAttribute('data-template-frame-value-key', nextValueKey);
+            textarea?.setAttribute('data-template-frame-value-key', nextValueKey);
+          } else {
+            node.removeAttribute('data-template-frame-value-key');
+            textarea?.removeAttribute('data-template-frame-value-key');
+          }
+          textarea?.removeAttribute('placeholder');
+        }
+
+        if (patch.role !== undefined) {
+          node.setAttribute('data-template-frame-role', patch.role);
+          textarea?.setAttribute('data-template-frame-role', patch.role);
+        }
+
+        if (patch.parentGroup !== undefined) {
+          const parentGroup = patch.parentGroup.trim();
+          if (parentGroup) {
+            node.setAttribute('data-template-frame-parent-group', parentGroup);
+            textarea?.setAttribute('data-template-frame-parent-group', parentGroup);
+          } else {
+            node.removeAttribute('data-template-frame-parent-group');
+            textarea?.removeAttribute('data-template-frame-parent-group');
+          }
+        }
+      });
+
+      syncDraftPreviewHtmlRef();
+    },
+    [syncDraftPreviewHtmlRef]
+  );
+
+  const findNearestFrameEdge = React.useCallback(
+    (
+      node: HTMLElement,
+      direction: 'left' | 'right' | 'top' | 'bottom'
+    ) => {
+      const currentRect = readFrameNodeRect(node);
+      const pageInner = node.closest<HTMLElement>('.page-inner');
+      const nodes = getFrameEditorNodes(pageInner);
+      const pageWidth = pageInner?.clientWidth || 0;
+      const pageHeight = pageInner?.clientHeight || 0;
+      const horizontalCandidates: number[] = [];
+      const verticalCandidates: number[] = [];
+
+      nodes.forEach((candidate) => {
+        if (candidate === node) {
+          return;
+        }
+
+        const candidateRect = readFrameNodeRect(candidate);
+
+        if (frameRectsOverlapVertically(currentRect, candidateRect)) {
+          horizontalCandidates.push(candidateRect.left, candidateRect.left + candidateRect.width);
+        }
+
+        if (frameRectsOverlapHorizontally(currentRect, candidateRect)) {
+          verticalCandidates.push(candidateRect.top, candidateRect.top + candidateRect.height);
+        }
+      });
+
+      if (direction === 'left') {
+        return Math.max(0, ...horizontalCandidates.filter((value) => value < currentRect.left - 1));
+      }
+
+      if (direction === 'right') {
+        return Math.min(pageWidth, ...horizontalCandidates.filter((value) => value > currentRect.left + currentRect.width + 1), pageWidth);
+      }
+
+      if (direction === 'top') {
+        return Math.max(0, ...verticalCandidates.filter((value) => value < currentRect.top - 1));
+      }
+
+      return Math.min(pageHeight, ...verticalCandidates.filter((value) => value > currentRect.top + currentRect.height + 1), pageHeight);
+    },
+    [getFrameEditorNodes]
+  );
+
+  const snapMovedFrameRect = React.useCallback(
+    (node: HTMLElement, rect: FrameNodeRect) => {
+      const pageInner = node.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        return rect;
+      }
+
+      const threshold = 12;
+      const pageWidth = pageInner.clientWidth;
+      const pageHeight = pageInner.clientHeight;
+      const nodes = getFrameEditorNodes(pageInner).filter((candidate) => candidate !== node);
+      const horizontalCandidates = [0, pageWidth];
+      const verticalCandidates = [0, pageHeight];
+
+      nodes.forEach((candidate) => {
+        const candidateRect = readFrameNodeRect(candidate);
+
+        if (frameRectsOverlapVertically(rect, candidateRect)) {
+          horizontalCandidates.push(candidateRect.left, candidateRect.left + candidateRect.width);
+        }
+
+        if (frameRectsOverlapHorizontally(rect, candidateRect)) {
+          verticalCandidates.push(candidateRect.top, candidateRect.top + candidateRect.height);
+        }
+      });
+
+      let snapDx = 0;
+      let snapDy = 0;
+      let snapDxDistance = threshold + 1;
+      let snapDyDistance = threshold + 1;
+
+      for (const edge of horizontalCandidates) {
+        for (const currentEdge of [rect.left, rect.left + rect.width]) {
+          const delta = edge - currentEdge;
+          const distance = Math.abs(delta);
+
+          if (distance <= threshold && distance < snapDxDistance) {
+            snapDxDistance = distance;
+            snapDx = delta;
+          }
+        }
+      }
+
+      for (const edge of verticalCandidates) {
+        for (const currentEdge of [rect.top, rect.top + rect.height]) {
+          const delta = edge - currentEdge;
+          const distance = Math.abs(delta);
+
+          if (distance <= threshold && distance < snapDyDistance) {
+            snapDyDistance = distance;
+            snapDy = delta;
+          }
+        }
+      }
+
+      return {
+        left: Math.max(0, Math.min(pageWidth - rect.width, rect.left + snapDx)),
+        top: Math.max(0, Math.min(pageHeight - rect.height, rect.top + snapDy)),
+        width: rect.width,
+        height: rect.height,
+      };
+    },
+    [getFrameEditorNodes]
+  );
+
+  const snapResizedFrameRect = React.useCallback(
+    (node: HTMLElement, rect: FrameNodeRect, direction: FrameResizeDirection) => {
+      const pageInner = node.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        return rect;
+      }
+
+      const threshold = 12;
+      const minSize = 12;
+      const pageWidth = pageInner.clientWidth;
+      const pageHeight = pageInner.clientHeight;
+      const nodes = getFrameEditorNodes(pageInner).filter((candidate) => candidate !== node);
+      const horizontalCandidates = [0, pageWidth];
+      const verticalCandidates = [0, pageHeight];
+
+      nodes.forEach((candidate) => {
+        const candidateRect = readFrameNodeRect(candidate);
+
+        if (frameRectsOverlapVertically(rect, candidateRect)) {
+          horizontalCandidates.push(candidateRect.left, candidateRect.left + candidateRect.width);
+        }
+
+        if (frameRectsOverlapHorizontally(rect, candidateRect)) {
+          verticalCandidates.push(candidateRect.top, candidateRect.top + candidateRect.height);
+        }
+      });
+
+      const snapEdge = (edge: number, candidates: number[]) => {
+        let snapped = edge;
+        let bestDistance = threshold + 1;
+
+        candidates.forEach((candidate) => {
+          const distance = Math.abs(candidate - edge);
+
+          if (distance <= threshold && distance < bestDistance) {
+            bestDistance = distance;
+            snapped = candidate;
+          }
+        });
+
+        return snapped;
+      };
+
+      let left = rect.left;
+      let top = rect.top;
+      let right = rect.left + rect.width;
+      let bottom = rect.top + rect.height;
+
+      if (direction.includes('w')) {
+        left = snapEdge(left, horizontalCandidates);
+        left = Math.max(0, Math.min(left, right - minSize));
+      }
+
+      if (direction.includes('e')) {
+        right = snapEdge(right, horizontalCandidates);
+        right = Math.max(left + minSize, Math.min(right, pageWidth));
+      }
+
+      if (direction.includes('n')) {
+        top = snapEdge(top, verticalCandidates);
+        top = Math.max(0, Math.min(top, bottom - minSize));
+      }
+
+      if (direction.includes('s')) {
+        bottom = snapEdge(bottom, verticalCandidates);
+        bottom = Math.max(top + minSize, Math.min(bottom, pageHeight));
+      }
+
+      return clampFrameNodeRect(
+        {
+          left,
+          top,
+          width: right - left,
+          height: bottom - top,
+        },
+        { width: pageWidth, height: pageHeight },
+        minSize
+      );
+    },
+    [getFrameEditorNodes]
+  );
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = frameResizeStateRef.current;
+
+      if (resizeState) {
+        const dx = event.clientX - resizeState.startX;
+        const dy = event.clientY - resizeState.startY;
+        const startRect = resizeState.rect;
+        let left = startRect.left;
+        let top = startRect.top;
+        let right = startRect.left + startRect.width;
+        let bottom = startRect.top + startRect.height;
+
+        if (resizeState.direction.includes('w')) {
+          left += dx;
+        }
+
+        if (resizeState.direction.includes('e')) {
+          right += dx;
+        }
+
+        if (resizeState.direction.includes('n')) {
+          top += dy;
+        }
+
+        if (resizeState.direction.includes('s')) {
+          bottom += dy;
+        }
+
+        const pageInner = resizeState.node.closest<HTMLElement>('.page-inner');
+        const nextRect = clampFrameNodeRect(
+          {
+            left: Math.min(left, right - 12),
+            top: Math.min(top, bottom - 12),
+            width: Math.max(12, right - left),
+            height: Math.max(12, bottom - top),
+          },
+          {
+            width: pageInner?.clientWidth || Number.MAX_SAFE_INTEGER,
+            height: pageInner?.clientHeight || Number.MAX_SAFE_INTEGER,
+          }
+        );
+
+        writeFrameNodeRect(resizeState.node, nextRect);
+        return;
+      }
+
+      const dragState = frameDragStateRef.current;
+
+      if (!dragState) {
+        return;
+      }
+
+      const dx = event.clientX - dragState.startX;
+      const dy = event.clientY - dragState.startY;
+
+      dragState.nodes.forEach(({ node, rect }) => {
+        writeFrameNodeRect(node, {
+          left: rect.left + dx,
+          top: rect.top + dy,
+          width: rect.width,
+          height: rect.height,
+        });
+      });
+    };
+
+    const finishDrag = () => {
+      const resizeState = frameResizeStateRef.current;
+
+      if (resizeState) {
+        const resizedRect = readFrameNodeRect(resizeState.node);
+        const snappedRect = snapResizedFrameRect(
+          resizeState.node,
+          resizedRect,
+          resizeState.direction
+        );
+        writeFrameNodeRect(resizeState.node, snappedRect);
+        resizeState.node.style.cursor = 'grab';
+        frameResizeStateRef.current = null;
+        syncDraftPreviewHtmlRef();
+        syncFrameEditorSelectionState();
+        return;
+      }
+
+      const dragState = frameDragStateRef.current;
+
+      if (!dragState) {
+        return;
+      }
+
+      const anchorRect = readFrameNodeRect(dragState.anchorNode);
+      const snappedAnchorRect = snapMovedFrameRect(dragState.anchorNode, anchorRect);
+      const dx = snappedAnchorRect.left - anchorRect.left;
+      const dy = snappedAnchorRect.top - anchorRect.top;
+
+      dragState.nodes.forEach(({ node }) => {
+        const rect = readFrameNodeRect(node);
+        writeFrameNodeRect(node, {
+          left: rect.left + dx,
+          top: rect.top + dy,
+          width: rect.width,
+          height: rect.height,
+        });
+        node.style.cursor = 'grab';
+      });
+
+      frameDragStateRef.current = null;
+      syncDraftPreviewHtmlRef();
+      syncFrameEditorSelectionState();
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+    };
+  }, [snapMovedFrameRect, snapResizedFrameRect, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]);
+
+  const mergeSelectedFrameGroups = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+    if (!root || selectedFrameGroupIds.length < 2) {
+      return;
+    }
+
+    const nodes = getFrameEditorNodes(root).filter((node) =>
+      selectedFrameGroupIds.includes(node.getAttribute('data-template-frame-group') || '')
+    );
+
+    if (nodes.length < 2) {
+      return;
+    }
+
+    const union = nodes
+      .map(readFrameNodeRect)
+      .reduce<FrameNodeRect>(
+        (acc, rect) => ({
+          left: Math.min(acc.left, rect.left),
+          top: Math.min(acc.top, rect.top),
+          width: Math.max(acc.left + acc.width, rect.left + rect.width) - Math.min(acc.left, rect.left),
+          height: Math.max(acc.top + acc.height, rect.top + rect.height) - Math.min(acc.top, rect.top),
+        }),
+        readFrameNodeRect(nodes[0])
+      );
+
+    const anchor = nodes[0];
+    const mergedId = `merged-${Date.now()}`;
+    writeFrameNodeRect(anchor, union);
+    anchor.setAttribute('data-template-frame-group', mergedId);
+    anchor.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]')?.setAttribute(
+      'data-template-frame-group',
+      mergedId
+    );
+
+    for (const node of nodes.slice(1)) {
+      node.remove();
+    }
+
+      setSelectedFrameGroupIds([mergedId]);
+      syncDraftPreviewHtmlRef();
+      syncFrameEditorSelectionState();
+  }, [getFrameEditorNodes, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]);
+
+  const splitSelectedFrameGroup = React.useCallback(
+    (axis: 'vertical' | 'horizontal') => {
+      const root = draftPreviewRef.current;
+      if (!root || selectedFrameGroupIds.length !== 1) {
+        return;
+      }
+
+      const node = getFrameEditorNodes(root).find(
+        (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+      );
+
+      if (!node) {
+        return;
+      }
+
+      const rect = readFrameNodeRect(node);
+      const pageInner = node.closest<HTMLElement>('.page-inner');
+      const otherNodes = getFrameEditorNodes(pageInner).filter((candidate) => candidate !== node);
+      const splitCandidates = otherNodes.flatMap((candidate) => {
+        const candidateRect = readFrameNodeRect(candidate);
+
+        if (axis === 'vertical' && frameRectsOverlapVertically(rect, candidateRect)) {
+          return [candidateRect.left, candidateRect.left + candidateRect.width];
+        }
+
+        if (axis === 'horizontal' && frameRectsOverlapHorizontally(rect, candidateRect)) {
+          return [candidateRect.top, candidateRect.top + candidateRect.height];
+        }
+
+        return [];
+      });
+
+      const innerCandidates = splitCandidates.filter((value) =>
+        axis === 'vertical'
+          ? value > rect.left + 12 && value < rect.left + rect.width - 12
+          : value > rect.top + 12 && value < rect.top + rect.height - 12
+      );
+
+      const midpoint = axis === 'vertical' ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+      const splitAt =
+        innerCandidates.sort((left, right) => Math.abs(left - midpoint) - Math.abs(right - midpoint))[0] ??
+        midpoint;
+
+      const firstId = `${selectedFrameGroupIds[0]}-a`;
+      const secondId = `${selectedFrameGroupIds[0]}-b`;
+      const secondNode = node.cloneNode(true) as HTMLElement;
+      const input = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
+      const secondInput = secondNode.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
+
+      if (axis === 'vertical') {
+        writeFrameNodeRect(node, { ...rect, width: splitAt - rect.left });
+        writeFrameNodeRect(secondNode, {
+          left: splitAt,
+          top: rect.top,
+          width: rect.left + rect.width - splitAt,
+          height: rect.height,
+        });
+      } else {
+        writeFrameNodeRect(node, { ...rect, height: splitAt - rect.top });
+        writeFrameNodeRect(secondNode, {
+          left: rect.left,
+          top: splitAt,
+          width: rect.width,
+          height: rect.top + rect.height - splitAt,
+        });
+      }
+
+      node.setAttribute('data-template-frame-group', firstId);
+      secondNode.setAttribute('data-template-frame-group', secondId);
+      input?.setAttribute('data-template-frame-group', firstId);
+      secondInput?.setAttribute('data-template-frame-group', secondId);
+      node.after(secondNode);
+
+      setSelectedFrameGroupIds([firstId, secondId]);
+      syncDraftPreviewHtmlRef();
+      syncFrameEditorSelectionState();
+    },
+    [getFrameEditorNodes, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]
+  );
+
+  const snapSelectedFrameGroups = React.useCallback(
+    (direction: 'left' | 'right' | 'top' | 'bottom') => {
+      const root = draftPreviewRef.current;
+      if (!root || selectedFrameGroupIds.length === 0) {
+        return;
+      }
+
+      const nodes = getFrameEditorNodes(root).filter((node) =>
+        selectedFrameGroupIds.includes(node.getAttribute('data-template-frame-group') || '')
+      );
+
+      nodes.forEach((node) => {
+        const rect = readFrameNodeRect(node);
+        const edge = findNearestFrameEdge(node, direction);
+
+        if (direction === 'left' && edge < rect.left + rect.width - 12) {
+          writeFrameNodeRect(node, {
+            left: edge,
+            top: rect.top,
+            width: rect.left + rect.width - edge,
+            height: rect.height,
+          });
+        } else if (direction === 'right' && edge > rect.left + 12) {
+          writeFrameNodeRect(node, {
+            ...rect,
+            width: edge - rect.left,
+          });
+        } else if (direction === 'top' && edge < rect.top + rect.height - 12) {
+          writeFrameNodeRect(node, {
+            left: rect.left,
+            top: edge,
+            width: rect.width,
+            height: rect.top + rect.height - edge,
+          });
+        } else if (direction === 'bottom' && edge > rect.top + 12) {
+          writeFrameNodeRect(node, {
+            ...rect,
+            height: edge - rect.top,
+          });
+        }
+      });
+
+      syncDraftPreviewHtmlRef();
+      syncFrameEditorSelectionState();
+    },
+    [findNearestFrameEdge, getFrameEditorNodes, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]
+  );
+
+  const applySelectedFrameSize = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root || selectedFrameGroupIds.length !== 1) {
+      return;
+    }
+
+    const node = getFrameEditorNodes(root).find(
+      (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+    );
+
+    if (!node) {
+      return;
+    }
+
+    const pageInner = node.closest<HTMLElement>('.page-inner');
+    const currentRect = readFrameNodeRect(node);
+    const nextWidth = Number.parseFloat(frameEditorWidthPx);
+    const nextHeight = Number.parseFloat(frameEditorHeightPx);
+
+    const nextRect = clampFrameNodeRect(
+      {
+        ...currentRect,
+        width: Number.isFinite(nextWidth) ? nextWidth : currentRect.width,
+        height: Number.isFinite(nextHeight) ? nextHeight : currentRect.height,
+      },
+      {
+        width: pageInner?.clientWidth || Number.MAX_SAFE_INTEGER,
+        height: pageInner?.clientHeight || Number.MAX_SAFE_INTEGER,
+      }
+    );
+
+    writeFrameNodeRect(node, nextRect);
+    syncDraftPreviewHtmlRef();
+    syncFrameEditorSelectionState();
+  }, [
+    frameEditorHeightPx,
+    frameEditorWidthPx,
+    getFrameEditorNodes,
+    selectedFrameGroupIds,
+    syncDraftPreviewHtmlRef,
+    syncFrameEditorSelectionState,
+  ]);
+
+  const linkSelectedFrameGroups = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+    if (!root || selectedFrameGroupIds.length < 2) {
+      return;
+    }
+
+    const parentGroupId = selectedFrameGroupIds[0];
+    const nodes = getFrameEditorNodes(root).filter((node) =>
+      selectedFrameGroupIds.includes(node.getAttribute('data-template-frame-group') || '')
+    );
+
+    applyFrameEditorMetadata(nodes.slice(1), { parentGroup: parentGroupId });
+  }, [applyFrameEditorMetadata, getFrameEditorNodes, selectedFrameGroupIds]);
+
+  const handleDraftPreviewPointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const targetElement = event.target instanceof HTMLElement ? event.target : null;
+      const resizeHandle = targetElement?.closest<HTMLElement>(V106_FRAME_RESIZE_HANDLE_SELECTOR);
+      const frameNode = targetElement?.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
+
+      if (!frameNode) {
+        return;
+      }
+
+      event.preventDefault();
+      setSelectedCandidateKey(null);
+
+      const frameGroupId = frameNode.getAttribute('data-template-frame-group') || '';
+
+      if (!frameGroupId) {
+        return;
+      }
+
+      const isV106FrameNode = frameNode.matches(V106_FRAME_NODE_SELECTOR);
+
+      if (resizeHandle) {
+        if (!isV106FrameNode) {
+          setSelectedFrameGroupIds([frameGroupId]);
+          return;
+        }
+
+        const direction = resizeHandle.getAttribute('data-v106-resize-direction') as FrameResizeDirection | null;
+
+        if (!direction) {
+          return;
+        }
+
+        setSelectedFrameGroupIds([frameGroupId]);
+        frameNode.style.cursor = 'grabbing';
+        frameResizeStateRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          direction,
+          node: frameNode,
+          rect: readFrameNodeRect(frameNode),
+        };
+        return;
+      }
+
+      if (!isV106FrameNode) {
+        if (event.shiftKey) {
+          setSelectedFrameGroupIds((previous) => {
+            const next = getNextFrameSelection(previous, frameGroupId, true);
+            if (draftPreviewRef.current) {
+              applyFrameSelectionHighlight(draftPreviewRef.current, next);
+            }
+            return next;
+          });
+        } else {
+          setSelectedFrameGroupIds((previous) => {
+            const next = getNextFrameSelection(previous, frameGroupId, false);
+            if (draftPreviewRef.current) {
+              applyFrameSelectionHighlight(draftPreviewRef.current, next);
+            }
+            return next;
+          });
+        }
+        return;
+      }
+
+      const nextSelectedIds = getNextFrameSelection(
+        selectedFrameGroupIds,
+        frameGroupId,
+        Boolean(event.shiftKey)
+      );
+
+      setSelectedFrameGroupIds((previous) =>
+        {
+          const next = getNextFrameSelection(previous, frameGroupId, Boolean(event.shiftKey));
+          if (draftPreviewRef.current) {
+            applyFrameSelectionHighlight(draftPreviewRef.current, next);
+          }
+          return next;
+        }
+      );
+
+      const root = draftPreviewRef.current;
+
+      if (!root) {
+        return;
+      }
+
+      const nodes = getFrameEditorNodes(root).filter((node) =>
+        nextSelectedIds.includes(node.getAttribute('data-template-frame-group') || '')
+      );
+
+      if (!nodes.length) {
+        return;
+      }
+
+      nodes.forEach((node) => {
+        node.style.cursor = 'grabbing';
+      });
+
+      frameDragStateRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        anchorNode: frameNode,
+        nodes: nodes.map((node) => ({ node, rect: readFrameNodeRect(node) })),
+      };
+    },
+    [getFrameEditorNodes, selectedFrameGroupIds]
+  );
+
+  const selectReviewedField = (field: TemplateExtractReviewedFieldInput) => {
+    setSelectedCandidateKey(field.candidateKey || null);
+
+    const root = draftPreviewRef.current;
+
+    if (!root || !field.labelKey) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const target = findTemplateValueElements(root, field.labelKey)[0];
+      target?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    });
+  };
+
+  const updatePreviewValueForField = (field: TemplateExtractReviewedFieldInput, nextValue: string) => {
+    const root = draftPreviewRef.current;
+
+    if (!root || !field.labelKey) {
+      return;
+    }
+
+    for (const element of findTemplateValueElements(root, field.labelKey)) {
+      element.textContent = nextValue;
+      markTemplateValueElementEdited(element);
+    }
+
+    syncDraftPreviewHtmlRef();
+    requestPreviewTextFit();
+  };
+
+  const handleReviewedFieldValueChange = (
+    field: TemplateExtractReviewedFieldInput,
+    nextValue: string
+  ) => {
+    setSelectedCandidateKey(field.candidateKey || null);
+    updateReviewedField(field.candidateKey, { defaultValue: nextValue });
+    updatePreviewValueForField(field, nextValue);
+  };
+
+  const syncPreviewEditTarget = (target: EventTarget | null) => {
+    const targetElement = target instanceof HTMLElement ? target : null;
+    const frameInput = targetElement?.closest<HTMLElement>('[data-template-frame-input="true"]');
+
+    if (frameInput) {
+      markTemplateValueElementEdited(frameInput);
+      syncDraftPreviewHtmlRef();
+      return;
+    }
+
+    const valueElement = resolveTemplateValueElementFromTarget(target);
+
+    if (!valueElement) {
+      const editableElement = targetElement?.closest<HTMLElement>('[contenteditable="true"]');
+      if (editableElement) {
+        markTemplateValueElementEdited(editableElement);
+      }
+      syncDraftPreviewHtmlRef();
+      requestPreviewTextFit();
+      return;
+    }
+
+    const labelKey = valueElement.getAttribute('data-template-value') || '';
+    const candidateKey = candidateKeyByLabelKey.get(labelKey);
+
+    if (!candidateKey) {
+      return;
+    }
+
+    setSelectedCandidateKey(candidateKey);
+    markTemplateValueElementEdited(valueElement);
+    updateReviewedField(candidateKey, { defaultValue: templateValueElementText(valueElement) });
+
+    syncDraftPreviewHtmlRef();
+    requestPreviewTextFit();
+  };
+
+  const handleDraftPreviewSelect = (
+    event: React.MouseEvent<HTMLDivElement> | React.FocusEvent<HTMLDivElement>
+  ) => {
+    const targetElement = event.target instanceof HTMLElement ? event.target : null;
+    const frameNode = targetElement?.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
+
+    if (frameNode) {
+      return;
+    }
+
+    const choiceButton = targetElement?.closest<HTMLElement>('[role="checkbox"][data-checked]');
+
+    if (choiceButton) {
+      toggleChoiceBoxElement(choiceButton);
+      syncDraftPreviewHtmlRef();
+      return;
+    }
+
+    const valueElement = resolveTemplateValueElementFromTarget(event.target);
+
+    if (!valueElement) {
+      return;
+    }
+
+    const candidateKey = candidateKeyByLabelKey.get(valueElement.getAttribute('data-template-value') || '');
+
+    if (candidateKey) {
+      setSelectedCandidateKey(candidateKey);
+    }
+  };
+
+  React.useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const handleNativePointerDown = (event: PointerEvent) => {
+      const root = draftPreviewRef.current;
+      const target = event.target instanceof Node ? event.target : null;
+
+      if (!root || !target || !root.contains(target)) {
+        return;
+      }
+
+      handleDraftPreviewPointerDown(event as unknown as React.PointerEvent<HTMLDivElement>);
+    };
+
+    const handleNativeClick = (event: MouseEvent) => {
+      const root = draftPreviewRef.current;
+      const target = event.target instanceof Node ? event.target : null;
+
+      if (!root || !target || !root.contains(target)) {
+        return;
+      }
+
+      handleDraftPreviewSelect(event as unknown as React.MouseEvent<HTMLDivElement>);
+    };
+
+    document.addEventListener('pointerdown', handleNativePointerDown, true);
+    document.addEventListener('click', handleNativeClick, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', handleNativePointerDown, true);
+      document.removeEventListener('click', handleNativeClick, true);
+    };
+  }, [handleDraftPreviewPointerDown, handleDraftPreviewSelect, draftDetail?.draft.generatedDraftHtml]);
+
+  const handleDraftPreviewPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const targetElement = event.target instanceof HTMLElement ? event.target : null;
+    const editableElement = targetElement?.closest<HTMLElement>('[contenteditable="true"]');
+
+    if (!editableElement) {
+      return;
+    }
+
+    event.preventDefault();
+    const text = event.clipboardData.getData('text/plain') || '';
+
+    if (document.queryCommandSupported?.('insertText')) {
+      document.execCommand('insertText', false, text);
+      return;
+    }
+
+    const selection = window.getSelection();
+
+    if (!selection || !selection.rangeCount) {
+      return;
+    }
+
+    selection.deleteFromDocument();
+    selection.getRangeAt(0).insertNode(document.createTextNode(text));
+    selection.collapseToEnd();
+  };
+
   const handleAdvancedReviewedFieldsChange = (value: string) => {
     setAdvancedReviewedFieldsText(value);
 
@@ -1278,12 +3072,116 @@ export default function TemplateExtractPage() {
 
   const previewSourceKind = draftDetail?.draft.sourceKind || sourceKind;
   const previewSourceContent = draftDetail?.draft.sourceContent || sourceContent;
+  const hasGeneratedDraftHtml = Boolean((draftDetail?.draft.generatedDraftHtml || '').trim());
+  const activePreviewPaneMode = previewPaneMode === 'draft' && !hasGeneratedDraftHtml ? 'source' : previewPaneMode;
   const pipelineTrace = draftDetail?.pipelineTrace || null;
   const qualityReport = draftDetail?.qualityReport || null;
   const offlineMetrics = qualityReport?.offlineMetrics || null;
+  const frameEditorActive =
+    draftDetail?.draft.generatedDraftHtml?.includes('data-template-extraction-stage="frames"') &&
+    draftDetail?.draft.generatedDraftHtml?.includes('data-template-frame-group-version="v1.06"');
+  const availableFrameGroupIds = getFrameEditorNodes()
+    .map((node) => node.getAttribute('data-template-frame-group') || '')
+    .filter(Boolean);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
+      <style>{`
+        .template-extract-draft-preview [data-template-value] {
+          cursor: text;
+        }
+        .template-extract-preview-surface {
+          position: relative;
+          box-sizing: border-box;
+          width: 100%;
+          max-width: none;
+          aspect-ratio: 210 / 297;
+          overflow: hidden;
+          border-radius: 0.75rem;
+          border: 1px solid rgb(226 232 240);
+          background: white;
+          box-shadow: none;
+        }
+        .template-extract-preview-surface.template-extract-text-preview {
+          overflow: auto;
+          white-space: pre-wrap;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+          font-size: 12px;
+          line-height: 1.5;
+          color: rgb(51 65 85);
+        }
+        .template-extract-preview-surface.template-extract-html-preview,
+        .template-extract-preview-surface.template-extract-draft-preview {
+          color: rgb(30 41 59);
+        }
+        .template-extract-draft-preview[data-template-preview-scaled="true"] > .page-inner {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: var(--template-preview-source-width, auto) !important;
+          min-height: var(--template-preview-source-height, auto) !important;
+          height: var(--template-preview-source-height, auto);
+          margin: 0 !important;
+          padding: 0 !important;
+          transform-origin: top left;
+          transform: scale(var(--template-preview-scale, 1));
+        }
+        .template-extract-draft-preview [data-v106-frame-node="true"] {
+          cursor: pointer;
+        }
+        .template-extract-draft-preview [data-v106-frame-node="true"] [data-template-frame-input="true"] {
+          cursor: text;
+        }
+        .template-extract-draft-preview [data-template-extraction-stage="frames"] .v202-frame-group-input {
+          pointer-events: none !important;
+          user-select: none !important;
+          -webkit-user-select: none !important;
+        }
+        .template-extract-draft-preview [data-template-edit-scope="admin"][data-template-edit-enabled="true"] {
+          cursor: text;
+        }
+        .template-extract-draft-preview [data-template-edit-scope="admin"][data-template-edit-enabled="false"] {
+          cursor: default;
+        }
+        .template-extract-draft-preview [role="checkbox"][data-checked] {
+          cursor: pointer;
+        }
+        .template-extract-draft-preview [data-template-selected="true"] {
+          position: relative;
+          z-index: 24 !important;
+          outline: 3px solid #2563eb !important;
+          outline-offset: -1px;
+          box-shadow:
+            0 0 0 4px rgba(37, 99, 235, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .96) !important;
+          background: rgba(219, 234, 254, .55) !important;
+          color: #111827 !important;
+          opacity: 1 !important;
+        }
+        .template-extract-draft-preview [data-template-primary-selected="true"] {
+          outline-color: #1d4ed8 !important;
+          box-shadow:
+            0 0 0 5px rgba(29, 78, 216, .28),
+            inset 0 0 0 1px rgba(255, 255, 255, .98) !important;
+        }
+        .template-extract-draft-preview .${FRAME_SELECTION_BADGE_CLASS} {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          z-index: 32;
+          pointer-events: none;
+          border-radius: 999px;
+          background: rgba(29, 78, 216, .96);
+          color: #eff6ff;
+          padding: 2px 8px;
+          font-size: 10px;
+          line-height: 1.2;
+          font-weight: 700;
+          letter-spacing: -.01em;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, .24);
+          white-space: nowrap;
+        }
+      `}</style>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="space-y-2">
           <Badge variant="slate">TPL-FLOW-01</Badge>
@@ -1296,8 +3194,27 @@ export default function TemplateExtractPage() {
           <Button variant="outline" onClick={() => void loadDraft(selectedDraftId)} disabled={loading}>
             최근 초안 열기
           </Button>
-          <Button onClick={handleCreateDraft} disabled={loading}>
-            초안 생성
+          <Button
+            variant="outline"
+            onClick={() => void handleCreateDraft('frames')}
+            disabled={loading || !selectedFile}
+          >
+            프레임 그룹 생성
+          </Button>
+          <select
+            value={frameGroupVersion}
+            onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
+            disabled={loading}
+            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <Button onClick={() => void handleCreateDraft('full')} disabled={loading}>
+            전체 추출
           </Button>
           <select
             value={engineVersion}
@@ -1361,94 +3278,14 @@ export default function TemplateExtractPage() {
         </Card>
       ) : null}
 
-      {visualSimilarityProgress.visible ? (
-        <Card className="border-slate-200 bg-white">
-          <CardContent className="space-y-4 p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">
-                  시각 유사도 측정 진행 {getVisualSimilarityCurrentStep(visualSimilarityProgress)}/
-                  {VISUAL_SIMILARITY_PROGRESS_STEPS.length}
-                </p>
-                <p className="text-xs text-slate-600">{visualSimilarityProgress.stage}</p>
-                <p className="text-xs text-slate-500">{visualSimilarityProgress.detail}</p>
-              </div>
-              <Badge
-                variant={
-                  visualSimilarityProgress.phase === 'completed'
-                    ? 'green'
-                    : visualSimilarityProgress.phase === 'failed'
-                      ? 'red'
-                      : 'amber'
-                }
-              >
-                {visualSimilarityProgress.phase === 'completed'
-                  ? '완료'
-                  : visualSimilarityProgress.phase === 'failed'
-                    ? '오류'
-                    : `${visualSimilarityProgress.percent}%`}
-              </Badge>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={visualSimilarityProgress.percent}
-                className={`h-full rounded-full transition-[width] duration-300 ${
-                  visualSimilarityProgress.phase === 'failed' ? 'bg-rose-500' : 'bg-amber-500'
-                }`}
-                style={{ width: `${visualSimilarityProgress.percent}%` }}
-              />
-            </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {VISUAL_SIMILARITY_PROGRESS_STEPS.map((step) => {
-                const stepState = getVisualSimilarityStepState(visualSimilarityProgress, step.key);
-
-                return (
-                  <div key={step.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-medium text-slate-900">{step.label}</p>
-                      <Badge
-                        variant={
-                          stepState === 'done'
-                            ? 'green'
-                            : stepState === 'active'
-                              ? 'amber'
-                              : stepState === 'failed'
-                                ? 'red'
-                                : 'slate'
-                        }
-                      >
-                        {stepState === 'done'
-                          ? '완료'
-                          : stepState === 'active'
-                            ? '진행 중'
-                            : stepState === 'failed'
-                              ? '오류'
-                              : '대기'}
-                      </Badge>
-                    </div>
-                    <p className="mt-2 text-[11px] text-slate-600">{step.description}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <div className="grid gap-6 lg:grid-cols-[1.45fr_0.85fr]">
         <div className="space-y-6">
           <Card className="border-slate-200">
             <CardHeader>
               <CardTitle>원본 문서 입력</CardTitle>
-              <CardDescription>
-                파일 업로드 또는 본문 붙여넣기 중 편한 방법 하나만 쓰면 됩니다. 파일이 있으면 파일을 우선 읽습니다.
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">원본 제목</label>
                   <Input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} />
@@ -1468,107 +3305,100 @@ export default function TemplateExtractPage() {
                 <p>선택된 파일: {selectedFile ? selectedFile.name : '없음'}</p>
                 <p>파일 형식: {selectedFile?.type || '-'}</p>
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">수동 입력 형식</label>
-                  <select
-                    value={sourceKind}
-                    onChange={(event) => setSourceKind(event.target.value as TemplateExtractSourceKind)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="html">html</option>
-                    <option value="text">text</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">유사 템플릿 ID 목록</label>
-                  <Input
-                    value={similarTemplateIdsText}
-                    onChange={(event) => setSimilarTemplateIdsText(event.target.value)}
-                    placeholder="필요하면 쉼표로 구분해 입력"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">추출 엔진 버전</label>
-                  <Input
-                    value={
-                      formatTemplateExtractEngineVersionLabel(engineVersion)
-                    }
-                    readOnly
-                  />
-                </div>
+          <Card className="flex flex-col gap-6 border-slate-200 p-6">
+            <CardHeader className="flex flex-col gap-3 p-0 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-1">
+                <CardTitle>문서 미리보기</CardTitle>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant={activePreviewPaneMode === 'source' ? 'default' : 'outline'}
+                  onClick={() => setPreviewPaneMode('source')}
+                >
+                  원본 문서 미리보기
+                </Button>
+                <Button
+                  variant={activePreviewPaneMode === 'draft' ? 'default' : 'outline'}
+                  onClick={() => setPreviewPaneMode('draft')}
+                  disabled={!hasGeneratedDraftHtml}
+                >
+                  추출된 템플릿 초안
+                </Button>
+                {activePreviewPaneMode === 'draft' ? (
+                  <>
+                    <label className="ml-2 text-xs font-medium text-slate-500">편집 권한</label>
+                    <select
+                      value={draftPreviewEditRole}
+                      onChange={(event) => setDraftPreviewEditRole(event.target.value as DraftPreviewEditRole)}
+                      className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="editor">일반 편집자</option>
+                      <option value="admin">관리자</option>
+                    </select>
+                  </>
+                ) : null}
+              </div>
+            </CardHeader>
+            {activePreviewPaneMode === 'source' ? (
+              previewSourceKind === 'html' ? (
+                <CardContent
+                  className="template-extract-preview-surface template-extract-html-preview !p-0"
+                  dangerouslySetInnerHTML={{ __html: previewSourceContent }}
+                />
+              ) : (
+                <CardContent className="template-extract-preview-surface template-extract-text-preview !p-0">
+                  {previewSourceContent.trim() || '표시할 내용이 없습니다.'}
+                </CardContent>
+              )
+            ) : hasGeneratedDraftHtml ? (
+              <CardContent
+                ref={draftPreviewRef}
+                className={`template-extract-draft-preview template-extract-preview-surface !p-0${
+                  flattenedFramePreview ? ' template-clone template-clone--raster-first-v2-structured' : ''
+                }`}
+                data-template-extraction-stage={flattenedFramePreview?.extractionStage || undefined}
+                data-template-frame-group-version={flattenedFramePreview?.frameGroupVersion || undefined}
+                data-template-clone-id={flattenedFramePreview?.cloneId || undefined}
+                onFocusCapture={handleDraftPreviewSelect}
+                onInput={(event) => syncPreviewEditTarget(event.target)}
+                onPasteCapture={handleDraftPreviewPaste}
+                dangerouslySetInnerHTML={{ __html: previewDraftHtml }}
+              />
+            ) : (
+              <CardContent className="template-extract-preview-surface flex items-center justify-center !p-0 text-sm text-slate-500">
+                아직 생성된 초안이 없습니다.
+              </CardContent>
+            )}
+          </Card>
 
+          <Card className="border-slate-200">
+            <CardContent className="space-y-3 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-900">생성된 HTML 코드</p>
+                  <p className="text-xs text-slate-600">
+                    브라우저를 다시 열지 않고도 품질을 확인할 수 있게, 현재 생성된 HTML 원문을 그대로 복사합니다.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={handleCopyDraftHtml}
+                  disabled={!draftDetail?.draft.generatedDraftHtml}
+                >
+                  {draftHtmlCopied ? '복사됨' : 'HTML 코드 복사'}
+                </Button>
+              </div>
               <details className="rounded-lg border border-slate-200 bg-white p-4">
                 <summary className="cursor-pointer text-sm font-medium text-slate-800">
-                  원본 본문 직접 붙여넣기
+                  생성된 HTML 코드 보기
                 </summary>
-                <div className="mt-3">
-                  <textarea
-                    value={sourceContent}
-                    onChange={(event) => setSourceContent(event.target.value)}
-                    className="flex min-h-[240px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  />
-                </div>
+                <pre className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-xs text-slate-100">
+                  {draftDetail?.draft.generatedDraftHtml?.trim() || '아직 생성된 HTML이 없습니다.'}
+                </pre>
               </details>
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>원본 문서 미리보기</CardTitle>
-              <CardDescription>사용자가 실제로 보게 될 문서를 기준으로 어떤 항목을 템플릿으로 만들지 검토합니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="min-h-[320px] rounded-xl border border-slate-200 bg-white p-6">
-                {renderContentPreview(previewSourceKind, previewSourceContent)}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>추출된 템플릿 초안</CardTitle>
-              <CardDescription>왼쪽 원본을 읽어 자동으로 만든 템플릿 초안입니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="min-h-[320px] rounded-xl border border-slate-200 bg-white p-6">
-                {(draftDetail?.draft.generatedDraftHtml || '').trim() ? (
-                  <div
-                    ref={draftPreviewRef}
-                    className="prose prose-sm max-w-none text-slate-800"
-                    dangerouslySetInnerHTML={{ __html: draftDetail?.draft.generatedDraftHtml || '' }}
-                  />
-                ) : (
-                  <p className="text-sm text-slate-500">아직 생성된 초안이 없습니다.</p>
-                )}
-              </div>
-              <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-slate-900">생성된 HTML 코드</p>
-                    <p className="text-xs text-slate-600">
-                      브라우저를 다시 열지 않고도 품질을 확인할 수 있게, 현재 생성된 HTML 원문을 그대로 복사합니다.
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={handleCopyDraftHtml}
-                    disabled={!draftDetail?.draft.generatedDraftHtml}
-                  >
-                    {draftHtmlCopied ? '복사됨' : 'HTML 코드 복사'}
-                  </Button>
-                </div>
-                <details className="rounded-lg border border-slate-200 bg-white p-4">
-                  <summary className="cursor-pointer text-sm font-medium text-slate-800">
-                    생성된 HTML 코드 보기
-                  </summary>
-                  <pre className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-xs text-slate-100">
-                    {draftDetail?.draft.generatedDraftHtml?.trim() || '아직 생성된 HTML이 없습니다.'}
-                  </pre>
-                </details>
-              </div>
             </CardContent>
           </Card>
         </div>
@@ -1598,6 +3428,100 @@ export default function TemplateExtractPage() {
             <CardContent className="space-y-3 text-sm text-slate-700">
               {draftDetail ? (
                 <>
+                  {visualSimilarityProgress.visible ? (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold">시각 유사도 측정 진행</div>
+                          <div className="mt-1 truncate text-sm font-semibold text-sky-950">
+                            {draftDetail.draft.sourceTitle || '제목 없음'}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs font-semibold">
+                          {visualSimilarityProgress.phase !== 'completed' &&
+                          visualSimilarityProgress.phase !== 'failed' ? (
+                            <span
+                              className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-sky-300 border-t-sky-700"
+                              aria-hidden="true"
+                            />
+                          ) : null}
+                          <span>
+                            {visualSimilarityProgress.phase === 'completed'
+                              ? '완료'
+                              : visualSimilarityProgress.phase === 'failed'
+                                ? '오류'
+                                : '계산 중'}
+                          </span>
+                          <span>{visualSimilarityProgress.percent}%</span>
+                        </div>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-sky-100">
+                        <div
+                          className={`h-full rounded-full transition-[width] duration-300 ${
+                            visualSimilarityProgress.phase === 'failed' ? 'bg-rose-500' : 'bg-sky-600'
+                          }`}
+                          style={{ width: `${visualSimilarityProgress.percent}%` }}
+                        />
+                      </div>
+                      <div className="mt-3 text-sm font-semibold">{visualSimilarityProgress.stage}</div>
+                      <div className="mt-1 text-xs opacity-90">{visualSimilarityProgress.detail}</div>
+                      <div className="mt-3 rounded-lg border border-sky-200/80 bg-white/70 px-3 py-2 text-[11px] text-sky-900">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold">
+                            세부 단계 {getVisualSimilarityCurrentStep(visualSimilarityProgress)} /{' '}
+                            {VISUAL_SIMILARITY_PROGRESS_STEPS.length}
+                          </span>
+                          <span className="opacity-80">
+                            {VISUAL_SIMILARITY_PROGRESS_STEPS.find(
+                              (step) => step.key === visualSimilarityProgress.activeStep
+                            )?.label || '대기'}
+                          </span>
+                        </div>
+                        <div className="mt-1 font-semibold">{visualSimilarityProgress.stage}</div>
+                        <div className="mt-1 opacity-80">{visualSimilarityProgress.detail}</div>
+                      </div>
+                      <div className="relative mt-3">
+                        <div
+                          className="overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                          style={{ maxHeight: '104px', overscrollBehaviorY: 'contain', touchAction: 'pan-y' }}
+                        >
+                          <div className="space-y-2">
+                            {VISUAL_SIMILARITY_PROGRESS_STEPS.map((step) => {
+                              const stepState = getVisualSimilarityStepState(visualSimilarityProgress, step.key);
+                              const stepLabel = formatVisualSimilarityStepStateLabel(stepState);
+                              const active = stepState === 'active';
+                              const done = stepState === 'done';
+                              const failed = stepState === 'failed';
+
+                              return (
+                                <div
+                                  key={step.key}
+                                  className={`rounded-lg px-2 py-1.5 text-[11px] transition-colors ${
+                                    active
+                                      ? 'bg-sky-100 text-sky-950'
+                                      : done
+                                        ? 'bg-white/80 text-sky-900'
+                                        : failed
+                                          ? 'bg-rose-50 text-rose-900'
+                                          : 'bg-transparent text-sky-800/80'
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="font-semibold">{step.label}</div>
+                                      <div className="mt-0.5 opacity-75">{step.description}</div>
+                                    </div>
+                                    <div className="shrink-0 font-semibold">{stepLabel}</div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="green">{draftDetail.draft.status}</Badge>
                     {qualityReport ? (
@@ -1729,6 +3653,193 @@ export default function TemplateExtractPage() {
             </CardContent>
           </Card>
 
+          {frameEditorActive ? (
+            <Card className="border-slate-200">
+              <CardHeader>
+                <CardTitle>프레임 편집</CardTitle>
+                <CardDescription>
+                  선택한 프레임을 합치거나 나누고, key/value 체인과 부모 관계를 수동으로 보정합니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                  <p>선택 수: {selectedFrameGroupIds.length}</p>
+                  <p className="break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</p>
+                </div>
+
+                {selectedFrameGroupIds.length > 1 && !frameMergePromptDismissed ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                    <p className="font-medium">복수 프레임이 선택되었습니다.</p>
+                    <p className="mt-1">선택한 박스를 그대로 유지하거나 바로 병합할 수 있습니다.</p>
+                    <div className="mt-3 flex gap-2">
+                      <Button size="sm" variant="outline" onClick={mergeSelectedFrameGroups}>
+                        선택 병합
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setFrameMergePromptDismissed(true)}
+                      >
+                        그대로 유지
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-800">Value Key</label>
+                  <Input
+                    value={frameEditorValueKey}
+                    onChange={(event) => setFrameEditorValueKey(event.target.value)}
+                    placeholder="예: 공동사업자 > 성명(법인명)"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-800">Frame Role</label>
+                  <select
+                    value={frameEditorRole}
+                    onChange={(event) => setFrameEditorRole(event.target.value as FrameEditorRole)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <option value="group">group</option>
+                    <option value="key">key</option>
+                    <option value="value">value</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-800">Parent Frame Group</label>
+                  <Input
+                    value={frameEditorParentGroup}
+                    onChange={(event) => setFrameEditorParentGroup(event.target.value)}
+                    list="frame-group-id-options"
+                    placeholder="parent frame group id"
+                  />
+                  <datalist id="frame-group-id-options">
+                    {availableFrameGroupIds.map((frameGroupId) => (
+                      <option key={frameGroupId} value={frameGroupId} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-800">Width (px)</label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={frameEditorWidthPx}
+                      onChange={(event) => setFrameEditorWidthPx(event.target.value)}
+                      placeholder="width"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-800">Height (px)</label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={frameEditorHeightPx}
+                      onChange={(event) => setFrameEditorHeightPx(event.target.value)}
+                      placeholder="height"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length === 0}
+                    onClick={() => {
+                      const root = draftPreviewRef.current;
+                      if (!root) {
+                        return;
+                      }
+                      const nodes = getFrameEditorNodes(root).filter((node) =>
+                        selectedFrameGroupIds.includes(node.getAttribute('data-template-frame-group') || '')
+                      );
+                      applyFrameEditorMetadata(nodes, {
+                        valueKey: frameEditorValueKey,
+                        role: frameEditorRole,
+                        parentGroup: frameEditorParentGroup,
+                      });
+                    }}
+                  >
+                    메타데이터 적용
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length !== 1}
+                    onClick={applySelectedFrameSize}
+                  >
+                    크기 적용
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length < 2}
+                    onClick={linkSelectedFrameGroups}
+                  >
+                    첫 선택을 부모로 연결
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length < 2}
+                    onClick={mergeSelectedFrameGroups}
+                  >
+                    선택 병합
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length !== 1}
+                    onClick={() => splitSelectedFrameGroup('vertical')}
+                  >
+                    세로 분할
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length !== 1}
+                    onClick={() => splitSelectedFrameGroup('horizontal')}
+                  >
+                    가로 분할
+                  </Button>
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length === 0}
+                    onClick={() => snapSelectedFrameGroups('left')}
+                  >
+                    좌측 스냅
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length === 0}
+                    onClick={() => snapSelectedFrameGroups('right')}
+                  >
+                    우측 스냅
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length === 0}
+                    onClick={() => snapSelectedFrameGroups('top')}
+                  >
+                    상단 스냅
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={selectedFrameGroupIds.length === 0}
+                    onClick={() => snapSelectedFrameGroups('bottom')}
+                  >
+                    하단 스냅
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card className="border-slate-200">
             <CardHeader>
               <CardTitle>정식 템플릿 만들기</CardTitle>
@@ -1796,9 +3907,31 @@ export default function TemplateExtractPage() {
               {reviewedFields.length > 0 ? (
                 reviewedFields.map((field) => {
                   const candidate = candidateMap.get(field.candidateKey || '');
+                  const isSelected = selectedCandidateKey === field.candidateKey;
+                  const fieldValueText = reviewedFieldValueText(field, candidate);
 
                   return (
-                    <div key={field.candidateKey || field.fieldKey} className="rounded-lg border border-slate-200 p-3 text-sm text-slate-700">
+                    <div
+                      key={field.candidateKey || field.fieldKey}
+                      tabIndex={0}
+                      onClick={() => selectReviewedField(field)}
+                      onFocusCapture={() => selectReviewedField(field)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) {
+                          return;
+                        }
+
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          selectReviewedField(field);
+                        }
+                      }}
+                      className={`rounded-lg border p-3 text-sm text-slate-700 transition ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-50/70 ring-2 ring-blue-100'
+                          : 'border-slate-200 bg-white'
+                      }`}
+                    >
                       <div className="flex items-center gap-2">
                         <Badge
                           variant={
@@ -1813,6 +3946,7 @@ export default function TemplateExtractPage() {
                         </Badge>
                         <Input
                           value={field.fieldLabel}
+                          onFocus={() => selectReviewedField(field)}
                           onChange={(event) =>
                             updateReviewedField(field.candidateKey, { fieldLabel: event.target.value })
                           }
@@ -1828,6 +3962,26 @@ export default function TemplateExtractPage() {
                             <p className="text-xs font-medium text-slate-500">필드 타입</p>
                             <p className="text-sm text-slate-700">{field.fieldType}</p>
                           </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-500">선택 항목 수정값</label>
+                          {field.fieldType === 'textarea' ? (
+                            <textarea
+                              value={fieldValueText}
+                              onFocus={() => selectReviewedField(field)}
+                              onChange={(event) => handleReviewedFieldValueChange(field, event.target.value)}
+                              className="flex min-h-[96px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            />
+                          ) : (
+                            <Input
+                              value={fieldValueText}
+                              onFocus={() => selectReviewedField(field)}
+                              onChange={(event) => handleReviewedFieldValueChange(field, event.target.value)}
+                            />
+                          )}
+                          <p className="text-xs text-slate-500">
+                            이 값은 왼쪽 초안의 선택된 텍스트와 승인될 HTML에 즉시 반영됩니다.
+                          </p>
                         </div>
                         <div className="space-y-2">
                           <label className="text-xs font-medium text-slate-500">이 항목 처리</label>
