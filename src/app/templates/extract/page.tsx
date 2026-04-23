@@ -469,6 +469,49 @@ const readSelectableFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
   };
 };
 
+const resolveFrameNodeFromEvent = (
+  root: HTMLElement,
+  target: EventTarget | null,
+  event: Pick<MouseEvent, 'clientX' | 'clientY'>
+) => {
+  const targetElement = target instanceof HTMLElement ? target : target instanceof Node ? target.parentElement : null;
+  const directFrameNode = targetElement?.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
+
+  if (directFrameNode && root.contains(directFrameNode)) {
+    return directFrameNode;
+  }
+
+  for (const pointElement of document.elementsFromPoint(event.clientX, event.clientY)) {
+    const pointFrameNode = pointElement.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
+
+    if (pointFrameNode && root.contains(pointFrameNode)) {
+      return pointFrameNode;
+    }
+  }
+
+  const hitPaddingPx = 2;
+  const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
+    .filter((node) => !node.matches('[data-template-frame-input="true"]'))
+    .map((node) => {
+      const rect = node.getBoundingClientRect();
+      const containsPoint =
+        event.clientX >= rect.left - hitPaddingPx &&
+        event.clientX <= rect.right + hitPaddingPx &&
+        event.clientY >= rect.top - hitPaddingPx &&
+        event.clientY <= rect.bottom + hitPaddingPx;
+
+      return {
+        node,
+        containsPoint,
+        area: rect.width * rect.height,
+      };
+    })
+    .filter((item) => item.containsPoint)
+    .sort((a, b) => a.area - b.area);
+
+  return frameNodes[0]?.node || null;
+};
+
 const applyFrameSelectionHighlight = (root: HTMLElement, selectedIds: string[]) => {
   root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
     element.removeAttribute('data-template-selected');
@@ -1263,6 +1306,30 @@ export default function TemplateExtractPage() {
   React.useEffect(() => {
     syncFrameEditorSelectionState();
   }, [syncFrameEditorSelectionState]);
+
+  React.useLayoutEffect(() => {
+    const root = draftPreviewRef.current;
+
+    if (!root || selectedFrameGroupIds.length === 0) {
+      return;
+    }
+
+    const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).filter(
+      (node) => !node.matches('[data-template-frame-input="true"]')
+    );
+
+    if (frameNodes.length > 0) {
+      applyFrameSelectionHighlight(root, selectedFrameGroupIds);
+    }
+  }, [
+    draftDetail?.draft.generatedDraftHtml,
+    frameEditorHeightPx,
+    frameEditorParentGroup,
+    frameEditorRole,
+    frameEditorValueKey,
+    frameEditorWidthPx,
+    selectedFrameGroupIds,
+  ]);
 
   React.useEffect(() => {
     if (selectedFrameGroupIds.length <= 1) {
@@ -3034,7 +3101,8 @@ export default function TemplateExtractPage() {
 
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
       const resizeHandle = targetElement?.closest<HTMLElement>(V106_FRAME_RESIZE_HANDLE_SELECTOR);
-      const frameNode = targetElement?.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
+      const root = draftPreviewRef.current;
+      const frameNode = root ? resolveFrameNodeFromEvent(root, event.target, event) : null;
 
       if (!frameNode) {
         return;
@@ -3112,8 +3180,6 @@ export default function TemplateExtractPage() {
           return next;
         }
       );
-
-      const root = draftPreviewRef.current;
 
       if (!root) {
         return;
@@ -3223,7 +3289,11 @@ export default function TemplateExtractPage() {
     event: React.MouseEvent<HTMLDivElement> | React.FocusEvent<HTMLDivElement>
   ) => {
     const targetElement = event.target instanceof HTMLElement ? event.target : null;
-    const frameNode = targetElement?.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
+    const root = draftPreviewRef.current;
+    const frameNode =
+      root && 'clientX' in event
+        ? resolveFrameNodeFromEvent(root, event.target, event)
+        : targetElement?.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
 
     if (frameNode) {
       return;
