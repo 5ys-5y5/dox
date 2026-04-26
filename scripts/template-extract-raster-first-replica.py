@@ -3910,6 +3910,207 @@ def v111_refresh_frame_spec_bbox(spec: dict, x0: float, y0: float, x1: float, y1
         setattr(cell, "bbox", next_bbox)
 
 
+def v111_resolve_mesh_edge_indexes(start_value: float, end_value: float, edges: list[float]) -> tuple[int, int] | None:
+    if len(edges) < 2:
+        return None
+
+    start_index = min(range(len(edges)), key=lambda index: abs(float(edges[index]) - float(start_value)))
+    end_index = min(range(len(edges)), key=lambda index: abs(float(edges[index]) - float(end_value)))
+
+    if end_index <= start_index:
+        return None
+
+    return start_index, end_index
+
+
+def v111_build_table_mesh_markup(
+    scale: float,
+    band_index: int,
+    frame_specs: list[dict],
+    frame_group_version: str = "v1.11",
+) -> str:
+    if not frame_specs:
+        return ""
+
+    sorted_specs = sorted(
+        frame_specs,
+        key=lambda item: (
+            float(item["y0"]),
+            float(item["x0"]),
+            float(item["y1"]),
+            float(item["x1"]),
+        ),
+    )
+    x_edges = v105_unique_positions(
+        [float(item["x0"]) for item in sorted_specs] + [float(item["x1"]) for item in sorted_specs],
+        0.75,
+    )
+    y_edges = v105_unique_positions(
+        [float(item["y0"]) for item in sorted_specs] + [float(item["y1"]) for item in sorted_specs],
+        0.75,
+    )
+
+    if len(x_edges) < 2 or len(y_edges) < 2:
+        return ""
+
+    normalized_specs = []
+
+    for spec in sorted_specs:
+        edge_indexes = v111_resolve_mesh_edge_indexes(float(spec["x0"]), float(spec["x1"]), x_edges)
+        row_indexes = v111_resolve_mesh_edge_indexes(float(spec["y0"]), float(spec["y1"]), y_edges)
+
+        if edge_indexes is None or row_indexes is None:
+            continue
+
+        normalized_spec = dict(spec)
+        normalized_spec["layout_col_start"] = edge_indexes[0] + 1
+        normalized_spec["layout_col_end"] = edge_indexes[1] + 1
+        normalized_spec["layout_row_start"] = row_indexes[0] + 1
+        normalized_spec["layout_row_end"] = row_indexes[1] + 1
+        normalized_specs.append(normalized_spec)
+
+    if not normalized_specs:
+        return ""
+
+    band_left = float(x_edges[0])
+    band_top = float(y_edges[0])
+    band_right = float(x_edges[-1])
+    band_bottom = float(y_edges[-1])
+    band_left_px = v103_snap_scaled_px(band_left, scale)
+    band_top_px = v103_snap_scaled_px(band_top, scale)
+    band_right_px = max(band_left_px + 1, v103_snap_scaled_px(band_right, scale))
+    band_bottom_px = max(band_top_px + 1, v103_snap_scaled_px(band_bottom, scale))
+    band_width_px = band_right_px - band_left_px
+    band_height_px = band_bottom_px - band_top_px
+
+    col_edges_px = [v103_snap_scaled_px(value, scale) for value in x_edges]
+    row_edges_px = [v103_snap_scaled_px(value, scale) for value in y_edges]
+    col_edges_px[0] = band_left_px
+    col_edges_px[-1] = band_right_px
+    row_edges_px[0] = band_top_px
+    row_edges_px[-1] = band_bottom_px
+    col_widths_px = [max(1, right_px - left_px) for left_px, right_px in zip(col_edges_px, col_edges_px[1:])]
+    row_heights_px = [max(1, bottom_px - top_px) for top_px, bottom_px in zip(row_edges_px, row_edges_px[1:])]
+    frame_specs_by_origin = {}
+    color_group_indexes = v102_resolve_color_group_indexes(normalized_specs)
+    band_outline_style = v102_resolve_band_outline_style(normalized_specs, frame_group_version)
+    band_border_color = "rgba(15, 23, 42, 0.34)" if band_outline_style == "dashed" else "rgba(15, 23, 42, 0.55)"
+    band_border_css = f" border:1px {band_outline_style} {band_border_color};" if band_outline_style == "dashed" else ""
+
+    for spec in normalized_specs:
+        frame_specs_by_origin[(int(spec["layout_row_start"]), int(spec["layout_col_start"]))] = spec
+
+    occupied = set()
+    rows_html = []
+
+    for local_row_index in range(1, len(y_edges)):
+        row_color = v102_pick_palette_color(V102_ROW_COLOR_PALETTE, band_index + local_row_index - 1)
+        cells_html = []
+
+        for local_col_index in range(1, len(x_edges)):
+            if (local_row_index, local_col_index) in occupied:
+                continue
+
+            spec = frame_specs_by_origin.get((local_row_index, local_col_index))
+
+            if spec is None:
+                continue
+
+            cell = spec["cell"]
+            local_row_end = int(spec["layout_row_end"])
+            local_col_end = int(spec["layout_col_end"])
+            rowspan = max(1, local_row_end - local_row_index)
+            colspan = max(1, local_col_end - local_col_index)
+
+            for covered_row in range(local_row_index, local_row_end):
+                for covered_col in range(local_col_index, local_col_end):
+                    if covered_row == local_row_index and covered_col == local_col_index:
+                        continue
+                    occupied.add((covered_row, covered_col))
+
+            font_px = clamp(float(getattr(cell, "font_pt", 11.0) or 11.0) * scale, 10.5, 18.0)
+            font_weight = 700 if getattr(cell, "bold", False) else 400
+            color_group = str(spec.get("color_group") or getattr(cell, "_frame_color_group", "") or getattr(cell, "_frame_group_id", "") or "")
+            color_index = color_group_indexes.get(color_group, len(color_group_indexes))
+            col_color = v102_pick_palette_color(V102_COL_COLOR_PALETTE, color_index)
+            span_attr = ""
+            border_style = ""
+
+            if rowspan > 1:
+                span_attr += f' rowspan="{rowspan}"'
+
+            if colspan > 1:
+                span_attr += f' colspan="{colspan}"'
+
+            if local_col_index > 1:
+                border_style += f" border-left:1px {band_outline_style} {band_border_color};"
+
+            if local_row_index > 1:
+                border_style += f" border-top:1px {band_outline_style} {band_border_color};"
+
+            cells_html.append(
+                f'{v202_build_frame_group_td_open_tag(cell, "halign-left valign-top", f"font-size:{font_px:.2f}px; font-weight:{font_weight}; --v102-row-color:{row_color}; --v102-col-color:{col_color};{border_style}", span_attr.strip())}'
+                f'{v202_build_frame_group_html(cell)}'
+                '</td>'
+            )
+
+        rows_html.append(f'<tr style="height:{row_heights_px[local_row_index - 1]}px;">{"".join(cells_html)}</tr>')
+
+    colgroup_html = "".join(f'<col style="width:{max(1, width_px)}px">' for width_px in col_widths_px)
+
+    return (
+        f'<div class="v102-frame-band" style="left:{band_left_px}px; top:{band_top_px}px; '
+        f'width:{band_width_px}px; height:{band_height_px}px;">'
+        f'<table class="v202-table-block v102-frame-band-table" style="width:{band_width_px}px; height:{band_height_px}px;{band_border_css}">'
+        f'<colgroup>{colgroup_html}</colgroup>'
+        f'<tbody style="--v102-row-color:{v102_pick_palette_color(V102_ROW_COLOR_PALETTE, band_index)};">'
+        f'{"".join(rows_html)}'
+        '</tbody></table></div>'
+    )
+
+
+def v111_build_embedded_block_frame_spec(block) -> dict | None:
+    bbox = getattr(block, "bbox", None)
+
+    if bbox is None:
+        return None
+
+    frame_group_id = str(getattr(block, "_frame_group_id", "") or "")
+    frame_color_group = str(getattr(block, "_frame_color_group", "") or frame_group_id or "embedded-block")
+    frame_outline_style = str(getattr(block, "_frame_outline_style", "") or "solid")
+    cell_like = SimpleNamespace(
+        row_start=1,
+        row_end=2,
+        col_start=1,
+        col_end=2,
+        bbox=bbox,
+        font_pt=float(getattr(block, "font_pt", 11.0) or 11.0),
+        bold=bool(getattr(block, "bold", False)),
+        align=getattr(block, "align", "left") or "left",
+        valign=getattr(block, "valign", "top") or "top",
+        _frame_group_id=frame_group_id,
+        _frame_color_group=frame_color_group,
+        _frame_source_text=str(getattr(block, "text", "") or "").strip(),
+        _frame_outline_style=frame_outline_style,
+    )
+
+    if hasattr(block, "_frame_value_key"):
+        setattr(cell_like, "_frame_value_key", str(getattr(block, "_frame_value_key", "") or ""))
+
+    if hasattr(block, "_frame_role"):
+        setattr(cell_like, "_frame_role", str(getattr(block, "_frame_role", "") or ""))
+
+    return {
+        "cell": cell_like,
+        "x0": float(bbox.x0),
+        "x1": float(bbox.x1),
+        "y0": float(bbox.y0),
+        "y1": float(bbox.y1),
+        "color_group": frame_color_group,
+        "outline_style": frame_outline_style,
+    }
+
+
 def v111_refine_row_frame_specs(table, row_index: int, row_cells: list, frame_specs: list[dict]) -> list[dict]:
     if not frame_specs:
         return frame_specs
@@ -3930,19 +4131,13 @@ def v111_refine_row_frame_specs(table, row_index: int, row_cells: list, frame_sp
     snapped_top = v111_snap_value_to_candidates(row_top, y_candidates, 3.5)
     snapped_bottom = v111_snap_value_to_candidates(row_bottom, y_candidates, 3.5)
     sorted_specs = sorted(frame_specs, key=lambda item: (float(item["x0"]), float(item["x1"])))
-    band_left = float(x_candidates[0]) if x_candidates else min(float(item["x0"]) for item in sorted_specs)
-    band_right = float(x_candidates[-1]) if x_candidates else max(float(item["x1"]) for item in sorted_specs)
     previous_right = None
 
     for spec_index, spec in enumerate(sorted_specs):
         original_left = float(spec["x0"])
         original_right = float(spec["x1"])
-        snapped_left = band_left if spec_index == 0 else v111_snap_value_to_candidates(original_left, x_candidates, 4.5)
-        snapped_right = (
-            band_right
-            if spec_index == len(sorted_specs) - 1
-            else v111_snap_value_to_candidates(original_right, x_candidates, 4.5)
-        )
+        snapped_left = v111_snap_value_to_candidates(original_left, x_candidates, 4.5)
+        snapped_right = v111_snap_value_to_candidates(original_right, x_candidates, 4.5)
 
         if previous_right is not None and snapped_left < previous_right:
             snapped_left = previous_right
@@ -3965,8 +4160,8 @@ def v111_build_table_row_frame_bands_html(
     y_lines = list(getattr(table, "y_lines", []) or [])
     total_rows = max(0, len(y_lines) - 1)
     rows = [[] for _ in range(total_rows)]
-    fragments = []
     next_band_index = band_index_start
+    all_frame_specs = []
 
     for cell in sorted(getattr(table, "cells", []) or [], key=lambda item: (item.row_start, item.col_start, item.row_end, item.col_end)):
         row_index = max(0, min(total_rows - 1, int(getattr(cell, "row_start", 1) or 1) - 1))
@@ -3990,10 +4185,23 @@ def v111_build_table_row_frame_bands_html(
         if not frame_specs:
             continue
 
-        fragments.append(v103_build_frame_band_markup(frame_specs, scale, next_band_index, frame_group_version=frame_group_version))
+        all_frame_specs.extend(frame_specs)
         next_band_index += 1
 
-    return fragments, next_band_index
+    for block in getattr(table, "_v111_embedded_status_blocks", []) or []:
+        block_spec = v111_build_embedded_block_frame_spec(block)
+
+        if block_spec is not None:
+            all_frame_specs.append(block_spec)
+
+    mesh_fragment = v111_build_table_mesh_markup(
+        scale,
+        band_index_start,
+        all_frame_specs,
+        frame_group_version,
+    )
+
+    return ([mesh_fragment] if mesh_fragment else []), next_band_index
 
 
 def v105_resolve_certificate_edge_clusters(
@@ -4911,6 +5119,41 @@ def v102_build_frame_groups_page_html(
     frame_bounds = v202_resolve_page_frame_bounds(page)
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
     certificate_like_page = normalized_frame_group_version in ("v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11") and v105_is_certificate_like_scanned_page(page, frame_bounds)
+    embedded_status_block_ids = set()
+
+    if normalized_frame_group_version == "v1.11":
+        status_blocks = list(getattr(page, "_v104_status_value_blocks", []) or [])
+        tables = list(getattr(page, "tables", []) or [])
+
+        for table in tables:
+            setattr(table, "_v111_embedded_status_blocks", [])
+
+        for block in status_blocks:
+            block_bbox = getattr(block, "bbox", None)
+
+            if block_bbox is None:
+                continue
+
+            block_center_x = (float(block_bbox.x0) + float(block_bbox.x1)) * 0.5
+            block_center_y = (float(block_bbox.y0) + float(block_bbox.y1)) * 0.5
+
+            for table in tables:
+                table_bbox = getattr(table, "bbox", None)
+
+                if table_bbox is None:
+                    continue
+
+                if not (
+                    float(table_bbox.x0) - 2.0 <= block_center_x <= float(table_bbox.x1) + 2.0
+                    and float(table_bbox.y0) - 2.0 <= block_center_y <= float(table_bbox.y1) + 2.0
+                ):
+                    continue
+
+                blocks = list(getattr(table, "_v111_embedded_status_blocks", []) or [])
+                blocks.append(block)
+                setattr(table, "_v111_embedded_status_blocks", blocks)
+                embedded_status_block_ids.add(id(block))
+                break
 
     if frame_bounds:
         for block in v202_collect_outside_region_blocks(page, frame_bounds, "top"):
@@ -4921,6 +5164,10 @@ def v102_build_frame_groups_page_html(
 
         if normalized_frame_group_version in ("v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11") and not certificate_like_page:
             for block in getattr(page, "_v104_status_value_blocks", []) or []:
+                if normalized_frame_group_version == "v1.11" and id(block) in embedded_status_block_ids:
+                    band_index += 1
+                    continue
+
                 frame_group_id = str(getattr(block, "_frame_group_id", "") or f"band-{band_index}-status")
                 band_fragments.append(
                     v102_build_region_frame_band_html(block, scale, band_index, frame_group_id, frame_group_version)
