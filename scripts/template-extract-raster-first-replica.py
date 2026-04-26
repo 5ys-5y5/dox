@@ -97,6 +97,8 @@ def normalize_extraction_stage(extraction_stage: str) -> str:
 def normalize_frame_group_version(frame_group_version: str) -> str:
     normalized = str(frame_group_version or "").strip().lower()
 
+    if normalized == "v1.11" or normalized.startswith("v1.11-"):
+        return "v1.11"
     if normalized == "v1.10" or normalized.startswith("v1.10-"):
         return "v1.10"
     if normalized == "v1.09" or normalized.startswith("v1.09-"):
@@ -122,6 +124,12 @@ def normalize_frame_group_version(frame_group_version: str) -> str:
 def resolve_frame_group_version_tag(frame_group_version: str) -> str:
     normalized = str(frame_group_version or "").strip().lower()
 
+    if normalized == "v1.11":
+        return "v1.11-default"
+
+    if normalized.startswith("v1.11-"):
+        return normalized
+
     if normalized == "v1.10":
         return "v1.10-default"
 
@@ -138,7 +146,7 @@ def resolve_frame_group_version_tag(frame_group_version: str) -> str:
 
 
 def is_profile_frame_group_version(frame_group_version: str) -> bool:
-    return normalize_frame_group_version(frame_group_version) in {"v1.09", "v1.10"}
+    return normalize_frame_group_version(frame_group_version) in {"v1.09", "v1.10", "v1.11"}
 
 
 V201_EDIT_OVERLAY_STYLE = """
@@ -461,6 +469,7 @@ V202_STRUCTURED_DOM_STYLE = """
     padding: 0;
     background: transparent;
     box-sizing: border-box;
+    z-index: 1;
   }
   .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table {
     width: 100%;
@@ -497,7 +506,7 @@ V202_STRUCTURED_DOM_STYLE = """
   }
   .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table .v202-frame-group {
     position: relative;
-    z-index: 1;
+    z-index: 3;
     min-height: 0;
     height: 100%;
   }
@@ -541,19 +550,23 @@ V202_STRUCTURED_DOM_STYLE = """
     text-align: right;
   }
   .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table,
-  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table {
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.11"] .v102-frame-band-table {
     border-color: rgba(15, 23, 42, 0.48);
   }
   .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table tbody,
-  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table tbody {
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table tbody,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.11"] .v102-frame-band-table tbody {
     background: transparent;
   }
   .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td,
-  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table td {
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table td,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.11"] .v102-frame-band-table td {
     background: transparent;
   }
   .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td::before,
-  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table td::before {
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table td::before,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.11"] .v102-frame-band-table td::before {
     background: transparent;
   }
   .template-clone--raster-first-v2-structured .v202-text-block {
@@ -1921,6 +1934,18 @@ def v102_find_row_label_cell(row_cells: list, canonical_label: str):
     return None
 
 
+def v102_estimate_inline_cell_padding(source_bbox, source_words: list) -> float:
+    if source_bbox is None or not source_words:
+        return 6.0
+
+    first_bbox = getattr(source_words[0], "bbox", None) or getattr(source_words[0], "rect", None)
+
+    if first_bbox is None:
+        return 6.0
+
+    return clamp(float(first_bbox.x0) - float(source_bbox.x0), 4.0, 14.0)
+
+
 def v102_build_document_issue_frame_specs(
     row_cells: list,
     band_index: int,
@@ -1956,8 +1981,15 @@ def v102_build_document_issue_frame_specs(
     if not document_bbox or not issue_label_bbox or not issue_value_bbox or source_bbox is None:
         return None
 
-    boundary_one = max(float(source_bbox.x0) + 1.0, (float(document_bbox.x1) + float(issue_label_bbox.x0)) * 0.5)
-    boundary_two = max(boundary_one + 1.0, (float(issue_label_bbox.x1) + float(issue_value_bbox.x0)) * 0.5)
+    inferred_pad = v102_estimate_inline_cell_padding(source_bbox, source_words)
+    boundary_one = max(
+        float(document_bbox.x1) + 1.0,
+        min(float(issue_label_bbox.x0) - 1.0, float(issue_label_bbox.x0) - inferred_pad),
+    )
+    boundary_two = max(
+        boundary_one + 1.0,
+        min(float(source_bbox.x1) - 1.0, float(issue_value_bbox.x0) - inferred_pad),
+    )
 
     def build_virtual_spec(
         x0: float,
@@ -2124,7 +2156,11 @@ def v102_build_signature_frame_specs(
     right = float(source_bbox.x1)
     total_width = max(1.0, right - left)
     signer_end = max(left + 1.0, (float(signer_bbox.x1) + float(status_bbox.x0)) * 0.5)
-    status_end = max(signer_end + 1.0, (float(status_bbox.x1) + float(receiver_label_bbox.x0)) * 0.5)
+    inferred_pad = v102_estimate_inline_cell_padding(source_bbox, source_words)
+    status_end = max(
+        signer_end + 1.0,
+        min(right - 1.0, float(receiver_label_bbox.x0) - inferred_pad),
+    )
     receiver_value_min_width = max(42.0, total_width * 0.18)
     receiver_label_end = min(
         right - receiver_value_min_width,
@@ -2242,14 +2278,14 @@ def v102_resolve_row_frame_specs(
 ) -> list[dict]:
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
 
-    if normalized_frame_group_version in ("v1.07", "v1.08", "v1.09", "v1.10"):
+    if normalized_frame_group_version in ("v1.07", "v1.08", "v1.09", "v1.10", "v1.11"):
         document_issue_specs = None
 
         if v102_find_row_label_cell(row_cells, "문서번호") is not None:
             document_issue_specs = v102_build_document_issue_frame_specs(row_cells, band_index, frame_group_version)
 
         if document_issue_specs:
-            if normalized_frame_group_version not in ("v1.09", "v1.10"):
+            if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
                 v106_apply_frame_spec_semantics(document_issue_specs)
             return document_issue_specs
 
@@ -2259,7 +2295,7 @@ def v102_resolve_row_frame_specs(
             signature_specs = v102_build_signature_frame_specs(row_cells, band_index, frame_group_version)
 
         if signature_specs:
-            if normalized_frame_group_version not in ("v1.09", "v1.10"):
+            if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
                 v106_apply_frame_spec_semantics(signature_specs)
             return signature_specs
 
@@ -2267,7 +2303,7 @@ def v102_resolve_row_frame_specs(
     active_color_group = None
 
     for local_index, cell in enumerate(sorted(row_cells, key=lambda item: (item.col_start, item.col_end)), start=1):
-        if normalized_frame_group_version in ("v1.09", "v1.10"):
+        if normalized_frame_group_version in ("v1.09", "v1.10", "v1.11"):
             color_group = f"band-{band_index}-cell-{local_index}"
         else:
             known_label = v202_resolve_known_label(getattr(cell, "text", "") or "")
@@ -2376,7 +2412,7 @@ def v102_resolve_color_group_indexes(frame_specs: list[dict]) -> dict[str, int]:
 
 
 def v102_resolve_band_outline_style(frame_specs: list[dict], frame_group_version: str = "v1.08") -> str:
-    if normalize_frame_group_version(frame_group_version) != "v1.10":
+    if normalize_frame_group_version(frame_group_version) not in ("v1.10", "v1.11"):
         return "solid"
 
     outline_styles = [
@@ -2763,7 +2799,7 @@ def v102_build_region_frame_band_html(
         "y1": float(bbox.y1),
         "outline_style": frame_outline_style,
     }
-    if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10"):
+    if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11"):
         return v103_build_frame_band_markup([spec], scale, band_index, frame_group_version=frame_group_version)
 
     return v102_build_frame_band_markup([spec], scale, band_index, frame_group_version=frame_group_version)
@@ -3740,7 +3776,7 @@ def v105_build_row_local_frame_specs(
         frame_group_id = f"band-{band_index}-cell-{local_index}"
         frame_color_group = (
             frame_group_id
-            if normalized_frame_group_version in ("v1.09", "v1.10")
+            if normalized_frame_group_version in ("v1.09", "v1.10", "v1.11")
             else v105_pick_frame_color_group(overlap_cell, frame_group_id)
         )
         frame_outline_style = v105_resolve_frame_outline_style(table, x0, row_top, x1, row_bottom)
@@ -3772,10 +3808,192 @@ def v105_build_row_local_frame_specs(
             }
         )
 
-    if normalized_frame_group_version not in ("v1.09", "v1.10"):
+    if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
         v106_apply_frame_spec_semantics(specs)
 
     return specs
+
+
+def v111_snap_value_to_candidates(value: float, candidates: list[float], tolerance: float = 4.0) -> float:
+    if not candidates:
+        return float(value)
+
+    nearest = min(candidates, key=lambda candidate: abs(float(candidate) - float(value)))
+    return float(nearest) if abs(float(nearest) - float(value)) <= tolerance else float(value)
+
+
+def v111_collect_precise_row_vertical_edges(table, row_top: float, row_bottom: float, row_cells: list) -> list[float]:
+    table_bbox = getattr(table, "bbox", None)
+
+    if table_bbox is None:
+        return []
+
+    table_left = float(table_bbox.x0)
+    table_right = float(table_bbox.x1)
+    center_y = (float(row_top) + float(row_bottom)) * 0.5
+    candidates = [table_left, table_right]
+    candidates.extend(float(value) for value in (getattr(table, "x_lines", []) or []))
+
+    for cell in row_cells:
+        bbox = getattr(cell, "bbox", None) or getattr(cell, "rect", None)
+
+        if bbox is None:
+            continue
+
+        candidates.extend([float(bbox.x0), float(bbox.x1)])
+
+    for segment in getattr(table, "_source_frame_segments", []) or []:
+        bbox = getattr(segment, "bbox", None)
+        orientation = str(getattr(segment, "orientation", "") or "").lower()
+
+        if bbox is None or orientation != "v":
+            continue
+
+        overlap = v202_bbox_overlap_ratio(float(bbox.y0), float(bbox.y1), row_top, row_bottom)
+        covers_center = float(bbox.y0) - 2.0 <= center_y <= float(bbox.y1) + 2.0
+
+        if overlap >= 0.18 or covers_center:
+            candidates.append((float(bbox.x0) + float(bbox.x1)) * 0.5)
+
+    resolved = v105_resolve_certificate_edge_clusters(
+        candidates,
+        lambda x_value: v105_measure_vertical_line_score(table, x_value),
+        2.75,
+    )
+    return [value for value in resolved if table_left - 1.0 <= value <= table_right + 1.0]
+
+
+def v111_collect_precise_row_horizontal_edges(table, row_top: float, row_bottom: float) -> list[float]:
+    table_bbox = getattr(table, "bbox", None)
+
+    if table_bbox is None:
+        return []
+
+    table_top = float(table_bbox.y0)
+    table_bottom = float(table_bbox.y1)
+    table_left = float(table_bbox.x0)
+    table_right = float(table_bbox.x1)
+    candidates = [table_top, table_bottom, float(row_top), float(row_bottom)]
+    candidates.extend(float(value) for value in (getattr(table, "y_lines", []) or []))
+
+    for segment in getattr(table, "_source_frame_segments", []) or []:
+        bbox = getattr(segment, "bbox", None)
+        orientation = str(getattr(segment, "orientation", "") or "").lower()
+
+        if bbox is None or orientation != "h":
+            continue
+
+        overlap = max(0.0, min(float(bbox.x1), table_right) - max(float(bbox.x0), table_left))
+
+        if overlap <= 0.0:
+            continue
+
+        candidates.append((float(bbox.y0) + float(bbox.y1)) * 0.5)
+
+    resolved = v105_resolve_certificate_edge_clusters(
+        candidates,
+        lambda y_value: v105_measure_horizontal_line_score(table, y_value),
+        2.5,
+    )
+    return [value for value in resolved if table_top - 1.0 <= value <= table_bottom + 1.0]
+
+
+def v111_refresh_frame_spec_bbox(spec: dict, x0: float, y0: float, x1: float, y1: float) -> None:
+    cell = spec.get("cell")
+    next_bbox = v102_make_bbox(x0, y0, x1, y1)
+    spec["x0"] = float(x0)
+    spec["x1"] = float(x1)
+    spec["y0"] = float(y0)
+    spec["y1"] = float(y1)
+
+    if cell is not None:
+        setattr(cell, "bbox", next_bbox)
+
+
+def v111_refine_row_frame_specs(table, row_index: int, row_cells: list, frame_specs: list[dict]) -> list[dict]:
+    if not frame_specs:
+        return frame_specs
+
+    y_lines = list(getattr(table, "y_lines", []) or [])
+
+    if row_index < 0 or row_index + 1 >= len(y_lines):
+        return frame_specs
+
+    row_top = float(y_lines[row_index])
+    row_bottom = float(y_lines[row_index + 1])
+    x_candidates = v111_collect_precise_row_vertical_edges(table, row_top, row_bottom, row_cells)
+    y_candidates = v111_collect_precise_row_horizontal_edges(table, row_top, row_bottom)
+
+    if not x_candidates and not y_candidates:
+        return frame_specs
+
+    snapped_top = v111_snap_value_to_candidates(row_top, y_candidates, 3.5)
+    snapped_bottom = v111_snap_value_to_candidates(row_bottom, y_candidates, 3.5)
+    sorted_specs = sorted(frame_specs, key=lambda item: (float(item["x0"]), float(item["x1"])))
+    band_left = float(x_candidates[0]) if x_candidates else min(float(item["x0"]) for item in sorted_specs)
+    band_right = float(x_candidates[-1]) if x_candidates else max(float(item["x1"]) for item in sorted_specs)
+    previous_right = None
+
+    for spec_index, spec in enumerate(sorted_specs):
+        original_left = float(spec["x0"])
+        original_right = float(spec["x1"])
+        snapped_left = band_left if spec_index == 0 else v111_snap_value_to_candidates(original_left, x_candidates, 4.5)
+        snapped_right = (
+            band_right
+            if spec_index == len(sorted_specs) - 1
+            else v111_snap_value_to_candidates(original_right, x_candidates, 4.5)
+        )
+
+        if previous_right is not None and snapped_left < previous_right:
+            snapped_left = previous_right
+
+        if snapped_right <= snapped_left + 1.0:
+            snapped_right = max(snapped_left + 1.0, original_right)
+
+        v111_refresh_frame_spec_bbox(spec, snapped_left, snapped_top, snapped_right, snapped_bottom)
+        previous_right = snapped_right
+
+    return sorted_specs
+
+
+def v111_build_table_row_frame_bands_html(
+    table,
+    scale: float,
+    band_index_start: int,
+    frame_group_version: str = "v1.11",
+) -> tuple[list[str], int]:
+    y_lines = list(getattr(table, "y_lines", []) or [])
+    total_rows = max(0, len(y_lines) - 1)
+    rows = [[] for _ in range(total_rows)]
+    fragments = []
+    next_band_index = band_index_start
+
+    for cell in sorted(getattr(table, "cells", []) or [], key=lambda item: (item.row_start, item.col_start, item.row_end, item.col_end)):
+        row_index = max(0, min(total_rows - 1, int(getattr(cell, "row_start", 1) or 1) - 1))
+
+        if total_rows > 0:
+            setattr(cell, "_frame_table", table)
+            rows[row_index].append(cell)
+
+    for row_index in range(total_rows):
+        row_top = float(y_lines[row_index])
+        row_bottom = float(y_lines[row_index + 1])
+        row_cells = rows[row_index]
+        refinement_cells = v105_find_row_cells(table, row_top, row_bottom) or row_cells
+
+        if not row_cells:
+            continue
+
+        frame_specs = v102_resolve_row_frame_specs(row_cells, next_band_index, frame_group_version)
+        frame_specs = v111_refine_row_frame_specs(table, row_index, refinement_cells, frame_specs)
+
+        if not frame_specs:
+            continue
+
+        fragments.append(v103_build_frame_band_markup(frame_specs, scale, next_band_index, frame_group_version=frame_group_version))
+        next_band_index += 1
+
+    return fragments, next_band_index
 
 
 def v105_resolve_certificate_edge_clusters(
@@ -4225,7 +4443,7 @@ def v105_build_certificate_group_mesh_specs(
         frame_group_id = f"band-{band_index}-cell-{next_local_index}"
         frame_color_group = (
             frame_group_id
-            if normalized_frame_group_version in ("v1.09", "v1.10")
+            if normalized_frame_group_version in ("v1.09", "v1.10", "v1.11")
             else v105_pick_frame_color_group(overlap_cell, frame_group_id)
         )
         frame_outline_style = v105_resolve_frame_outline_style(table, x0, y0, x1, y1)
@@ -4263,7 +4481,7 @@ def v105_build_certificate_group_mesh_specs(
         )
         next_local_index += 1
 
-    if normalized_frame_group_version not in ("v1.09", "v1.10"):
+    if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
         v105_apply_frame_spec_color_links(specs)
         v106_apply_frame_spec_semantics(specs)
 
@@ -4594,7 +4812,12 @@ def v102_build_table_row_frame_bands_html(
     frame_group_version: str = "v1.08",
     use_v105_row_local_grid: bool = False,
 ) -> tuple[list[str], int]:
-    if normalize_frame_group_version(frame_group_version) in ("v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") and use_v105_row_local_grid:
+    normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
+
+    if normalized_frame_group_version == "v1.11" and not use_v105_row_local_grid:
+        return v111_build_table_row_frame_bands_html(table, scale, band_index_start, frame_group_version)
+
+    if normalized_frame_group_version in ("v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11") and use_v105_row_local_grid:
         mesh_fragments, next_band_index = v105_build_certificate_table_mesh_fragments(table, scale, band_index_start, frame_group_version)
 
         if mesh_fragments:
@@ -4624,7 +4847,7 @@ def v102_build_table_row_frame_bands_html(
         if not frame_specs:
             continue
 
-        if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10"):
+        if normalized_frame_group_version in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11"):
             fragments.append(v103_build_frame_band_markup(frame_specs, scale, next_band_index, frame_group_version=frame_group_version))
         else:
             fragments.append(v102_build_frame_band_markup(frame_specs, scale, next_band_index, frame_group_version=frame_group_version))
@@ -4632,6 +4855,50 @@ def v102_build_table_row_frame_bands_html(
 
     return fragments, next_band_index
 
+
+def v111_build_source_frame_segment_overlay_html(page, scale: float, frame_group_version: str) -> str:
+    if normalize_frame_group_version(frame_group_version) != "v1.11":
+        return ""
+
+    source_segments = list(getattr(page, "_source_frame_segments", []) or [])
+
+    if not source_segments:
+        return ""
+
+    fragments = []
+
+    for segment in source_segments:
+        bbox = getattr(segment, "bbox", None)
+        orientation = str(getattr(segment, "orientation", "") or "").lower()
+
+        if bbox is None or orientation not in {"h", "v"}:
+            continue
+
+        thickness_px = max(
+            1.0,
+            float(getattr(segment, "thickness", V202_FRAME_STROKE_WIDTH) or V202_FRAME_STROKE_WIDTH) * scale,
+        )
+
+        if orientation == "h":
+            left_px = float(bbox.x0) * scale
+            top_px = ((float(bbox.y0) + float(bbox.y1)) * 0.5) * scale - thickness_px * 0.5
+            width_px = max(1.0, float(bbox.width) * scale)
+            fragments.append(
+                f'<div class="v111-source-frame-segment" data-template-frame-segment="h" '
+                f'style="left:{left_px:.2f}px; top:{top_px:.2f}px; width:{width_px:.2f}px; height:{thickness_px:.2f}px;"></div>'
+            )
+            continue
+
+        left_px = ((float(bbox.x0) + float(bbox.x1)) * 0.5) * scale - thickness_px * 0.5
+        top_px = float(bbox.y0) * scale
+        height_px = max(1.0, float(bbox.height) * scale)
+        fragments.append(
+            f'<div class="v111-source-frame-segment" data-template-frame-segment="v" '
+            f'style="left:{left_px:.2f}px; top:{top_px:.2f}px; width:{thickness_px:.2f}px; height:{height_px:.2f}px;"></div>'
+        )
+
+    if not fragments:
+        return ""
 
 def v102_build_frame_groups_page_html(
     page,
@@ -4643,7 +4910,7 @@ def v102_build_frame_groups_page_html(
     band_index = 0
     frame_bounds = v202_resolve_page_frame_bounds(page)
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
-    certificate_like_page = normalized_frame_group_version in ("v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") and v105_is_certificate_like_scanned_page(page, frame_bounds)
+    certificate_like_page = normalized_frame_group_version in ("v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11") and v105_is_certificate_like_scanned_page(page, frame_bounds)
 
     if frame_bounds:
         for block in v202_collect_outside_region_blocks(page, frame_bounds, "top"):
@@ -4652,7 +4919,7 @@ def v102_build_frame_groups_page_html(
             )
             band_index += 1
 
-        if normalized_frame_group_version in ("v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") and not certificate_like_page:
+        if normalized_frame_group_version in ("v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11") and not certificate_like_page:
             for block in getattr(page, "_v104_status_value_blocks", []) or []:
                 frame_group_id = str(getattr(block, "_frame_group_id", "") or f"band-{band_index}-status")
                 band_fragments.append(
@@ -4677,9 +4944,8 @@ def v102_build_frame_groups_page_html(
             )
             band_index += 1
 
-    page_width_px = v103_snap_scaled_px(page.width, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") else page.width * scale
-    page_height_px = v103_snap_scaled_px(page.height, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") else page.height * scale
-
+    page_width_px = v103_snap_scaled_px(page.width, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11") else page.width * scale
+    page_height_px = v103_snap_scaled_px(page.height, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11") else page.height * scale
     return (
         f'<section class="page" data-page="{getattr(page, "number", 1)}" '
         f'style="width:{page_width_px:.2f}px; min-height:{page_height_px:.2f}px;">'
@@ -4700,7 +4966,7 @@ def v202_build_page_html(
     frame_only = normalized_stage == "frames"
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
 
-    if frame_only and normalized_frame_group_version in ("v1.02", "v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10"):
+    if frame_only and normalized_frame_group_version in ("v1.02", "v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11"):
         return v102_build_frame_groups_page_html(page, scale, clone_id, frame_group_version)
 
     frame_bounds = v202_resolve_page_frame_bounds(page)
@@ -6588,7 +6854,7 @@ def convert(
     ocr_lang: str,
     engine_version: str,
     extraction_stage: str = "full",
-    frame_group_version: str = "v1.10-default",
+    frame_group_version: str = "v1.11-default",
 ) -> dict:
     engine_config = resolve_engine_config(engine_version)
     normalized_stage = normalize_extraction_stage(extraction_stage)
@@ -6725,7 +6991,7 @@ def main() -> None:
     parser.add_argument("--input-pdf", required=True)
     parser.add_argument("--engine-version", default=DEFAULT_ENGINE_VERSION)
     parser.add_argument("--extraction-stage", default="full")
-    parser.add_argument("--frame-group-version", default="v1.10-default")
+    parser.add_argument("--frame-group-version", default="v1.11-default")
     parser.add_argument("--scale", type=float, default=1.28)
     parser.add_argument("--raster-scale", type=float, default=3.2)
     parser.add_argument("--ocr-lang", default="kor+eng")

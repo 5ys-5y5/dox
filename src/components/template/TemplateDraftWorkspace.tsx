@@ -22,7 +22,7 @@ type FlattenedFramePreviewMarkup = {
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
-const FRAME_EDITOR_SUPPORTED_VERSIONS = ['v1.06', 'v1.07', 'v1.08', 'v1.09', 'v1.10'] as const;
+const FRAME_EDITOR_SUPPORTED_VERSIONS = ['v1.06', 'v1.07', 'v1.08', 'v1.09', 'v1.10', 'v1.11'] as const;
 const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-group',
   'data-template-frame-color-group',

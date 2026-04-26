@@ -209,7 +209,7 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
     bytes: Uint8Array,
     version: RasterFirstReplicaVersion = '47',
     extractionStage: TemplateExtractExtractionStage = 'full',
-    frameGroupVersion: TemplateExtractFrameGroupVersion = 'v1.10-default'
+    frameGroupVersion: TemplateExtractFrameGroupVersion = 'v1.11-default'
   ): Promise<TemplateExtractResolvedSource> {
     const sourceTitle = fileName.replace(/\.pdf$/i, '').trim() || '업로드 PDF';
     const tempDir = await mkdtemp(join(tmpdir(), 'template-extract-raster-first-'));

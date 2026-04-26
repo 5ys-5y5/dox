@@ -116,16 +116,19 @@ export type TemplateExtractFrameGroupBaseVersion =
   | 'v1.07'
   | 'v1.08'
   | 'v1.09'
-  | 'v1.10';
+  | 'v1.10'
+  | 'v1.11';
 export type TemplateExtractFrameGroupVersion =
   | TemplateExtractFrameGroupBaseVersion
   | `v1.09-${string}`
-  | `v1.10-${string}`;
+  | `v1.10-${string}`
+  | `v1.11-${string}`;
 
 export const TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS: Array<{
   value: TemplateExtractFrameGroupBaseVersion;
   label: string;
 }> = [
+  { value: 'v1.11', label: 'v1.11' },
   { value: 'v1.10', label: 'v1.10' },
   { value: 'v1.09', label: 'v1.09' },
   { value: 'v1.08', label: 'v1.08' },

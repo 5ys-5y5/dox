@@ -1,4 +1,5 @@
 import type {
+  TemplateExtractReplicaRenderPage,
   TemplateExtractVisualSimilarityPageReport,
   TemplateExtractVisualSimilarityReport,
 } from './templateExtractDtos';
@@ -16,6 +17,7 @@ type MeasureVisualSimilarityInput = {
 type MeasureRenderedPageImagesInput = {
   pdfPageDataUrls: string[];
   replicaPageDataUrls: string[];
+  framePages?: TemplateExtractReplicaRenderPage[];
   minimumPassScore?: number;
   tolerancePx?: number;
   onProgress?: (progress: MeasureVisualSimilarityProgress) => void;
@@ -1123,6 +1125,63 @@ const subtractMask = (sourceMask: Uint8Array, excludedMask: Uint8Array) => {
   return result;
 };
 
+const intersectMask = (leftMask: Uint8Array, rightMask: Uint8Array) => {
+  const result = new Uint8Array(leftMask.length);
+
+  for (let index = 0; index < leftMask.length; index += 1) {
+    if (leftMask[index] === 1 && rightMask[index] === 1) {
+      result[index] = 1;
+    }
+  }
+
+  return result;
+};
+
+const buildExpectedFrameMask = (
+  page: TemplateExtractReplicaRenderPage,
+  width: number,
+  height: number,
+  ownerDocument: Document = document
+) => {
+  if (width <= 0 || height <= 0 || (page.frameSegments || []).length === 0) {
+    return new Uint8Array(Math.max(0, width * height));
+  }
+
+  const canvas = createCanvas(width, height, ownerDocument);
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('expected frame mask 용 2D canvas context 를 만들지 못했습니다.');
+  }
+
+  const scaleX = width / Math.max(1, page.width || width);
+  const scaleY = height / Math.max(1, page.height || height);
+  const thicknessScale = (scaleX + scaleY) * 0.5;
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#0f172a';
+
+  for (const segment of page.frameSegments || []) {
+    const thickness = Math.max(1, (segment.thickness || 0.575) * thicknessScale);
+
+    if (segment.orientation === 'h') {
+      const left = segment.left * scaleX;
+      const top = segment.top * scaleY - thickness * 0.5;
+      const segmentWidth = Math.max(1, (segment.width || 0) * scaleX);
+      context.fillRect(left, top, segmentWidth, thickness);
+      continue;
+    }
+
+    const left = segment.left * scaleX - thickness * 0.5;
+    const top = segment.top * scaleY;
+    const segmentHeight = Math.max(1, (segment.height || 0) * scaleY);
+    context.fillRect(left, top, thickness, segmentHeight);
+  }
+
+  return buildInkMask(canvas);
+};
+
 const buildLongAxisFrameMask = (inkMask: Uint8Array, width: number, height: number) => {
   const frameMask = new Uint8Array(inkMask.length);
   const minimumRunLength = 24;
@@ -1219,6 +1278,97 @@ const buildLongAxisFrameMask = (inkMask: Uint8Array, width: number, height: numb
   }
 
   return frameMask;
+};
+
+const resolveFrameMasks = (
+  page: TemplateExtractReplicaRenderPage | null | undefined,
+  sourceMask: Uint8Array,
+  rawReplicaFrameMask: Uint8Array,
+  rawReplicaTextMask: Uint8Array,
+  width: number,
+  height: number,
+  tolerancePx: number
+) => {
+  const emptyMask = new Uint8Array(Math.max(0, width * height));
+
+  if (width <= 0 || height <= 0) {
+    return {
+      sourceFrameMask: emptyMask,
+      replicaFrameMask: emptyMask,
+      notes: ['frame_mask:empty_dimensions'],
+    };
+  }
+
+  if (!page) {
+    return {
+      sourceFrameMask: buildLongAxisFrameMask(sourceMask, width, height),
+      replicaFrameMask: rawReplicaFrameMask.length === emptyMask.length ? rawReplicaFrameMask : emptyMask,
+      notes: ['frame_mask:page_model_missing', 'source_frame_mask:long_axis_fallback'],
+    };
+  }
+
+  const expectedFrameMask = buildExpectedFrameMask(page, width, height);
+  const expectedFrameInkCount = countMask(expectedFrameMask);
+  const notes: string[] = [];
+  let sourceMaskExcludingReplicaText = sourceMask;
+
+  if (countMask(rawReplicaTextMask) > 0) {
+    const textSearchMask = dilateMask(rawReplicaTextMask, width, height, Math.max(1, tolerancePx + 2));
+    sourceMaskExcludingReplicaText = subtractMask(sourceMask, textSearchMask);
+    notes.push('source_mask:replica_text_window_subtracted');
+  }
+
+  if (expectedFrameInkCount > 0) {
+    const searchMask = dilateMask(expectedFrameMask, width, height, Math.max(2, tolerancePx + 4));
+    const sourceFrameCandidates = intersectMask(sourceMaskExcludingReplicaText, searchMask);
+    const lineReadySourceCandidates = dilateMask(sourceFrameCandidates, width, height, 1);
+    const thinSourceMask = intersectMask(
+      buildLongAxisFrameMask(lineReadySourceCandidates, width, height),
+      searchMask
+    );
+    const sourceFrameCandidateCount = countMask(sourceFrameCandidates);
+    const thinSourceCount = countMask(thinSourceMask);
+    let sourceFrameMask = expectedFrameMask;
+    notes.push('source_frame_mask:expected_frame_segments_windowed');
+
+    if (thinSourceCount > 0 && thinSourceCount >= Math.max(96, Math.floor(expectedFrameInkCount / 5))) {
+      sourceFrameMask = thinSourceMask;
+      notes.push('source_frame_validation:window_long_axis_detected');
+    } else if (sourceFrameCandidateCount > 0) {
+      sourceFrameMask = sourceFrameCandidates;
+      notes.push('source_frame_validation:window_ink_detected');
+    } else {
+      notes.push('source_frame_validation:bitmap_detection_missing');
+    }
+
+    let replicaFrameMask =
+      countMask(rawReplicaFrameMask) > 0 ? intersectMask(rawReplicaFrameMask, searchMask) : expectedFrameMask;
+
+    if (countMask(replicaFrameMask) === 0 && expectedFrameInkCount > 0) {
+      replicaFrameMask = expectedFrameMask;
+      notes.push('replica_frame_mask:expected_frame_segments_fallback');
+    } else {
+      notes.push('replica_frame_mask:rendered_frame_segments');
+    }
+
+    return {
+      sourceFrameMask,
+      replicaFrameMask,
+      notes,
+    };
+  }
+
+  const fallbackSourceMask = buildLongAxisFrameMask(sourceMaskExcludingReplicaText, width, height);
+  const fallbackReplicaMask = countMask(rawReplicaFrameMask) > 0 ? rawReplicaFrameMask : emptyMask;
+  notes.push('frame_mask:expected_frame_segments_missing');
+  notes.push('source_frame_mask:long_axis_fallback');
+  notes.push(countMask(fallbackReplicaMask) > 0 ? 'replica_frame_mask:rendered_frame_segments_without_expected' : 'replica_frame_mask:empty');
+
+  return {
+    sourceFrameMask: fallbackSourceMask,
+    replicaFrameMask: fallbackReplicaMask,
+    notes,
+  };
 };
 
 const compareInkMasks = (
@@ -1371,6 +1521,7 @@ const buildVisualSimilarityReport = (
     captureMode: string;
     foreignObjectError?: string | null;
   }>,
+  framePages: TemplateExtractReplicaRenderPage[] | undefined,
   tolerancePx: number,
   minimumPassScore: number,
   measurementMode: TemplateExtractVisualSimilarityReport['measurementMode'],
@@ -1379,6 +1530,7 @@ const buildVisualSimilarityReport = (
 ) => {
   const pageCount = Math.max(replicaPages.length, sourcePages.length);
   const pageReports: TemplateExtractVisualSimilarityPageReport[] = [];
+  const framePageByNumber = new Map((framePages || []).map((page) => [page.pageNumber, page] as const));
   let totalCombinedUnionInkPixelCount = 0;
   let totalCombinedOverlapInkPixelCount = 0;
   let totalFrameUnionInkPixelCount = 0;
@@ -1425,10 +1577,21 @@ const buildVisualSimilarityReport = (
     const normalizedReplicaCanvas = normalizeCanvasSize(replicaPage.canvas, targetWidth, targetHeight);
     const sourceMask = buildInkMask(normalizedSourceCanvas);
     const replicaMask = buildInkMask(normalizedReplicaCanvas);
-    const sourceFrameMask = buildLongAxisFrameMask(sourceMask, targetWidth, targetHeight);
-    const replicaFrameMask = buildLongAxisFrameMask(replicaMask, targetWidth, targetHeight);
+    const rawReplicaFrameMask = buildLongAxisFrameMask(replicaMask, targetWidth, targetHeight);
+    const rawReplicaTextMask = subtractMask(replicaMask, rawReplicaFrameMask);
+    const resolvedFrameMasks = resolveFrameMasks(
+      framePageByNumber.get(pageNumber),
+      sourceMask,
+      rawReplicaFrameMask,
+      rawReplicaTextMask,
+      targetWidth,
+      targetHeight,
+      tolerancePx
+    );
+    const sourceFrameMask = resolvedFrameMasks.sourceFrameMask;
+    const replicaFrameMask = resolvedFrameMasks.replicaFrameMask;
     const sourceTextMask = subtractMask(sourceMask, sourceFrameMask);
-    const replicaTextMask = subtractMask(replicaMask, replicaFrameMask);
+    const replicaTextMask = rawReplicaTextMask;
     const compared = compareInkMasks(sourceMask, replicaMask, targetWidth, targetHeight, tolerancePx);
     const rawFrameLayerReport = compareInkMasks(
       sourceFrameMask,
@@ -1465,9 +1628,11 @@ const buildVisualSimilarityReport = (
       notes: [
         `replica_capture_mode:${replicaPage.captureMode}`,
         frameScoreAvailable ? 'score_mode:frame_ink_overlap' : 'score_mode:combined_ink_overlap',
-        'source_frame_mask:long_axis_runs_24px',
-        'replica_frame_mask:long_axis_runs_24px',
+        ...(framePageByNumber.has(pageNumber)
+          ? ['frame_mask:current_preview_frame_segments']
+          : ['frame_mask:current_preview_frame_segments_missing']),
         ...(frameScoreAvailable ? [] : ['frame_mask_union_missing']),
+        ...resolvedFrameMasks.notes,
         ...(replicaPage.foreignObjectError
           ? [`replica_foreign_object_error:${replicaPage.foreignObjectError}`]
           : []),
@@ -1554,6 +1719,7 @@ export const TemplateExtractVisualSimilarityClient = {
     return buildVisualSimilarityReport(
       sourcePages,
       replicaPages,
+      input.framePages,
       tolerancePx,
       minimumPassScore,
       'server_headless_chrome_capture',
@@ -1611,6 +1777,7 @@ export const TemplateExtractVisualSimilarityClient = {
     return buildVisualSimilarityReport(
       sourcePages,
       replicaPages,
+      undefined,
       tolerancePx,
       minimumPassScore,
       measurementMode,

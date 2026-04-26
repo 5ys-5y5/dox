@@ -19,6 +19,7 @@ import type {
   TemplateExtractEngineVersion,
   TemplateExtractExtractionStage,
   TemplateExtractFrameGroupVersion,
+  TemplateExtractReplicaRenderFrameSegment,
   TemplateExtractReplicaRenderModel,
   TemplateExtractReplicaRenderPage,
   TemplateExtractReplicaRenderTextItem,
@@ -143,6 +144,12 @@ type FrameCreateState = {
   ghostNode: HTMLElement;
 };
 type FrameExtractedTextState = Record<string, string>;
+type FrameTextRenderModelV112 = TemplateExtractReplicaRenderModel & {
+  diagnostics?: {
+    pageModes?: string[];
+  };
+};
+type FrameTextExtractionMode = 'non_image' | 'image';
 type TemplateValueResolveEvent = {
   clientX?: number;
   clientY?: number;
@@ -168,7 +175,8 @@ type StoredFrameProfile = {
   savedAt: string;
   frames: FrameNodeSnapshot[];
 };
-type FrameTextExtractionVersion = 'v1.01' | 'v1.02';
+type FrameTextExtractionVersion = 'v1.01' | 'v1.02' | 'v1.12';
+type ImageFrameTextExtractionVersion = 'v1.00';
 type CrossValidationViewMode = 'side_by_side' | 'overlay';
 type CrossValidationPreviewState = {
   pdfPageDataUrls: string[];
@@ -203,15 +211,20 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-halign',
   'data-template-frame-valign',
 ] as const;
-const FRAME_EDITOR_SUPPORTED_VERSIONS = ['v1.06', 'v1.07', 'v1.08', 'v1.09', 'v1.10'] as const;
+const FRAME_EDITOR_SUPPORTED_VERSIONS = ['v1.06', 'v1.07', 'v1.08', 'v1.09', 'v1.10', 'v1.11'] as const;
 const FRAME_PROFILE_STORAGE_KEY = 'template-extract-frame-profiles-v109';
-const FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
+const NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
   value: FrameTextExtractionVersion;
   label: string;
 }> = [
+  { value: 'v1.12', label: 'v1.12' },
   { value: 'v1.02', label: 'v1.02' },
   { value: 'v1.01', label: 'v1.01' },
 ];
+const IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
+  value: ImageFrameTextExtractionVersion;
+  label: string;
+}> = [{ value: 'v1.00', label: 'v1.00' }];
 const RENDER_MODEL_SCRIPT_PATTERN =
   /<script\b[^>]*data-template-render-model="positioned-v1"[^>]*>([\s\S]*?)<\/script>/i;
 
@@ -223,7 +236,8 @@ const isSupportedFrameEditorVersion = (frameGroupVersion: string | null | undefi
 
 const isV109FrameGroupVersion = (frameGroupVersion: string | null | undefined) =>
   frameGroupVersionMatches(String(frameGroupVersion || ''), 'v1.09') ||
-  frameGroupVersionMatches(String(frameGroupVersion || ''), 'v1.10');
+  frameGroupVersionMatches(String(frameGroupVersion || ''), 'v1.10') ||
+  frameGroupVersionMatches(String(frameGroupVersion || ''), 'v1.11');
 
 const normalizeFrameFieldPath = (value: string) =>
   value
@@ -247,7 +261,7 @@ const buildRequestedFrameGroupVersion = (
   baseVersion: string,
   profileName: string
 ): TemplateExtractFrameGroupVersion =>
-  baseVersion === 'v1.09' || baseVersion === 'v1.10'
+  baseVersion === 'v1.09' || baseVersion === 'v1.10' || baseVersion === 'v1.11'
     ? (`${baseVersion}-${sanitizeFrameProfileName(profileName)}` as TemplateExtractFrameGroupVersion)
     : (baseVersion as TemplateExtractFrameGroupVersion);
 
@@ -1282,6 +1296,7 @@ const stringifyRenderTextItem = (item: TemplateExtractReplicaRenderTextItem) => 
 };
 
 type FrameRenderCandidateItem = {
+  sourceIndex: number;
   text: string;
   left: number;
   top: number;
@@ -1298,6 +1313,8 @@ type FrameRenderCandidateItem = {
   insideLoose: boolean;
   distanceX: number;
   distanceY: number;
+  hintAffinity?: number;
+  score?: number;
 };
 
 type FrameRenderCandidateLine = {
@@ -1311,7 +1328,7 @@ const mapFrameRenderCandidateItems = (
   frameRect: FrameNodeRect
 ): FrameRenderCandidateItem[] =>
   page.textItems
-    .map((item) => {
+    .map((item, sourceIndex) => {
       const text = normalizeExtractedFrameText(stringifyRenderTextItem(item));
 
       if (!text) {
@@ -1340,6 +1357,7 @@ const mapFrameRenderCandidateItems = (
       const itemArea = Math.max(1, width * height);
 
       return {
+        sourceIndex,
         text,
         left,
         top,
@@ -1615,6 +1633,328 @@ const resolveFrameTextExtractionV102 = (renderText: string, sourceTextHint: stri
   return affinity >= 0.35 ? normalizedRenderText : normalizedSourceHint;
 };
 
+const looksLikeNoisyFrameExtractedText = (value: string) => {
+  const normalized = normalizeExtractedFrameText(value);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const compact = compactFrameTextForComparison(normalized);
+  const symbolCount = (normalized.match(/[|[\]{}<>_=]/g) || []).length;
+  const visibleLength = normalized.replace(/\s+/g, '').length;
+
+  if (symbolCount >= 2) {
+    return true;
+  }
+
+  if (visibleLength >= 3 && compact.length <= Math.max(1, Math.floor(visibleLength * 0.55))) {
+    return true;
+  }
+
+  return false;
+};
+
+const scoreFrameRenderCandidateItemV112 = (item: FrameRenderCandidateItem, sourceTextHint: string) => {
+  const normalizedHint = normalizeExtractedFrameText(sourceTextHint);
+  const hintAffinity = normalizedHint ? measureFrameTextAffinity(item.text, normalizedHint) : 0;
+  const geometryScore =
+    (item.insideStrict ? 5.5 : item.insideLoose ? 2.8 : 0) +
+    Math.min(3.6, item.overlapRatio * 7.2) -
+    Math.min(1.5, (item.distanceX + item.distanceY) / 18);
+  const linePenalty =
+    normalizedHint && countFrameTextLines(item.text) > countFrameTextLines(normalizedHint) + 1 ? 0.85 : 0;
+  const noisePenalty = normalizedHint && looksLikeNoisyFrameExtractedText(item.text) ? 0.9 : 0;
+
+  return {
+    ...item,
+    hintAffinity,
+    score: geometryScore + hintAffinity * 4 - linePenalty - noisePenalty,
+  } satisfies FrameRenderCandidateItem;
+};
+
+const resolveFrameTextExtractionV112 = (
+  assignedText: string,
+  localText: string,
+  sourceTextHint: string
+) => {
+  const normalizedHint = normalizeExtractedFrameText(sourceTextHint);
+  const resolvedAssigned = resolveFrameTextExtractionV102(assignedText, sourceTextHint);
+  const resolvedLocal = resolveFrameTextExtractionV102(localText, sourceTextHint);
+
+  if (!resolvedAssigned) {
+    return resolvedLocal || normalizedHint;
+  }
+
+  if (!resolvedLocal) {
+    return resolvedAssigned;
+  }
+
+  if (!normalizedHint) {
+    return resolvedAssigned.length >= resolvedLocal.length ? resolvedAssigned : resolvedLocal;
+  }
+
+  const assignedNoise = looksLikeNoisyFrameExtractedText(resolvedAssigned);
+  const localNoise = looksLikeNoisyFrameExtractedText(resolvedLocal);
+
+  if (assignedNoise !== localNoise) {
+    return assignedNoise ? resolvedLocal : resolvedAssigned;
+  }
+
+  const assignedAffinity = measureFrameTextAffinity(resolvedAssigned, normalizedHint);
+  const localAffinity = measureFrameTextAffinity(resolvedLocal, normalizedHint);
+
+  if (Math.abs(assignedAffinity - localAffinity) > 0.08) {
+    return assignedAffinity > localAffinity ? resolvedAssigned : resolvedLocal;
+  }
+
+  const hintLineCount = countFrameTextLines(normalizedHint);
+  const assignedLineDistance = Math.abs(countFrameTextLines(resolvedAssigned) - hintLineCount);
+  const localLineDistance = Math.abs(countFrameTextLines(resolvedLocal) - hintLineCount);
+
+  if (assignedLineDistance !== localLineDistance) {
+    return assignedLineDistance < localLineDistance ? resolvedAssigned : resolvedLocal;
+  }
+
+  return resolvedAssigned.length >= resolvedLocal.length ? resolvedAssigned : resolvedLocal;
+};
+
+const extractFrameTextStateFromRenderPageV112 = (
+  page: TemplateExtractReplicaRenderPage | null | undefined,
+  framePlans: Array<{
+    key: string;
+    frameRect: FrameNodeRect;
+    sourceTextHint: string;
+  }>
+): FrameExtractedTextState => {
+  if (!page || !framePlans.length) {
+    return {};
+  }
+
+  const assignments = new Map<string, FrameRenderCandidateItem[]>();
+  const localCandidatesByKey = new Map<string, FrameRenderCandidateItem[]>();
+  const scoredByItemIndex = new Map<number, Array<{ key: string; item: FrameRenderCandidateItem }>>();
+
+  framePlans.forEach((plan) => {
+    const candidates = mapFrameRenderCandidateItems(page, plan.frameRect)
+      .map((item) => scoreFrameRenderCandidateItemV112(item, plan.sourceTextHint))
+      .filter((item) => {
+        if (item.insideStrict) {
+          return true;
+        }
+
+        if (item.overlapArea > 0 && item.overlapRatio >= 0.14) {
+          return true;
+        }
+
+        return (item.hintAffinity || 0) >= 0.5 && item.insideLoose;
+      })
+      .sort((left, right) => {
+        if (Math.abs(left.top - right.top) > 3) {
+          return left.top - right.top;
+        }
+
+        if (Math.abs(left.left - right.left) > 2) {
+          return left.left - right.left;
+        }
+
+        return (right.score || 0) - (left.score || 0);
+      });
+
+    localCandidatesByKey.set(plan.key, candidates);
+
+    candidates.forEach((item) => {
+      const entries = scoredByItemIndex.get(item.sourceIndex) || [];
+      entries.push({ key: plan.key, item });
+      scoredByItemIndex.set(item.sourceIndex, entries);
+    });
+  });
+
+  scoredByItemIndex.forEach((entries) => {
+    const viable = entries
+      .filter(({ item }) => (item.score || 0) >= 2.2 || (item.insideStrict && (item.score || 0) >= 1.4))
+      .sort((left, right) => (right.item.score || 0) - (left.item.score || 0));
+
+    if (!viable.length) {
+      return;
+    }
+
+    const best = viable[0];
+    const second = viable[1];
+
+    if (
+      second &&
+      (best.item.score || 0) < (second.item.score || 0) + 0.55 &&
+      (best.item.hintAffinity || 0) < 0.7 &&
+      !best.item.insideStrict
+    ) {
+      return;
+    }
+
+    const assigned = assignments.get(best.key) || [];
+    assigned.push(best.item);
+    assignments.set(best.key, assigned);
+  });
+
+  return framePlans.reduce<FrameExtractedTextState>((nextState, plan) => {
+    const assignedItems = (assignments.get(plan.key) || []).sort((left, right) => {
+      if (Math.abs(left.top - right.top) > 3) {
+        return left.top - right.top;
+      }
+
+      if (Math.abs(left.left - right.left) > 2) {
+        return left.left - right.left;
+      }
+
+      return (right.score || 0) - (left.score || 0);
+    });
+    const localCandidates = localCandidatesByKey.get(plan.key) || [];
+    const assignedText = selectBestFrameRenderTextWindowV102(assignedItems, plan.sourceTextHint);
+    const localText = selectBestFrameRenderTextWindowV102(localCandidates, plan.sourceTextHint);
+    nextState[plan.key] = resolveFrameTextExtractionV112(assignedText, localText, plan.sourceTextHint);
+    return nextState;
+  }, {});
+};
+
+const scoreFrameRenderCandidateItemImageV100 = (item: FrameRenderCandidateItem, sourceTextHint: string) => {
+  const normalizedHint = normalizeExtractedFrameText(sourceTextHint);
+  const hintAffinity = normalizedHint ? measureFrameTextAffinity(item.text, normalizedHint) : 0;
+  const geometryScore =
+    (item.insideStrict ? 5.2 : item.insideLoose ? 2.4 : 0) +
+    Math.min(3.2, item.overlapRatio * 6.4) -
+    Math.min(1.8, (item.distanceX + item.distanceY) / 16);
+  const noisePenalty = looksLikeNoisyFrameExtractedText(item.text) ? 1.1 : 0;
+
+  return {
+    ...item,
+    hintAffinity,
+    score: geometryScore + hintAffinity * 2.6 - noisePenalty,
+  } satisfies FrameRenderCandidateItem;
+};
+
+const resolveFrameTextExtractionImageV100 = (
+  assignedText: string,
+  localText: string,
+  sourceTextHint: string
+) => {
+  const resolvedAssigned = resolveFrameTextExtractionV102(assignedText, sourceTextHint);
+  const resolvedLocal = resolveFrameTextExtractionV102(localText, sourceTextHint);
+
+  if (!resolvedAssigned) {
+    return resolvedLocal;
+  }
+
+  if (!resolvedLocal) {
+    return resolvedAssigned;
+  }
+
+  const assignedNoise = looksLikeNoisyFrameExtractedText(resolvedAssigned);
+  const localNoise = looksLikeNoisyFrameExtractedText(resolvedLocal);
+
+  if (assignedNoise !== localNoise) {
+    return assignedNoise ? resolvedLocal : resolvedAssigned;
+  }
+
+  return resolvedAssigned.length >= resolvedLocal.length ? resolvedAssigned : resolvedLocal;
+};
+
+const extractFrameTextStateFromRenderPageImageV100 = (
+  page: TemplateExtractReplicaRenderPage | null | undefined,
+  framePlans: Array<{
+    key: string;
+    frameRect: FrameNodeRect;
+    sourceTextHint: string;
+  }>
+): FrameExtractedTextState => {
+  if (!page || !framePlans.length) {
+    return {};
+  }
+
+  const assignments = new Map<string, FrameRenderCandidateItem[]>();
+  const localCandidatesByKey = new Map<string, FrameRenderCandidateItem[]>();
+  const scoredByItemIndex = new Map<number, Array<{ key: string; item: FrameRenderCandidateItem }>>();
+
+  framePlans.forEach((plan) => {
+    const candidates = mapFrameRenderCandidateItems(page, plan.frameRect)
+      .map((item) => scoreFrameRenderCandidateItemImageV100(item, plan.sourceTextHint))
+      .filter((item) => {
+        if (item.insideStrict) {
+          return true;
+        }
+
+        if (item.overlapArea > 0 && item.overlapRatio >= 0.1) {
+          return true;
+        }
+
+        return (item.hintAffinity || 0) >= 0.32 && item.insideLoose;
+      })
+      .sort((left, right) => {
+        if (Math.abs(left.top - right.top) > 3) {
+          return left.top - right.top;
+        }
+
+        if (Math.abs(left.left - right.left) > 2) {
+          return left.left - right.left;
+        }
+
+        return (right.score || 0) - (left.score || 0);
+      });
+
+    localCandidatesByKey.set(plan.key, candidates);
+
+    candidates.forEach((item) => {
+      const entries = scoredByItemIndex.get(item.sourceIndex) || [];
+      entries.push({ key: plan.key, item });
+      scoredByItemIndex.set(item.sourceIndex, entries);
+    });
+  });
+
+  scoredByItemIndex.forEach((entries) => {
+    const viable = entries
+      .filter(({ item }) => (item.score || 0) >= 1.8 || (item.insideStrict && (item.score || 0) >= 1.2))
+      .sort((left, right) => (right.item.score || 0) - (left.item.score || 0));
+
+    if (!viable.length) {
+      return;
+    }
+
+    const best = viable[0];
+    const second = viable[1];
+
+    if (
+      second &&
+      (best.item.score || 0) < (second.item.score || 0) + 0.4 &&
+      (best.item.hintAffinity || 0) < 0.58 &&
+      !best.item.insideStrict
+    ) {
+      return;
+    }
+
+    const assigned = assignments.get(best.key) || [];
+    assigned.push(best.item);
+    assignments.set(best.key, assigned);
+  });
+
+  return framePlans.reduce<FrameExtractedTextState>((nextState, plan) => {
+    const assignedItems = (assignments.get(plan.key) || []).sort((left, right) => {
+      if (Math.abs(left.top - right.top) > 3) {
+        return left.top - right.top;
+      }
+
+      if (Math.abs(left.left - right.left) > 2) {
+        return left.left - right.left;
+      }
+
+      return (right.score || 0) - (left.score || 0);
+    });
+    const localCandidates = localCandidatesByKey.get(plan.key) || [];
+    const assignedText = selectBestFrameRenderTextWindowV102(assignedItems, plan.sourceTextHint);
+    const localText = selectBestFrameRenderTextWindowV102(localCandidates, plan.sourceTextHint);
+    nextState[plan.key] = resolveFrameTextExtractionImageV100(assignedText, localText, plan.sourceTextHint);
+    return nextState;
+  }, {});
+};
+
 const extractFrameTextFromRenderPage = (
   page: TemplateExtractReplicaRenderPage | null | undefined,
   frameRect: FrameNodeRect,
@@ -1626,6 +1966,13 @@ const extractFrameTextFromRenderPage = (
   }
 
   switch (version) {
+    case 'v1.12': {
+      const candidateItems = selectFrameRenderCandidateItemsV102(page, frameRect, sourceTextHint).map((item) =>
+        scoreFrameRenderCandidateItemV112(item, sourceTextHint)
+      );
+      const renderText = selectBestFrameRenderTextWindowV102(candidateItems, sourceTextHint);
+      return resolveFrameTextExtractionV112(renderText, renderText, sourceTextHint);
+    }
     case 'v1.02': {
       const candidateItems = selectFrameRenderCandidateItemsV102(page, frameRect, sourceTextHint);
       const renderText = selectBestFrameRenderTextWindowV102(candidateItems, sourceTextHint);
@@ -2073,6 +2420,9 @@ const formatPercent = (value: number | null | undefined) => {
   return `${(value * 100).toFixed(2)}%`;
 };
 
+const buildSelectedFileCacheKey = (file: File | null | undefined) =>
+  file ? `${file.name}::${file.size}::${file.lastModified}` : '';
+
 const toVisualSimilarityStepKey = (phase: string): VisualSimilarityProgressStepKey => {
   if (phase === 'loading_html' || phase === 'capturing_pages') {
     return 'preparing_replica_pages';
@@ -2099,7 +2449,7 @@ export default function TemplateExtractPage() {
   const [sourceContent, setSourceContent] = React.useState(defaultSourceContent);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [engineVersion, setEngineVersion] = React.useState<TemplateExtractEngineVersion>('47');
-  const [frameGroupVersion, setFrameGroupVersion] = React.useState<TemplateExtractFrameGroupVersion>('v1.10');
+  const [frameGroupVersion, setFrameGroupVersion] = React.useState<TemplateExtractFrameGroupVersion>('v1.11');
   const [frameProfileName, setFrameProfileName] = React.useState('default');
   const [previewPaneMode, setPreviewPaneMode] = React.useState<PreviewPaneMode>('source');
   const [draftPreviewEditRole, setDraftPreviewEditRole] = React.useState<DraftPreviewEditRole>('editor');
@@ -2116,8 +2466,12 @@ export default function TemplateExtractPage() {
   const [frameCreateMode, setFrameCreateMode] = React.useState(false);
   const [frameEditorNotice, setFrameEditorNotice] = React.useState<string | null>(null);
   const [frameRevision, setFrameRevision] = React.useState(0);
+  const [frameTextExtractionMode, setFrameTextExtractionMode] =
+    React.useState<FrameTextExtractionMode>('non_image');
   const [frameTextExtractionVersion, setFrameTextExtractionVersion] =
-    React.useState<FrameTextExtractionVersion>('v1.02');
+    React.useState<FrameTextExtractionVersion>('v1.12');
+  const [imageFrameTextExtractionVersion, setImageFrameTextExtractionVersion] =
+    React.useState<ImageFrameTextExtractionVersion>('v1.00');
   const [frameExtractedTextState, setFrameExtractedTextState] = React.useState<FrameExtractedTextState>({});
   const [frameTextExtractionCompleted, setFrameTextExtractionCompleted] = React.useState(false);
   const [similarTemplateIdsText, setSimilarTemplateIdsText] = React.useState('');
@@ -2173,6 +2527,10 @@ export default function TemplateExtractPage() {
   const visualMeasurementLogFileNameRef = React.useRef('');
   const lastVisualMeasurementLogEventKeyRef = React.useRef('');
   const lastVisualMeasurementKeyRef = React.useRef<string>('');
+  const frameTextRenderModelCacheRef = React.useRef<{
+    fileKey: string;
+    model: FrameTextRenderModelV112;
+  } | null>(null);
   const [visualSimilarityProgress, setVisualSimilarityProgress] =
     React.useState<VisualSimilarityProgressState>({
       visible: false,
@@ -2287,7 +2645,7 @@ export default function TemplateExtractPage() {
     return applyFrameExtractedTextStateToHtml(baseHtml, frameExtractedTextState);
   }, [frameExtractedTextState, frameRevision, previewDraftBaseHtml]);
   const requestedFrameGroupVersion = React.useMemo(
-    () => buildRequestedFrameGroupVersion(String(frameGroupVersion || 'v1.10'), frameProfileName),
+    () => buildRequestedFrameGroupVersion(String(frameGroupVersion || 'v1.11'), frameProfileName),
     [frameGroupVersion, frameProfileName]
   );
   const currentFrameGroupVersionTag =
@@ -2482,7 +2840,7 @@ export default function TemplateExtractPage() {
     const root = draftPreviewRef.current;
 
     if (!root || !isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
-      setFrameEditorNotice('v1.09/v1.10 프레임 프로필에서만 저장할 수 있습니다.');
+      setFrameEditorNotice('v1.09/v1.10/v1.11 프레임 프로필에서만 저장할 수 있습니다.');
       return false;
     }
 
@@ -3775,10 +4133,12 @@ export default function TemplateExtractPage() {
       });
       setCrossValidationReferenceVisible(true);
       setCrossValidationPageIndex(0);
+      const framePages = buildCrossValidationFramePages();
 
       const report = await TemplateExtractVisualSimilarityClient.measureRenderedPageImages({
         pdfPageDataUrls,
         replicaPageDataUrls,
+        framePages,
         onProgress: (progress) => {
           const activeStep = toVisualSimilarityStepKey(progress.phase);
           updateVisualSimilarityProgress({
@@ -3856,6 +4216,7 @@ export default function TemplateExtractPage() {
     postVisualMeasurementLog,
     requestVisualSimilarityRenderInputs,
     selectedFile,
+    buildCrossValidationFramePages,
     updateVisualSimilarityProgress,
     startVisualMeasurementLog,
   ]);
@@ -3936,26 +4297,50 @@ export default function TemplateExtractPage() {
     });
   }, []);
 
-  const handleExtractFrameText = React.useCallback(() => {
+  const loadImageFrameTextRenderModelV100 = React.useCallback(async () => {
+    if (!selectedFile || !isPdfSourceFile(selectedFile)) {
+      return null;
+    }
+
+    const fileKey = buildSelectedFileCacheKey(selectedFile);
+
+    if (frameTextRenderModelCacheRef.current?.fileKey === fileKey) {
+      return frameTextRenderModelCacheRef.current.model;
+    }
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('mode', 'image');
+
+    const response = await fetch('/api/templates/extract/frame-text', {
+      method: 'POST',
+      body: formData,
+    });
+    const result = (await response.json()) as {
+      success?: boolean;
+      data?: FrameTextRenderModelV112;
+      message?: string;
+    };
+
+    if (!response.ok || !result.success || !result.data?.pages?.length) {
+      throw new Error(result.message || '이미지 모드 텍스트 추출용 PDF 재분석에 실패했습니다.');
+    }
+
+    frameTextRenderModelCacheRef.current = {
+      fileKey,
+      model: result.data,
+    };
+
+    return result.data;
+  }, [selectedFile]);
+
+  const handleExtractFrameText = React.useCallback(async () => {
     const root = draftPreviewRef.current;
 
     if (!root || !textExtractionReady) {
       setMessage('텍스트 추출은 프레임 그룹 생성 이후에 실행할 수 있습니다.');
       return;
     }
-
-    const renderModel =
-      parseReplicaRenderModelFromHtml(draftDetail?.draft.generatedDraftHtml || '') ||
-      parseReplicaRenderModelFromHtml(draftDetail?.draft.sourceContent || '');
-
-    if (!renderModel?.pages?.length) {
-      setMessage('텍스트 추출용 렌더 모델을 찾지 못했습니다.');
-      return;
-    }
-
-    const pageModelByPageNumber = new Map(
-      (renderModel?.pages || []).map((page) => [String(page.pageNumber), page] as const)
-    );
     const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).filter(
       (node) => !node.matches('[data-template-frame-input="true"]')
     );
@@ -3969,38 +4354,114 @@ export default function TemplateExtractPage() {
     setMessage(null);
 
     try {
+      const defaultRenderModel =
+        parseReplicaRenderModelFromHtml(draftDetail?.draft.generatedDraftHtml || '') ||
+        parseReplicaRenderModelFromHtml(draftDetail?.draft.sourceContent || '');
+      const activeTextExtractionVersion =
+        frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion;
+      const renderModel =
+        frameTextExtractionMode === 'image' ? await loadImageFrameTextRenderModelV100() : defaultRenderModel;
+
+      if (!renderModel?.pages?.length) {
+        setMessage('텍스트 추출용 렌더 모델을 찾지 못했습니다.');
+        return;
+      }
+
+      const pageModelByPageNumber = new Map(
+        (renderModel.pages || []).map((page) => [String(page.pageNumber), page] as const)
+      );
       let filledCount = 0;
       const nextExtractedTextState: FrameExtractedTextState = {};
+      if (frameTextExtractionMode === 'image' || frameTextExtractionVersion === 'v1.12') {
+        const framePlansByPageNumber = new Map<
+          string,
+          Array<{
+            key: string;
+            frameRect: FrameNodeRect;
+            sourceTextHint: string;
+            node: HTMLElement;
+          }>
+        >();
 
-      frameNodes.forEach((node) => {
-        const pageNumber =
-          node.getAttribute('data-template-frame-page') ||
-          node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
-          '1';
-        const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
-        const frameRect = readSelectableFrameNodeRect(node);
-        const sourceTextHint = readFrameNodeSourceText(node);
-        const nextText = extractFrameTextFromRenderPage(
-          pageModel,
-          frameRect,
-          frameTextExtractionVersion,
-          sourceTextHint
-        );
-        const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
-        const normalizedText = formatFrameSourceTextForDisplay(nextText, {
-          frameGroup: node.getAttribute('data-template-frame-group'),
-          valueKey: node.getAttribute('data-template-frame-value-key'),
-          colorGroup: node.getAttribute('data-template-frame-color-group'),
+        frameNodes.forEach((node) => {
+          const pageNumber =
+            node.getAttribute('data-template-frame-page') ||
+            node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
+            '1';
+          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
+
+          if (!extractedTextKey) {
+            return;
+          }
+
+          const pagePlans = framePlansByPageNumber.get(pageNumber) || [];
+          pagePlans.push({
+            key: extractedTextKey,
+            frameRect: readSelectableFrameNodeRect(node),
+            sourceTextHint: readFrameNodeSourceText(node),
+            node,
+          });
+          framePlansByPageNumber.set(pageNumber, pagePlans);
         });
 
-        if (extractedTextKey) {
-          nextExtractedTextState[extractedTextKey] = normalizedText;
-        }
+        framePlansByPageNumber.forEach((plans, pageNumber) => {
+          const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
+          const normalizedPlans = plans.map((plan) => ({
+            key: plan.key,
+            frameRect: plan.frameRect,
+            sourceTextHint: plan.sourceTextHint,
+          }));
+          const extractedTextState =
+            frameTextExtractionMode === 'image'
+              ? extractFrameTextStateFromRenderPageImageV100(pageModel, normalizedPlans)
+              : extractFrameTextStateFromRenderPageV112(pageModel, normalizedPlans);
 
-        if (normalizedText) {
-          filledCount += 1;
-        }
-      });
+          plans.forEach((plan) => {
+            const nextText = extractedTextState[plan.key] || '';
+            const normalizedText = formatFrameSourceTextForDisplay(nextText, {
+              frameGroup: plan.node.getAttribute('data-template-frame-group'),
+              valueKey: plan.node.getAttribute('data-template-frame-value-key'),
+              colorGroup: plan.node.getAttribute('data-template-frame-color-group'),
+            });
+
+            nextExtractedTextState[plan.key] = normalizedText;
+
+            if (normalizedText) {
+              filledCount += 1;
+            }
+          });
+        });
+      } else {
+        frameNodes.forEach((node) => {
+          const pageNumber =
+            node.getAttribute('data-template-frame-page') ||
+            node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
+            '1';
+          const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
+          const frameRect = readSelectableFrameNodeRect(node);
+          const sourceTextHint = readFrameNodeSourceText(node);
+          const nextText = extractFrameTextFromRenderPage(
+            pageModel,
+            frameRect,
+            frameTextExtractionVersion,
+            sourceTextHint
+          );
+          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
+          const normalizedText = formatFrameSourceTextForDisplay(nextText, {
+            frameGroup: node.getAttribute('data-template-frame-group'),
+            valueKey: node.getAttribute('data-template-frame-value-key'),
+            colorGroup: node.getAttribute('data-template-frame-color-group'),
+          });
+
+          if (extractedTextKey) {
+            nextExtractedTextState[extractedTextKey] = normalizedText;
+          }
+
+          if (normalizedText) {
+            filledCount += 1;
+          }
+        });
+      }
 
       setFrameExtractedTextState(nextExtractedTextState);
       setFrameTextExtractionCompleted(true);
@@ -4009,7 +4470,9 @@ export default function TemplateExtractPage() {
           requestPreviewTextFit();
         });
       }
-      setMessage(`텍스트 추출을 완료했습니다. (${frameTextExtractionVersion}, ${filledCount}개 프레임)`);
+      setMessage(
+        `텍스트 추출을 완료했습니다. (${frameTextExtractionMode === 'image' ? '이미지' : '비 이미지'} ${activeTextExtractionVersion}, ${filledCount}개 프레임)`
+      );
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : '텍스트 추출에 실패했습니다.';
       setMessage(nextMessage);
@@ -4019,7 +4482,10 @@ export default function TemplateExtractPage() {
   }, [
     draftDetail?.draft.generatedDraftHtml,
     draftDetail?.draft.sourceContent,
+    frameTextExtractionMode,
     frameTextExtractionVersion,
+    imageFrameTextExtractionVersion,
+    loadImageFrameTextRenderModelV100,
     requestPreviewTextFit,
     textExtractionReady,
   ]);
@@ -4031,6 +4497,90 @@ export default function TemplateExtractPage() {
       ).filter((node) => !node.matches('[data-template-frame-input="true"]')),
     []
   );
+
+  function buildCrossValidationFramePages(): TemplateExtractReplicaRenderPage[] {
+    const root = draftPreviewRef.current;
+
+    if (!root) {
+      return [];
+    }
+
+    const renderModel =
+      frameRevision === 0
+        ? parseReplicaRenderModelFromHtml(getCurrentDraftPreviewHtml()) ||
+          parseReplicaRenderModelFromHtml(draftDetail?.draft.generatedDraftHtml || '') ||
+          parseReplicaRenderModelFromHtml(draftDetail?.draft.sourceContent || '')
+        : null;
+
+    if (frameRevision === 0 && renderModel?.pages?.some((page) => (page.frameSegments || []).length > 0)) {
+      return renderModel.pages
+        .map((page) => ({
+          pageNumber: page.pageNumber,
+          width: page.width,
+          height: page.height,
+          frameSegments: page.frameSegments || [],
+          textItems: [],
+        }))
+        .filter((page) => page.frameSegments.length > 0);
+    }
+
+    return getPreviewPageInners(root)
+      .map((pageInner, pageIndex) => {
+        const pageNumber = Number.parseInt(pageInner.getAttribute('data-page') || '', 10) || pageIndex + 1;
+        const pageWidth = Math.max(
+          1,
+          pageInner.clientWidth || parseFramePx(pageInner.style.width) || root.clientWidth || 1
+        );
+        const pageHeight = Math.max(
+          1,
+          pageInner.clientHeight || parseFramePx(pageInner.style.minHeight) || parseFramePx(pageInner.style.height) || 1
+        );
+        const frameSegments: TemplateExtractReplicaRenderFrameSegment[] = [];
+
+        getFrameEditorNodes(pageInner).forEach((node) => {
+          const rect = node.matches(V106_FRAME_NODE_SELECTOR) ? readFrameNodeRect(node) : readSelectableFrameNodeRect(node);
+          const thickness = 1;
+
+          frameSegments.push({
+            orientation: 'h',
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            thickness,
+          });
+          frameSegments.push({
+            orientation: 'h',
+            left: rect.left,
+            top: rect.top + rect.height,
+            width: rect.width,
+            thickness,
+          });
+          frameSegments.push({
+            orientation: 'v',
+            left: rect.left,
+            top: rect.top,
+            height: rect.height,
+            thickness,
+          });
+          frameSegments.push({
+            orientation: 'v',
+            left: rect.left + rect.width,
+            top: rect.top,
+            height: rect.height,
+            thickness,
+          });
+        });
+
+        return {
+          pageNumber,
+          width: pageWidth,
+          height: pageHeight,
+          frameSegments,
+          textItems: [],
+        } satisfies TemplateExtractReplicaRenderPage;
+      })
+      .filter((page) => page.frameSegments.length > 0);
+  }
 
   const applyFrameEditorMetadata = React.useCallback(
     (
@@ -5354,7 +5904,7 @@ export default function TemplateExtractPage() {
               value={frameProfileName}
               onChange={(event) => setFrameProfileName(event.target.value)}
               disabled={loading || visualSimilarityMeasuring}
-              placeholder={`${String(frameGroupVersion || 'v1.10')} 저장명`}
+              placeholder={`${String(frameGroupVersion || 'v1.11')} 저장명`}
               className="h-9 w-44"
             />
           ) : null}
@@ -5366,14 +5916,41 @@ export default function TemplateExtractPage() {
           >
             텍스트 추출
           </Button>
+          <div className="inline-flex items-center gap-1 rounded-md border border-input bg-background p-1">
+            <Button
+              variant={frameTextExtractionMode === 'non_image' ? 'default' : 'ghost'}
+              className="h-7 px-2 text-xs"
+              onClick={() => setFrameTextExtractionMode('non_image')}
+              disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
+              title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
+            >
+              비 이미지
+            </Button>
+            <Button
+              variant={frameTextExtractionMode === 'image' ? 'default' : 'ghost'}
+              className="h-7 px-2 text-xs"
+              onClick={() => setFrameTextExtractionMode('image')}
+              disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
+              title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
+            >
+              이미지
+            </Button>
+          </div>
           <select
-            value={frameTextExtractionVersion}
-            onChange={(event) => setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)}
+            value={frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion}
+            onChange={(event) =>
+              frameTextExtractionMode === 'image'
+                ? setImageFrameTextExtractionVersion(event.target.value as ImageFrameTextExtractionVersion)
+                : setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)
+            }
             disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
             title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
             className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
-            {FRAME_TEXT_EXTRACTION_VERSION_OPTIONS.map((option) => (
+            {(frameTextExtractionMode === 'image'
+              ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+              : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+            ).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
