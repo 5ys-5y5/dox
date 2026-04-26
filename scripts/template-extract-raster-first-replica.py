@@ -97,6 +97,10 @@ def normalize_extraction_stage(extraction_stage: str) -> str:
 def normalize_frame_group_version(frame_group_version: str) -> str:
     normalized = str(frame_group_version or "").strip().lower()
 
+    if normalized == "v1.10" or normalized.startswith("v1.10-"):
+        return "v1.10"
+    if normalized == "v1.09" or normalized.startswith("v1.09-"):
+        return "v1.09"
     if normalized == "v1.01":
         return "v1.01"
     if normalized == "v1.02":
@@ -105,10 +109,36 @@ def normalize_frame_group_version(frame_group_version: str) -> str:
         return "v1.03"
     if normalized == "v1.04":
         return "v1.04"
+    if normalized == "v1.08":
+        return "v1.08"
+    if normalized == "v1.07":
+        return "v1.07"
     if normalized == "v1.06":
         return "v1.06"
 
     return "v1.05"
+
+
+def resolve_frame_group_version_tag(frame_group_version: str) -> str:
+    normalized = str(frame_group_version or "").strip().lower()
+
+    if normalized == "v1.10":
+        return "v1.10-default"
+
+    if normalized.startswith("v1.10-"):
+        return normalized
+
+    if normalized == "v1.09":
+        return "v1.09-default"
+
+    if normalized.startswith("v1.09-"):
+        return normalized
+
+    return normalize_frame_group_version(frame_group_version)
+
+
+def is_profile_frame_group_version(frame_group_version: str) -> bool:
+    return normalize_frame_group_version(frame_group_version) in {"v1.09", "v1.10"}
 
 
 V201_EDIT_OVERLAY_STYLE = """
@@ -510,6 +540,22 @@ V202_STRUCTURED_DOM_STYLE = """
   .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group[data-template-frame-halign="right"] .v202-frame-group-input {
     text-align: right;
   }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table {
+    border-color: rgba(15, 23, 42, 0.48);
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table tbody,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table tbody {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table td {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td::before,
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.10"] .v102-frame-band-table td::before {
+    background: transparent;
+  }
   .template-clone--raster-first-v2-structured .v202-text-block {
     position: absolute;
     color: #111827;
@@ -901,6 +947,22 @@ V202_KNOWN_LABEL_RULES = [
         "canonical": "하도급대금 연동에 관한 사항",
         "field_type": "text",
     },
+    {"matches": ["상호(법인명)", "상호 (법인명)", "성명(법인명)"], "canonical": "상호(법인명)", "field_type": "text"},
+    {"matches": ["사업자등록번호", "사업 등록번호"], "canonical": "사업자등록번호", "field_type": "text"},
+    {"matches": ["대표자성명(대표유형)", "대표자성명", "대표자 성명"], "canonical": "대표자성명(대표유형)", "field_type": "text"},
+    {"matches": ["주민(법인)등록번호", "주민등록번호", "법인등록번호"], "canonical": "주민(법인)등록번호", "field_type": "text"},
+    {"matches": ["사업장소재지"], "canonical": "사업장소재지", "field_type": "textarea"},
+    {"matches": ["개업일", "개업 일"], "canonical": "개업일", "field_type": "date"},
+    {"matches": ["사업자등록일", "사업자등록 일"], "canonical": "사업자등록일", "field_type": "date"},
+    {"matches": ["공동사업자", "공동 사업자"], "canonical": "공동사업자", "field_type": "text"},
+    {"matches": ["주민(사업자)등록번호", "주민(사업자) 등록번호"], "canonical": "주민(사업자)등록번호", "field_type": "text"},
+    {"matches": ["발급번호"], "canonical": "발급번호", "field_type": "text"},
+    {"matches": ["처리기간"], "canonical": "처리기간", "field_type": "text"},
+    {"matches": ["접수번호"], "canonical": "접수번호", "field_type": "text"},
+    {"matches": ["담당부서"], "canonical": "담당부서", "field_type": "text"},
+    {"matches": ["발급기관"], "canonical": "발급기관", "field_type": "text"},
+    {"matches": ["담당자 연락처", "담당자연락처"], "canonical": "담당자 연락처", "field_type": "text"},
+    {"matches": ["과세유형"], "canonical": "과세유형", "field_type": "text"},
     {"matches": ["발급자 서명자", "발급자서명"], "canonical": "발급자 서명자", "field_type": "text"},
     {"matches": ["전자서명 상태"], "canonical": "전자서명 상태", "field_type": "text"},
 ]
@@ -1593,6 +1655,22 @@ def v202_build_cell_border_style(
     return ""
 
 
+def v202_normalize_frame_outline_style(value: str | None, default: str = "solid") -> str:
+    normalized = str(value or "").strip().lower()
+
+    if normalized == "dashed":
+        return "dashed"
+
+    if normalized == "solid":
+        return "solid"
+
+    return default
+
+
+def v202_resolve_frame_outline_style(cell, default: str = "solid") -> str:
+    return v202_normalize_frame_outline_style(getattr(cell, "_frame_outline_style", ""), default)
+
+
 def v22_wrap_cell_html(inner_html: str, clone_id: str) -> str:
     if not v202_is_v22_clone(clone_id) or not inner_html:
         return inner_html
@@ -1613,6 +1691,7 @@ def v202_resolve_frame_group_parts(cell) -> tuple[str, str, str, str, str]:
     frame_parent_group = str(getattr(cell, "_frame_parent_group", "") or "").strip()
     frame_chain_key = str(getattr(cell, "_frame_chain_key", "") or "").strip()
     frame_chain_depth = str(getattr(cell, "_frame_chain_depth", "") or "").strip()
+    frame_outline_style = v202_resolve_frame_outline_style(cell)
     align = str(getattr(cell, "align", "left") or "left").strip().lower()
     valign = str(getattr(cell, "valign", "top") or "top").strip().lower()
 
@@ -1627,6 +1706,7 @@ def v202_resolve_frame_group_parts(cell) -> tuple[str, str, str, str, str]:
     parent_group_attr = f' data-template-frame-parent-group="{v202_escape_attr(frame_parent_group)}" ' if frame_parent_group else ""
     chain_key_attr = f' data-template-frame-chain-key="{v202_escape_attr(frame_chain_key)}" ' if frame_chain_key else ""
     chain_depth_attr = f' data-template-frame-chain-depth="{v202_escape_attr(frame_chain_depth)}" ' if frame_chain_depth else ""
+    outline_style_attr = f' data-template-frame-outline-style="{v202_escape_attr(frame_outline_style)}" ' if frame_outline_style else ""
 
     container_attrs = (
         f'data-template-frame-group="{frame_group_id}" '
@@ -1637,6 +1717,7 @@ def v202_resolve_frame_group_parts(cell) -> tuple[str, str, str, str, str]:
         f'{parent_group_attr}'
         f'{chain_key_attr}'
         f'{chain_depth_attr}'
+        f'{outline_style_attr}'
         f'data-template-frame-row-start="{row_start}" '
         f'data-template-frame-row-end="{row_end}" '
         f'data-template-frame-col-start="{col_start}" '
@@ -1656,6 +1737,7 @@ def v202_resolve_frame_group_parts(cell) -> tuple[str, str, str, str, str]:
         f'{parent_group_attr}'
         f'{chain_key_attr}'
         f'{chain_depth_attr}'
+        f'{outline_style_attr}'
         f'data-template-frame-halign="{v202_escape_attr(align)}" '
         f'data-template-frame-valign="{v202_escape_attr(valign)}"></textarea>'
     )
@@ -1742,7 +1824,38 @@ def v102_build_virtual_frame_cell(
         _frame_group_id=frame_group_id,
         _frame_color_group=str(frame_color_group or frame_group_id),
         _frame_source_text=str(getattr(source_cell, "text", "") or "").strip(),
+        _frame_outline_style="dashed",
     )
+
+
+def v102_apply_virtual_frame_cell_semantics(
+    cell,
+    *,
+    source_text: str | None = None,
+    value_key: str | None = None,
+    role: str | None = None,
+    chain_key: str | None = None,
+    chain_depth: int | None = None,
+):
+    if cell is None:
+        return None
+
+    if source_text is not None:
+        setattr(cell, "_frame_source_text", str(source_text))
+
+    if value_key is not None:
+        setattr(cell, "_frame_value_key", str(value_key))
+
+    if role is not None:
+        setattr(cell, "_frame_role", str(role))
+
+    if chain_key is not None:
+        setattr(cell, "_frame_chain_key", str(chain_key))
+
+    if chain_depth is not None:
+        setattr(cell, "_frame_chain_depth", str(int(chain_depth)))
+
+    return cell
 
 
 def v102_build_frame_cell_spec(
@@ -1750,12 +1863,28 @@ def v102_build_frame_cell_spec(
     local_index: int,
     frame_group_id: str,
     frame_color_group: str | None = None,
+    frame_outline_style: str | None = None,
 ) -> dict | None:
     bbox = getattr(cell, "bbox", None)
 
     if bbox is None:
         return None
 
+    resolved_outline_style = str(frame_outline_style or getattr(cell, "_frame_outline_style", "") or "").strip().lower()
+
+    if resolved_outline_style not in {"solid", "dashed"}:
+        table = getattr(cell, "_frame_table", None)
+
+        if table is not None:
+            resolved_outline_style = v105_resolve_frame_outline_style(
+                table,
+                float(bbox.x0),
+                float(bbox.y0),
+                float(bbox.x1),
+                float(bbox.y1),
+            )
+
+    resolved_outline_style = v202_normalize_frame_outline_style(resolved_outline_style, "solid")
     cell_like = SimpleNamespace(
         row_start=int(getattr(cell, "row_start", 1) or 1),
         row_end=int(getattr(cell, "row_end", 2) or 2),
@@ -1769,6 +1898,7 @@ def v102_build_frame_cell_spec(
         _frame_group_id=frame_group_id,
         _frame_color_group=str(frame_color_group or frame_group_id),
         _frame_source_text=str(getattr(cell, "text", "") or "").strip(),
+        _frame_outline_style=resolved_outline_style,
     )
     return {
         "cell": cell_like,
@@ -1777,6 +1907,7 @@ def v102_build_frame_cell_spec(
         "y0": float(bbox.y0),
         "y1": float(bbox.y1),
         "color_group": str(frame_color_group or frame_group_id),
+        "outline_style": resolved_outline_style,
     }
 
 
@@ -1790,8 +1921,13 @@ def v102_find_row_label_cell(row_cells: list, canonical_label: str):
     return None
 
 
-def v102_build_document_issue_frame_specs(row_cells: list, band_index: int) -> list[dict] | None:
+def v102_build_document_issue_frame_specs(
+    row_cells: list,
+    band_index: int,
+    frame_group_version: str = "v1.08",
+) -> list[dict] | None:
     sorted_cells = sorted(row_cells, key=lambda item: (item.col_start, item.col_end))
+    neutral_mode = is_profile_frame_group_version(frame_group_version)
 
     if len(sorted_cells) < 4:
         return None
@@ -1809,6 +1945,9 @@ def v102_build_document_issue_frame_specs(row_cells: list, band_index: int) -> l
     if label_start <= 0 or label_end >= len(source_words):
         return None
 
+    document_text = v202_normalize_whitespace(" ".join(getattr(word, "text", "") or "" for word in source_words[:label_start]))
+    issue_label_text = " ".join(getattr(word, "text", "") or "" for word in source_words[label_start:label_end]).strip() or "발 급 일"
+    issue_value_text = v202_normalize_whitespace(" ".join(getattr(word, "text", "") or "" for word in source_words[label_end:]))
     document_bbox = v202_resolve_words_bbox(source_words[:label_start])
     issue_label_bbox = v202_resolve_words_bbox(source_words[label_start:label_end])
     issue_value_bbox = v202_resolve_words_bbox(source_words[label_end:])
@@ -1820,56 +1959,139 @@ def v102_build_document_issue_frame_specs(row_cells: list, band_index: int) -> l
     boundary_one = max(float(source_bbox.x0) + 1.0, (float(document_bbox.x1) + float(issue_label_bbox.x0)) * 0.5)
     boundary_two = max(boundary_one + 1.0, (float(issue_label_bbox.x1) + float(issue_value_bbox.x0)) * 0.5)
 
-    virtual_cells = [
-        v102_build_virtual_frame_cell(
+    def build_virtual_spec(
+        x0: float,
+        x1: float,
+        local_index: int,
+        semantic_suffix: str,
+        semantic_color_group: str,
+        source_text: str,
+        *,
+        value_key: str | None = None,
+        role: str | None = None,
+        chain_key: str | None = None,
+        chain_depth: int | None = None,
+    ) -> dict | None:
+        frame_group_id = (
+            f"band-{band_index}-cell-{local_index}"
+            if neutral_mode
+            else f"band-{band_index}-{semantic_suffix}"
+        )
+        frame_color_group = frame_group_id if neutral_mode else semantic_color_group
+        virtual_cell = v102_build_virtual_frame_cell(
             composite_cell,
+            x0,
+            x1,
+            local_index,
+            frame_group_id,
+            frame_color_group,
+        )
+
+        if virtual_cell is None:
+            return None
+
+        setattr(virtual_cell, "_frame_source_text", source_text)
+
+        if not neutral_mode:
+            v102_apply_virtual_frame_cell_semantics(
+                virtual_cell,
+                value_key=value_key,
+                role=role,
+                chain_key=chain_key,
+                chain_depth=chain_depth,
+            )
+
+        return {
+            "cell": virtual_cell,
+            "x0": float(virtual_cell.bbox.x0),
+            "x1": float(virtual_cell.bbox.x1),
+            "y0": float(virtual_cell.bbox.y0),
+            "y1": float(virtual_cell.bbox.y1),
+            "color_group": str(getattr(virtual_cell, "_frame_color_group", "") or getattr(virtual_cell, "_frame_group_id", "")),
+        }
+
+    virtual_specs = [
+        build_virtual_spec(
             float(source_bbox.x0),
             boundary_one,
             2,
-            f"band-{band_index}-document-number",
             "document-number",
+            "document-number",
+            document_text,
+            value_key="문서번호",
+            role="value",
+            chain_key="문서번호",
+            chain_depth=1,
         ),
-        v102_build_virtual_frame_cell(
-            composite_cell,
+        build_virtual_spec(
             boundary_one,
             boundary_two,
             3,
-            f"band-{band_index}-issue-date-label",
+            "issue-date-label",
             "issue-date",
+            issue_label_text,
+            value_key="발급일",
+            role="key",
+            chain_key="발급일",
+            chain_depth=0,
         ),
-        v102_build_virtual_frame_cell(
-            composite_cell,
+        build_virtual_spec(
             boundary_two,
             float(source_bbox.x1),
             4,
-            f"band-{band_index}-issue-date-value",
+            "issue-date-value",
             "issue-date",
+            issue_value_text,
+            value_key="발급일",
+            role="value",
+            chain_key="발급일",
+            chain_depth=1,
         ),
     ]
 
+    label_group_id = f"band-{band_index}-cell-1" if neutral_mode else f"band-{band_index}-document-label"
+    label_color_group = label_group_id if neutral_mode else "document-number"
+    partner_label_group_id = f"band-{band_index}-cell-5" if neutral_mode else f"band-{band_index}-partner-approval-label"
+    partner_label_color_group = partner_label_group_id if neutral_mode else "partner-approval"
+    partner_value_group_id = f"band-{band_index}-cell-6" if neutral_mode else f"band-{band_index}-partner-approval-value"
+    partner_value_color_group = partner_value_group_id if neutral_mode else "partner-approval"
+
+    partner_approval_value_spec = v102_build_frame_cell_spec(
+        sorted_cells[3],
+        6,
+        partner_value_group_id,
+        partner_value_color_group,
+    )
+
+    if partner_approval_value_spec is not None:
+        setattr(partner_approval_value_spec.get("cell"), "_frame_source_text", "")
+
+        if not neutral_mode:
+            v102_apply_virtual_frame_cell_semantics(
+                partner_approval_value_spec.get("cell"),
+                value_key="협력사승인일",
+                role="value",
+                chain_key="협력사승인일",
+                chain_depth=1,
+            )
+
     specs = [
-        v102_build_frame_cell_spec(label_cell, 1, f"band-{band_index}-document-label", "document-number"),
-        *[
-            {
-                "cell": virtual_cell,
-                "x0": float(virtual_cell.bbox.x0),
-                "x1": float(virtual_cell.bbox.x1),
-                "y0": float(virtual_cell.bbox.y0),
-                "y1": float(virtual_cell.bbox.y1),
-                "color_group": str(getattr(virtual_cell, "_frame_color_group", "") or getattr(virtual_cell, "_frame_group_id", "")),
-            }
-            for virtual_cell in virtual_cells
-            if virtual_cell is not None
-        ],
-        v102_build_frame_cell_spec(sorted_cells[2], 5, f"band-{band_index}-partner-approval-label", "partner-approval"),
-        v102_build_frame_cell_spec(sorted_cells[3], 6, f"band-{band_index}-partner-approval-value", "partner-approval"),
+        v102_build_frame_cell_spec(label_cell, 1, label_group_id, label_color_group),
+        *[spec for spec in virtual_specs if spec is not None],
+        v102_build_frame_cell_spec(sorted_cells[2], 5, partner_label_group_id, partner_label_color_group),
+        partner_approval_value_spec,
     ]
 
     return [spec for spec in specs if spec is not None]
 
 
-def v102_build_signature_frame_specs(row_cells: list, band_index: int) -> list[dict] | None:
+def v102_build_signature_frame_specs(
+    row_cells: list,
+    band_index: int,
+    frame_group_version: str = "v1.08",
+) -> list[dict] | None:
     sorted_cells = sorted(row_cells, key=lambda item: (item.col_start, item.col_end))
+    neutral_mode = is_profile_frame_group_version(frame_group_version)
 
     if len(sorted_cells) < 2:
         return None
@@ -1887,6 +2109,9 @@ def v102_build_signature_frame_specs(row_cells: list, band_index: int) -> list[d
     if label_start <= 0:
         return None
 
+    issuer_value_text = v202_normalize_whitespace(" ".join(getattr(word, "text", "") or "" for word in source_words[:label_start]))
+    receiver_label_text = " ".join(getattr(word, "text", "") or "" for word in source_words[label_start:label_end]).strip() or "접수자 서명"
+    receiver_value_text = v202_normalize_whitespace(" ".join(getattr(word, "text", "") or "" for word in source_words[label_end:]))
     signer_bbox = v202_resolve_words_bbox(source_words[:1])
     status_bbox = v202_resolve_words_bbox(source_words[1:label_start])
     receiver_label_bbox = v202_resolve_words_bbox(source_words[label_start:label_end])
@@ -1909,27 +2134,102 @@ def v102_build_signature_frame_specs(row_cells: list, band_index: int) -> list[d
     if receiver_label_end >= right:
         receiver_label_end = right - max(18.0, receiver_value_min_width * 0.5)
 
-    virtual_cells = [
-        v102_build_virtual_frame_cell(value_cell, left, signer_end, 2, f"band-{band_index}-issuer-signer", "issuer-sign"),
-        v102_build_virtual_frame_cell(value_cell, signer_end, status_end, 3, f"band-{band_index}-issuer-sign-status", "issuer-sign"),
-        v102_build_virtual_frame_cell(value_cell, status_end, receiver_label_end, 4, f"band-{band_index}-receiver-sign-label", "receiver-sign"),
-        v102_build_virtual_frame_cell(value_cell, receiver_label_end, right, 5, f"band-{band_index}-receiver-sign-value", "receiver-sign"),
+    def build_virtual_spec(
+        x0: float,
+        x1: float,
+        local_index: int,
+        semantic_suffix: str,
+        semantic_color_group: str,
+        source_text: str,
+        *,
+        value_key: str | None = None,
+        role: str | None = None,
+        chain_key: str | None = None,
+        chain_depth: int | None = None,
+    ) -> dict | None:
+        frame_group_id = (
+            f"band-{band_index}-cell-{local_index}"
+            if neutral_mode
+            else f"band-{band_index}-{semantic_suffix}"
+        )
+        frame_color_group = frame_group_id if neutral_mode else semantic_color_group
+        virtual_cell = v102_build_virtual_frame_cell(
+            value_cell,
+            x0,
+            x1,
+            local_index,
+            frame_group_id,
+            frame_color_group,
+        )
+
+        if virtual_cell is None:
+            return None
+
+        setattr(virtual_cell, "_frame_source_text", source_text)
+
+        if not neutral_mode:
+            v102_apply_virtual_frame_cell_semantics(
+                virtual_cell,
+                value_key=value_key,
+                role=role,
+                chain_key=chain_key,
+                chain_depth=chain_depth,
+            )
+
+        return {
+            "cell": virtual_cell,
+            "x0": float(virtual_cell.bbox.x0),
+            "x1": float(virtual_cell.bbox.x1),
+            "y0": float(virtual_cell.bbox.y0),
+            "y1": float(virtual_cell.bbox.y1),
+            "color_group": str(getattr(virtual_cell, "_frame_color_group", "") or getattr(virtual_cell, "_frame_group_id", "")),
+        }
+
+    virtual_specs = [
+        build_virtual_spec(
+            left,
+            status_end,
+            2,
+            "issuer-sign-value",
+            "issuer-sign",
+            issuer_value_text,
+            value_key="발급자 서명자",
+            role="value",
+            chain_key="발급자 서명자",
+            chain_depth=1,
+        ),
+        build_virtual_spec(
+            status_end,
+            receiver_label_end,
+            3,
+            "receiver-sign-label",
+            "receiver-sign",
+            receiver_label_text,
+            value_key="접수자 서명",
+            role="key",
+            chain_key="접수자 서명",
+            chain_depth=0,
+        ),
+        build_virtual_spec(
+            receiver_label_end,
+            right,
+            4,
+            "receiver-sign-value",
+            "receiver-sign",
+            receiver_value_text,
+            value_key="접수자 서명",
+            role="value",
+            chain_key="접수자 서명",
+            chain_depth=1,
+        ),
     ]
 
+    label_group_id = f"band-{band_index}-cell-1" if neutral_mode else f"band-{band_index}-issuer-sign-label"
+    label_color_group = label_group_id if neutral_mode else "issuer-sign"
+
     specs = [
-        v102_build_frame_cell_spec(label_cell, 1, f"band-{band_index}-issuer-sign-label", "issuer-sign"),
-        *[
-            {
-                "cell": virtual_cell,
-                "x0": float(virtual_cell.bbox.x0),
-                "x1": float(virtual_cell.bbox.x1),
-                "y0": float(virtual_cell.bbox.y0),
-                "y1": float(virtual_cell.bbox.y1),
-                "color_group": str(getattr(virtual_cell, "_frame_color_group", "") or getattr(virtual_cell, "_frame_group_id", "")),
-            }
-            for virtual_cell in virtual_cells
-            if virtual_cell is not None
-        ],
+        v102_build_frame_cell_spec(label_cell, 1, label_group_id, label_color_group),
+        *[spec for spec in virtual_specs if spec is not None],
     ]
 
     return [spec for spec in specs if spec is not None]
@@ -1938,39 +2238,46 @@ def v102_build_signature_frame_specs(row_cells: list, band_index: int) -> list[d
 def v102_resolve_row_frame_specs(
     row_cells: list,
     band_index: int,
-    frame_group_version: str = "v1.06",
+    frame_group_version: str = "v1.08",
 ) -> list[dict]:
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
 
-    if normalized_frame_group_version not in ("v1.03", "v1.04", "v1.05", "v1.06"):
+    if normalized_frame_group_version in ("v1.07", "v1.08", "v1.09", "v1.10"):
         document_issue_specs = None
 
         if v102_find_row_label_cell(row_cells, "문서번호") is not None:
-            document_issue_specs = v102_build_document_issue_frame_specs(row_cells, band_index)
+            document_issue_specs = v102_build_document_issue_frame_specs(row_cells, band_index, frame_group_version)
 
         if document_issue_specs:
+            if normalized_frame_group_version not in ("v1.09", "v1.10"):
+                v106_apply_frame_spec_semantics(document_issue_specs)
             return document_issue_specs
 
         signature_specs = None
 
         if v102_find_row_label_cell(row_cells, "발급자 서명자") is not None:
-            signature_specs = v102_build_signature_frame_specs(row_cells, band_index)
+            signature_specs = v102_build_signature_frame_specs(row_cells, band_index, frame_group_version)
 
         if signature_specs:
+            if normalized_frame_group_version not in ("v1.09", "v1.10"):
+                v106_apply_frame_spec_semantics(signature_specs)
             return signature_specs
 
     specs = []
     active_color_group = None
 
     for local_index, cell in enumerate(sorted(row_cells, key=lambda item: (item.col_start, item.col_end)), start=1):
-        known_label = v202_resolve_known_label(getattr(cell, "text", "") or "")
-
-        if known_label is not None:
-            active_color_group = str(known_label.get("canonical_label") or f"band-{band_index}-pair-{local_index}")
-            color_group = active_color_group
+        if normalized_frame_group_version in ("v1.09", "v1.10"):
+            color_group = f"band-{band_index}-cell-{local_index}"
         else:
-            color_group = active_color_group or f"band-{band_index}-cell-{local_index}"
-            active_color_group = None
+            known_label = v202_resolve_known_label(getattr(cell, "text", "") or "")
+
+            if known_label is not None:
+                active_color_group = str(known_label.get("canonical_label") or f"band-{band_index}-pair-{local_index}")
+                color_group = active_color_group
+            else:
+                color_group = active_color_group or f"band-{band_index}-cell-{local_index}"
+                active_color_group = None
 
         spec = v102_build_frame_cell_spec(
             cell,
@@ -1982,7 +2289,7 @@ def v102_resolve_row_frame_specs(
         if spec is not None:
             specs.append(spec)
 
-    if normalized_frame_group_version == "v1.06":
+    if normalized_frame_group_version in ("v1.06", "v1.07", "v1.08"):
         v106_apply_frame_spec_semantics(specs)
 
     return specs
@@ -1993,6 +2300,7 @@ def v102_build_frame_band_markup(
     scale: float,
     band_index: int,
     *,
+    frame_group_version: str = "v1.08",
     left: float | None = None,
     top: float | None = None,
     right: float | None = None,
@@ -2009,6 +2317,9 @@ def v102_build_frame_band_markup(
     band_width = max(1.0, band_right - band_left)
     band_height = max(1.0, band_bottom - band_top)
     row_color = v102_pick_palette_color(V102_ROW_COLOR_PALETTE, band_index)
+    band_outline_style = v102_resolve_band_outline_style(sorted_specs, frame_group_version)
+    band_border_color = "rgba(15, 23, 42, 0.34)" if band_outline_style == "dashed" else "rgba(15, 23, 42, 0.55)"
+    band_border_css = f" border:1px {band_outline_style} {band_border_color};" if band_outline_style == "dashed" else ""
     colgroup_html = "".join(
         f'<col style="width:{max(0.5, ((float(item["x1"]) - float(item["x0"])) / band_width) * 100.0):.6f}%">'
         for item in sorted_specs
@@ -2026,7 +2337,7 @@ def v102_build_frame_band_markup(
         border_style = ""
 
         if cell_index > 0:
-            border_style += " border-left:1px solid rgba(15, 23, 42, 0.55);"
+            border_style += f" border-left:1px {band_outline_style} {band_border_color};"
 
         cells_html.append(
             f'{v202_build_frame_group_td_open_tag(cell, "halign-left valign-top", f"font-size:{font_px:.2f}px; font-weight:{font_weight}; --v102-row-color:{row_color}; --v102-col-color:{col_color};{border_style}")}'
@@ -2037,7 +2348,7 @@ def v102_build_frame_band_markup(
     return (
         f'<div class="v102-frame-band" style="left:{band_left * scale:.2f}px; top:{band_top * scale:.2f}px; '
         f'width:{band_width * scale:.2f}px; min-height:{band_height * scale:.2f}px;">'
-        f'<table class="v202-table-block v102-frame-band-table" style="width:100%; min-height:{band_height * scale:.2f}px;">'
+        f'<table class="v202-table-block v102-frame-band-table" style="width:100%; min-height:{band_height * scale:.2f}px;{band_border_css}">'
         f'<colgroup>{colgroup_html}</colgroup>'
         f'<tbody style="--v102-row-color:{row_color};">'
         f'<tr style="height:{band_height * scale:.2f}px;">{"".join(cells_html)}</tr>'
@@ -2064,11 +2375,31 @@ def v102_resolve_color_group_indexes(frame_specs: list[dict]) -> dict[str, int]:
     return color_group_indexes
 
 
+def v102_resolve_band_outline_style(frame_specs: list[dict], frame_group_version: str = "v1.08") -> str:
+    if normalize_frame_group_version(frame_group_version) != "v1.10":
+        return "solid"
+
+    outline_styles = [
+        v202_normalize_frame_outline_style(
+            str(item.get("outline_style") or getattr(item.get("cell"), "_frame_outline_style", "") or ""),
+            "solid",
+        )
+        for item in frame_specs
+        if item is not None
+    ]
+
+    if outline_styles and all(style == "dashed" for style in outline_styles):
+        return "dashed"
+
+    return "solid"
+
+
 def v103_build_frame_band_markup(
     frame_specs: list[dict],
     scale: float,
     band_index: int,
     *,
+    frame_group_version: str = "v1.08",
     left: float | None = None,
     top: float | None = None,
     right: float | None = None,
@@ -2090,6 +2421,9 @@ def v103_build_frame_band_markup(
     band_bottom_px = max(band_top_px + 1, v103_snap_scaled_px(band_bottom, scale))
     band_width_px = band_right_px - band_left_px
     band_height_px = band_bottom_px - band_top_px
+    band_outline_style = v102_resolve_band_outline_style(sorted_specs, frame_group_version)
+    band_border_color = "rgba(15, 23, 42, 0.34)" if band_outline_style == "dashed" else "rgba(15, 23, 42, 0.55)"
+    band_border_css = f" border:1px {band_outline_style} {band_border_color};" if band_outline_style == "dashed" else ""
 
     col_edges_px = [band_left_px]
     for item in sorted_specs[:-1]:
@@ -2120,7 +2454,7 @@ def v103_build_frame_band_markup(
         border_style = ""
 
         if cell_index > 0:
-            border_style += " border-left:1px solid rgba(15, 23, 42, 0.55);"
+            border_style += f" border-left:1px {band_outline_style} {band_border_color};"
 
         cells_html.append(
             f'{v202_build_frame_group_td_open_tag(cell, "halign-left valign-top", f"font-size:{font_px:.2f}px; font-weight:{font_weight}; --v102-row-color:{row_color}; --v102-col-color:{col_color};{border_style}")}'
@@ -2131,7 +2465,7 @@ def v103_build_frame_band_markup(
     return (
         f'<div class="v102-frame-band" style="left:{band_left_px}px; top:{band_top_px}px; '
         f'width:{band_width_px}px; height:{band_height_px}px;">'
-        f'<table class="v202-table-block v102-frame-band-table" style="width:{band_width_px}px; height:{band_height_px}px;">'
+        f'<table class="v202-table-block v102-frame-band-table" style="width:{band_width_px}px; height:{band_height_px}px;{band_border_css}">'
         f'<colgroup>{colgroup_html}</colgroup>'
         f'<tbody style="--v102-row-color:{row_color};">'
         f'<tr style="height:{band_height_px}px;">{"".join(cells_html)}</tr>'
@@ -2297,18 +2631,110 @@ def v106_apply_frame_spec_semantics(frame_specs: list[dict]) -> None:
                     setattr(candidate_cell, "_frame_chain_depth", str(anchor_depth + 1))
 
 
+def v108_apply_certificate_row_pair_semantics(frame_specs: list[dict]) -> None:
+    if not frame_specs:
+        return
+
+    row_specs_map: dict[int, list[dict]] = {}
+
+    for spec in frame_specs:
+        row_start = int(spec.get("layout_row_start", 1))
+        row_specs_map.setdefault(row_start, []).append(spec)
+
+    for row_start in sorted(row_specs_map):
+        ordered_specs = sorted(row_specs_map[row_start], key=lambda item: int(item.get("layout_col_start", 1)))
+
+        if not ordered_specs:
+            continue
+
+        if (
+            len(ordered_specs) == 2
+            and int(ordered_specs[0].get("layout_col_start", 1)) == 1
+            and int(ordered_specs[0].get("layout_row_end", row_start + 1)) - row_start <= 1
+        ):
+            key_spec = ordered_specs[0]
+            value_spec = ordered_specs[1]
+            key_cell = key_spec.get("cell")
+            value_cell = value_spec.get("cell")
+
+            if key_cell is not None and value_cell is not None:
+                key_text = v202_normalize_whitespace(str(getattr(key_cell, "_frame_source_text", "") or ""))
+
+                if key_text:
+                    known_label = v202_resolve_known_label(key_text)
+                    key_value_key = str(known_label.get("canonical_label") or key_text) if known_label else key_text
+                    key_group_id = str(getattr(key_cell, "_frame_group_id", "") or key_value_key)
+                    key_color_group = str(known_label.get("canonical_label") or key_group_id) if known_label else key_group_id
+                    key_spec["color_group"] = key_color_group
+                    value_spec["color_group"] = key_color_group
+                    setattr(key_cell, "_frame_color_group", key_color_group)
+                    setattr(value_cell, "_frame_color_group", key_color_group)
+                    setattr(key_cell, "_frame_value_key", key_value_key)
+                    setattr(value_cell, "_frame_value_key", key_value_key)
+                    setattr(key_cell, "_frame_role", "key")
+                    setattr(value_cell, "_frame_role", "value")
+                    setattr(key_cell, "_frame_chain_key", key_value_key)
+                    setattr(value_cell, "_frame_chain_key", key_value_key)
+                    setattr(key_cell, "_frame_chain_depth", "0")
+                    setattr(value_cell, "_frame_chain_depth", "1")
+                    setattr(value_cell, "_frame_parent_group", key_group_id)
+                    continue
+
+        active_key_spec = None
+        active_key_value_key = ""
+        active_key_group_id = ""
+        active_color_group = ""
+
+        for spec in ordered_specs:
+            cell = spec.get("cell")
+
+            if cell is None:
+                continue
+
+            source_text = v202_normalize_whitespace(str(getattr(cell, "_frame_source_text", "") or ""))
+            known_label = v202_resolve_known_label(source_text) if source_text else None
+
+            if known_label is not None:
+                active_key_spec = spec
+                active_key_value_key = str(known_label.get("canonical_label") or source_text)
+                active_key_group_id = str(getattr(cell, "_frame_group_id", "") or active_key_value_key)
+                active_color_group = active_key_value_key
+                spec["color_group"] = active_color_group
+                setattr(cell, "_frame_color_group", active_color_group)
+                setattr(cell, "_frame_value_key", active_key_value_key)
+                setattr(cell, "_frame_role", "key")
+                setattr(cell, "_frame_chain_key", active_key_value_key)
+                setattr(cell, "_frame_chain_depth", "0")
+                continue
+
+            if active_key_spec is None or not active_key_value_key:
+                continue
+
+            spec["color_group"] = active_color_group
+            setattr(cell, "_frame_color_group", active_color_group)
+            setattr(cell, "_frame_value_key", active_key_value_key)
+            setattr(cell, "_frame_role", "value")
+            setattr(cell, "_frame_chain_key", active_key_value_key)
+            setattr(cell, "_frame_chain_depth", "1")
+            setattr(cell, "_frame_parent_group", active_key_group_id)
+
+
 def v102_build_region_frame_band_html(
     block,
     scale: float,
     band_index: int,
     frame_group_id: str,
-    frame_group_version: str = "v1.06",
+    frame_group_version: str = "v1.08",
 ) -> str:
     bbox = getattr(block, "bbox", None)
 
     if bbox is None:
         return ""
 
+    frame_outline_style = v202_normalize_frame_outline_style(
+        str(getattr(block, "_frame_outline_style", "") or ""),
+        "dashed",
+    )
     cell = SimpleNamespace(
         row_start=1,
         row_end=2,
@@ -2327,6 +2753,7 @@ def v102_build_region_frame_band_html(
         _frame_parent_group=str(getattr(block, "_frame_parent_group", "") or "").strip(),
         _frame_chain_key=str(getattr(block, "_frame_chain_key", "") or "").strip(),
         _frame_chain_depth=str(getattr(block, "_frame_chain_depth", "") or "").strip(),
+        _frame_outline_style=frame_outline_style,
     )
     spec = {
         "cell": cell,
@@ -2334,11 +2761,12 @@ def v102_build_region_frame_band_html(
         "x1": float(bbox.x1),
         "y0": float(bbox.y0),
         "y1": float(bbox.y1),
+        "outline_style": frame_outline_style,
     }
-    if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06"):
-        return v103_build_frame_band_markup([spec], scale, band_index)
+    if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10"):
+        return v103_build_frame_band_markup([spec], scale, band_index, frame_group_version=frame_group_version)
 
-    return v102_build_frame_band_markup([spec], scale, band_index)
+    return v102_build_frame_band_markup([spec], scale, band_index, frame_group_version=frame_group_version)
 
 
 def v202_fill_gap_cells(
@@ -3280,8 +3708,14 @@ def v105_select_overlapping_cell(row_cells: list, x0: float, x1: float) -> objec
     return best_cell
 
 
-def v105_build_row_local_frame_specs(table, row_index: int, band_index: int) -> list[dict]:
+def v105_build_row_local_frame_specs(
+    table,
+    row_index: int,
+    band_index: int,
+    frame_group_version: str = "v1.08",
+) -> list[dict]:
     y_lines = list(getattr(table, "y_lines", []) or [])
+    normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
 
     if row_index < 0 or row_index + 1 >= len(y_lines):
         return []
@@ -3304,7 +3738,12 @@ def v105_build_row_local_frame_specs(table, row_index: int, band_index: int) -> 
 
         overlap_cell = v105_select_overlapping_cell(row_cells, x0, x1)
         frame_group_id = f"band-{band_index}-cell-{local_index}"
-        frame_color_group = v105_pick_frame_color_group(overlap_cell, frame_group_id)
+        frame_color_group = (
+            frame_group_id
+            if normalized_frame_group_version in ("v1.09", "v1.10")
+            else v105_pick_frame_color_group(overlap_cell, frame_group_id)
+        )
+        frame_outline_style = v105_resolve_frame_outline_style(table, x0, row_top, x1, row_bottom)
         bbox = v102_make_bbox(x0, row_top, x1, row_bottom)
         cell_like = SimpleNamespace(
             row_start=row_index + 1,
@@ -3319,6 +3758,7 @@ def v105_build_row_local_frame_specs(table, row_index: int, band_index: int) -> 
             _frame_group_id=frame_group_id,
             _frame_color_group=frame_color_group,
             _frame_source_text=str(getattr(overlap_cell, "text", "") or "").strip(),
+            _frame_outline_style=frame_outline_style,
         )
         specs.append(
             {
@@ -3328,10 +3768,12 @@ def v105_build_row_local_frame_specs(table, row_index: int, band_index: int) -> 
                 "y0": row_top,
                 "y1": row_bottom,
                 "color_group": frame_color_group,
+                "outline_style": frame_outline_style,
             }
         )
 
-    v106_apply_frame_spec_semantics(specs)
+    if normalized_frame_group_version not in ("v1.09", "v1.10"):
+        v106_apply_frame_spec_semantics(specs)
 
     return specs
 
@@ -3635,6 +4077,23 @@ def v105_has_horizontal_boundary(table, y_value: float, x0: float, x1: float, ta
     return cell_edge_matches >= 2 and cell_coverage >= span * 0.45
 
 
+def v105_resolve_frame_outline_style(table, x0: float, y0: float, x1: float, y1: float) -> str:
+    table_bbox = getattr(table, "bbox", None)
+
+    if table_bbox is None:
+        return "dashed"
+
+    table_left = float(table_bbox.x0)
+    table_right = float(table_bbox.x1)
+    table_top = float(table_bbox.y0)
+    table_bottom = float(table_bbox.y1)
+    has_left = v105_has_vertical_boundary(table, float(x0), float(y0), float(y1), table_left, table_right)
+    has_right = v105_has_vertical_boundary(table, float(x1), float(y0), float(y1), table_left, table_right)
+    has_top = v105_has_horizontal_boundary(table, float(y0), float(x0), float(x1), table_top, table_bottom)
+    has_bottom = v105_has_horizontal_boundary(table, float(y1), float(x0), float(x1), table_top, table_bottom)
+    return "solid" if has_left and has_right and has_top and has_bottom else "dashed"
+
+
 def v105_select_overlapping_cell_for_bbox(table, x0: float, y0: float, x1: float, y1: float):
     best_cell = None
     best_area = 0.0
@@ -3683,6 +4142,7 @@ def v105_build_certificate_group_mesh_specs(
     row_end_index: int,
     x_edges: list[float],
     band_index: int,
+    frame_group_version: str = "v1.08",
 ) -> tuple[list[float], list[float], list[dict]]:
     table_bbox = getattr(table, "bbox", None)
     y_lines = list(getattr(table, "y_lines", []) or [])
@@ -3743,6 +4203,7 @@ def v105_build_certificate_group_mesh_specs(
 
     specs = []
     next_local_index = 1
+    normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
 
     for tiles in components.values():
         local_rows = [row_index for row_index, _ in tiles]
@@ -3762,7 +4223,12 @@ def v105_build_certificate_group_mesh_specs(
         y1 = float(y_edges[local_row_max + 1])
         overlap_cell = v105_select_overlapping_cell_for_bbox(table, x0, y0, x1, y1)
         frame_group_id = f"band-{band_index}-cell-{next_local_index}"
-        frame_color_group = v105_pick_frame_color_group(overlap_cell, frame_group_id)
+        frame_color_group = (
+            frame_group_id
+            if normalized_frame_group_version in ("v1.09", "v1.10")
+            else v105_pick_frame_color_group(overlap_cell, frame_group_id)
+        )
+        frame_outline_style = v105_resolve_frame_outline_style(table, x0, y0, x1, y1)
         bbox = v102_make_bbox(x0, y0, x1, y1)
         font_pt = float(getattr(overlap_cell, "font_pt", 11.0) if overlap_cell is not None else 11.0)
         cell_like = SimpleNamespace(
@@ -3778,6 +4244,7 @@ def v105_build_certificate_group_mesh_specs(
             _frame_group_id=frame_group_id,
             _frame_color_group=frame_color_group,
             _frame_source_text=str(getattr(overlap_cell, "text", "") or "").strip(),
+            _frame_outline_style=frame_outline_style,
         )
         specs.append(
             {
@@ -3787,6 +4254,7 @@ def v105_build_certificate_group_mesh_specs(
                 "y0": y0,
                 "y1": y1,
                 "color_group": frame_color_group,
+                "outline_style": frame_outline_style,
                 "layout_row_start": local_row_min + 1,
                 "layout_row_end": local_row_max + 2,
                 "layout_col_start": col_min + 1,
@@ -3795,8 +4263,12 @@ def v105_build_certificate_group_mesh_specs(
         )
         next_local_index += 1
 
-    v105_apply_frame_spec_color_links(specs)
-    v106_apply_frame_spec_semantics(specs)
+    if normalized_frame_group_version not in ("v1.09", "v1.10"):
+        v105_apply_frame_spec_color_links(specs)
+        v106_apply_frame_spec_semantics(specs)
+
+    if normalized_frame_group_version == "v1.08":
+        v108_apply_certificate_row_pair_semantics(specs)
 
     return x_edges, y_edges, specs
 
@@ -3808,6 +4280,7 @@ def v105_build_certificate_group_mesh_markup(
     row_start_index: int,
     row_end_index: int,
     x_edges: list[float],
+    frame_group_version: str = "v1.08",
 ) -> str:
     x_edges, y_edges, frame_specs = v105_build_certificate_group_mesh_specs(
         table,
@@ -3815,6 +4288,7 @@ def v105_build_certificate_group_mesh_markup(
         row_end_index,
         x_edges,
         band_index,
+        frame_group_version,
     )
 
     if len(x_edges) < 2 or len(y_edges) < 2 or not frame_specs:
@@ -3842,6 +4316,9 @@ def v105_build_certificate_group_mesh_markup(
     row_heights_px = [max(1, bottom_px - top_px) for top_px, bottom_px in zip(row_edges_px, row_edges_px[1:])]
     frame_specs_by_origin = {}
     color_group_indexes = v102_resolve_color_group_indexes(frame_specs)
+    band_outline_style = v102_resolve_band_outline_style(frame_specs, frame_group_version)
+    band_border_color = "rgba(15, 23, 42, 0.34)" if band_outline_style == "dashed" else "rgba(15, 23, 42, 0.55)"
+    band_border_css = f" border:1px {band_outline_style} {band_border_color};" if band_outline_style == "dashed" else ""
 
     for spec in frame_specs:
         frame_specs_by_origin[(int(spec["layout_row_start"]), int(spec["layout_col_start"]))] = spec
@@ -3889,10 +4366,10 @@ def v105_build_certificate_group_mesh_markup(
                 span_attr += f' colspan="{colspan}"'
 
             if local_col_index > 1:
-                border_style += " border-left:1px solid rgba(15, 23, 42, 0.55);"
+                border_style += f" border-left:1px {band_outline_style} {band_border_color};"
 
             if local_row_index > 1:
-                border_style += " border-top:1px solid rgba(15, 23, 42, 0.55);"
+                border_style += f" border-top:1px {band_outline_style} {band_border_color};"
 
             cells_html.append(
                 f'{v202_build_frame_group_td_open_tag(cell, "halign-left valign-top", f"font-size:{font_px:.2f}px; font-weight:{font_weight}; --v102-row-color:{row_color}; --v102-col-color:{col_color};{border_style}", span_attr.strip())}'
@@ -3907,7 +4384,7 @@ def v105_build_certificate_group_mesh_markup(
     return (
         f'<div class="v102-frame-band" style="left:{band_left_px}px; top:{band_top_px}px; '
         f'width:{band_width_px}px; height:{band_height_px}px;">'
-        f'<table class="v202-table-block v102-frame-band-table" style="width:{band_width_px}px; height:{band_height_px}px;">'
+        f'<table class="v202-table-block v102-frame-band-table" style="width:{band_width_px}px; height:{band_height_px}px;{band_border_css}">'
         f'<colgroup>{colgroup_html}</colgroup>'
         f'<tbody style="--v102-row-color:{v102_pick_palette_color(V102_ROW_COLOR_PALETTE, band_index)};">'
         f'{"".join(rows_html)}'
@@ -3919,6 +4396,7 @@ def v105_build_certificate_table_mesh_fragments(
     table,
     scale: float,
     band_index_start: int,
+    frame_group_version: str = "v1.08",
 ) -> tuple[list[str], int]:
     y_lines = list(getattr(table, "y_lines", []) or [])
     row_count = max(0, len(y_lines) - 1)
@@ -3952,6 +4430,7 @@ def v105_build_certificate_table_mesh_fragments(
             group_start,
             group_end,
             group_edges,
+            frame_group_version,
         )
 
         if group_fragment:
@@ -4075,13 +4554,21 @@ def v105_build_implicit_certificate_header_band_html(page, table, scale: float, 
     if not header_specs:
         return ""
 
-    return v103_build_frame_band_markup(header_specs, scale, band_index, top=header_top, bottom=header_bottom)
+    return v103_build_frame_band_markup(
+        header_specs,
+        scale,
+        band_index,
+        frame_group_version=frame_group_version,
+        top=header_top,
+        bottom=header_bottom,
+    )
 
 
 def v105_build_table_row_frame_bands_html(
     table,
     scale: float,
     band_index_start: int,
+    frame_group_version: str = "v1.08",
 ) -> tuple[list[str], int]:
     y_lines = list(getattr(table, "y_lines", []) or [])
     total_rows = max(0, len(y_lines) - 1)
@@ -4089,12 +4576,12 @@ def v105_build_table_row_frame_bands_html(
     next_band_index = band_index_start
 
     for row_index in range(total_rows):
-        frame_specs = v105_build_row_local_frame_specs(table, row_index, next_band_index)
+        frame_specs = v105_build_row_local_frame_specs(table, row_index, next_band_index, frame_group_version)
 
         if not frame_specs:
             continue
 
-        fragments.append(v103_build_frame_band_markup(frame_specs, scale, next_band_index))
+        fragments.append(v103_build_frame_band_markup(frame_specs, scale, next_band_index, frame_group_version=frame_group_version))
         next_band_index += 1
 
     return fragments, next_band_index
@@ -4104,16 +4591,16 @@ def v102_build_table_row_frame_bands_html(
     table,
     scale: float,
     band_index_start: int,
-    frame_group_version: str = "v1.06",
+    frame_group_version: str = "v1.08",
     use_v105_row_local_grid: bool = False,
 ) -> tuple[list[str], int]:
-    if normalize_frame_group_version(frame_group_version) in ("v1.05", "v1.06") and use_v105_row_local_grid:
-        mesh_fragments, next_band_index = v105_build_certificate_table_mesh_fragments(table, scale, band_index_start)
+    if normalize_frame_group_version(frame_group_version) in ("v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") and use_v105_row_local_grid:
+        mesh_fragments, next_band_index = v105_build_certificate_table_mesh_fragments(table, scale, band_index_start, frame_group_version)
 
         if mesh_fragments:
             return mesh_fragments, next_band_index
 
-        return v105_build_table_row_frame_bands_html(table, scale, band_index_start)
+        return v105_build_table_row_frame_bands_html(table, scale, band_index_start, frame_group_version)
 
     total_rows = max(0, len(getattr(table, "y_lines", []) or []) - 1)
     rows = [[] for _ in range(total_rows)]
@@ -4122,6 +4609,7 @@ def v102_build_table_row_frame_bands_html(
         row_index = max(0, min(total_rows - 1, int(getattr(cell, "row_start", 1) or 1) - 1))
 
         if total_rows > 0:
+            setattr(cell, "_frame_table", table)
             rows[row_index].append(cell)
 
     fragments = []
@@ -4136,10 +4624,10 @@ def v102_build_table_row_frame_bands_html(
         if not frame_specs:
             continue
 
-        if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06"):
-            fragments.append(v103_build_frame_band_markup(frame_specs, scale, next_band_index))
+        if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10"):
+            fragments.append(v103_build_frame_band_markup(frame_specs, scale, next_band_index, frame_group_version=frame_group_version))
         else:
-            fragments.append(v102_build_frame_band_markup(frame_specs, scale, next_band_index))
+            fragments.append(v102_build_frame_band_markup(frame_specs, scale, next_band_index, frame_group_version=frame_group_version))
         next_band_index += 1
 
     return fragments, next_band_index
@@ -4149,13 +4637,13 @@ def v102_build_frame_groups_page_html(
     page,
     scale: float,
     clone_id: str,
-    frame_group_version: str = "v1.06",
+    frame_group_version: str = "v1.08",
 ) -> str:
     band_fragments = []
     band_index = 0
     frame_bounds = v202_resolve_page_frame_bounds(page)
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
-    certificate_like_page = normalized_frame_group_version in ("v1.05", "v1.06") and v105_is_certificate_like_scanned_page(page, frame_bounds)
+    certificate_like_page = normalized_frame_group_version in ("v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") and v105_is_certificate_like_scanned_page(page, frame_bounds)
 
     if frame_bounds:
         for block in v202_collect_outside_region_blocks(page, frame_bounds, "top"):
@@ -4164,7 +4652,7 @@ def v102_build_frame_groups_page_html(
             )
             band_index += 1
 
-        if normalized_frame_group_version in ("v1.04", "v1.05", "v1.06") and not certificate_like_page:
+        if normalized_frame_group_version in ("v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") and not certificate_like_page:
             for block in getattr(page, "_v104_status_value_blocks", []) or []:
                 frame_group_id = str(getattr(block, "_frame_group_id", "") or f"band-{band_index}-status")
                 band_fragments.append(
@@ -4189,8 +4677,8 @@ def v102_build_frame_groups_page_html(
             )
             band_index += 1
 
-    page_width_px = v103_snap_scaled_px(page.width, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06") else page.width * scale
-    page_height_px = v103_snap_scaled_px(page.height, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06") else page.height * scale
+    page_width_px = v103_snap_scaled_px(page.width, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") else page.width * scale
+    page_height_px = v103_snap_scaled_px(page.height, scale) if normalize_frame_group_version(frame_group_version) in ("v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10") else page.height * scale
 
     return (
         f'<section class="page" data-page="{getattr(page, "number", 1)}" '
@@ -4206,14 +4694,14 @@ def v202_build_page_html(
     scale: float,
     clone_id: str,
     extraction_stage: str = "full",
-    frame_group_version: str = "v1.06",
+    frame_group_version: str = "v1.08",
 ) -> str:
     normalized_stage = normalize_extraction_stage(extraction_stage)
     frame_only = normalized_stage == "frames"
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
 
-    if frame_only and normalized_frame_group_version in ("v1.02", "v1.03", "v1.04", "v1.05", "v1.06"):
-        return v102_build_frame_groups_page_html(page, scale, clone_id, normalized_frame_group_version)
+    if frame_only and normalized_frame_group_version in ("v1.02", "v1.03", "v1.04", "v1.05", "v1.06", "v1.07", "v1.08", "v1.09", "v1.10"):
+        return v102_build_frame_groups_page_html(page, scale, clone_id, frame_group_version)
 
     frame_bounds = v202_resolve_page_frame_bounds(page)
 
@@ -4346,27 +4834,28 @@ def v202_build_structured_section(
     clone_id: str,
     render_model: dict,
     extraction_stage: str = "full",
-    frame_group_version: str = "v1.06",
+    frame_group_version: str = "v1.08",
 ) -> str:
     normalized_stage = normalize_extraction_stage(extraction_stage)
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
+    frame_group_version_tag = resolve_frame_group_version_tag(frame_group_version)
     render_model_json = json.dumps(render_model, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
     pages_html = "".join(
-        v202_build_page_html(page, scale, clone_id, normalized_stage, normalized_frame_group_version)
+        v202_build_page_html(page, scale, clone_id, normalized_stage, frame_group_version_tag)
         for page in pages
     )
 
     if normalized_stage == "frames":
-        return f'''<section data-template-extract-draft="true" data-template-clone="{clone_id}" data-template-extraction-stage="{normalized_stage}" data-template-frame-group-version="{normalized_frame_group_version}" class="template-clone template-clone--raster-first-v2-structured" data-template-clone-id="{clone_id}">
+        return f'''<section data-template-extract-draft="true" data-template-clone="{clone_id}" data-template-extraction-stage="{normalized_stage}" data-template-frame-group-version="{frame_group_version_tag}" class="template-clone template-clone--raster-first-v2-structured" data-template-clone-id="{clone_id}">
   <script type="application/json" data-template-render-model="positioned-v1">{render_model_json}</script>
 {V202_STRUCTURED_DOM_STYLE}
 {V202_STRUCTURED_DOM_SCRIPT}
 {pages_html}
 </section>'''
 
-    return f'''<section data-template-extract-draft="true" data-template-clone="{clone_id}" data-template-extraction-stage="{normalized_stage}" data-template-frame-group-version="{normalized_frame_group_version}">
+    return f'''<section data-template-extract-draft="true" data-template-clone="{clone_id}" data-template-extraction-stage="{normalized_stage}" data-template-frame-group-version="{frame_group_version_tag}">
   <script type="application/json" data-template-render-model="positioned-v1">{render_model_json}</script>
-  <div class="template-clone template-clone--raster-first-v2-structured" data-template-clone-id="{clone_id}" data-template-extraction-stage="{normalized_stage}" data-template-frame-group-version="{normalized_frame_group_version}">
+  <div class="template-clone template-clone--raster-first-v2-structured" data-template-clone-id="{clone_id}" data-template-extraction-stage="{normalized_stage}" data-template-frame-group-version="{frame_group_version_tag}">
 {V202_STRUCTURED_DOM_STYLE}
 {V202_STRUCTURED_DOM_SCRIPT}
     <div class="viewer">
@@ -4548,6 +5037,84 @@ def v104_infer_container_bbox_from_frame_segments(target_bbox, source_segments, 
     return v102_make_bbox(resolved_left, resolved_top, resolved_right, resolved_bottom)
 
 
+def v104_has_vertical_segment_boundary(source_segments, x_value: float, y0: float, y1: float) -> bool:
+    span = max(1.0, float(y1) - float(y0))
+    covered = 0.0
+    center_y = (float(y0) + float(y1)) * 0.5
+
+    for segment in source_segments or []:
+        bbox = getattr(segment, "bbox", None)
+        orientation = str(getattr(segment, "orientation", "") or "").lower()
+
+        if bbox is None or orientation != "v":
+            continue
+
+        segment_x = (float(bbox.x0) + float(bbox.x1)) * 0.5
+
+        if abs(segment_x - float(x_value)) > 4.0:
+            continue
+
+        overlap = max(0.0, min(float(bbox.y1), float(y1)) - max(float(bbox.y0), float(y0)))
+        covered += overlap
+
+        if overlap >= span * 0.55:
+            return True
+
+        if float(bbox.y0) - 1.5 <= center_y <= float(bbox.y1) + 1.5 and overlap >= span * 0.25:
+            return True
+
+    return covered >= span * 0.7
+
+
+def v104_has_horizontal_segment_boundary(source_segments, y_value: float, x0: float, x1: float) -> bool:
+    span = max(1.0, float(x1) - float(x0))
+    covered = 0.0
+    center_x = (float(x0) + float(x1)) * 0.5
+
+    for segment in source_segments or []:
+        bbox = getattr(segment, "bbox", None)
+        orientation = str(getattr(segment, "orientation", "") or "").lower()
+
+        if bbox is None or orientation != "h":
+            continue
+
+        segment_y = (float(bbox.y0) + float(bbox.y1)) * 0.5
+
+        if abs(segment_y - float(y_value)) > 4.0:
+            continue
+
+        overlap = max(0.0, min(float(bbox.x1), float(x1)) - max(float(bbox.x0), float(x0)))
+        covered += overlap
+
+        if overlap >= span * 0.55:
+            return True
+
+        if float(bbox.x0) - 1.5 <= center_x <= float(bbox.x1) + 1.5 and overlap >= span * 0.25:
+            return True
+
+    return covered >= span * 0.7
+
+
+def v104_resolve_outline_style_from_source_segments(target_bbox, source_segments) -> str:
+    if target_bbox is None:
+        return "dashed"
+
+    usable_segments = list(source_segments or [])
+
+    if not usable_segments:
+        return "dashed"
+
+    x0 = float(target_bbox.x0)
+    y0 = float(target_bbox.y0)
+    x1 = float(target_bbox.x1)
+    y1 = float(target_bbox.y1)
+    has_left = v104_has_vertical_segment_boundary(usable_segments, x0, y0, y1)
+    has_right = v104_has_vertical_segment_boundary(usable_segments, x1, y0, y1)
+    has_top = v104_has_horizontal_segment_boundary(usable_segments, y0, x0, x1)
+    has_bottom = v104_has_horizontal_segment_boundary(usable_segments, y1, x0, x1)
+    return "solid" if has_left and has_right and has_top and has_bottom else "dashed"
+
+
 def v104_extract_status_value_blocks_from_fitz_page(fitz_page, visual_page, frame_bounds) -> list:
     if fitz_page is None or visual_page is None or not frame_bounds:
         return []
@@ -4656,6 +5223,7 @@ def v104_extract_status_value_blocks_from_fitz_page(fitz_page, visual_page, fram
         value_key = "상태 이력"
         cluster_bbox = v102_make_bbox(x0, y0, x1, y1)
         container_bbox = v104_infer_container_bbox_from_frame_segments(cluster_bbox, source_segments, frame_bounds)
+        frame_outline_style = v104_resolve_outline_style_from_source_segments(container_bbox, source_segments)
         semantic_blocks.append(
             SimpleNamespace(
                 text=" | ".join(item["text"] for item in cluster),
@@ -4667,6 +5235,7 @@ def v104_extract_status_value_blocks_from_fitz_page(fitz_page, visual_page, fram
                 _frame_group_id=f"status-history-{cluster_index}",
                 _frame_color_group=value_key,
                 _frame_value_key=value_key,
+                _frame_outline_style=frame_outline_style,
             )
         )
 
@@ -6019,11 +6588,12 @@ def convert(
     ocr_lang: str,
     engine_version: str,
     extraction_stage: str = "full",
-    frame_group_version: str = "v1.06",
+    frame_group_version: str = "v1.10-default",
 ) -> dict:
     engine_config = resolve_engine_config(engine_version)
     normalized_stage = normalize_extraction_stage(extraction_stage)
     normalized_frame_group_version = normalize_frame_group_version(frame_group_version)
+    frame_group_version_tag = resolve_frame_group_version_tag(frame_group_version)
     visual_converter = load_reference_converter(VISUAL_REFERENCE_CONVERTER, "template_extract_reference_type1")
     edit_converter = load_reference_converter(EDIT_REFERENCE_CONVERTER, "template_extract_reference_type3")
     doc = visual_converter.fitz.open(str(input_pdf))
@@ -6065,7 +6635,7 @@ def convert(
             engine_config["clone_id"],
             render_model,
             normalized_stage,
-            normalized_frame_group_version,
+            frame_group_version,
         )
         summary = build_model_summary(visual_pages, visual_pages)
 
@@ -6073,7 +6643,7 @@ def convert(
             "sourceTitle": input_pdf.stem,
             "html": fragment_html,
             "extractionStage": normalized_stage,
-            "frameGroupVersion": normalized_frame_group_version,
+            "frameGroupVersion": frame_group_version_tag,
             "pageCount": len(visual_pages),
             "sourceMode": page_source_mode(visual_pages),
             "documentFamily": "generic_form",
@@ -6155,7 +6725,7 @@ def main() -> None:
     parser.add_argument("--input-pdf", required=True)
     parser.add_argument("--engine-version", default=DEFAULT_ENGINE_VERSION)
     parser.add_argument("--extraction-stage", default="full")
-    parser.add_argument("--frame-group-version", default="v1.06")
+    parser.add_argument("--frame-group-version", default="v1.10-default")
     parser.add_argument("--scale", type=float, default=1.28)
     parser.add_argument("--raster-scale", type=float, default=3.2)
     parser.add_argument("--ocr-lang", default="kor+eng")

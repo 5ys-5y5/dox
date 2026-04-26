@@ -106,12 +106,30 @@ export type TemplateExtractPdfSourceMode = 'digital' | 'scanned';
 
 export type TemplateExtractDocumentFamily = 'work_order' | 'certificate' | 'generic_form';
 export type TemplateExtractExtractionStage = 'full' | 'frames';
-export type TemplateExtractFrameGroupVersion = 'v1.01' | 'v1.02' | 'v1.03' | 'v1.04' | 'v1.05' | 'v1.06';
+export type TemplateExtractFrameGroupBaseVersion =
+  | 'v1.01'
+  | 'v1.02'
+  | 'v1.03'
+  | 'v1.04'
+  | 'v1.05'
+  | 'v1.06'
+  | 'v1.07'
+  | 'v1.08'
+  | 'v1.09'
+  | 'v1.10';
+export type TemplateExtractFrameGroupVersion =
+  | TemplateExtractFrameGroupBaseVersion
+  | `v1.09-${string}`
+  | `v1.10-${string}`;
 
 export const TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS: Array<{
-  value: TemplateExtractFrameGroupVersion;
+  value: TemplateExtractFrameGroupBaseVersion;
   label: string;
 }> = [
+  { value: 'v1.10', label: 'v1.10' },
+  { value: 'v1.09', label: 'v1.09' },
+  { value: 'v1.08', label: 'v1.08' },
+  { value: 'v1.07', label: 'v1.07' },
   { value: 'v1.06', label: 'v1.06' },
   { value: 'v1.05', label: 'v1.05' },
   { value: 'v1.04', label: 'v1.04' },
@@ -421,7 +439,7 @@ export type TemplateExtractReplicaRenderCheckboxOption = {
 
 export type TemplateExtractReplicaRenderTextItem =
   | {
-      kind: 'plain';
+      kind: 'plain' | 'plain_text';
       left: number;
       top: number;
       width: number;

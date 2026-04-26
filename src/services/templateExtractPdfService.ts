@@ -1343,7 +1343,7 @@ export const TemplateExtractPdfService = {
     bytes: Uint8Array,
     version: Extract<TemplateExtractEngineVersion, '19' | '20' | '21' | '22' | '23' | '24' | '25' | '26' | '27' | '28' | '29' | '30' | '31' | '32' | '33' | '34' | '35' | '36' | '42' | '43' | '44' | '45' | '46' | '47'> = '19',
     extractionStage: TemplateExtractExtractionStage = 'full',
-    frameGroupVersion: TemplateExtractFrameGroupVersion = 'v1.06'
+    frameGroupVersion: TemplateExtractFrameGroupVersion = 'v1.10-default'
   ): Promise<TemplateExtractResolvedSource> {
     if (version === '32' || version === '33' || version === '34' || version === '35' || version === '36' || version === '42' || version === '43' || version === '44' || version === '45' || version === '46' || version === '47') {
       return TemplateExtractPdfRasterFirstReplicaService.extractPdfSource(

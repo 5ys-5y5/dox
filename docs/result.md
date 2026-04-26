@@ -1,0 +1,983 @@
+<style>
+  .template-clone--raster-first-v2-structured {
+    width: fit-content;
+    margin: 0 auto;
+    background: transparent;
+    color: #111827;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", Arial, sans-serif;
+  }
+  .template-clone--raster-first-v2-structured .viewer {
+    padding: 24px 14px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+  .template-clone--raster-first-v2-structured .page {
+    position: relative;
+    background: #ffffff;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+  }
+  .template-clone--raster-first-v2-structured .page-inner {
+    position: relative;
+    width: 100%;
+    min-height: inherit;
+  }
+  .template-clone--raster-first-v2-structured .v211-page-region {
+    position: relative;
+    width: 100%;
+  }
+  .template-clone--raster-first-v2-structured .v211-frame-stack {
+    position: relative;
+  }
+  .template-clone--raster-first-v2-structured .v211-frame-flow-item {
+    position: relative;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-frame {
+    position: relative;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-block {
+    margin: 0;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: fixed;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-block td {
+    border: 1px solid #2f2f2f;
+    padding: var(--v202-pad-y, 4px) var(--v202-pad-x, 6px);
+    vertical-align: top;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    color: #111827;
+    background: #ffffff;
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-block td.v202-cell-empty {
+    padding: 0;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block {
+    position: relative;
+    z-index: 1;
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-table-raster {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-position: center center;
+    pointer-events: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block td {
+    position: relative;
+    border: 0;
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block td.v202-cell-empty {
+    border: 0;
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame {
+    overflow: hidden;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v22-table-raster {
+    display: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] td {
+    border: 1px solid #2f2f2f;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] td.v202-cell-empty {
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v202-table-block td {
+    border: 1px solid #2f2f2f;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v202-table-block td.v202-cell-empty {
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-html-shell {
+    position: absolute;
+    inset: 0;
+    padding: inherit;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: auto;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-html-shell [contenteditable="true"] {
+    caret-color: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] .v22-html-shell {
+    position: static;
+    inset: auto;
+    padding: 0;
+    opacity: 1;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] .v22-html-shell [contenteditable="true"] {
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v22-html-shell {
+    position: static;
+    inset: auto;
+    padding: 0;
+    opacity: 1;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v22-html-shell [contenteditable="true"] {
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-raster-region {
+    position: absolute;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-position: center center;
+    pointer-events: none;
+  }
+  .template-clone--raster-first-v2-structured .halign-left {
+    text-align: left;
+  }
+  .template-clone--raster-first-v2-structured .halign-center {
+    text-align: center;
+  }
+  .template-clone--raster-first-v2-structured .halign-right {
+    text-align: right;
+  }
+  .template-clone--raster-first-v2-structured .valign-top {
+    vertical-align: top;
+  }
+  .template-clone--raster-first-v2-structured .valign-middle {
+    vertical-align: middle;
+  }
+  .template-clone--raster-first-v2-structured .v202-cell-box,
+  .template-clone--raster-first-v2-structured .v202-text-box {
+    display: block;
+    width: 100%;
+    min-height: 1.12em;
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured .v202-frame-group {
+    min-height: inherit;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-cell-box {
+    min-height: 100%;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"] {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"] .page {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"] .page-inner {
+    margin: 0;
+    padding: 0;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-table-frame {
+    background: transparent;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band {
+    position: absolute;
+    padding: 0;
+    background: transparent;
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    background: transparent;
+    border: 1px solid rgba(15, 23, 42, 0.55);
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table tbody {
+    background: var(--v102-row-color, rgba(59, 130, 246, 0.08));
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table td {
+    position: relative;
+    border: 0;
+    background: var(--v102-col-color, rgba(14, 165, 233, 0.14));
+    padding: 0;
+    min-height: 14px;
+    overflow: hidden;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table td + td {
+    border-left: 1px solid rgba(15, 23, 42, 0.55);
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table tr + tr td {
+    border-top: 1px solid rgba(15, 23, 42, 0.55);
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table td::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--v102-row-color, rgba(59, 130, 246, 0.08));
+    pointer-events: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table .v202-frame-group {
+    position: relative;
+    z-index: 1;
+    min-height: 0;
+    height: 100%;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    border: 0;
+    resize: none;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: #0f172a;
+    font: inherit;
+    line-height: 1.2;
+    border-radius: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    outline: none;
+    overflow: hidden;
+    white-space: pre-wrap;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group[data-template-frame-halign="center"] .v202-frame-group-input {
+    text-align: center;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group[data-template-frame-halign="right"] .v202-frame-group-input {
+    text-align: right;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table {
+    border-color: rgba(15, 23, 42, 0.48);
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table tbody {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td::before {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured .v202-text-block {
+    position: absolute;
+    color: #111827;
+    white-space: pre-wrap;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .template-clone--raster-first-v2-structured .v202-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px;
+    min-height: 1.14em;
+  }
+  .template-clone--raster-first-v2-structured .v202-line--choice {
+    align-items: center;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-fragment {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-box {
+    width: 10px;
+    height: 10px;
+    padding: 0;
+    border: 1px solid #111827;
+    background: #ffffff;
+    appearance: none;
+    -webkit-appearance: none;
+    box-sizing: border-box;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-box[data-checked="1"]::after {
+    content: "";
+    display: block;
+    width: 6px;
+    height: 6px;
+    margin: 1px;
+    background: #111827;
+  }
+  .template-clone--raster-first-v2-structured .v202-structured-text {
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  .template-clone--raster-first-v2-structured .v202-structured-text:focus {
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.28);
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-value {
+    display: block;
+    width: 100%;
+    min-height: 1.1em;
+    box-sizing: border-box;
+    outline: none;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-value--inline {
+    display: inline-block;
+    min-width: 0;
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-key {
+    display: block;
+    min-height: 1.1em;
+    outline: none;
+    color: #111827;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-key--inline {
+    display: inline-block;
+    min-width: 0;
+  }
+  .template-clone--raster-first-v2-structured .v202-inline-editor-row {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    outline: none;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured .v202-source-inline-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 0;
+    width: 100%;
+    white-space: nowrap;
+  }
+  .template-clone--raster-first-v2-structured .v202-inline-positioned-part {
+    display: inline-flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    min-height: 1.1em;
+    vertical-align: top;
+  }
+  .template-clone--raster-first-v2-structured .v202-inline-positioned-part > .template-clone__field-value--inline,
+  .template-clone--raster-first-v2-structured .v202-inline-positioned-part > .template-clone__field-key--inline {
+    display: block;
+    width: 100%;
+  }
+  .template-clone--raster-first-v2-structured [data-template-edit-scope="admin"][data-template-edit-enabled="true"] {
+    cursor: text;
+  }
+  .template-clone--raster-first-v2-structured [data-template-edit-scope="admin"][data-template-edit-enabled="false"] {
+    cursor: default;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-label {
+    outline: none;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-line {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    white-space: nowrap;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-code {
+    display: inline-block;
+    min-width: 26px;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-options {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  @media print {
+    .template-clone--raster-first-v2-structured .viewer {
+      padding: 0;
+      gap: 0;
+    }
+    .template-clone--raster-first-v2-structured .page {
+      box-shadow: none;
+      page-break-after: always;
+    }
+    .template-clone--raster-first-v2-structured .page:last-child {
+      page-break-after: auto;
+    }
+  }
+</style><style>
+  .template-clone--raster-first-v2-structured {
+    width: fit-content;
+    margin: 0 auto;
+    background: transparent;
+    color: #111827;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", Arial, sans-serif;
+  }
+  .template-clone--raster-first-v2-structured .viewer {
+    padding: 24px 14px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+  .template-clone--raster-first-v2-structured .page {
+    position: relative;
+    background: #ffffff;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+  }
+  .template-clone--raster-first-v2-structured .page-inner {
+    position: relative;
+    width: 100%;
+    min-height: inherit;
+  }
+  .template-clone--raster-first-v2-structured .v211-page-region {
+    position: relative;
+    width: 100%;
+  }
+  .template-clone--raster-first-v2-structured .v211-frame-stack {
+    position: relative;
+  }
+  .template-clone--raster-first-v2-structured .v211-frame-flow-item {
+    position: relative;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-frame {
+    position: relative;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-block {
+    margin: 0;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: fixed;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-block td {
+    border: 1px solid #2f2f2f;
+    padding: var(--v202-pad-y, 4px) var(--v202-pad-x, 6px);
+    vertical-align: top;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    color: #111827;
+    background: #ffffff;
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured .v202-table-block td.v202-cell-empty {
+    padding: 0;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block {
+    position: relative;
+    z-index: 1;
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-table-raster {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-position: center center;
+    pointer-events: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block td {
+    position: relative;
+    border: 0;
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block td.v202-cell-empty {
+    border: 0;
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame {
+    overflow: hidden;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v22-table-raster {
+    display: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] td {
+    border: 1px solid #2f2f2f;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] td.v202-cell-empty {
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v202-table-block td {
+    border: 1px solid #2f2f2f;
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v202-table-block td.v202-cell-empty {
+    background: #ffffff;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-html-shell {
+    position: absolute;
+    inset: 0;
+    padding: inherit;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: auto;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-html-shell [contenteditable="true"] {
+    caret-color: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] .v22-html-shell {
+    position: static;
+    inset: auto;
+    padding: 0;
+    opacity: 1;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-block tr[data-v22-edited="true"] .v22-html-shell [contenteditable="true"] {
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v22-html-shell {
+    position: static;
+    inset: auto;
+    padding: 0;
+    opacity: 1;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-table-frame[data-v22-live="true"] .v22-html-shell [contenteditable="true"] {
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v22-raster-region {
+    position: absolute;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-position: center center;
+    pointer-events: none;
+  }
+  .template-clone--raster-first-v2-structured .halign-left {
+    text-align: left;
+  }
+  .template-clone--raster-first-v2-structured .halign-center {
+    text-align: center;
+  }
+  .template-clone--raster-first-v2-structured .halign-right {
+    text-align: right;
+  }
+  .template-clone--raster-first-v2-structured .valign-top {
+    vertical-align: top;
+  }
+  .template-clone--raster-first-v2-structured .valign-middle {
+    vertical-align: middle;
+  }
+  .template-clone--raster-first-v2-structured .v202-cell-box,
+  .template-clone--raster-first-v2-structured .v202-text-box {
+    display: block;
+    width: 100%;
+    min-height: 1.12em;
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured .v202-frame-group {
+    min-height: inherit;
+  }
+  .template-clone--raster-first-v2-structured[data-template-clone-id^="pdf-raster-first-v2.2"] .v202-cell-box {
+    min-height: 100%;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"] {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"] .page {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"] .page-inner {
+    margin: 0;
+    padding: 0;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-table-frame {
+    background: transparent;
+    overflow: visible;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band {
+    position: absolute;
+    padding: 0;
+    background: transparent;
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    background: transparent;
+    border: 1px solid rgba(15, 23, 42, 0.55);
+    box-sizing: border-box;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table tbody {
+    background: var(--v102-row-color, rgba(59, 130, 246, 0.08));
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table td {
+    position: relative;
+    border: 0;
+    background: var(--v102-col-color, rgba(14, 165, 233, 0.14));
+    padding: 0;
+    min-height: 14px;
+    overflow: hidden;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table td + td {
+    border-left: 1px solid rgba(15, 23, 42, 0.55);
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table tr + tr td {
+    border-top: 1px solid rgba(15, 23, 42, 0.55);
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table td::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--v102-row-color, rgba(59, 130, 246, 0.08));
+    pointer-events: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v102-frame-band-table .v202-frame-group {
+    position: relative;
+    z-index: 1;
+    min-height: 0;
+    height: 100%;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    border: 0;
+    resize: none;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: #0f172a;
+    font: inherit;
+    line-height: 1.2;
+    border-radius: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    outline: none;
+    overflow: hidden;
+    white-space: pre-wrap;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group[data-template-frame-halign="center"] .v202-frame-group-input {
+    text-align: center;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group[data-template-frame-halign="right"] .v202-frame-group-input {
+    text-align: right;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table {
+    border-color: rgba(15, 23, 42, 0.48);
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table tbody {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured[data-template-extraction-stage="frames"][data-template-frame-group-version^="v1.09"] .v102-frame-band-table td::before {
+    background: transparent;
+  }
+  .template-clone--raster-first-v2-structured .v202-text-block {
+    position: absolute;
+    color: #111827;
+    white-space: pre-wrap;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .template-clone--raster-first-v2-structured .v202-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px;
+    min-height: 1.14em;
+  }
+  .template-clone--raster-first-v2-structured .v202-line--choice {
+    align-items: center;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-fragment {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-box {
+    width: 10px;
+    height: 10px;
+    padding: 0;
+    border: 1px solid #111827;
+    background: #ffffff;
+    appearance: none;
+    -webkit-appearance: none;
+    box-sizing: border-box;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-box[data-checked="1"]::after {
+    content: "";
+    display: block;
+    width: 6px;
+    height: 6px;
+    margin: 1px;
+    background: #111827;
+  }
+  .template-clone--raster-first-v2-structured .v202-structured-text {
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  .template-clone--raster-first-v2-structured .v202-structured-text:focus {
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.28);
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-value {
+    display: block;
+    width: 100%;
+    min-height: 1.1em;
+    box-sizing: border-box;
+    outline: none;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-value--inline {
+    display: inline-block;
+    min-width: 0;
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-key {
+    display: block;
+    min-height: 1.1em;
+    outline: none;
+    color: #111827;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .template-clone--raster-first-v2-structured .template-clone__field-key--inline {
+    display: inline-block;
+    min-width: 0;
+  }
+  .template-clone--raster-first-v2-structured .v202-inline-editor-row {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    outline: none;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured .v202-source-inline-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 0;
+    width: 100%;
+    white-space: nowrap;
+  }
+  .template-clone--raster-first-v2-structured .v202-inline-positioned-part {
+    display: inline-flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    min-height: 1.1em;
+    vertical-align: top;
+  }
+  .template-clone--raster-first-v2-structured .v202-inline-positioned-part > .template-clone__field-value--inline,
+  .template-clone--raster-first-v2-structured .v202-inline-positioned-part > .template-clone__field-key--inline {
+    display: block;
+    width: 100%;
+  }
+  .template-clone--raster-first-v2-structured [data-template-edit-scope="admin"][data-template-edit-enabled="true"] {
+    cursor: text;
+  }
+  .template-clone--raster-first-v2-structured [data-template-edit-scope="admin"][data-template-edit-enabled="false"] {
+    cursor: default;
+  }
+  .template-clone--raster-first-v2-structured .v202-choice-label {
+    outline: none;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    caret-color: #111827;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-line {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    white-space: nowrap;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-code {
+    display: inline-block;
+    min-width: 26px;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-options {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .template-clone--raster-first-v2-structured .v202-status-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  @media print {
+    .template-clone--raster-first-v2-structured .viewer {
+      padding: 0;
+      gap: 0;
+    }
+    .template-clone--raster-first-v2-structured .page {
+      box-shadow: none;
+      page-break-after: always;
+    }
+    .template-clone--raster-first-v2-structured .page:last-child {
+      page-break-after: auto;
+    }
+  }
+</style><div class="page-inner template-clone template-clone--raster-first-v2-structured" data-template-extraction-stage="frames" data-template-frame-group-version="v1.09-안전관리계획서-입력본" data-template-clone-id="pdf-raster-first-v2.21" data-page="1" style="width: 762px; min-height: 1078px; margin: 0px; padding: 0px; display: block;"><div class="v102-frame-band" style="left:40px; top:21px; width:225px; height:12px;"><table class="v202-table-block v102-frame-band-table" style="width:225px; height:12px;"><colgroup><col style="width:225px"></colgroup><tbody style="--v102-row-color:rgba(59, 130, 246, 0.10);"><tr style="height:12px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-0-header" data-template-frame-color-group="band-0-header" data-template-frame-source-text="양식명(코드):작업지시서(GMS-CPN-001)" data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:12.80px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-0-header" data-template-frame-color-group="band-0-header" data-template-frame-source-text="양식명(코드):작업지시서(GMS-CPN-001)" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">양식명(코드):작업지시서(GMS-CPN-001)</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:594px; top:21px; width:128px; height:11px;"><table class="v202-table-block v102-frame-band-table" style="width:128px; height:11px;"><colgroup><col style="width:128px"></colgroup><tbody style="--v102-row-color:rgba(16, 185, 129, 0.10);"><tr style="height:11px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-1-header" data-template-frame-color-group="band-1-header" data-template-frame-source-text="문서번호:2603-020593" data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:12.80px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-1-header" data-template-frame-color-group="band-1-header" data-template-frame-source-text="문서번호:2603-020593" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">문서번호:2603-020593</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:313px; top:40px; width:411px; height:102px;"><table class="v202-table-block v102-frame-band-table" style="width:411px; height:102px;"><colgroup><col style="width:411px"></colgroup><tbody style="--v102-row-color:rgba(245, 158, 11, 0.10);"><tr style="height:102px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="status-history-1" data-template-frame-color-group="상태 이력" data-template-frame-value-key="상태 이력" data-template-frame-source-text="협력사승인일
+발 급 자 포스코이앤씨" data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:12.64px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="status-history-1" data-template-frame-color-group="상태 이력" data-template-frame-value-key="상태 이력" data-template-frame-source-text="협력사승인일
+발 급 자 포스코이앤씨" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">협력사승인일
+발 급 자 포스코이앤씨</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:40px; width:275px; height:55px;"><table class="v202-table-block v102-frame-band-table" style="width:275px; height:55px;"><colgroup><col style="width:91px"><col style="width:184px"></colgroup><tbody style="--v102-row-color:rgba(236, 72, 153, 0.10);"><tr style="height:55px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-3-cell-1" data-template-frame-color-group="band-3-cell-1" data-template-frame-source-text="구 분
+작 성 자" data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-3-cell-1" data-template-frame-color-group="band-3-cell-1" data-template-frame-source-text="구 분
+작 성 자" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">구 분
+작 성 자</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-3-cell-2" data-template-frame-color-group="band-3-cell-2" data-template-frame-source-text="신규 재발급
+Off-Line등록
+김종현" data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-3-cell-2" data-template-frame-color-group="band-3-cell-2" data-template-frame-source-text="신규 재발급
+Off-Line등록
+김종현" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">신규 재발급
+Off-Line등록
+김종현</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:95px; width:275px; height:47px;"><table class="v202-table-block v102-frame-band-table" style="width:275px; height:47px;"><colgroup><col style="width:91px"><col style="width:184px"></colgroup><tbody style="--v102-row-color:rgba(59, 130, 246, 0.10);"><tr style="height:47px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-4-cell-1" data-template-frame-color-group="band-4-cell-1" data-template-frame-source-text="문서번호
+프로젝트" data-template-frame-row-start="2" data-template-frame-row-end="3" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-4-cell-1" data-template-frame-color-group="band-4-cell-1" data-template-frame-source-text="문서번호
+프로젝트" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">문서번호
+프로젝트</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-4-cell-2" data-template-frame-color-group="band-4-cell-2" data-template-frame-source-text="E10013CA-93 발 급 일 2026-03-06
+대구사일동주상복합" data-template-frame-row-start="2" data-template-frame-row-end="3" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-4-cell-2" data-template-frame-color-group="band-4-cell-2" data-template-frame-source-text="E10013CA-93 발 급 일 2026-03-06
+대구사일동주상복합" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">E10013CA-93 발 급 일 2026-03-06
+대구사일동주상복합</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:142px; width:686px; height:22px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:22px;"><colgroup><col style="width:91px"><col style="width:119px"><col style="width:108px"><col style="width:139px"><col style="width:92px"><col style="width:137px"></colgroup><tbody style="--v102-row-color:rgba(16, 185, 129, 0.10);"><tr style="height:22px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-5-cell-1" data-template-frame-color-group="band-5-cell-1" data-template-frame-source-text="프로젝트
+계 약" data-template-frame-row-start="3" data-template-frame-row-end="4" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-5-cell-1" data-template-frame-color-group="band-5-cell-1" data-template-frame-source-text="프로젝트
+계 약" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">프로젝트
+계 약</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-5-cell-2" data-template-frame-color-group="band-5-cell-2" data-template-frame-source-text="대구사일동주상복합
+대구사일동주상복합건축설비공사" data-template-frame-row-start="3" data-template-frame-row-end="4" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-5-cell-2" data-template-frame-color-group="band-5-cell-2" data-template-frame-source-text="대구사일동주상복합
+대구사일동주상복합건축설비공사" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">대구사일동주상복합
+대구사일동주상복합건축설비공사</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-5-cell-3" data-template-frame-color-group="band-5-cell-3" data-template-frame-source-text="대구사일동주상복합
+대구사일동주상복합건축설비공사" data-template-frame-row-start="3" data-template-frame-row-end="4" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-5-cell-3" data-template-frame-color-group="band-5-cell-3" data-template-frame-source-text="대구사일동주상복합
+대구사일동주상복합건축설비공사" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">대구사일동주상복합
+대구사일동주상복합건축설비공사</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-5-cell-4" data-template-frame-color-group="band-5-cell-4" data-template-frame-source-text="발 급 자
+접 수 자" data-template-frame-row-start="3" data-template-frame-row-end="4" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-5-cell-4" data-template-frame-color-group="band-5-cell-4" data-template-frame-source-text="발 급 자
+접 수 자" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">발 급 자
+접 수 자</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-5-cell-5" data-template-frame-color-group="band-5-cell-5" data-template-frame-source-text="포스코이앤씨
+(주)백산이엔씨" data-template-frame-row-start="3" data-template-frame-row-end="4" data-template-frame-col-start="5" data-template-frame-col-end="6" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(239, 68, 68, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-5-cell-5" data-template-frame-color-group="band-5-cell-5" data-template-frame-source-text="포스코이앤씨
+(주)백산이엔씨" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">포스코이앤씨
+(주)백산이엔씨</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-5-cell-6" data-template-frame-color-group="band-5-cell-6" data-template-frame-row-start="3" data-template-frame-row-end="4" data-template-frame-col-start="6" data-template-frame-col-end="7" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:12.80px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(99, 102, 241, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-5-cell-6" data-template-frame-color-group="band-5-cell-6" data-template-frame-halign="left" data-template-frame-valign="top" style="color: transparent;"></textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:164px; width:686px; height:23px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:23px;"><colgroup><col style="width:91px"><col style="width:366px"><col style="width:92px"><col style="width:137px"></colgroup><tbody style="--v102-row-color:rgba(245, 158, 11, 0.10);"><tr style="height:23px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-6-cell-1" data-template-frame-color-group="band-6-cell-1" data-template-frame-source-text="발급자서명" data-template-frame-row-start="4" data-template-frame-row-end="5" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-6-cell-1" data-template-frame-color-group="band-6-cell-1" data-template-frame-source-text="발급자서명" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">발급자서명</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-6-cell-2" data-template-frame-color-group="band-6-cell-2" data-template-frame-source-text="김종현전자서명완료 접수자서명" data-template-frame-row-start="4" data-template-frame-row-end="5" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-6-cell-2" data-template-frame-color-group="band-6-cell-2" data-template-frame-source-text="김종현전자서명완료 접수자서명" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">김종현전자서명완료 접수자서명</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-6-cell-3" data-template-frame-color-group="band-6-cell-3" data-template-frame-source-text="발 급 자" data-template-frame-row-start="4" data-template-frame-row-end="5" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-6-cell-3" data-template-frame-color-group="band-6-cell-3" data-template-frame-source-text="발 급 자" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">발 급 자</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-6-cell-4" data-template-frame-color-group="band-6-cell-4" data-template-frame-source-text="포스코이앤씨" data-template-frame-row-start="4" data-template-frame-row-end="5" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-6-cell-4" data-template-frame-color-group="band-6-cell-4" data-template-frame-source-text="포스코이앤씨" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">포스코이앤씨</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:187px; width:686px; height:23px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:23px;"><colgroup><col style="width:91px"><col style="width:366px"><col style="width:92px"><col style="width:137px"></colgroup><tbody style="--v102-row-color:rgba(236, 72, 153, 0.10);"><tr style="height:23px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-7-cell-1" data-template-frame-color-group="band-7-cell-1" data-template-frame-source-text="제 목" data-template-frame-row-start="5" data-template-frame-row-end="6" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-7-cell-1" data-template-frame-color-group="band-7-cell-1" data-template-frame-source-text="제 목" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">제 목</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-7-cell-2" data-template-frame-color-group="band-7-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사" data-template-frame-row-start="5" data-template-frame-row-end="6" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-7-cell-2" data-template-frame-color-group="band-7-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">B1F피난안전구역,연결통로환기시설추가공사</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-7-cell-3" data-template-frame-color-group="band-7-cell-3" data-template-frame-source-text="접 수 자" data-template-frame-row-start="5" data-template-frame-row-end="6" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-7-cell-3" data-template-frame-color-group="band-7-cell-3" data-template-frame-source-text="접 수 자" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">접 수 자</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-7-cell-4" data-template-frame-color-group="band-7-cell-4" data-template-frame-source-text="(주)백산이엔씨" data-template-frame-row-start="5" data-template-frame-row-end="6" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-7-cell-4" data-template-frame-color-group="band-7-cell-4" data-template-frame-source-text="(주)백산이엔씨" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">(주)백산이엔씨</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:210px; width:686px; height:23px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:23px;"><colgroup><col style="width:91px"><col style="width:198px"><col style="width:146px"><col style="width:251px"></colgroup><tbody style="--v102-row-color:rgba(59, 130, 246, 0.10);"><tr style="height:23px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-8-cell-1" data-template-frame-color-group="band-8-cell-1" data-template-frame-source-text="1.공사내용*" data-template-frame-row-start="6" data-template-frame-row-end="7" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-8-cell-1" data-template-frame-color-group="band-8-cell-1" data-template-frame-source-text="1.공사내용*" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">1.공사내용*</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-8-cell-2" data-template-frame-color-group="band-8-cell-2" data-template-frame-source-text="1)B1F101,102동피난안전구역,연결통로환기시설시공" data-template-frame-row-start="6" data-template-frame-row-end="7" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-8-cell-2" data-template-frame-color-group="band-8-cell-2" data-template-frame-source-text="1)B1F101,102동피난안전구역,연결통로환기시설시공" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">1)B1F101,102동피난안전구역,연결통로환기시설시공</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-8-cell-3" data-template-frame-color-group="band-8-cell-3" data-template-frame-source-text="1)B1F101,102동피난안전구역,연결통로환기시설시공" data-template-frame-row-start="6" data-template-frame-row-end="7" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-8-cell-3" data-template-frame-color-group="band-8-cell-3" data-template-frame-source-text="1)B1F101,102동피난안전구역,연결통로환기시설시공" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">1)B1F101,102동피난안전구역,연결통로환기시설시공</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-8-cell-4" data-template-frame-color-group="band-8-cell-4" data-template-frame-row-start="6" data-template-frame-row-end="7" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-8-cell-4" data-template-frame-color-group="band-8-cell-4" data-template-frame-halign="left" data-template-frame-valign="top" style="color: transparent;"></textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:233px; width:686px; height:23px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:23px;"><colgroup><col style="width:91px"><col style="width:595px"></colgroup><tbody style="--v102-row-color:rgba(16, 185, 129, 0.10);"><tr style="height:23px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-9-cell-1" data-template-frame-color-group="band-9-cell-1" data-template-frame-source-text="1-1.대표수량,단가등*" data-template-frame-row-start="7" data-template-frame-row-end="8" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-9-cell-1" data-template-frame-color-group="band-9-cell-1" data-template-frame-source-text="1-1.대표수량,단가등*" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">1-1.대표수량,단가등*</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-9-cell-2" data-template-frame-color-group="band-9-cell-2" data-template-frame-source-text="*전열교환기: 1-2.하도급대금 8,190,000" data-template-frame-row-start="7" data-template-frame-row-end="8" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-9-cell-2" data-template-frame-color-group="band-9-cell-2" data-template-frame-source-text="*전열교환기: 1-2.하도급대금 8,190,000" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">*전열교환기: 1-2.하도급대금 8,190,000</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:256px; width:686px; height:37px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:37px;"><colgroup><col style="width:155px"><col style="width:531px"></colgroup><tbody style="--v102-row-color:rgba(245, 158, 11, 0.10);"><tr style="height:37px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-10-cell-1" data-template-frame-color-group="band-10-cell-1" data-template-frame-source-text="1.공사내용*" data-template-frame-row-start="8" data-template-frame-row-end="9" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-10-cell-1" data-template-frame-color-group="band-10-cell-1" data-template-frame-source-text="1.공사내용*" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">1.공사내용*</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-10-cell-2" data-template-frame-color-group="band-10-cell-2" data-template-frame-source-text="250CMH(1대)-240,000원 (단위: 원,직접비)*
+350CMH(1대)-320,000원" data-template-frame-row-start="8" data-template-frame-row-end="9" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-10-cell-2" data-template-frame-color-group="band-10-cell-2" data-template-frame-source-text="250CMH(1대)-240,000원 (단위: 원,직접비)*
+350CMH(1대)-320,000원" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">250CMH(1대)-240,000원 (단위: 원,직접비)*
+350CMH(1대)-320,000원</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:293px; width:686px; height:71px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:71px;"><colgroup><col style="width:155px"><col style="width:199px"><col style="width:128px"><col style="width:204px"></colgroup><tbody style="--v102-row-color:rgba(236, 72, 153, 0.10);"><tr style="height:71px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-11-cell-1" data-template-frame-color-group="band-11-cell-1" data-template-frame-source-text="2.공사착수일*
+3.검사의방법*
+4.대금지급방법*
+5.원재료지급시조건*" data-template-frame-row-start="9" data-template-frame-row-end="10" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-11-cell-1" data-template-frame-color-group="band-11-cell-1" data-template-frame-source-text="2.공사착수일*
+3.검사의방법*
+4.대금지급방법*
+5.원재료지급시조건*" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">2.공사착수일*
+3.검사의방법*
+4.대금지급방법*
+5.원재료지급시조건*</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-11-cell-2" data-template-frame-color-group="band-11-cell-2" data-template-frame-source-text="2026-03-12 2-1.공사완료일*
+작업완료후도면및육안검사 3-1.검사의시기*
+본계약조건과동일 4-1.대금지급시기*
+해당없음" data-template-frame-row-start="9" data-template-frame-row-end="10" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-11-cell-2" data-template-frame-color-group="band-11-cell-2" data-template-frame-source-text="2026-03-12 2-1.공사완료일*
+작업완료후도면및육안검사 3-1.검사의시기*
+본계약조건과동일 4-1.대금지급시기*
+해당없음" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">2026-03-12 2-1.공사완료일*
+작업완료후도면및육안검사 3-1.검사의시기*
+본계약조건과동일 4-1.대금지급시기*
+해당없음</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-11-cell-3" data-template-frame-color-group="band-11-cell-3" data-template-frame-source-text="2026-08-31
+협력사요청시
+매월공사진행율에따라지급" data-template-frame-row-start="9" data-template-frame-row-end="10" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-11-cell-3" data-template-frame-color-group="band-11-cell-3" data-template-frame-source-text="2026-08-31
+협력사요청시
+매월공사진행율에따라지급" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">2026-08-31
+협력사요청시
+매월공사진행율에따라지급</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-11-cell-4" data-template-frame-color-group="band-11-cell-4" data-template-frame-source-text="2026-08-31
+협력사요청시
+매월공사진행율에따라지급" data-template-frame-row-start="9" data-template-frame-row-end="10" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-11-cell-4" data-template-frame-color-group="band-11-cell-4" data-template-frame-source-text="2026-08-31
+협력사요청시
+매월공사진행율에따라지급" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">2026-08-31
+협력사요청시
+매월공사진행율에따라지급</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:364px; width:686px; height:23px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:23px;"><colgroup><col style="width:155px"><col style="width:199px"><col style="width:128px"><col style="width:204px"></colgroup><tbody style="--v102-row-color:rgba(59, 130, 246, 0.10);"><tr style="height:23px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-12-cell-1" data-template-frame-color-group="band-12-cell-1" data-template-frame-source-text="6.공급원가변동에따른" data-template-frame-row-start="10" data-template-frame-row-end="11" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-12-cell-1" data-template-frame-color-group="band-12-cell-1" data-template-frame-source-text="6.공급원가변동에따른" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">6.공급원가변동에따른</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-12-cell-2" data-template-frame-color-group="band-12-cell-2" data-template-frame-source-text="본계약조건과동일(하도급법준수)" data-template-frame-row-start="10" data-template-frame-row-end="11" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-12-cell-2" data-template-frame-color-group="band-12-cell-2" data-template-frame-source-text="본계약조건과동일(하도급법준수)" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">본계약조건과동일(하도급법준수)</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-12-cell-3" data-template-frame-color-group="band-12-cell-3" data-template-frame-source-text="본계약조건과동일(하도급법준수)" data-template-frame-row-start="10" data-template-frame-row-end="11" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-12-cell-3" data-template-frame-color-group="band-12-cell-3" data-template-frame-source-text="본계약조건과동일(하도급법준수)" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">본계약조건과동일(하도급법준수)</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-12-cell-4" data-template-frame-color-group="band-12-cell-4" data-template-frame-source-text="2026-08-31" data-template-frame-row-start="10" data-template-frame-row-end="11" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-12-cell-4" data-template-frame-color-group="band-12-cell-4" data-template-frame-source-text="2026-08-31" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">2026-08-31</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:387px; width:686px; height:24px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:24px;"><colgroup><col style="width:155px"><col style="width:199px"><col style="width:128px"><col style="width:204px"></colgroup><tbody style="--v102-row-color:rgba(16, 185, 129, 0.10);"><tr style="height:24px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-13-cell-1" data-template-frame-color-group="band-13-cell-1" data-template-frame-source-text="3.검사의방법*" data-template-frame-row-start="11" data-template-frame-row-end="12" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-13-cell-1" data-template-frame-color-group="band-13-cell-1" data-template-frame-source-text="3.검사의방법*" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">3.검사의방법*</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-13-cell-2" data-template-frame-color-group="band-13-cell-2" data-template-frame-source-text="작업완료후도면및육안검사" data-template-frame-row-start="11" data-template-frame-row-end="12" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-13-cell-2" data-template-frame-color-group="band-13-cell-2" data-template-frame-source-text="작업완료후도면및육안검사" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">작업완료후도면및육안검사</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-13-cell-3" data-template-frame-color-group="band-13-cell-3" data-template-frame-source-text="3-1.검사의시기*" data-template-frame-row-start="11" data-template-frame-row-end="12" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-13-cell-3" data-template-frame-color-group="band-13-cell-3" data-template-frame-source-text="3-1.검사의시기*" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">3-1.검사의시기*</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-13-cell-4" data-template-frame-color-group="band-13-cell-4" data-template-frame-source-text="협력사요청시" data-template-frame-row-start="11" data-template-frame-row-end="12" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-13-cell-4" data-template-frame-color-group="band-13-cell-4" data-template-frame-source-text="협력사요청시" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">협력사요청시</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:411px; width:686px; height:24px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:24px;"><colgroup><col style="width:155px"><col style="width:199px"><col style="width:128px"><col style="width:204px"></colgroup><tbody style="--v102-row-color:rgba(245, 158, 11, 0.10);"><tr style="height:24px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-14-cell-1" data-template-frame-color-group="band-14-cell-1" data-template-frame-source-text="7.기타" data-template-frame-row-start="12" data-template-frame-row-end="13" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-14-cell-1" data-template-frame-color-group="band-14-cell-1" data-template-frame-source-text="7.기타" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">7.기타</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-14-cell-2" data-template-frame-color-group="band-14-cell-2" data-template-frame-source-text="1.작업방법은당사품질관리기준에준하여시공(작업전안전교육완료)" data-template-frame-row-start="12" data-template-frame-row-end="13" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-14-cell-2" data-template-frame-color-group="band-14-cell-2" data-template-frame-source-text="1.작업방법은당사품질관리기준에준하여시공(작업전안전교육완료)" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">1.작업방법은당사품질관리기준에준하여시공(작업전안전교육완료)</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-14-cell-3" data-template-frame-color-group="band-14-cell-3" data-template-frame-source-text="1.작업방법은당사품질관리기준에준하여시공(작업전안전교육완료)" data-template-frame-row-start="12" data-template-frame-row-end="13" data-template-frame-col-start="3" data-template-frame-col-end="4" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(217, 70, 239, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-14-cell-3" data-template-frame-color-group="band-14-cell-3" data-template-frame-source-text="1.작업방법은당사품질관리기준에준하여시공(작업전안전교육완료)" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">1.작업방법은당사품질관리기준에준하여시공(작업전안전교육완료)</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-14-cell-4" data-template-frame-color-group="band-14-cell-4" data-template-frame-source-text="매월공사진행율에따라지급" data-template-frame-row-start="12" data-template-frame-row-end="13" data-template-frame-col-start="4" data-template-frame-col-end="5" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(34, 197, 94, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-14-cell-4" data-template-frame-color-group="band-14-cell-4" data-template-frame-source-text="매월공사진행율에따라지급" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">매월공사진행율에따라지급</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:435px; width:686px; height:24px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:24px;"><colgroup><col style="width:155px"><col style="width:531px"></colgroup><tbody style="--v102-row-color:rgba(236, 72, 153, 0.10);"><tr style="height:24px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-15-cell-1" data-template-frame-color-group="band-15-cell-1" data-template-frame-source-text="8.하도급대금연동에" data-template-frame-row-start="13" data-template-frame-row-end="14" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-15-cell-1" data-template-frame-color-group="band-15-cell-1" data-template-frame-source-text="8.하도급대금연동에" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">8.하도급대금연동에</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-15-cell-2" data-template-frame-color-group="band-15-cell-2" data-template-frame-source-text="본계약조건과동일" data-template-frame-row-start="13" data-template-frame-row-end="14" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-15-cell-2" data-template-frame-color-group="band-15-cell-2" data-template-frame-source-text="본계약조건과동일" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">본계약조건과동일</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:459px; width:686px; height:47px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:47px;"><colgroup><col style="width:155px"><col style="width:531px"></colgroup><tbody style="--v102-row-color:rgba(59, 130, 246, 0.10);"><tr style="height:47px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-16-cell-1" data-template-frame-color-group="band-16-cell-1" data-template-frame-source-text="9.첨부파일" data-template-frame-row-start="14" data-template-frame-row-end="15" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-16-cell-1" data-template-frame-color-group="band-16-cell-1" data-template-frame-source-text="9.첨부파일" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">9.첨부파일</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-16-cell-2" data-template-frame-color-group="band-16-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg" data-template-frame-row-start="14" data-template-frame-row-end="15" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-16-cell-2" data-template-frame-color-group="band-16-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:506px; width:686px; height:37px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:37px;"><colgroup><col style="width:155px"><col style="width:531px"></colgroup><tbody style="--v102-row-color:rgba(16, 185, 129, 0.10);"><tr style="height:37px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-17-cell-1" data-template-frame-color-group="band-17-cell-1" data-template-frame-source-text="○상기내용은진행,협의등상황에따라변동될수있습니다." data-template-frame-row-start="15" data-template-frame-row-end="16" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-17-cell-1" data-template-frame-color-group="band-17-cell-1" data-template-frame-source-text="○상기내용은진행,협의등상황에따라변동될수있습니다." data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">○상기내용은진행,협의등상황에따라변동될수있습니다.</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-17-cell-2" data-template-frame-color-group="band-17-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+○상기내용은진행,협의등상황에따라변동될수있습니다." data-template-frame-row-start="15" data-template-frame-row-end="16" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-17-cell-2" data-template-frame-color-group="band-17-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+○상기내용은진행,협의등상황에따라변동될수있습니다." data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+○상기내용은진행,협의등상황에따라변동될수있습니다.</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:543px; width:686px; height:41px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:41px;"><colgroup><col style="width:155px"><col style="width:531px"></colgroup><tbody style="--v102-row-color:rgba(245, 158, 11, 0.10);"><tr style="height:41px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-18-cell-1" data-template-frame-color-group="band-18-cell-1" data-template-frame-source-text="○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일).
+○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은" data-template-frame-row-start="16" data-template-frame-row-end="17" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-18-cell-1" data-template-frame-color-group="band-18-cell-1" data-template-frame-source-text="○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일).
+○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일).
+○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-18-cell-2" data-template-frame-color-group="band-18-cell-2" data-template-frame-source-text="○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일).
+○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은" data-template-frame-row-start="16" data-template-frame-row-end="17" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-18-cell-2" data-template-frame-color-group="band-18-cell-2" data-template-frame-source-text="○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일).
+○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일).
+○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:38px; top:584px; width:686px; height:71px;"><table class="v202-table-block v102-frame-band-table" style="width:686px; height:71px;"><colgroup><col style="width:155px"><col style="width:531px"></colgroup><tbody style="--v102-row-color:rgba(236, 72, 153, 0.10);"><tr style="height:71px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-19-cell-1" data-template-frame-color-group="band-19-cell-1" data-template-frame-source-text="9.첨부파일" data-template-frame-row-start="17" data-template-frame-row-end="18" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-19-cell-1" data-template-frame-color-group="band-19-cell-1" data-template-frame-source-text="9.첨부파일" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">9.첨부파일</textarea></td><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-19-cell-2" data-template-frame-color-group="band-19-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg
+B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg" data-template-frame-row-start="17" data-template-frame-row-end="18" data-template-frame-col-start="2" data-template-frame-col-end="3" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:17.02px; font-weight:400; --v102-row-color:rgba(236, 72, 153, 0.10); --v102-col-color:rgba(245, 158, 11, 0.18); border-left:1px solid rgba(15, 23, 42, 0.55);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-19-cell-2" data-template-frame-color-group="band-19-cell-2" data-template-frame-source-text="B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg
+B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg" data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg
+B1F피난안전구역,연결통로환기시설추가공사(26.3월).xlsx
+B1F피난안전구역,연결통호환기시설추가상세도(26.3월).dwg</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:40px; top:658px; width:326px; height:12px;"><table class="v202-table-block v102-frame-band-table" style="width:326px; height:12px;"><colgroup><col style="width:326px"></colgroup><tbody style="--v102-row-color:rgba(59, 130, 246, 0.10);"><tr style="height:12px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-20-footer" data-template-frame-color-group="band-20-footer" data-template-frame-source-text="○상기내용은진행,협의등상황에따라변동될수있습니다." data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:12.80px; font-weight:400; --v102-row-color:rgba(59, 130, 246, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-20-footer" data-template-frame-color-group="band-20-footer" data-template-frame-source-text="○상기내용은진행,협의등상황에따라변동될수있습니다." data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">○상기내용은진행,협의등상황에따라변동될수있습니다.</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:40px; top:678px; width:669px; height:13px;"><table class="v202-table-block v102-frame-band-table" style="width:669px; height:13px;"><colgroup><col style="width:669px"></colgroup><tbody style="--v102-row-color:rgba(16, 185, 129, 0.10);"><tr style="height:13px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-21-footer" data-template-frame-color-group="band-21-footer" data-template-frame-source-text="○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일)." data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:12.80px; font-weight:400; --v102-row-color:rgba(16, 185, 129, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-21-footer" data-template-frame-color-group="band-21-footer" data-template-frame-source-text="○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일)." data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">○협력사에서는반드시전자서명완료후에작업에착수해주시기바랍니다(예정공사착수일이후서명시서명일이공사착수일).</textarea></td></tr></tbody></table></div><div class="v102-frame-band" style="left:40px; top:700px; width:659px; height:26px;"><table class="v202-table-block v102-frame-band-table" style="width:659px; height:26px;"><colgroup><col style="width:659px"></colgroup><tbody style="--v102-row-color:rgba(245, 158, 11, 0.10);"><tr style="height:26px;"><td class="halign-left valign-top v202-frame-group" data-template-frame-group="band-22-footer" data-template-frame-color-group="band-22-footer" data-template-frame-source-text="○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은
+무효입니다." data-template-frame-row-start="1" data-template-frame-row-end="2" data-template-frame-col-start="1" data-template-frame-col-end="2" data-template-frame-halign="left" data-template-frame-valign="top" style="font-size:12.80px; font-weight:400; --v102-row-color:rgba(245, 158, 11, 0.10); --v102-col-color:rgba(14, 165, 233, 0.18);"><textarea class="v202-frame-group-input" spellcheck="false" readonly="" tabindex="-1" data-template-frame-input="true" data-template-frame-group="band-22-footer" data-template-frame-color-group="band-22-footer" data-template-frame-source-text="○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은
+무효입니다." data-template-frame-halign="left" data-template-frame-valign="top" style="color: rgb(15, 23, 42);">○향후수급사업자의귀책,기존계약범위에포함등의사유로추가/변경작업이아닌것으로객관적으로확인될경우본서면은
+무효입니다.</textarea></td></tr></tbody></table></div></div>

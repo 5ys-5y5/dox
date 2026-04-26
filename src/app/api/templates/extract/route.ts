@@ -9,10 +9,34 @@ import { TemplateExtractVersionService } from '../../../../services/templateExtr
 const normalizeExtractionStage = (value: unknown): TemplateExtractExtractionStage =>
   value === 'frames' ? 'frames' : 'full';
 
-const normalizeFrameGroupVersion = (value: unknown): TemplateExtractFrameGroupVersion =>
-  value === 'v1.01' || value === 'v1.02' || value === 'v1.03' || value === 'v1.04' || value === 'v1.05' || value === 'v1.06'
-    ? value
-    : 'v1.06';
+const normalizeFrameGroupVersion = (value: unknown): TemplateExtractFrameGroupVersion => {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (
+    normalized === 'v1.01' ||
+    normalized === 'v1.02' ||
+    normalized === 'v1.03' ||
+    normalized === 'v1.04' ||
+    normalized === 'v1.05' ||
+    normalized === 'v1.06' ||
+    normalized === 'v1.07' ||
+    normalized === 'v1.08' ||
+    normalized === 'v1.09' ||
+    normalized === 'v1.10'
+  ) {
+    return normalized as TemplateExtractFrameGroupVersion;
+  }
+
+  if (/^v1\.09-[0-9a-z._\-\u3131-\u318e\uac00-\ud7a3]+$/i.test(normalized)) {
+    return normalized as TemplateExtractFrameGroupVersion;
+  }
+
+  if (/^v1\.10-[0-9a-z._\-\u3131-\u318e\uac00-\ud7a3]+$/i.test(normalized)) {
+    return normalized as TemplateExtractFrameGroupVersion;
+  }
+
+  return 'v1.10-default';
+};
 
 export async function POST(request: Request) {
   try {

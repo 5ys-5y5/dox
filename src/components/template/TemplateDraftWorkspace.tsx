@@ -7,7 +7,7 @@ import { applyTemplateExtractEditableTextFit } from '../../lib/templateExtractEd
 
 type DraftPreviewEditRole = 'editor' | 'admin';
 type PreviewPaneMode = 'source' | 'draft';
-type FrameEditorRole = 'group' | 'key' | 'value';
+type FrameEditorRole = 'group' | 'key' | 'value' | 'key_value';
 type FrameNodeRect = { left: number; top: number; width: number; height: number };
 type FlattenedFramePreviewMarkup = {
   html: string;
@@ -22,9 +22,12 @@ type FlattenedFramePreviewMarkup = {
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
+const FRAME_EDITOR_SUPPORTED_VERSIONS = ['v1.06', 'v1.07', 'v1.08', 'v1.09', 'v1.10'] as const;
 const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-group',
   'data-template-frame-color-group',
+  'data-template-frame-outline-style',
+  'data-template-frame-extracted-text',
   'data-template-frame-value-key',
   'data-template-frame-source-text',
   'data-template-frame-role',
@@ -38,6 +41,11 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-halign',
   'data-template-frame-valign',
 ] as const;
+
+const hasSupportedFrameEditorMarkup = (html: string | null | undefined) =>
+  FRAME_EDITOR_SUPPORTED_VERSIONS.some((version) =>
+    new RegExp(`data-template-frame-group-version="${version}(?:-[^"]+)?"`, 'i').test(html || '')
+  );
 
 const stripDraftPreviewUiState = (html: string) => {
   if (!html.trim()) {
@@ -368,7 +376,7 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
       previewPaneMode === 'draft' && !hasGeneratedDraftHtml ? 'source' : previewPaneMode;
     const frameEditorActive =
       draftHtml.includes('data-template-extraction-stage="frames"') &&
-      draftHtml.includes('data-template-frame-group-version="v1.06"');
+      hasSupportedFrameEditorMarkup(draftHtml);
 
     const syncDraftPreviewSurfaceScale = React.useCallback(() => {
       const root = draftPreviewRef.current;
@@ -1247,6 +1255,7 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
                       <option value="group">group</option>
                       <option value="key">key</option>
                       <option value="value">value</option>
+                      <option value="key_value">key_value</option>
                     </select>
                   </div>
                   <div className="space-y-2 md:col-span-2">
@@ -1381,7 +1390,7 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
               </>
             ) : (
               <p className="text-sm text-slate-500">
-                현재 초안은 v1.06 프레임 그룹 미리보기가 아니어서 프레임 편집을 바로 표시하지 않습니다.
+                현재 초안은 지원되는 프레임 그룹 미리보기가 아니어서 프레임 편집을 바로 표시하지 않습니다.
               </p>
             )}
           </CardContent>

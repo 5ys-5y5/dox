@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { Eye, EyeOff, Trash2 } from 'lucide-react';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
@@ -19,9 +18,6 @@ import type {
   TemplateExtractEngineVersion,
   TemplateExtractExtractionStage,
   TemplateExtractFrameGroupVersion,
-  TemplateExtractReplicaRenderModel,
-  TemplateExtractReplicaRenderPage,
-  TemplateExtractReplicaRenderTextItem,
   TemplateExtractReviewedFieldInput,
   TemplateExtractSourceKind,
   TemplateExtractVisualSimilarityReport,
@@ -32,14 +28,6 @@ import type {
   TemplateRecordDto,
 } from '../../../lib/templateDtos';
 import { TemplateExtractVisualSimilarityClient } from '../../../lib/templateExtractVisualSimilarityClient';
-import type {
-  TemplateFrameMetadataDto,
-  TemplateFrameNodeDto,
-  TemplateFrameRectDto,
-} from '../../../lib/templateFrameEditDtos';
-import { TemplateFrameEditGeometryService } from '../../../services/templateFrameEditGeometryService';
-import { TemplateFrameEditHtmlService } from '../../../services/templateFrameEditHtmlService';
-import { TemplateExtractValueBindingService } from '../../../services/templateExtractValueBindingService';
 
 const defaultSourceContent = `<section>
   <h1>안전관리계획서</h1>
@@ -103,8 +91,7 @@ type VisualSimilarityProgressState = {
 
 type DraftPreviewEditRole = 'editor' | 'admin';
 type PreviewPaneMode = 'source' | 'draft';
-type FrameEditorRole = 'group' | 'key' | 'value' | 'key_value';
-type FrameOutlineStyle = 'solid' | 'dashed';
+type FrameEditorRole = 'group' | 'key' | 'value';
 type FrameNodeRect = { left: number; top: number; width: number; height: number };
 type FrameResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 type FrameNodeSnapshot = {
@@ -119,7 +106,6 @@ type FrameDragState = {
   pointerId: number;
   startX: number;
   startY: number;
-  scale: number;
   anchorNode: HTMLElement;
   nodes: Array<{
     node: HTMLElement;
@@ -130,19 +116,10 @@ type FrameResizeState = {
   pointerId: number;
   startX: number;
   startY: number;
-  scale: number;
   direction: FrameResizeDirection;
   node: HTMLElement;
   rect: FrameNodeRect;
 };
-type FrameCreateState = {
-  pointerId: number;
-  pageInner: HTMLElement;
-  start: { x: number; y: number };
-  lastRawRect: FrameNodeRect;
-  ghostNode: HTMLElement;
-};
-type FrameExtractedTextState = Record<string, string>;
 type TemplateValueResolveEvent = {
   clientX?: number;
   clientY?: number;
@@ -158,38 +135,15 @@ type FlattenedFramePreviewMarkup = {
   pageWidth: string;
   pageMinHeight: string;
 };
-type StoredFrameProfile = {
-  version: 1;
-  frameGroupVersion: string;
-  profileName: string;
-  sourceSignature: string;
-  pageWidth: string;
-  pageMinHeight: string;
-  savedAt: string;
-  frames: FrameNodeSnapshot[];
-};
-type FrameTextExtractionVersion = 'v1.01' | 'v1.02';
-type CrossValidationViewMode = 'side_by_side' | 'overlay';
-type CrossValidationPreviewState = {
-  pdfPageDataUrls: string[];
-  replicaPageDataUrls: string[];
-  createdAt: string;
-};
 
 const V106_FRAME_NODE_SELECTOR = '[data-v106-frame-node="true"]';
 const V106_FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
-const V106_FRAME_DELETE_BUTTON_SELECTOR = '[data-v106-delete-button="true"]';
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = `${V106_FRAME_NODE_SELECTOR}, ${RAW_FRAME_NODE_SELECTOR}`;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
-const FRAME_DELETE_BUTTON_CLASS = 'v106-frame-delete-button';
-const FRAME_CREATE_GHOST_CLASS = 'v106-frame-create-ghost';
-const FRAME_VISIBLE_TEXT_CLASS = 'v106-frame-visible-text';
 const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-group',
   'data-template-frame-color-group',
-  'data-template-frame-outline-style',
-  'data-template-frame-extracted-text',
   'data-template-frame-value-key',
   'data-template-frame-source-text',
   'data-template-frame-role',
@@ -203,102 +157,6 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-halign',
   'data-template-frame-valign',
 ] as const;
-const FRAME_EDITOR_SUPPORTED_VERSIONS = ['v1.06', 'v1.07', 'v1.08', 'v1.09', 'v1.10'] as const;
-const FRAME_PROFILE_STORAGE_KEY = 'template-extract-frame-profiles-v109';
-const FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
-  value: FrameTextExtractionVersion;
-  label: string;
-}> = [
-  { value: 'v1.02', label: 'v1.02' },
-  { value: 'v1.01', label: 'v1.01' },
-];
-const RENDER_MODEL_SCRIPT_PATTERN =
-  /<script\b[^>]*data-template-render-model="positioned-v1"[^>]*>([\s\S]*?)<\/script>/i;
-
-const frameGroupVersionMatches = (frameGroupVersion: string, version: string) =>
-  frameGroupVersion === version || frameGroupVersion.startsWith(`${version}-`);
-
-const isSupportedFrameEditorVersion = (frameGroupVersion: string | null | undefined) =>
-  FRAME_EDITOR_SUPPORTED_VERSIONS.some((version) => frameGroupVersionMatches(String(frameGroupVersion || ''), version));
-
-const isV109FrameGroupVersion = (frameGroupVersion: string | null | undefined) =>
-  frameGroupVersionMatches(String(frameGroupVersion || ''), 'v1.09') ||
-  frameGroupVersionMatches(String(frameGroupVersion || ''), 'v1.10');
-
-const normalizeFrameFieldPath = (value: string) =>
-  value
-    .split('>')
-    .map((segment) => segment.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join(' > ');
-
-const sanitizeFrameProfileName = (value: string) => {
-  const normalized = String(value || '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^0-9A-Za-z._\-\u3131-\u318e\uac00-\ud7a3]+/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^[._-]+|[._-]+$/g, '');
-
-  return normalized || 'default';
-};
-
-const buildRequestedFrameGroupVersion = (
-  baseVersion: string,
-  profileName: string
-): TemplateExtractFrameGroupVersion =>
-  baseVersion === 'v1.09' || baseVersion === 'v1.10'
-    ? (`${baseVersion}-${sanitizeFrameProfileName(profileName)}` as TemplateExtractFrameGroupVersion)
-    : (baseVersion as TemplateExtractFrameGroupVersion);
-
-const hashFrameValueKey = (value: string) => {
-  let hash = 2166136261;
-
-  for (const character of value) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return Math.abs(hash >>> 0).toString(36);
-};
-
-const isPdfSourceFile = (file: File | null | undefined) =>
-  Boolean(file && (/\.pdf$/i.test(file.name) || file.type === 'application/pdf'));
-
-const hasFrameExtractedTextMarkup = (html: string | null | undefined) =>
-  /data-template-frame-extracted-text="/i.test(String(html || ''));
-
-const readStoredFrameProfiles = (): Record<string, StoredFrameProfile> => {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const stored = window.localStorage.getItem(FRAME_PROFILE_STORAGE_KEY);
-    const parsed = stored ? (JSON.parse(stored) as Record<string, StoredFrameProfile>) : {};
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const writeStoredFrameProfiles = (profiles: Record<string, StoredFrameProfile>) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(FRAME_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
-};
-
-const hasSupportedFrameEditorMarkup = (html: string | null | undefined) =>
-  FRAME_EDITOR_SUPPORTED_VERSIONS.some((version) =>
-    new RegExp(`data-template-frame-group-version="${version}(?:-[^"]+)?"`, 'i').test(html || '')
-  );
-
-const querySupportedFrameEditorSection = (root: ParentNode) =>
-  Array.from(root.querySelectorAll<HTMLElement>('section[data-template-extraction-stage="frames"]')).find(
-    (section) => isSupportedFrameEditorVersion(section.getAttribute('data-template-frame-group-version'))
-  ) || null;
 
 const toReviewedFields = (detail: TemplateExtractDetailResult): TemplateExtractReviewedFieldInput[] =>
   detail.candidates.map((candidate) => ({
@@ -408,7 +266,6 @@ const stripDraftPreviewUiState = (html: string) => {
   container.querySelectorAll<HTMLElement>(V106_FRAME_RESIZE_HANDLE_SELECTOR).forEach((element) => {
     element.remove();
   });
-  TemplateFrameEditHtmlService.stripEditorUiState(container);
 
   return container.innerHTML;
 };
@@ -560,16 +417,6 @@ const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => ({
   height: Math.max(1, parseFramePx(node.style.height)),
 });
 
-const normalizeFrameOutlineStyle = (value: string | null | undefined): FrameOutlineStyle =>
-  String(value || '').trim().toLowerCase() === 'dashed' ? 'dashed' : 'solid';
-
-const applyFrameNodeOutlineStyle = (node: HTMLElement, outlineStyle: FrameOutlineStyle) => {
-  node.style.border =
-    outlineStyle === 'dashed'
-      ? '1px dashed rgba(15, 23, 42, 0.34)'
-      : '1px solid rgba(15, 23, 42, 0.55)';
-};
-
 const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
   node.style.left = `${Math.round(rect.left)}px`;
   node.style.top = `${Math.round(rect.top)}px`;
@@ -588,13 +435,6 @@ const clampFrameNodeRect = (
   const top = Math.max(0, Math.min(bounds.height - height, rect.top));
   return { left, top, width, height };
 };
-
-const toFrameNodeRect = (rect: TemplateFrameRectDto): FrameNodeRect => ({
-  left: rect.left,
-  top: rect.top,
-  width: rect.width,
-  height: rect.height,
-});
 
 const frameRectsOverlapVertically = (left: FrameNodeRect, right: FrameNodeRect) =>
   left.top < right.top + right.height - 2 && right.top < left.top + left.height - 2;
@@ -620,98 +460,13 @@ const readSelectableFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
   const pageInner = node.closest<HTMLElement>('.page-inner');
   const pageRect = pageInner?.getBoundingClientRect();
   const rect = node.getBoundingClientRect();
-  const scale = readFramePreviewScale(pageInner);
 
   return {
-    left: (rect.left - (pageRect?.left || 0)) / scale,
-    top: (rect.top - (pageRect?.top || 0)) / scale,
-    width: rect.width / scale,
-    height: rect.height / scale,
+    left: rect.left - (pageRect?.left || 0),
+    top: rect.top - (pageRect?.top || 0),
+    width: rect.width,
+    height: rect.height,
   };
-};
-
-const readFramePreviewScale = (pageInner: HTMLElement | null) => {
-  if (!pageInner) {
-    return 1;
-  }
-
-  const rect = pageInner.getBoundingClientRect();
-  return pageInner.clientWidth > 0 && rect.width > 0 ? rect.width / pageInner.clientWidth : 1;
-};
-
-const clientPointToPagePoint = (
-  pageInner: HTMLElement,
-  clientX: number,
-  clientY: number
-) => {
-  const rect = pageInner.getBoundingClientRect();
-  const scale = readFramePreviewScale(pageInner);
-
-  return {
-    x: (clientX - rect.left) / scale,
-    y: (clientY - rect.top) / scale,
-  };
-};
-
-const readFrameNodeMetadata = (node: HTMLElement): TemplateFrameMetadataDto => ({
-  role: ((node.getAttribute('data-template-frame-role') as FrameEditorRole | null) || 'group'),
-  outlineStyle: normalizeFrameOutlineStyle(node.getAttribute('data-template-frame-outline-style') || null),
-  valueKey: node.getAttribute('data-template-frame-value-key') || null,
-  parentGroupId: node.getAttribute('data-template-frame-parent-group') || null,
-  chainKey: node.getAttribute('data-template-frame-chain-key') || null,
-  chainDepth: Number.isFinite(Number.parseInt(node.getAttribute('data-template-frame-chain-depth') || '', 10))
-    ? Number.parseInt(node.getAttribute('data-template-frame-chain-depth') || '', 10)
-    : null,
-  sourceText: node.getAttribute('data-template-frame-source-text') || null,
-});
-
-const readFrameNodeSourceText = (node: HTMLElement, textarea?: HTMLTextAreaElement | null) =>
-  node.getAttribute('data-template-frame-source-text') ||
-  textarea?.getAttribute('data-template-frame-source-text') ||
-  '';
-
-const readFrameNodeExtractedText = (node: HTMLElement, textarea?: HTMLTextAreaElement | null) =>
-  node.getAttribute('data-template-frame-extracted-text') ||
-  textarea?.getAttribute('data-template-frame-extracted-text') ||
-  '';
-
-const readFrameNodeDisplayText = (node: HTMLElement, textarea?: HTMLTextAreaElement | null) => {
-  const extractedText = readFrameNodeExtractedText(node, textarea);
-
-  if (extractedText) {
-    return extractedText;
-  }
-
-  return readFrameNodeSourceText(node, textarea);
-};
-
-const readFrameNodeDto = (node: HTMLElement): TemplateFrameNodeDto => ({
-  frameGroupId: node.getAttribute('data-template-frame-group') || '',
-  rect: {
-    pageNumber: Number.parseInt(node.getAttribute('data-template-frame-page') || '1', 10) || 1,
-    ...readFrameNodeRect(node),
-  },
-  metadata: readFrameNodeMetadata(node),
-});
-
-const writeFrameNodeId = (node: HTMLElement, frameGroupId: string) => {
-  node.setAttribute('data-template-frame-group', frameGroupId);
-  node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]')?.setAttribute(
-    'data-template-frame-group',
-    frameGroupId
-  );
-};
-
-const resolvePageInnerFromPoint = (root: HTMLElement, clientX: number, clientY: number) => {
-  for (const pointElement of document.elementsFromPoint(clientX, clientY)) {
-    const pageInner = pointElement.closest<HTMLElement>('.page-inner');
-
-    if (pageInner && root.contains(pageInner)) {
-      return pageInner;
-    }
-  }
-
-  return null;
 };
 
 const resolveFrameNodeFromEvent = (
@@ -787,19 +542,9 @@ const applyFrameSelectionHighlight = (root: HTMLElement, selectedIds: string[]) 
 
         const badge = document.createElement('div');
         badge.className = FRAME_SELECTION_BADGE_CLASS;
-        badge.setAttribute('data-frame-editor-ui', 'true');
         badge.setAttribute('aria-hidden', 'true');
         badge.textContent = selectedIds.length > 1 ? `선택 ${selectedIndex + 1}` : '선택됨';
         node.appendChild(badge);
-
-        const deleteButton = document.createElement('button');
-        deleteButton.type = 'button';
-        deleteButton.className = FRAME_DELETE_BUTTON_CLASS;
-        deleteButton.setAttribute('data-v106-delete-button', 'true');
-        deleteButton.setAttribute('data-frame-editor-ui', 'true');
-        deleteButton.setAttribute('aria-label', '선택 프레임 삭제');
-        deleteButton.textContent = '삭제';
-        node.appendChild(deleteButton);
       }
     });
 };
@@ -869,7 +614,7 @@ const buildV106FrameNode = (snapshot: FrameNodeSnapshot) => {
   box.style.width = `${Math.max(1, Math.round(snapshot.rect.width))}px`;
   box.style.height = `${Math.max(1, Math.round(snapshot.rect.height))}px`;
   box.style.boxSizing = 'border-box';
-  applyFrameNodeOutlineStyle(box, normalizeFrameOutlineStyle(snapshot.attrs['data-template-frame-outline-style']));
+  box.style.border = '1px solid rgba(15, 23, 42, 0.55)';
   box.style.background = snapshot.colColor || 'rgba(14, 165, 233, 0.14)';
   box.style.overflow = 'hidden';
   box.style.display = 'block';
@@ -918,59 +663,6 @@ const buildV106FrameNode = (snapshot: FrameNodeSnapshot) => {
 
   box.appendChild(textarea);
 
-  const visibleText = document.createElement('div');
-  visibleText.className = FRAME_VISIBLE_TEXT_CLASS;
-  visibleText.setAttribute('data-template-frame-visible-text', 'true');
-  visibleText.style.position = 'absolute';
-  visibleText.style.inset = '0';
-  visibleText.style.display = 'flex';
-  visibleText.style.flexDirection = 'column';
-  visibleText.style.justifyContent =
-    snapshot.attrs['data-template-frame-valign'] === 'bottom'
-      ? 'flex-end'
-      : snapshot.attrs['data-template-frame-valign'] === 'middle' ||
-          snapshot.attrs['data-template-frame-valign'] === 'center'
-        ? 'center'
-        : 'flex-start';
-  visibleText.style.padding = '0';
-  visibleText.style.margin = '0';
-  visibleText.style.border = '0';
-  visibleText.style.background = 'transparent';
-  visibleText.style.boxSizing = 'border-box';
-  visibleText.style.font = 'inherit';
-  visibleText.style.color = 'transparent';
-  visibleText.style.lineHeight = '1.2';
-  visibleText.style.whiteSpace = 'pre-wrap';
-  visibleText.style.wordBreak = 'break-word';
-  visibleText.style.overflow = 'hidden';
-  visibleText.style.pointerEvents = 'none';
-  visibleText.style.userSelect = 'none';
-  visibleText.style.textAlign = snapshot.attrs['data-template-frame-halign'] || 'left';
-  visibleText.textContent = '';
-  box.appendChild(visibleText);
-
-  const snapshotSourceText = normalizeExtractedFrameText(snapshot.attrs['data-template-frame-source-text'] || '');
-  const snapshotFallbackValue = normalizeExtractedFrameText(snapshot.value || '');
-  const fallbackDisplayValue =
-    snapshotFallbackValue && snapshotFallbackValue !== snapshotSourceText ? snapshotFallbackValue : '';
-  const initialText = formatFrameSourceTextForDisplay(
-    snapshot.attrs['data-template-frame-extracted-text'] || fallbackDisplayValue,
-    {
-      frameGroup: snapshot.attrs['data-template-frame-group'],
-      valueKey: snapshot.attrs['data-template-frame-value-key'],
-      colorGroup: snapshot.attrs['data-template-frame-color-group'],
-    }
-  );
-
-  if (initialText) {
-    textarea.value = initialText;
-    textarea.textContent = initialText;
-    textarea.style.color = '#0f172a';
-    textarea.style.setProperty('-webkit-text-fill-color', '#0f172a');
-    visibleText.textContent = initialText;
-    visibleText.style.color = '#0f172a';
-  }
-
   resizeHandles.forEach(({ direction, cursor, style }) => {
     const handle = document.createElement('div');
     handle.setAttribute('data-v106-resize-handle', 'true');
@@ -1000,27 +692,6 @@ const flattenFramePreviewMarkup = (html: string): FlattenedFramePreviewMarkup | 
 
   const container = document.createElement('div');
   container.innerHTML = html;
-
-  const preFlattenedPageInner =
-    container.querySelector<HTMLElement>(':scope > .page-inner[data-template-extraction-stage="frames"]') ||
-    container.querySelector<HTMLElement>(':scope > .page-inner');
-
-  if (preFlattenedPageInner) {
-    const styleText = Array.from(container.children)
-      .filter((node) => node.tagName === 'STYLE')
-      .map((node) => node.textContent || '')
-      .join('');
-
-    return {
-      html: preFlattenedPageInner.outerHTML,
-      styleText,
-      cloneId: preFlattenedPageInner.getAttribute('data-template-clone-id') || '',
-      extractionStage: preFlattenedPageInner.getAttribute('data-template-extraction-stage') || 'frames',
-      frameGroupVersion: preFlattenedPageInner.getAttribute('data-template-frame-group-version') || '',
-      pageWidth: preFlattenedPageInner.style.width || '',
-      pageMinHeight: preFlattenedPageInner.style.minHeight || '',
-    };
-  }
 
   const frameSection =
     container.querySelector<HTMLElement>(':scope > section[data-template-extraction-stage="frames"]') ||
@@ -1105,866 +776,24 @@ const flattenFramePreviewMarkup = (html: string): FlattenedFramePreviewMarkup | 
   };
 };
 
-const getPreviewPageInners = (root: HTMLElement) => {
-  const directPageInners = Array.from(root.querySelectorAll<HTMLElement>(':scope > .page-inner'));
-
-  if (directPageInners.length > 0) {
-    return directPageInners;
-  }
-
-  return Array.from(root.querySelectorAll<HTMLElement>('.page-inner'));
-};
-
-const readFrameNodeSnapshot = (node: HTMLElement): FrameNodeSnapshot => {
-  const textarea = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
-  const attrs = Object.fromEntries(
-    FRAME_GROUP_ATTR_NAMES.map((name) => [name, node.getAttribute(name) || textarea?.getAttribute(name) || ''])
-  );
-  const rowColor = node.style.getPropertyValue('--v102-row-color').trim() || 'rgba(59, 130, 246, 0.08)';
-  const colColor = node.style.getPropertyValue('--v102-col-color').trim() || 'rgba(14, 165, 233, 0.14)';
-
-  return {
-    pageNumber:
-      node.getAttribute('data-template-frame-page') ||
-      node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
-      '1',
-    attrs,
-    rowColor,
-    colColor,
-    rect: node.matches(V106_FRAME_NODE_SELECTOR) ? readFrameNodeRect(node) : readSelectableFrameNodeRect(node),
-    value: readFrameNodeDisplayText(node, textarea),
-  };
-};
-
-const stripFrameSnapshotText = (snapshot: FrameNodeSnapshot): FrameNodeSnapshot => ({
-  ...snapshot,
-  attrs: {
-    ...snapshot.attrs,
-    'data-template-frame-source-text': '',
-    'data-template-frame-extracted-text': '',
-  },
-  value: '',
-});
-
-const buildFrameProfileSnapshotKey = (snapshot: Pick<FrameNodeSnapshot, 'pageNumber' | 'attrs'>) =>
-  [
-    snapshot.pageNumber,
-    snapshot.attrs['data-template-frame-group'] || '',
-    snapshot.attrs['data-template-frame-row-start'] || '',
-    snapshot.attrs['data-template-frame-row-end'] || '',
-    snapshot.attrs['data-template-frame-col-start'] || '',
-    snapshot.attrs['data-template-frame-col-end'] || '',
-  ].join('::');
-
-const buildFrameSourceSignatureFromHtml = (html: string) => {
-  if (!html.trim() || typeof document === 'undefined') {
-    return '';
-  }
-
-  const flattened = flattenFramePreviewMarkup(html);
-  const versionTag = flattened?.frameGroupVersion || '';
-  const sourceHtml = flattened?.html || html;
-  const pageWidth = flattened?.pageWidth || '';
-  const pageMinHeight = flattened?.pageMinHeight || '';
-  const container = document.createElement('div');
-  container.innerHTML = sourceHtml;
-  const pageInners = Array.from(container.querySelectorAll<HTMLElement>('.page-inner'));
-  const signatureParts = pageInners.flatMap((pageInner, pageIndex) =>
-    Array.from(pageInner.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR))
-      .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-      .map((node) => {
-        return [
-          pageInner.getAttribute('data-page') || String(pageIndex + 1),
-          node.getAttribute('data-template-frame-group') || '',
-          node.getAttribute('data-template-frame-row-start') || '',
-          node.getAttribute('data-template-frame-row-end') || '',
-          node.getAttribute('data-template-frame-col-start') || '',
-          node.getAttribute('data-template-frame-col-end') || '',
-        ].join(':');
-      })
-  );
-
-  return [versionTag, pageWidth, pageMinHeight, signatureParts.length, signatureParts.join('|')].join('||');
-};
-
-const parseReplicaRenderModelFromHtml = (html: string) => {
-  const matched = String(html || '').match(RENDER_MODEL_SCRIPT_PATTERN);
-
-  if (!matched?.[1]) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(matched[1]) as TemplateExtractReplicaRenderModel;
-  } catch {
-    return null;
-  }
-};
-
-const overlapLength = (startA: number, endA: number, startB: number, endB: number) =>
-  Math.max(0, Math.min(endA, endB) - Math.max(startA, startB));
-
-const normalizeExtractedFrameText = (value: string) =>
-  value
-    .replace(/[ \t]+/g, ' ')
-    .replace(/ *\n */g, '\n')
-    .trim();
-
-const compactFrameTextForComparison = (value: string) =>
-  normalizeExtractedFrameText(value)
-    .toLowerCase()
-    .replace(/[^0-9A-Za-z\u3131-\u318e\uac00-\ud7a3]+/g, '');
-
-const countFrameTextLines = (value: string) =>
-  normalizeExtractedFrameText(value)
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean).length;
-
-const looksLikeShortFrameLabel = (value: string) => {
-  const normalized = normalizeExtractedFrameText(value);
-
-  if (!normalized || normalized.length > 28 || normalized.includes('\n')) {
-    return false;
-  }
-
-  const digitCount = (normalized.match(/\d/g) || []).length;
-  return digitCount <= 8;
-};
-
-const STATUS_HISTORY_LINE_PATTERN = /^(CAE|CE|CAM|PM)\s+.+?\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/;
-
-const formatFrameSourceTextForDisplay = (
-  value: string,
-  metadata?: {
-    frameGroup?: string | null;
-    valueKey?: string | null;
-    colorGroup?: string | null;
-  }
-) => {
-  const normalized = normalizeExtractedFrameText(value);
-
-  if (!normalized) {
-    return '';
-  }
-
-  const frameGroup = String(metadata?.frameGroup || '').trim();
-  const valueKey = String(metadata?.valueKey || '').trim();
-  const colorGroup = String(metadata?.colorGroup || '').trim();
-  const segments = normalized.split(/\s+\|\s+/).map((segment) => segment.trim()).filter(Boolean);
-  const isStatusHistoryFrame =
-    frameGroup.startsWith('status-history-') || valueKey === '상태 이력' || colorGroup === '상태 이력';
-
-  if (segments.length > 1 && (isStatusHistoryFrame || segments.every((segment) => STATUS_HISTORY_LINE_PATTERN.test(segment)))) {
-    return segments.join('\n');
-  }
-
-  return normalized;
-};
-
-const stringifyRenderTextItem = (item: TemplateExtractReplicaRenderTextItem) => {
-  if (item.kind === 'plain' || item.kind === 'plain_text') {
-    return item.text;
-  }
-
-  if (item.kind === 'status_line') {
-    return [item.code, item.actor, item.timestamp].filter(Boolean).join(' ');
-  }
-
-  if (!('options' in item)) {
-    return '';
-  }
-
-  return item.options
-    .filter((option) => option.checked)
-    .map((option) => option.label)
-    .join(' ');
-};
-
-type FrameRenderCandidateItem = {
-  text: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  lineHeight: number;
-  centerX: number;
-  centerY: number;
-  horizontalOverlap: number;
-  verticalOverlap: number;
-  overlapArea: number;
-  overlapRatio: number;
-  insideStrict: boolean;
-  insideLoose: boolean;
-  distanceX: number;
-  distanceY: number;
-};
-
-type FrameRenderCandidateLine = {
-  top: number;
-  height: number;
-  texts: string[];
-};
-
-const mapFrameRenderCandidateItems = (
-  page: TemplateExtractReplicaRenderPage,
-  frameRect: FrameNodeRect
-): FrameRenderCandidateItem[] =>
-  page.textItems
-    .map((item) => {
-      const text = normalizeExtractedFrameText(stringifyRenderTextItem(item));
-
-      if (!text) {
-        return null;
-      }
-
-      const left = item.left;
-      const top = item.top;
-      const width = item.width;
-      const height = item.height;
-      const centerX = left + width * 0.5;
-      const centerY = top + height * 0.5;
-      const horizontalOverlap = overlapLength(
-        frameRect.left,
-        frameRect.left + frameRect.width,
-        left,
-        left + width
-      );
-      const verticalOverlap = overlapLength(
-        frameRect.top,
-        frameRect.top + frameRect.height,
-        top,
-        top + height
-      );
-      const overlapArea = horizontalOverlap * verticalOverlap;
-      const itemArea = Math.max(1, width * height);
-
-      return {
-        text,
-        left,
-        top,
-        width,
-        height,
-        lineHeight: item.lineHeight,
-        centerX,
-        centerY,
-        horizontalOverlap,
-        verticalOverlap,
-        overlapArea,
-        overlapRatio: overlapArea / itemArea,
-        insideStrict:
-          centerX >= frameRect.left - 2 &&
-          centerX <= frameRect.left + frameRect.width + 2 &&
-          centerY >= frameRect.top - 2 &&
-          centerY <= frameRect.top + frameRect.height + 2,
-        insideLoose:
-          centerX >= frameRect.left - 6 &&
-          centerX <= frameRect.left + frameRect.width + 6 &&
-          centerY >= frameRect.top - 6 &&
-          centerY <= frameRect.top + frameRect.height + 6,
-        distanceX:
-          centerX < frameRect.left
-            ? frameRect.left - centerX
-            : centerX > frameRect.left + frameRect.width
-              ? centerX - (frameRect.left + frameRect.width)
-              : 0,
-        distanceY:
-          centerY < frameRect.top
-            ? frameRect.top - centerY
-            : centerY > frameRect.top + frameRect.height
-              ? centerY - (frameRect.top + frameRect.height)
-              : 0,
-      } satisfies FrameRenderCandidateItem;
-    })
-    .filter((item): item is FrameRenderCandidateItem => item !== null);
-
-const groupFrameRenderCandidateLines = (candidateItems: FrameRenderCandidateItem[]): FrameRenderCandidateLine[] => {
-  if (!candidateItems.length) {
-    return [];
-  }
-
-  const lines: FrameRenderCandidateLine[] = [];
-
-  candidateItems.forEach((item) => {
-    const lastLine = lines[lines.length - 1];
-
-    if (!lastLine) {
-      lines.push({ top: item.centerY, height: item.lineHeight || item.height, texts: [item.text] });
-      return;
-    }
-
-    const lineThreshold = Math.max(6, Math.min(lastLine.height, item.lineHeight || item.height) * 0.55);
-
-    if (Math.abs(lastLine.top - item.centerY) <= lineThreshold) {
-      lastLine.texts.push(item.text);
-      lastLine.top = (lastLine.top + item.centerY) * 0.5;
-      lastLine.height = Math.max(lastLine.height, item.lineHeight || item.height);
-      return;
-    }
-
-    lines.push({ top: item.centerY, height: item.lineHeight || item.height, texts: [item.text] });
-  });
-
-  return lines;
-};
-
-const stringifyFrameRenderCandidateLines = (lines: FrameRenderCandidateLine[]) =>
-  normalizeExtractedFrameText(lines.map((line) => line.texts.join(' ')).join('\n'));
-
-const buildFrameTextFromCandidateItems = (candidateItems: FrameRenderCandidateItem[]) =>
-  stringifyFrameRenderCandidateLines(groupFrameRenderCandidateLines(candidateItems));
-
-const measureFrameTextAffinity = (left: string, right: string) => {
-  const compactLeft = compactFrameTextForComparison(left);
-  const compactRight = compactFrameTextForComparison(right);
-
-  if (!compactLeft || !compactRight) {
-    return 0;
-  }
-
-  if (compactLeft === compactRight) {
-    return 1;
-  }
-
-  const shorter = compactLeft.length <= compactRight.length ? compactLeft : compactRight;
-  const longer = shorter === compactLeft ? compactRight : compactLeft;
-
-  if (longer.includes(shorter)) {
-    return shorter.length / Math.max(shorter.length, longer.length);
-  }
-
-  let longestPrefix = 0;
-
-  for (let index = 0; index < shorter.length; index += 1) {
-    if (longer.includes(shorter.slice(0, shorter.length - index))) {
-      longestPrefix = shorter.length - index;
-      break;
-    }
-  }
-
-  return longestPrefix / Math.max(shorter.length, longer.length);
-};
-
-const selectFrameRenderCandidateItemsV101 = (
-  page: TemplateExtractReplicaRenderPage,
-  frameRect: FrameNodeRect
-) =>
-  mapFrameRenderCandidateItems(page, frameRect)
-    .filter((item) => {
-      if (item.insideStrict) {
-        return true;
-      }
-
-      return item.overlapArea > 0 && item.overlapRatio >= 0.28;
-    })
-    .sort((left, right) => {
-      const topDelta = left.top - right.top;
-      return Math.abs(topDelta) > 3 ? topDelta : left.left - right.left;
-    });
-
-const selectFrameRenderCandidateItemsV102 = (
-  page: TemplateExtractReplicaRenderPage,
-  frameRect: FrameNodeRect,
-  sourceTextHint: string
-) => {
-  const normalizedHint = normalizeExtractedFrameText(sourceTextHint);
-
-  return mapFrameRenderCandidateItems(page, frameRect)
-    .map((item) => {
-      const hintAffinity = normalizedHint ? measureFrameTextAffinity(item.text, normalizedHint) : 0;
-      const score =
-        (item.insideStrict ? 4 : item.insideLoose ? 2.5 : 0) +
-        Math.min(3, item.overlapRatio * 6) +
-        hintAffinity * 3 -
-        Math.min(1.2, (item.distanceX + item.distanceY) / 24);
-
-      return {
-        ...item,
-        hintAffinity,
-        score,
-      };
-    })
-    .filter((item) => {
-      if (item.insideStrict) {
-        return true;
-      }
-
-      if (item.overlapArea > 0 && item.overlapRatio >= 0.16) {
-        return true;
-      }
-
-      return item.hintAffinity >= 0.55 && item.insideLoose;
-    })
-    .sort((left, right) => {
-      if (Math.abs(left.top - right.top) > 3) {
-        return left.top - right.top;
-      }
-
-      if (Math.abs(left.left - right.left) > 2) {
-        return left.left - right.left;
-      }
-
-      return right.score - left.score;
-    });
-};
-
-const selectBestFrameRenderTextWindowV102 = (
-  candidateItems: FrameRenderCandidateItem[],
-  sourceTextHint: string
-) => {
-  const lines = groupFrameRenderCandidateLines(candidateItems);
-
-  if (!lines.length) {
-    return '';
-  }
-
-  const normalizedHint = normalizeExtractedFrameText(sourceTextHint);
-
-  if (!normalizedHint) {
-    return stringifyFrameRenderCandidateLines(lines);
-  }
-
-  const hintLineCount = countFrameTextLines(normalizedHint);
-  let bestText = '';
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (let start = 0; start < lines.length; start += 1) {
-    for (let end = start + 1; end <= lines.length; end += 1) {
-      const candidateText = stringifyFrameRenderCandidateLines(lines.slice(start, end));
-
-      if (!candidateText) {
-        continue;
-      }
-
-      const affinity = measureFrameTextAffinity(candidateText, normalizedHint);
-      const candidateLineCount = countFrameTextLines(candidateText);
-      const compactCandidate = compactFrameTextForComparison(candidateText);
-      const compactHint = compactFrameTextForComparison(normalizedHint);
-      const containsBonus =
-        compactCandidate === compactHint
-          ? 1.25
-          : compactCandidate.includes(compactHint) || compactHint.includes(compactCandidate)
-            ? 0.45
-            : 0;
-      const extraLinePenalty = Math.max(0, candidateLineCount - hintLineCount) * 0.55;
-      const extraLengthPenalty = Math.max(0, candidateText.length - normalizedHint.length) / Math.max(8, normalizedHint.length);
-      const shorterPenalty = Math.max(0, hintLineCount - candidateLineCount) * 0.35;
-      const score = affinity * 4 + containsBonus - extraLinePenalty - extraLengthPenalty - shorterPenalty;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestText = candidateText;
-      }
-    }
-  }
-
-  return bestText || stringifyFrameRenderCandidateLines(lines);
-};
-
-const resolveFrameTextExtractionV102 = (renderText: string, sourceTextHint: string) => {
-  const normalizedRenderText = normalizeExtractedFrameText(renderText);
-  const normalizedSourceHint = normalizeExtractedFrameText(sourceTextHint);
-
-  if (!normalizedRenderText) {
-    return normalizedSourceHint;
-  }
-
-  if (!normalizedSourceHint) {
-    return normalizedRenderText;
-  }
-
-  const affinity = measureFrameTextAffinity(normalizedRenderText, normalizedSourceHint);
-  const compactRender = compactFrameTextForComparison(normalizedRenderText);
-  const compactSource = compactFrameTextForComparison(normalizedSourceHint);
-
-  if (!compactRender) {
-    return normalizedSourceHint;
-  }
-
-  if (compactRender === compactSource) {
-    return normalizedSourceHint.length >= normalizedRenderText.length ? normalizedSourceHint : normalizedRenderText;
-  }
-
-  if (compactRender.includes(compactSource) && compactSource.length / compactRender.length >= 0.6) {
-    if (
-      countFrameTextLines(normalizedRenderText) > countFrameTextLines(normalizedSourceHint) &&
-      looksLikeShortFrameLabel(normalizedSourceHint)
-    ) {
-      return normalizedSourceHint;
-    }
-
-    return normalizedRenderText;
-  }
-
-  if (compactSource.includes(compactRender) && compactRender.length / compactSource.length <= 0.8) {
-    return normalizedSourceHint;
-  }
-
-  if (countFrameTextLines(normalizedRenderText) < countFrameTextLines(normalizedSourceHint)) {
-    return normalizedSourceHint;
-  }
-
-  if (normalizedRenderText.length < Math.max(4, Math.round(normalizedSourceHint.length * 0.6))) {
-    return normalizedSourceHint;
-  }
-
-  if (looksLikeShortFrameLabel(normalizedSourceHint) && affinity < 0.72) {
-    return normalizedSourceHint;
-  }
-
-  return affinity >= 0.35 ? normalizedRenderText : normalizedSourceHint;
-};
-
-const extractFrameTextFromRenderPage = (
-  page: TemplateExtractReplicaRenderPage | null | undefined,
-  frameRect: FrameNodeRect,
-  version: FrameTextExtractionVersion,
-  sourceTextHint = ''
-) => {
-  if (!page) {
-    return '';
-  }
-
-  switch (version) {
-    case 'v1.02': {
-      const candidateItems = selectFrameRenderCandidateItemsV102(page, frameRect, sourceTextHint);
-      const renderText = selectBestFrameRenderTextWindowV102(candidateItems, sourceTextHint);
-      return resolveFrameTextExtractionV102(renderText, sourceTextHint);
-    }
-    case 'v1.01':
-    default: {
-      return buildFrameTextFromCandidateItems(selectFrameRenderCandidateItemsV101(page, frameRect));
-    }
-  }
-};
-
-const writeFrameNodeExtractedText = (node: HTMLElement, nextText: string) => {
-  const normalizedText = formatFrameSourceTextForDisplay(nextText, {
-    frameGroup: node.getAttribute('data-template-frame-group'),
-    valueKey: node.getAttribute('data-template-frame-value-key'),
-    colorGroup: node.getAttribute('data-template-frame-color-group'),
-  });
-  const textarea = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
-  const visibleText = node.querySelector<HTMLElement>('[data-template-frame-visible-text="true"]');
-
-  if (normalizedText) {
-    node.setAttribute('data-template-frame-extracted-text', normalizedText);
-    textarea?.setAttribute('data-template-frame-extracted-text', normalizedText);
-  } else {
-    node.removeAttribute('data-template-frame-extracted-text');
-    textarea?.removeAttribute('data-template-frame-extracted-text');
-  }
-
-  if (textarea) {
-    textarea.value = normalizedText;
-    textarea.textContent = normalizedText;
-    textarea.style.color = normalizedText ? '#0f172a' : 'transparent';
-    textarea.style.setProperty('-webkit-text-fill-color', normalizedText ? '#0f172a' : 'transparent');
-  }
-
-  if (visibleText) {
-    visibleText.textContent = normalizedText;
-    visibleText.style.color = normalizedText ? '#0f172a' : 'transparent';
-  }
-};
-
-const buildFrameExtractedTextKey = ({
-  pageNumber,
-  frameGroup,
-  rowStart,
-  rowEnd,
-  colStart,
-  colEnd,
-}: {
-  pageNumber: string;
-  frameGroup: string;
-  rowStart?: string | null;
-  rowEnd?: string | null;
-  colStart?: string | null;
-  colEnd?: string | null;
-}) =>
-  [pageNumber, frameGroup, rowStart || '', rowEnd || '', colStart || '', colEnd || ''].join('::');
-
-const buildFrameExtractedTextKeyFromNode = (node: HTMLElement) => {
-  const pageNumber =
-    node.getAttribute('data-template-frame-page') ||
-    node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
-    '1';
-  const frameGroup = node.getAttribute('data-template-frame-group') || '';
-
-  if (!frameGroup) {
-    return '';
-  }
-
-  return buildFrameExtractedTextKey({
-    pageNumber,
-    frameGroup,
-    rowStart: node.getAttribute('data-template-frame-row-start'),
-    rowEnd: node.getAttribute('data-template-frame-row-end'),
-    colStart: node.getAttribute('data-template-frame-col-start'),
-    colEnd: node.getAttribute('data-template-frame-col-end'),
-  });
-};
-
-const resetFrameNodeExtractedText = (node: HTMLElement) => {
-  const textarea = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
-  const visibleText = node.querySelector<HTMLElement>('[data-template-frame-visible-text="true"]');
-
-  node.removeAttribute('data-template-frame-extracted-text');
-  textarea?.removeAttribute('data-template-frame-extracted-text');
-
-  if (textarea) {
-    textarea.value = '';
-    textarea.textContent = '';
-    textarea.style.color = 'transparent';
-    textarea.style.setProperty('-webkit-text-fill-color', 'transparent');
-  }
-
-  if (visibleText) {
-    visibleText.textContent = '';
-    visibleText.style.color = 'transparent';
-  }
-};
-
-const collectFrameExtractedTextStateFromHtml = (html: string): FrameExtractedTextState => {
-  if (!html.trim() || typeof document === 'undefined') {
-    return {};
-  }
-
-  const container = document.createElement('div');
-  const nextState: FrameExtractedTextState = {};
-  container.innerHTML = html;
-
-  Array.from(container.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-    .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-    .forEach((node) => {
-      const key = buildFrameExtractedTextKeyFromNode(node);
-      const value = normalizeExtractedFrameText(readFrameNodeExtractedText(node));
-
-      if (!key || !value) {
-        return;
-      }
-
-      nextState[key] = value;
-    });
-
-  return nextState;
-};
-
-const stripFrameExtractedTextStateFromHtml = (html: string) => {
-  if (!html.trim() || typeof document === 'undefined') {
-    return html;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = html;
-
-  Array.from(container.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-    .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-    .forEach((node) => {
-      resetFrameNodeExtractedText(node);
-    });
-
-  return container.innerHTML;
-};
-
-const applyFrameExtractedTextStateToHtml = (html: string, extractedTextState: FrameExtractedTextState) => {
-  if (!html.trim() || typeof document === 'undefined') {
-    return html;
-  }
-
-  if (Object.keys(extractedTextState).length === 0) {
-    return html;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = html;
-
-  Array.from(container.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-    .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-    .forEach((node) => {
-      const key = buildFrameExtractedTextKeyFromNode(node);
-
-      if (!key || !Object.prototype.hasOwnProperty.call(extractedTextState, key)) {
-        return;
-      }
-
-      writeFrameNodeExtractedText(node, extractedTextState[key] || '');
-    });
-
-  return container.innerHTML;
-};
-
-const buildReviewedFieldsFromFrameNodes = (
-  nodes: HTMLElement[],
-  previousFields: TemplateExtractReviewedFieldInput[]
-) => {
-  const previousFieldByLabelKey = new Map(
-    previousFields
-      .filter((field) => field.labelKey.trim())
-      .map((field) => [normalizeFrameFieldPath(field.labelKey), field])
-  );
-  const grouped = new Map<
-    string,
-    {
-      sourceValues: string[];
-      sortOrder: number;
-      fieldType: TemplateExtractReviewedFieldInput['fieldType'];
-    }
-  >();
-
-  nodes.forEach((node, index) => {
-    const role = (node.getAttribute('data-template-frame-role') as FrameEditorRole | null) || 'group';
-
-    if (role !== 'value' && role !== 'key_value') {
-      return;
-    }
-
-    const valueKey = normalizeFrameFieldPath(node.getAttribute('data-template-frame-value-key') || '');
-
-    if (!valueKey) {
-      return;
-    }
-
-    const sourceValue = readFrameNodeDisplayText(node).replace(/\s+/g, ' ').trim();
-    const lastSegment = valueKey.split('>').pop()?.trim() || valueKey;
-    const knownField =
-      TemplateExtractValueBindingService.inferKnownFieldForLabel(lastSegment, index) ||
-      TemplateExtractValueBindingService.inferKnownFieldForLabel(valueKey, index);
-    const entry = grouped.get(valueKey) || {
-      sourceValues: [],
-      sortOrder: index + 1,
-      fieldType:
-        knownField?.fieldType ||
-        (sourceValue.length >= 80 || sourceValue.includes('\n') ? 'textarea' : 'text'),
-    };
-
-    if (sourceValue && !entry.sourceValues.includes(sourceValue)) {
-      entry.sourceValues.push(sourceValue);
-    }
-
-    if (knownField?.fieldType) {
-      entry.fieldType = knownField.fieldType;
-    }
-
-    grouped.set(valueKey, entry);
-  });
-
-  return Array.from(grouped.entries())
-    .map(([labelKey, entry], index) => {
-      const previous = previousFieldByLabelKey.get(labelKey);
-      const fieldKey = previous?.fieldKey || `frame_field_${hashFrameValueKey(labelKey)}`;
-      const candidateKey = previous?.candidateKey || `manual:${fieldKey}`;
-      const defaultValue = previous?.defaultValue ?? entry.sourceValues.join('\n');
-      const fieldLabel = previous?.fieldLabel?.trim() || labelKey;
-
-      return {
-        candidateKey,
-        fieldKey,
-        labelKey,
-        fieldType: previous?.fieldType || entry.fieldType,
-        fieldLabel,
-        required: previous?.required ?? false,
-        placeholder: previous?.placeholder ?? null,
-        defaultValue,
-        options: previous?.options || [],
-        layoutBlockId: previous?.layoutBlockId || `frame:${fieldKey}`,
-        sortOrder: previous?.sortOrder ?? entry.sortOrder ?? index + 1,
-        reviewStatus: previous?.reviewStatus || (entry.fieldType === 'signature' ? 'review_needed' : 'accepted'),
-      } satisfies TemplateExtractReviewedFieldInput;
-    })
-    .sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0));
-};
-
-const applyStoredFrameProfileToPreview = (root: HTMLElement, profile: StoredFrameProfile) => {
-  const pageInners = getPreviewPageInners(root);
-
-  if (!pageInners.length || !profile.frames.length) {
-    return false;
-  }
-
-  const currentFrameSnapshots = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-    .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-    .map(readFrameNodeSnapshot);
-  const currentFrameSnapshotByKey = new Map(
-    currentFrameSnapshots.map((snapshot) => [buildFrameProfileSnapshotKey(snapshot), snapshot] as const)
-  );
-
-  pageInners.forEach((pageInner) => {
-    pageInner.replaceChildren();
-    pageInner.style.position = 'relative';
-  });
-
-  const pageInnerByPageNumber = new Map(
-    pageInners.map((pageInner, index) => [pageInner.getAttribute('data-page') || String(index + 1), pageInner] as const)
-  );
-
-  profile.frames.forEach((snapshot) => {
-    const pageInner = pageInnerByPageNumber.get(snapshot.pageNumber) || pageInners[0];
-    const currentSnapshot = currentFrameSnapshotByKey.get(buildFrameProfileSnapshotKey(snapshot));
-    const currentSourceText =
-      currentSnapshot?.attrs['data-template-frame-source-text'] || '';
-    const currentExtractedText =
-      currentSnapshot?.attrs['data-template-frame-extracted-text'] || '';
-    const mergedSnapshot: FrameNodeSnapshot = currentSnapshot
-      ? {
-          ...snapshot,
-          rowColor: currentSnapshot.rowColor || snapshot.rowColor,
-          colColor: currentSnapshot.colColor || snapshot.colColor,
-          attrs: {
-            ...snapshot.attrs,
-            'data-template-frame-source-text': currentSourceText,
-            'data-template-frame-extracted-text': currentExtractedText,
-          },
-          value: currentExtractedText || currentSourceText,
-        }
-      : {
-          ...snapshot,
-          attrs: {
-            ...snapshot.attrs,
-            'data-template-frame-source-text': '',
-            'data-template-frame-extracted-text': '',
-          },
-          value: '',
-        };
-    let editorLayer = pageInner.querySelector<HTMLElement>('[data-v106-frame-editor-layer="true"]');
-
-    if (!editorLayer) {
-      editorLayer = document.createElement('div');
-      editorLayer.className = 'v106-frame-editor-layer';
-      editorLayer.setAttribute('data-v106-frame-editor-layer', 'true');
-      editorLayer.style.position = 'absolute';
-      editorLayer.style.inset = '0';
-      editorLayer.style.pointerEvents = 'none';
-      pageInner.appendChild(editorLayer);
-    }
-
-    const node = buildV106FrameNode(mergedSnapshot);
-    node.style.pointerEvents = 'auto';
-    editorLayer.appendChild(node);
-  });
-
-  root.setAttribute('data-v106-frame-editor-ready', 'true');
-  return true;
-};
-
 const normalizeFramePreviewForV106 = (root: HTMLElement) => {
-  if (root.getAttribute('data-v106-frame-editor-ready') === 'true') {
+  const frameSection = root.querySelector<HTMLElement>(
+    'section[data-template-extraction-stage="frames"][data-template-frame-group-version="v1.06"]'
+  );
+
+  if (!frameSection || frameSection.getAttribute('data-v106-frame-editor-ready') === 'true') {
     return false;
   }
-
-  const frameGroupVersionTag = root.getAttribute('data-template-frame-group-version') || '';
-
-  if (!isSupportedFrameEditorVersion(frameGroupVersionTag)) {
-    return false;
-  }
-
-  const transparentMode = isV109FrameGroupVersion(frameGroupVersionTag);
 
   let transformed = false;
-  const pageInners = getPreviewPageInners(root);
 
-  pageInners.forEach((pageInner, pageIndex) => {
+  frameSection.querySelectorAll<HTMLElement>('.page').forEach((pageElement) => {
+    const pageInner = pageElement.querySelector<HTMLElement>(':scope > .page-inner') || pageElement;
+
+    if (!pageInner) {
+      return;
+    }
+
     const frameGroups = Array.from(pageInner.querySelectorAll<HTMLElement>('.v202-frame-group'));
 
     if (!frameGroups.length) {
@@ -1972,7 +801,6 @@ const normalizeFramePreviewForV106 = (root: HTMLElement) => {
     }
 
     const pageRect = pageInner.getBoundingClientRect();
-    const scale = readFramePreviewScale(pageInner);
     const snapshots: FrameNodeSnapshot[] = frameGroups.map((frameGroup) => {
       const rect = frameGroup.getBoundingClientRect();
       const host = frameGroup.closest<HTMLElement>('td, .v102-frame-band, .v202-text-box, .v202-cell-box') || frameGroup;
@@ -1983,25 +811,17 @@ const normalizeFramePreviewForV106 = (root: HTMLElement) => {
       );
 
       return {
-        pageNumber: pageInner.getAttribute('data-page') || String(pageIndex + 1),
+        pageNumber: pageElement.getAttribute('data-page') || '1',
         attrs,
-        rowColor: transparentMode
-          ? 'transparent'
-          : computed.getPropertyValue('--v102-row-color').trim() || 'rgba(59, 130, 246, 0.08)',
-        colColor: transparentMode
-          ? 'transparent'
-          : computed.getPropertyValue('--v102-col-color').trim() || 'rgba(14, 165, 233, 0.14)',
+        rowColor: computed.getPropertyValue('--v102-row-color').trim() || 'rgba(59, 130, 246, 0.08)',
+        colColor: computed.getPropertyValue('--v102-col-color').trim() || 'rgba(14, 165, 233, 0.14)',
         rect: {
-          left: (rect.left - pageRect.left) / scale,
-          top: (rect.top - pageRect.top) / scale,
-          width: rect.width / scale,
-          height: rect.height / scale,
+          left: rect.left - pageRect.left,
+          top: rect.top - pageRect.top,
+          width: rect.width,
+          height: rect.height,
         },
-        value:
-          frameGroup.getAttribute('data-template-frame-extracted-text') ||
-          textarea?.getAttribute('data-template-frame-extracted-text') ||
-          textarea?.value ||
-          '',
+        value: textarea?.value || '',
       };
     });
 
@@ -2026,7 +846,7 @@ const normalizeFramePreviewForV106 = (root: HTMLElement) => {
   });
 
   if (transformed) {
-    root.setAttribute('data-v106-frame-editor-ready', 'true');
+    frameSection.setAttribute('data-v106-frame-editor-ready', 'true');
   }
 
   return transformed;
@@ -2099,27 +919,16 @@ export default function TemplateExtractPage() {
   const [sourceContent, setSourceContent] = React.useState(defaultSourceContent);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [engineVersion, setEngineVersion] = React.useState<TemplateExtractEngineVersion>('47');
-  const [frameGroupVersion, setFrameGroupVersion] = React.useState<TemplateExtractFrameGroupVersion>('v1.10');
-  const [frameProfileName, setFrameProfileName] = React.useState('default');
+  const [frameGroupVersion, setFrameGroupVersion] = React.useState<TemplateExtractFrameGroupVersion>('v1.06');
   const [previewPaneMode, setPreviewPaneMode] = React.useState<PreviewPaneMode>('source');
   const [draftPreviewEditRole, setDraftPreviewEditRole] = React.useState<DraftPreviewEditRole>('editor');
   const [selectedFrameGroupIds, setSelectedFrameGroupIds] = React.useState<string[]>([]);
   const [frameEditorValueKey, setFrameEditorValueKey] = React.useState('');
   const [frameEditorRole, setFrameEditorRole] = React.useState<FrameEditorRole>('group');
-  const [frameEditorOutlineStyle, setFrameEditorOutlineStyle] = React.useState<FrameOutlineStyle>('solid');
   const [frameEditorParentGroup, setFrameEditorParentGroup] = React.useState('');
-  const [frameEditorChainKey, setFrameEditorChainKey] = React.useState('');
-  const [frameEditorChainDepth, setFrameEditorChainDepth] = React.useState('');
   const [frameEditorWidthPx, setFrameEditorWidthPx] = React.useState('');
   const [frameEditorHeightPx, setFrameEditorHeightPx] = React.useState('');
   const [frameMergePromptDismissed, setFrameMergePromptDismissed] = React.useState(false);
-  const [frameCreateMode, setFrameCreateMode] = React.useState(false);
-  const [frameEditorNotice, setFrameEditorNotice] = React.useState<string | null>(null);
-  const [frameRevision, setFrameRevision] = React.useState(0);
-  const [frameTextExtractionVersion, setFrameTextExtractionVersion] =
-    React.useState<FrameTextExtractionVersion>('v1.02');
-  const [frameExtractedTextState, setFrameExtractedTextState] = React.useState<FrameExtractedTextState>({});
-  const [frameTextExtractionCompleted, setFrameTextExtractionCompleted] = React.useState(false);
   const [similarTemplateIdsText, setSimilarTemplateIdsText] = React.useState('');
   const [selectedDraftId, setSelectedDraftId] = React.useState('');
   const [reviewedFields, setReviewedFields] = React.useState<TemplateExtractReviewedFieldInput[]>([]);
@@ -2130,13 +939,6 @@ export default function TemplateExtractPage() {
   const [draftDetail, setDraftDetail] = React.useState<TemplateExtractDetailResult | null>(null);
   const [visualSimilarityReport, setVisualSimilarityReport] =
     React.useState<TemplateExtractVisualSimilarityReport | null>(null);
-  const [crossValidationPreview, setCrossValidationPreview] =
-    React.useState<CrossValidationPreviewState | null>(null);
-  const [crossValidationReferenceVisible, setCrossValidationReferenceVisible] = React.useState(false);
-  const [crossValidationViewMode, setCrossValidationViewMode] =
-    React.useState<CrossValidationViewMode>('side_by_side');
-  const [crossValidationPageIndex, setCrossValidationPageIndex] = React.useState(0);
-  const [crossValidationOverlayOpacity, setCrossValidationOverlayOpacity] = React.useState(55);
   const [recentDrafts, setRecentDrafts] = React.useState<RecentDraftOption[]>([]);
   const [registeredTemplates, setRegisteredTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [selectedRegisteredTemplateId, setSelectedRegisteredTemplateId] = React.useState('');
@@ -2166,10 +968,8 @@ export default function TemplateExtractPage() {
   const visualMeasurementFrameRef = React.useRef<HTMLIFrameElement | null>(null);
   const draftPreviewRef = React.useRef<HTMLDivElement | null>(null);
   const draftPreviewHtmlRef = React.useRef('');
-  const appliedFrameProfileKeyRef = React.useRef('');
   const frameDragStateRef = React.useRef<FrameDragState | null>(null);
   const frameResizeStateRef = React.useRef<FrameResizeState | null>(null);
-  const frameCreateStateRef = React.useRef<FrameCreateState | null>(null);
   const visualMeasurementLogFileNameRef = React.useRef('');
   const lastVisualMeasurementLogEventKeyRef = React.useRef('');
   const lastVisualMeasurementKeyRef = React.useRef<string>('');
@@ -2190,34 +990,8 @@ export default function TemplateExtractPage() {
       map.set(candidate.candidateKey, candidate);
     }
 
-    reviewedFields.forEach((field, index) => {
-      if (!field.candidateKey || map.has(field.candidateKey)) {
-        return;
-      }
-
-      map.set(field.candidateKey, {
-        id: `manual:${field.candidateKey}`,
-        draftId: draftDetail?.draft.id || 'manual',
-        candidateKey: field.candidateKey,
-        fieldKey: field.fieldKey,
-        labelKey: field.labelKey,
-        fieldType: field.fieldType,
-        fieldLabel: field.fieldLabel,
-        detectedValue: stringifyTemplateDefaultValue(field.defaultValue),
-        placeholder: field.placeholder || null,
-        defaultValue: field.defaultValue ?? null,
-        options: field.options || [],
-        required: field.required ?? false,
-        layoutBlockId: field.layoutBlockId || null,
-        confidenceScore: 0.8,
-        reviewStatus: field.reviewStatus || 'accepted',
-        extractionReason: 'manual_frame_mapping',
-        sortOrder: field.sortOrder ?? index,
-      });
-    });
-
     return map;
-  }, [draftDetail, reviewedFields]);
+  }, [draftDetail]);
 
   const candidateKeyByLabelKey = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -2226,14 +1000,8 @@ export default function TemplateExtractPage() {
       map.set(candidate.labelKey, candidate.candidateKey);
     }
 
-    reviewedFields.forEach((field) => {
-      if (field.labelKey && field.candidateKey) {
-        map.set(field.labelKey, field.candidateKey);
-      }
-    });
-
     return map;
-  }, [draftDetail, reviewedFields]);
+  }, [draftDetail]);
 
   const reviewedSummary = React.useMemo(() => {
     return reviewedFields.reduce(
@@ -2270,64 +1038,6 @@ export default function TemplateExtractPage() {
   const previewDraftStyleText = flattenedFramePreview?.styleText || '';
   const previewDraftHtml = flattenedFramePreview?.html || draftDetail?.draft.generatedDraftHtml || '';
   const previewDraftCopyHtml = `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${previewDraftHtml}`;
-  const previewDraftBaseHtml = React.useMemo(
-    () => stripFrameExtractedTextStateFromHtml(previewDraftCopyHtml),
-    [previewDraftCopyHtml]
-  );
-  const initialFrameExtractedTextState = React.useMemo(
-    () => collectFrameExtractedTextStateFromHtml(previewDraftCopyHtml),
-    [previewDraftCopyHtml]
-  );
-  const frameExtractedTextStateSignature = React.useMemo(
-    () => JSON.stringify(frameExtractedTextState),
-    [frameExtractedTextState]
-  );
-  const renderedDraftHtml = React.useMemo(() => {
-    const baseHtml = (frameRevision > 0 ? draftPreviewHtmlRef.current : previewDraftBaseHtml) || previewDraftBaseHtml;
-    return applyFrameExtractedTextStateToHtml(baseHtml, frameExtractedTextState);
-  }, [frameExtractedTextState, frameRevision, previewDraftBaseHtml]);
-  const requestedFrameGroupVersion = React.useMemo(
-    () => buildRequestedFrameGroupVersion(String(frameGroupVersion || 'v1.10'), frameProfileName),
-    [frameGroupVersion, frameProfileName]
-  );
-  const currentFrameGroupVersionTag =
-    flattenedFramePreview?.frameGroupVersion ||
-    (draftDetail?.draft.generatedDraftHtml.match(/data-template-frame-group-version="([^"]+)"/i)?.[1] || '');
-  const currentFrameProfileSourceSignature = React.useMemo(
-    () => buildFrameSourceSignatureFromHtml(draftDetail?.draft.generatedDraftHtml || ''),
-    [draftDetail?.draft.generatedDraftHtml]
-  );
-  const extractedTextReady = frameTextExtractionCompleted;
-  const textExtractionReady =
-    Boolean(draftDetail?.draft.generatedDraftHtml?.includes('data-template-extraction-stage="frames"')) &&
-    hasSupportedFrameEditorMarkup(draftDetail?.draft.generatedDraftHtml);
-  const crossValidationReady =
-    textExtractionReady &&
-    extractedTextReady &&
-    Boolean(draftDetail) &&
-    isPdfSourceFile(selectedFile);
-  const frameEditorActive =
-    Boolean(draftDetail?.draft.generatedDraftHtml?.includes('data-template-extraction-stage="frames"')) &&
-    hasSupportedFrameEditorMarkup(draftDetail?.draft.generatedDraftHtml);
-
-  React.useEffect(() => {
-    if (!isV109FrameGroupVersion(frameGroupVersion)) {
-      return;
-    }
-
-    if (frameProfileName.trim() && frameProfileName.trim() !== 'default') {
-      return;
-    }
-
-    const suggestedName = sanitizeFrameProfileName(
-      selectedFile?.name.replace(/\.[^.]+$/u, '') || sourceTitle || 'default'
-    );
-
-    if (suggestedName !== frameProfileName) {
-      setFrameProfileName(suggestedName);
-    }
-  }, [frameGroupVersion, frameProfileName, selectedFile?.name, sourceTitle]);
-
   const syncDraftPreviewSurfaceScale = React.useCallback(() => {
     const root = draftPreviewRef.current;
 
@@ -2424,157 +1134,26 @@ export default function TemplateExtractPage() {
   const getCurrentDraftPreviewHtml = React.useCallback(() => {
     const liveHtml = draftPreviewRef.current?.innerHTML?.trim() || '';
     const normalizedLiveHtml = stripDraftPreviewUiState(liveHtml);
-    const normalizedBaseLiveHtml = stripFrameExtractedTextStateFromHtml(normalizedLiveHtml);
 
-    if (flattenedFramePreview && normalizedBaseLiveHtml) {
-      return applyFrameExtractedTextStateToHtml(
-        `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedBaseLiveHtml}`,
-        frameExtractedTextState
-      );
+    if (flattenedFramePreview && normalizedLiveHtml) {
+      return `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedLiveHtml}`;
     }
 
-    const fallbackHtml = draftPreviewHtmlRef.current || previewDraftBaseHtml;
+    const fallbackHtml = draftPreviewHtmlRef.current || previewDraftCopyHtml;
 
-    return applyFrameExtractedTextStateToHtml(
-      stripFrameExtractedTextStateFromHtml(liveHtml || fallbackHtml),
-      frameExtractedTextState
-    );
-  }, [flattenedFramePreview, frameExtractedTextState, previewDraftBaseHtml, previewDraftStyleText]);
-
-  const syncDraftPreviewHtmlRef = React.useCallback(() => {
-    const root = draftPreviewRef.current;
-
-    if (!root) {
-      return;
-    }
-
-    const normalizedHtml = stripFrameExtractedTextStateFromHtml(stripDraftPreviewUiState(root.innerHTML));
-    draftPreviewHtmlRef.current = flattenedFramePreview
-      ? `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedHtml}`
-      : normalizedHtml;
-    setFrameExtractedTextState((previous) => (Object.keys(previous).length > 0 ? {} : previous));
-    setFrameTextExtractionCompleted(false);
-    setFrameRevision((previous) => previous + 1);
-  }, [flattenedFramePreview, previewDraftStyleText]);
-
-  const syncV109ReviewedFieldsFromCurrentFrames = React.useCallback(() => {
-    const root = draftPreviewRef.current;
-
-    if (!root || !isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
-      return;
-    }
-
-    const nextFields = buildReviewedFieldsFromFrameNodes(
-      Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).filter(
-        (node) => !node.matches('[data-template-frame-input="true"]')
-      ),
-      reviewedFields
-    );
-
-    if (JSON.stringify(nextFields) === JSON.stringify(reviewedFields)) {
-      return;
-    }
-
-    syncReviewedFields(nextFields);
-  }, [currentFrameGroupVersionTag, reviewedFields, syncReviewedFields]);
-
-  const saveCurrentFrameProfile = React.useCallback(() => {
-    const root = draftPreviewRef.current;
-
-    if (!root || !isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
-      setFrameEditorNotice('v1.09/v1.10 프레임 프로필에서만 저장할 수 있습니다.');
-      return false;
-    }
-
-    const frames = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-      .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-      .map(readFrameNodeSnapshot)
-      .map(stripFrameSnapshotText);
-
-    if (!frames.length) {
-      setFrameEditorNotice('저장할 프레임이 없습니다.');
-      return false;
-    }
-
-    const profileName = sanitizeFrameProfileName(frameProfileName);
-    const storedProfiles = readStoredFrameProfiles();
-    storedProfiles[currentFrameGroupVersionTag] = {
-      version: 1,
-      frameGroupVersion: currentFrameGroupVersionTag,
-      profileName,
-      sourceSignature: currentFrameProfileSourceSignature,
-      pageWidth: flattenedFramePreview?.pageWidth || '',
-      pageMinHeight: flattenedFramePreview?.pageMinHeight || '',
-      savedAt: new Date().toISOString(),
-      frames,
-    };
-    writeStoredFrameProfiles(storedProfiles);
-    setFrameEditorNotice(`프레임 프로필 ${profileName} 을 저장했습니다.`);
-    return true;
-  }, [
-    currentFrameGroupVersionTag,
-    currentFrameProfileSourceSignature,
-    flattenedFramePreview?.pageMinHeight,
-    flattenedFramePreview?.pageWidth,
-    frameProfileName,
-  ]);
+    return stripDraftPreviewUiState(liveHtml || fallbackHtml);
+  }, [flattenedFramePreview, previewDraftCopyHtml, previewDraftStyleText]);
 
   React.useEffect(() => {
-    if (frameRevision === 0) {
-      return;
-    }
-
-    syncV109ReviewedFieldsFromCurrentFrames();
-  }, [frameRevision, syncV109ReviewedFieldsFromCurrentFrames]);
-
-  React.useEffect(() => {
-    draftPreviewHtmlRef.current = previewDraftBaseHtml;
-    setFrameExtractedTextState(initialFrameExtractedTextState);
-    setFrameTextExtractionCompleted(Object.keys(initialFrameExtractedTextState).length > 0);
-    setFrameRevision(0);
+    draftPreviewHtmlRef.current = previewDraftCopyHtml;
     setSelectedFrameGroupIds([]);
     setFrameEditorValueKey('');
     setFrameEditorRole('group');
-    setFrameEditorOutlineStyle('solid');
     setFrameEditorParentGroup('');
-    setFrameEditorChainKey('');
-    setFrameEditorChainDepth('');
     setFrameEditorWidthPx('');
     setFrameEditorHeightPx('');
     setFrameMergePromptDismissed(false);
-    setFrameCreateMode(false);
-    setFrameEditorNotice(null);
-  }, [draftDetail?.draft.id, initialFrameExtractedTextState, previewDraftBaseHtml]);
-
-  React.useEffect(() => {
-    setCrossValidationPreview(null);
-    setCrossValidationReferenceVisible(false);
-    setCrossValidationPageIndex(0);
-  }, [
-    draftDetail?.draft.id,
-    selectedFile?.name,
-    selectedFile?.size,
-    selectedFile?.lastModified,
-    frameRevision,
-    frameExtractedTextStateSignature,
-  ]);
-
-  React.useEffect(() => {
-    appliedFrameProfileKeyRef.current = '';
-  }, [draftDetail?.draft.id, currentFrameGroupVersionTag, currentFrameProfileSourceSignature]);
-
-  React.useEffect(() => {
-    if (!frameEditorActive || !isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
-      return;
-    }
-
-    syncV109ReviewedFieldsFromCurrentFrames();
-  }, [
-    currentFrameGroupVersionTag,
-    frameEditorActive,
-    frameExtractedTextStateSignature,
-    syncV109ReviewedFieldsFromCurrentFrames,
-  ]);
+  }, [draftDetail?.draft.id, previewDraftCopyHtml]);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') {
@@ -2698,10 +1277,7 @@ export default function TemplateExtractPage() {
     if (!root || selectedFrameGroupIds.length === 0) {
       setFrameEditorValueKey('');
       setFrameEditorRole('group');
-      setFrameEditorOutlineStyle('solid');
       setFrameEditorParentGroup('');
-      setFrameEditorChainKey('');
-      setFrameEditorChainDepth('');
       setFrameEditorWidthPx('');
       setFrameEditorHeightPx('');
       return;
@@ -2722,12 +1298,7 @@ export default function TemplateExtractPage() {
     setFrameEditorRole(
       ((selectedNode.getAttribute('data-template-frame-role') as FrameEditorRole | null) || 'group')
     );
-    setFrameEditorOutlineStyle(
-      normalizeFrameOutlineStyle(selectedNode.getAttribute('data-template-frame-outline-style'))
-    );
     setFrameEditorParentGroup(selectedNode.getAttribute('data-template-frame-parent-group') || '');
-    setFrameEditorChainKey(selectedNode.getAttribute('data-template-frame-chain-key') || '');
-    setFrameEditorChainDepth(selectedNode.getAttribute('data-template-frame-chain-depth') || '');
     setFrameEditorWidthPx(String(Math.round(rect.width)));
     setFrameEditorHeightPx(String(Math.round(rect.height)));
   }, [selectedFrameGroupIds]);
@@ -2752,8 +1323,6 @@ export default function TemplateExtractPage() {
     }
   }, [
     draftDetail?.draft.generatedDraftHtml,
-    frameEditorChainDepth,
-    frameEditorChainKey,
     frameEditorHeightPx,
     frameEditorParentGroup,
     frameEditorRole,
@@ -3181,10 +1750,6 @@ export default function TemplateExtractPage() {
     setMessage(null);
 
     try {
-      if (isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
-        saveCurrentFrameProfile();
-      }
-
       const response = await fetch(`/api/templates/${normalizedTemplateId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -3217,15 +1782,7 @@ export default function TemplateExtractPage() {
     } finally {
       setLoading(false);
     }
-  }, [
-    currentFrameGroupVersionTag,
-    getCurrentDraftPreviewHtml,
-    layoutResizeMode,
-    loadedTemplateId,
-    saveCurrentFrameProfile,
-    sourceTitle,
-    templateName,
-  ]);
+  }, [getCurrentDraftPreviewHtml, layoutResizeMode, loadedTemplateId, sourceTitle, templateName]);
 
   const handleDeleteRegisteredTemplate = React.useCallback(async (templateId?: string) => {
     const normalizedTemplateId = (templateId || selectedRegisteredTemplateId).trim();
@@ -3361,7 +1918,7 @@ export default function TemplateExtractPage() {
         formData.append('similarTemplateIds', similarTemplateIds.join(','));
         formData.append('engineVersion', engineVersion);
         formData.append('extractionStage', extractionStage);
-        formData.append('frameGroupVersion', requestedFrameGroupVersion);
+        formData.append('frameGroupVersion', frameGroupVersion);
         formData.append('file', selectedFile);
 
         result = await createDraftWithFileUpload(formData, extractionStage);
@@ -3383,7 +1940,7 @@ export default function TemplateExtractPage() {
             similarTemplateIds,
             engineVersion,
             extractionStage,
-            frameGroupVersion: requestedFrameGroupVersion,
+            frameGroupVersion,
           }),
         });
         result = await response.json();
@@ -3414,7 +1971,7 @@ export default function TemplateExtractPage() {
       const versionLabel = formatTemplateExtractEngineVersionLabel(engineVersion);
       setMessage(
         actualExtractionStage === 'frames'
-          ? `프레임 그룹 초안을 만들었습니다. (${requestedFrameGroupVersion}, ${versionLabel})`
+          ? `프레임 그룹 초안을 만들었습니다. (${frameGroupVersion}, ${versionLabel})`
           : `원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${versionLabel})`
       );
     } catch (error) {
@@ -3445,10 +2002,6 @@ export default function TemplateExtractPage() {
     setMessage(null);
 
     try {
-      if (isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
-        saveCurrentFrameProfile();
-      }
-
       const response = await fetch(`/api/templates/extract/${normalizedDraftId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3697,22 +2250,17 @@ export default function TemplateExtractPage() {
 
   const handleMeasureVisualSimilarity = React.useCallback(async () => {
     if (!selectedFile) {
-      setMessage('교차 검증을 하려면 원본 PDF 파일이 필요합니다.');
+      setMessage('시각 유사도를 측정하려면 원본 PDF 파일이 필요합니다.');
       return;
     }
 
     if (!draftDetail || draftDetail.draft.sourceKind !== 'html') {
-      setMessage('교차 검증할 HTML 초안이 없습니다.');
+      setMessage('시각 유사도를 측정할 HTML 초안이 없습니다.');
       return;
     }
 
-    if (!isPdfSourceFile(selectedFile)) {
-      setMessage('교차 검증은 PDF 업로드에 대해서만 지원합니다.');
-      return;
-    }
-
-    if (!crossValidationReady) {
-      setMessage('교차 검증은 프레임 그룹 생성 후 텍스트 추출을 완료한 뒤에 실행할 수 있습니다.');
+    if (!/\.pdf$/i.test(selectedFile.name) && selectedFile.type !== 'application/pdf') {
+      setMessage('시각 유사도 측정은 PDF 업로드에 대해서만 지원합니다.');
       return;
     }
 
@@ -3725,7 +2273,7 @@ export default function TemplateExtractPage() {
     ].join('::');
 
     if (!sourceHtml) {
-      setMessage('교차 검증할 output HTML이 없습니다.');
+      setMessage('시각 유사도를 측정할 output HTML이 없습니다.');
       return;
     }
 
@@ -3739,7 +2287,7 @@ export default function TemplateExtractPage() {
       phase: 'uploading',
       activeStep: 'uploading',
       percent: 2,
-      stage: '교차 검증을 준비하고 있습니다.',
+      stage: '시각 유사도 측정을 준비하고 있습니다.',
       detail: '원본 PDF와 output HTML을 같은 기준으로 비교하기 위한 입력을 준비합니다.',
     });
     lastVisualMeasurementKeyRef.current = measurementKey;
@@ -3768,13 +2316,6 @@ export default function TemplateExtractPage() {
         selectedFile,
         sourceHtml
       );
-      setCrossValidationPreview({
-        pdfPageDataUrls,
-        replicaPageDataUrls,
-        createdAt: new Date().toISOString(),
-      });
-      setCrossValidationReferenceVisible(true);
-      setCrossValidationPageIndex(0);
 
       const report = await TemplateExtractVisualSimilarityClient.measureRenderedPageImages({
         pdfPageDataUrls,
@@ -3814,17 +2355,17 @@ export default function TemplateExtractPage() {
         summary: `1px 허용 오차 기준 프레임 중첩률 ${formatPercent(report.frameScore ?? report.overallScore)}`,
         visualSimilarityReport: report,
       });
-      setMessage(`교차 검증을 완료했습니다. 프레임 기준 ${formatPercent(report.frameScore ?? report.overallScore)}`);
+      setMessage(`시각 유사도를 측정했습니다. 프레임 기준 ${formatPercent(report.frameScore ?? report.overallScore)}`);
     } catch (error) {
       setVisualSimilarityReport(null);
       clearVisualSimilarityProgressTimer();
-      const nextMessage = error instanceof Error ? error.message : '교차 검증에 실패했습니다.';
+      const nextMessage = error instanceof Error ? error.message : '시각 유사도 측정에 실패했습니다.';
       setVisualSimilarityProgress((previous) => ({
         visible: true,
         phase: 'failed',
         activeStep: previous.activeStep || 'uploading',
         percent: Math.max(previous.percent, 12),
-        stage: '교차 검증이 중단되었습니다.',
+        stage: '시각 유사도 측정이 중단되었습니다.',
         detail: nextMessage,
       }));
       await appendVisualMeasurementLog({
@@ -3848,7 +2389,6 @@ export default function TemplateExtractPage() {
   }, [
     appendVisualMeasurementLog,
     clearVisualSimilarityProgressTimer,
-    crossValidationReady,
     draftDetail,
     engineVersion,
     frameGroupVersion,
@@ -3936,94 +2476,6 @@ export default function TemplateExtractPage() {
     });
   }, []);
 
-  const handleExtractFrameText = React.useCallback(() => {
-    const root = draftPreviewRef.current;
-
-    if (!root || !textExtractionReady) {
-      setMessage('텍스트 추출은 프레임 그룹 생성 이후에 실행할 수 있습니다.');
-      return;
-    }
-
-    const renderModel =
-      parseReplicaRenderModelFromHtml(draftDetail?.draft.generatedDraftHtml || '') ||
-      parseReplicaRenderModelFromHtml(draftDetail?.draft.sourceContent || '');
-
-    if (!renderModel?.pages?.length) {
-      setMessage('텍스트 추출용 렌더 모델을 찾지 못했습니다.');
-      return;
-    }
-
-    const pageModelByPageNumber = new Map(
-      (renderModel?.pages || []).map((page) => [String(page.pageNumber), page] as const)
-    );
-    const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).filter(
-      (node) => !node.matches('[data-template-frame-input="true"]')
-    );
-
-    if (!frameNodes.length) {
-      setMessage('텍스트를 채울 프레임이 없습니다.');
-      return;
-    }
-
-    setLoading(true);
-    setMessage(null);
-
-    try {
-      let filledCount = 0;
-      const nextExtractedTextState: FrameExtractedTextState = {};
-
-      frameNodes.forEach((node) => {
-        const pageNumber =
-          node.getAttribute('data-template-frame-page') ||
-          node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
-          '1';
-        const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
-        const frameRect = readSelectableFrameNodeRect(node);
-        const sourceTextHint = readFrameNodeSourceText(node);
-        const nextText = extractFrameTextFromRenderPage(
-          pageModel,
-          frameRect,
-          frameTextExtractionVersion,
-          sourceTextHint
-        );
-        const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
-        const normalizedText = formatFrameSourceTextForDisplay(nextText, {
-          frameGroup: node.getAttribute('data-template-frame-group'),
-          valueKey: node.getAttribute('data-template-frame-value-key'),
-          colorGroup: node.getAttribute('data-template-frame-color-group'),
-        });
-
-        if (extractedTextKey) {
-          nextExtractedTextState[extractedTextKey] = normalizedText;
-        }
-
-        if (normalizedText) {
-          filledCount += 1;
-        }
-      });
-
-      setFrameExtractedTextState(nextExtractedTextState);
-      setFrameTextExtractionCompleted(true);
-      if (typeof window !== 'undefined') {
-        window.requestAnimationFrame(() => {
-          requestPreviewTextFit();
-        });
-      }
-      setMessage(`텍스트 추출을 완료했습니다. (${frameTextExtractionVersion}, ${filledCount}개 프레임)`);
-    } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : '텍스트 추출에 실패했습니다.';
-      setMessage(nextMessage);
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    draftDetail?.draft.generatedDraftHtml,
-    draftDetail?.draft.sourceContent,
-    frameTextExtractionVersion,
-    requestPreviewTextFit,
-    textExtractionReady,
-  ]);
-
   const getFrameEditorNodes = React.useCallback(
     (root?: HTMLElement | null) =>
       Array.from(
@@ -4032,23 +2484,32 @@ export default function TemplateExtractPage() {
     []
   );
 
+  const syncDraftPreviewHtmlRef = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+    if (!root) {
+      return;
+    }
+
+    const normalizedHtml = stripDraftPreviewUiState(root.innerHTML);
+    draftPreviewHtmlRef.current = flattenedFramePreview
+      ? `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedHtml}`
+      : normalizedHtml;
+  }, [flattenedFramePreview, previewDraftStyleText]);
+
   const applyFrameEditorMetadata = React.useCallback(
     (
       nodes: HTMLElement[],
       patch: {
         valueKey?: string;
         role?: FrameEditorRole;
-        outlineStyle?: FrameOutlineStyle;
         parentGroup?: string;
-        chainKey?: string;
-        chainDepth?: string;
       }
     ) => {
       nodes.forEach((node) => {
         const textarea = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
 
         if (patch.valueKey !== undefined) {
-          const nextValueKey = normalizeFrameFieldPath(patch.valueKey);
+          const nextValueKey = patch.valueKey.trim();
           if (nextValueKey) {
             node.setAttribute('data-template-frame-value-key', nextValueKey);
             textarea?.setAttribute('data-template-frame-value-key', nextValueKey);
@@ -4064,12 +2525,6 @@ export default function TemplateExtractPage() {
           textarea?.setAttribute('data-template-frame-role', patch.role);
         }
 
-        if (patch.outlineStyle !== undefined) {
-          node.setAttribute('data-template-frame-outline-style', patch.outlineStyle);
-          textarea?.setAttribute('data-template-frame-outline-style', patch.outlineStyle);
-          applyFrameNodeOutlineStyle(node, patch.outlineStyle);
-        }
-
         if (patch.parentGroup !== undefined) {
           const parentGroup = patch.parentGroup.trim();
           if (parentGroup) {
@@ -4078,28 +2533,6 @@ export default function TemplateExtractPage() {
           } else {
             node.removeAttribute('data-template-frame-parent-group');
             textarea?.removeAttribute('data-template-frame-parent-group');
-          }
-        }
-
-        if (patch.chainKey !== undefined) {
-          const chainKey = normalizeFrameFieldPath(patch.chainKey);
-          if (chainKey) {
-            node.setAttribute('data-template-frame-chain-key', chainKey);
-            textarea?.setAttribute('data-template-frame-chain-key', chainKey);
-          } else {
-            node.removeAttribute('data-template-frame-chain-key');
-            textarea?.removeAttribute('data-template-frame-chain-key');
-          }
-        }
-
-        if (patch.chainDepth !== undefined) {
-          const parsedDepth = Number.parseInt(patch.chainDepth, 10);
-          if (Number.isFinite(parsedDepth) && parsedDepth >= 0) {
-            node.setAttribute('data-template-frame-chain-depth', String(parsedDepth));
-            textarea?.setAttribute('data-template-frame-chain-depth', String(parsedDepth));
-          } else {
-            node.removeAttribute('data-template-frame-chain-depth');
-            textarea?.removeAttribute('data-template-frame-chain-depth');
           }
         }
       });
@@ -4163,17 +2596,60 @@ export default function TemplateExtractPage() {
         return rect;
       }
 
+      const threshold = 12;
       const pageWidth = pageInner.clientWidth;
       const pageHeight = pageInner.clientHeight;
-      const result = TemplateFrameEditGeometryService.snapMovedRect({
-        rect,
-        siblingRects: getFrameEditorNodes(pageInner)
-          .filter((candidate) => candidate !== node)
-          .map(readFrameNodeRect),
-        bounds: { width: pageWidth, height: pageHeight },
+      const nodes = getFrameEditorNodes(pageInner).filter((candidate) => candidate !== node);
+      const horizontalCandidates = [0, pageWidth];
+      const verticalCandidates = [0, pageHeight];
+
+      nodes.forEach((candidate) => {
+        const candidateRect = readFrameNodeRect(candidate);
+
+        if (frameRectsOverlapVertically(rect, candidateRect)) {
+          horizontalCandidates.push(candidateRect.left, candidateRect.left + candidateRect.width);
+        }
+
+        if (frameRectsOverlapHorizontally(rect, candidateRect)) {
+          verticalCandidates.push(candidateRect.top, candidateRect.top + candidateRect.height);
+        }
       });
 
-      return result.value || rect;
+      let snapDx = 0;
+      let snapDy = 0;
+      let snapDxDistance = threshold + 1;
+      let snapDyDistance = threshold + 1;
+
+      for (const edge of horizontalCandidates) {
+        for (const currentEdge of [rect.left, rect.left + rect.width]) {
+          const delta = edge - currentEdge;
+          const distance = Math.abs(delta);
+
+          if (distance <= threshold && distance < snapDxDistance) {
+            snapDxDistance = distance;
+            snapDx = delta;
+          }
+        }
+      }
+
+      for (const edge of verticalCandidates) {
+        for (const currentEdge of [rect.top, rect.top + rect.height]) {
+          const delta = edge - currentEdge;
+          const distance = Math.abs(delta);
+
+          if (distance <= threshold && distance < snapDyDistance) {
+            snapDyDistance = distance;
+            snapDy = delta;
+          }
+        }
+      }
+
+      return {
+        left: Math.max(0, Math.min(pageWidth - rect.width, rect.left + snapDx)),
+        top: Math.max(0, Math.min(pageHeight - rect.height, rect.top + snapDy)),
+        width: rect.width,
+        height: rect.height,
+      };
     },
     [getFrameEditorNodes]
   );
@@ -4186,129 +2662,79 @@ export default function TemplateExtractPage() {
         return rect;
       }
 
+      const threshold = 12;
+      const minSize = 12;
       const pageWidth = pageInner.clientWidth;
       const pageHeight = pageInner.clientHeight;
-      const result = TemplateFrameEditGeometryService.snapResizedRect({
-        rect,
-        direction,
-        siblingRects: getFrameEditorNodes(pageInner)
-          .filter((candidate) => candidate !== node)
-          .map(readFrameNodeRect),
-        bounds: { width: pageWidth, height: pageHeight },
-      });
+      const nodes = getFrameEditorNodes(pageInner).filter((candidate) => candidate !== node);
+      const horizontalCandidates = [0, pageWidth];
+      const verticalCandidates = [0, pageHeight];
 
-      return result.value || rect;
-    },
-    [getFrameEditorNodes]
-  );
+      nodes.forEach((candidate) => {
+        const candidateRect = readFrameNodeRect(candidate);
 
-  const buildFrameEditorAttrs = React.useCallback(
-    (frameGroupId: string) => {
-      const attrs: Record<string, string> = {
-        'data-template-frame-group': frameGroupId,
-        'data-template-frame-role': frameEditorRole,
-        'data-template-frame-outline-style': frameEditorOutlineStyle,
-      };
-      const valueKey = normalizeFrameFieldPath(frameEditorValueKey);
-      const parentGroup = frameEditorParentGroup.trim();
-      const chainKey = normalizeFrameFieldPath(frameEditorChainKey);
-      const chainDepth = Number.parseInt(frameEditorChainDepth, 10);
+        if (frameRectsOverlapVertically(rect, candidateRect)) {
+          horizontalCandidates.push(candidateRect.left, candidateRect.left + candidateRect.width);
+        }
 
-      if (valueKey) {
-        attrs['data-template-frame-value-key'] = valueKey;
-      }
-
-      if (parentGroup) {
-        attrs['data-template-frame-parent-group'] = parentGroup;
-      }
-
-      if (chainKey) {
-        attrs['data-template-frame-chain-key'] = chainKey;
-      }
-
-      if (Number.isFinite(chainDepth) && chainDepth >= 0) {
-        attrs['data-template-frame-chain-depth'] = String(chainDepth);
-      }
-
-      return attrs;
-    },
-    [
-      frameEditorChainDepth,
-      frameEditorChainKey,
-      frameEditorOutlineStyle,
-      frameEditorParentGroup,
-      frameEditorRole,
-      frameEditorValueKey,
-    ]
-  );
-
-  const createFrameNodeFromRect = React.useCallback(
-    (pageInner: HTMLElement, rect: FrameNodeRect) => {
-      const pageNumber =
-        pageInner.getAttribute('data-page') ||
-        pageInner.closest<HTMLElement>('[data-page]')?.getAttribute('data-page') ||
-        '1';
-      const frameGroupId = `created-${Date.now()}`;
-      const node = buildV106FrameNode({
-        pageNumber,
-        attrs: buildFrameEditorAttrs(frameGroupId),
-        rowColor: isV109FrameGroupVersion(currentFrameGroupVersionTag)
-          ? 'transparent'
-          : 'rgba(59, 130, 246, 0.08)',
-        colColor: isV109FrameGroupVersion(currentFrameGroupVersionTag)
-          ? 'transparent'
-          : 'rgba(14, 165, 233, 0.14)',
-        rect,
-        value: '',
-      });
-      const layer = pageInner.querySelector<HTMLElement>('[data-v106-frame-editor-layer="true"]') || pageInner;
-
-      node.style.pointerEvents = 'auto';
-      layer.appendChild(node);
-      setSelectedFrameGroupIds([frameGroupId]);
-      setFrameEditorNotice(null);
-      syncDraftPreviewHtmlRef();
-      window.requestAnimationFrame(() => syncFrameEditorSelectionState());
-    },
-    [buildFrameEditorAttrs, currentFrameGroupVersionTag, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]
-  );
-
-  const deleteSelectedFrameGroups = React.useCallback(
-    (targetFrameGroupIds = selectedFrameGroupIds) => {
-      const root = draftPreviewRef.current;
-      const ids = targetFrameGroupIds.filter(Boolean);
-
-      if (!root || !ids.length) {
-        return;
-      }
-
-      getFrameEditorNodes(root).forEach((node) => {
-        if (ids.includes(node.getAttribute('data-template-frame-group') || '')) {
-          node.remove();
+        if (frameRectsOverlapHorizontally(rect, candidateRect)) {
+          verticalCandidates.push(candidateRect.top, candidateRect.top + candidateRect.height);
         }
       });
 
-      const missingParentReferences = getFrameEditorNodes(root).filter((node) =>
-        ids.includes(node.getAttribute('data-template-frame-parent-group') || '')
-      );
+      const snapEdge = (edge: number, candidates: number[]) => {
+        let snapped = edge;
+        let bestDistance = threshold + 1;
 
-      missingParentReferences.forEach((node) => {
-        node.removeAttribute('data-template-frame-parent-group');
-        node
-          .querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]')
-          ?.removeAttribute('data-template-frame-parent-group');
-      });
+        candidates.forEach((candidate) => {
+          const distance = Math.abs(candidate - edge);
 
-      setSelectedFrameGroupIds((previous) => previous.filter((id) => !ids.includes(id)));
-      setFrameEditorNotice(
-        missingParentReferences.length
-          ? '삭제된 프레임을 부모로 참조하던 연결을 제거했습니다.'
-          : null
+          if (distance <= threshold && distance < bestDistance) {
+            bestDistance = distance;
+            snapped = candidate;
+          }
+        });
+
+        return snapped;
+      };
+
+      let left = rect.left;
+      let top = rect.top;
+      let right = rect.left + rect.width;
+      let bottom = rect.top + rect.height;
+
+      if (direction.includes('w')) {
+        left = snapEdge(left, horizontalCandidates);
+        left = Math.max(0, Math.min(left, right - minSize));
+      }
+
+      if (direction.includes('e')) {
+        right = snapEdge(right, horizontalCandidates);
+        right = Math.max(left + minSize, Math.min(right, pageWidth));
+      }
+
+      if (direction.includes('n')) {
+        top = snapEdge(top, verticalCandidates);
+        top = Math.max(0, Math.min(top, bottom - minSize));
+      }
+
+      if (direction.includes('s')) {
+        bottom = snapEdge(bottom, verticalCandidates);
+        bottom = Math.max(top + minSize, Math.min(bottom, pageHeight));
+      }
+
+      return clampFrameNodeRect(
+        {
+          left,
+          top,
+          width: right - left,
+          height: bottom - top,
+        },
+        { width: pageWidth, height: pageHeight },
+        minSize
       );
-      syncDraftPreviewHtmlRef();
-      syncFrameEditorSelectionState();
     },
-    [getFrameEditorNodes, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]
+    [getFrameEditorNodes]
   );
 
   React.useEffect(() => {
@@ -4317,40 +2743,11 @@ export default function TemplateExtractPage() {
     }
 
     const handlePointerMove = (event: PointerEvent) => {
-      const createState = frameCreateStateRef.current;
-
-      if (createState) {
-        const point = clientPointToPagePoint(createState.pageInner, event.clientX, event.clientY);
-        const rawRect = {
-          left: Math.min(createState.start.x, point.x),
-          top: Math.min(createState.start.y, point.y),
-          width: Math.abs(point.x - createState.start.x),
-          height: Math.abs(point.y - createState.start.y),
-        };
-        createState.lastRawRect = rawRect;
-        const result = TemplateFrameEditGeometryService.validateCreateRect({
-          rect: rawRect,
-          siblingRects: getFrameEditorNodes(createState.pageInner).map(readFrameNodeRect),
-          bounds: {
-            width: createState.pageInner.clientWidth,
-            height: createState.pageInner.clientHeight,
-          },
-        });
-
-        writeFrameNodeRect(createState.ghostNode, result.value || rawRect);
-        return;
-      }
-
       const resizeState = frameResizeStateRef.current;
 
       if (resizeState) {
-        const { x: dx, y: dy } = TemplateFrameEditGeometryService.screenDeltaToPageDelta(
-          {
-            x: event.clientX - resizeState.startX,
-            y: event.clientY - resizeState.startY,
-          },
-          resizeState.scale
-        );
+        const dx = event.clientX - resizeState.startX;
+        const dy = event.clientY - resizeState.startY;
         const startRect = resizeState.rect;
         let left = startRect.left;
         let top = startRect.top;
@@ -4397,13 +2794,8 @@ export default function TemplateExtractPage() {
         return;
       }
 
-      const { x: dx, y: dy } = TemplateFrameEditGeometryService.screenDeltaToPageDelta(
-        {
-          x: event.clientX - dragState.startX,
-          y: event.clientY - dragState.startY,
-        },
-        dragState.scale
-      );
+      const dx = event.clientX - dragState.startX;
+      const dy = event.clientY - dragState.startY;
 
       dragState.nodes.forEach(({ node, rect }) => {
         writeFrameNodeRect(node, {
@@ -4416,23 +2808,6 @@ export default function TemplateExtractPage() {
     };
 
     const finishDrag = () => {
-      const createState = frameCreateStateRef.current;
-
-      if (createState) {
-        const rect = readFrameNodeRect(createState.ghostNode);
-        const rawRect = createState.lastRawRect;
-        createState.ghostNode.remove();
-        frameCreateStateRef.current = null;
-
-        if (rawRect.width >= 12 && rawRect.height >= 12) {
-          createFrameNodeFromRect(createState.pageInner, rect);
-          setFrameCreateMode(false);
-        } else {
-          setFrameEditorNotice('새 프레임이 최소 크기보다 작아 생성하지 않았습니다.');
-        }
-        return;
-      }
-
       const resizeState = frameResizeStateRef.current;
 
       if (resizeState) {
@@ -4486,14 +2861,7 @@ export default function TemplateExtractPage() {
       window.removeEventListener('pointerup', finishDrag);
       window.removeEventListener('pointercancel', finishDrag);
     };
-  }, [
-    createFrameNodeFromRect,
-    getFrameEditorNodes,
-    snapMovedFrameRect,
-    snapResizedFrameRect,
-    syncDraftPreviewHtmlRef,
-    syncFrameEditorSelectionState,
-  ]);
+  }, [snapMovedFrameRect, snapResizedFrameRect, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]);
 
   const mergeSelectedFrameGroups = React.useCallback(() => {
     const root = draftPreviewRef.current;
@@ -4509,28 +2877,34 @@ export default function TemplateExtractPage() {
       return;
     }
 
-    const mergeResult = TemplateFrameEditGeometryService.validateMerge({
-      frames: nodes.map(readFrameNodeDto),
-    });
-
-    if (!mergeResult.ok || !mergeResult.value) {
-      setFrameEditorNotice(mergeResult.warnings[0]?.message || '선택한 프레임은 병합할 수 없습니다.');
-      return;
-    }
+    const union = nodes
+      .map(readFrameNodeRect)
+      .reduce<FrameNodeRect>(
+        (acc, rect) => ({
+          left: Math.min(acc.left, rect.left),
+          top: Math.min(acc.top, rect.top),
+          width: Math.max(acc.left + acc.width, rect.left + rect.width) - Math.min(acc.left, rect.left),
+          height: Math.max(acc.top + acc.height, rect.top + rect.height) - Math.min(acc.top, rect.top),
+        }),
+        readFrameNodeRect(nodes[0])
+      );
 
     const anchor = nodes[0];
     const mergedId = `merged-${Date.now()}`;
-    writeFrameNodeRect(anchor, toFrameNodeRect(mergeResult.value));
-    writeFrameNodeId(anchor, mergedId);
+    writeFrameNodeRect(anchor, union);
+    anchor.setAttribute('data-template-frame-group', mergedId);
+    anchor.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]')?.setAttribute(
+      'data-template-frame-group',
+      mergedId
+    );
 
     for (const node of nodes.slice(1)) {
       node.remove();
     }
 
-    setSelectedFrameGroupIds([mergedId]);
-    setFrameEditorNotice(null);
-    syncDraftPreviewHtmlRef();
-    syncFrameEditorSelectionState();
+      setSelectedFrameGroupIds([mergedId]);
+      syncDraftPreviewHtmlRef();
+      syncFrameEditorSelectionState();
   }, [getFrameEditorNodes, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncFrameEditorSelectionState]);
 
   const splitSelectedFrameGroup = React.useCallback(
@@ -4548,52 +2922,65 @@ export default function TemplateExtractPage() {
         return;
       }
 
+      const rect = readFrameNodeRect(node);
       const pageInner = node.closest<HTMLElement>('.page-inner');
-      const currentFrame = readFrameNodeDto(node);
-      const otherFrames = getFrameEditorNodes(pageInner)
-        .filter((candidate) => candidate !== node)
-        .map(readFrameNodeDto);
-      const candidatesResult = TemplateFrameEditGeometryService.listSplitCandidates({
-        frame: currentFrame,
-        siblings: otherFrames,
-        axis,
+      const otherNodes = getFrameEditorNodes(pageInner).filter((candidate) => candidate !== node);
+      const splitCandidates = otherNodes.flatMap((candidate) => {
+        const candidateRect = readFrameNodeRect(candidate);
+
+        if (axis === 'vertical' && frameRectsOverlapVertically(rect, candidateRect)) {
+          return [candidateRect.left, candidateRect.left + candidateRect.width];
+        }
+
+        if (axis === 'horizontal' && frameRectsOverlapHorizontally(rect, candidateRect)) {
+          return [candidateRect.top, candidateRect.top + candidateRect.height];
+        }
+
+        return [];
       });
 
-      if (!candidatesResult.ok || !candidatesResult.value?.length) {
-        setFrameEditorNotice(candidatesResult.warnings[0]?.message || '인접 경계선이 없어 분할할 수 없습니다.');
-        return;
-      }
+      const innerCandidates = splitCandidates.filter((value) =>
+        axis === 'vertical'
+          ? value > rect.left + 12 && value < rect.left + rect.width - 12
+          : value > rect.top + 12 && value < rect.top + rect.height - 12
+      );
+
+      const midpoint = axis === 'vertical' ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+      const splitAt =
+        innerCandidates.sort((left, right) => Math.abs(left - midpoint) - Math.abs(right - midpoint))[0] ??
+        midpoint;
 
       const firstId = `${selectedFrameGroupIds[0]}-a`;
       const secondId = `${selectedFrameGroupIds[0]}-b`;
-      const splitResult = TemplateFrameEditGeometryService.splitFrame({
-        frame: currentFrame,
-        candidate: candidatesResult.value[0],
-        firstFrameGroupId: firstId,
-        secondFrameGroupId: secondId,
-      });
-
-      if (!splitResult.ok || !splitResult.value) {
-        setFrameEditorNotice(splitResult.warnings[0]?.message || '선택한 프레임을 분할할 수 없습니다.');
-        return;
-      }
-
       const secondNode = node.cloneNode(true) as HTMLElement;
       const input = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
       const secondInput = secondNode.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
-      const [firstFrame, secondFrame] = splitResult.value;
 
-      writeFrameNodeRect(node, toFrameNodeRect(firstFrame.rect));
-      writeFrameNodeRect(secondNode, toFrameNodeRect(secondFrame.rect));
+      if (axis === 'vertical') {
+        writeFrameNodeRect(node, { ...rect, width: splitAt - rect.left });
+        writeFrameNodeRect(secondNode, {
+          left: splitAt,
+          top: rect.top,
+          width: rect.left + rect.width - splitAt,
+          height: rect.height,
+        });
+      } else {
+        writeFrameNodeRect(node, { ...rect, height: splitAt - rect.top });
+        writeFrameNodeRect(secondNode, {
+          left: rect.left,
+          top: splitAt,
+          width: rect.width,
+          height: rect.top + rect.height - splitAt,
+        });
+      }
 
-      writeFrameNodeId(node, firstId);
-      writeFrameNodeId(secondNode, secondId);
+      node.setAttribute('data-template-frame-group', firstId);
+      secondNode.setAttribute('data-template-frame-group', secondId);
       input?.setAttribute('data-template-frame-group', firstId);
       secondInput?.setAttribute('data-template-frame-group', secondId);
       node.after(secondNode);
 
       setSelectedFrameGroupIds([firstId, secondId]);
-      setFrameEditorNotice(null);
       syncDraftPreviewHtmlRef();
       syncFrameEditorSelectionState();
     },
@@ -4713,49 +3100,8 @@ export default function TemplateExtractPage() {
       }
 
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
-      const deleteButton = targetElement?.closest<HTMLElement>(V106_FRAME_DELETE_BUTTON_SELECTOR);
       const resizeHandle = targetElement?.closest<HTMLElement>(V106_FRAME_RESIZE_HANDLE_SELECTOR);
       const root = draftPreviewRef.current;
-
-      if (deleteButton) {
-        event.preventDefault();
-        const frameGroupId =
-          deleteButton.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)?.getAttribute('data-template-frame-group') ||
-          '';
-        deleteSelectedFrameGroups(frameGroupId ? [frameGroupId] : selectedFrameGroupIds);
-        return;
-      }
-
-      if (frameCreateMode && root) {
-        const pageInner = resolvePageInnerFromPoint(root, event.clientX, event.clientY);
-
-        if (pageInner) {
-          event.preventDefault();
-          const start = clientPointToPagePoint(pageInner, event.clientX, event.clientY);
-          const ghostNode = document.createElement('div');
-          ghostNode.className = FRAME_CREATE_GHOST_CLASS;
-          ghostNode.setAttribute('data-frame-editor-ui', 'true');
-          ghostNode.style.position = 'absolute';
-          ghostNode.style.pointerEvents = 'none';
-          ghostNode.style.zIndex = '35';
-          ghostNode.style.border = '2px dashed #2563eb';
-          ghostNode.style.background = 'rgba(37, 99, 235, .12)';
-          ghostNode.style.boxSizing = 'border-box';
-          writeFrameNodeRect(ghostNode, { left: start.x, top: start.y, width: 1, height: 1 });
-          (pageInner.querySelector<HTMLElement>('[data-v106-frame-editor-layer="true"]') || pageInner).appendChild(
-            ghostNode
-          );
-          frameCreateStateRef.current = {
-            pointerId: event.pointerId,
-            pageInner,
-            start,
-            lastRawRect: { left: start.x, top: start.y, width: 0, height: 0 },
-            ghostNode,
-          };
-          return;
-        }
-      }
-
       const frameNode = root ? resolveFrameNodeFromEvent(root, event.target, event) : null;
 
       if (!frameNode) {
@@ -4770,9 +3116,6 @@ export default function TemplateExtractPage() {
       if (!frameGroupId) {
         return;
       }
-
-      const frameValueKey = normalizeFrameFieldPath(frameNode.getAttribute('data-template-frame-value-key') || '');
-      setSelectedCandidateKey(frameValueKey ? candidateKeyByLabelKey.get(frameValueKey) || null : null);
 
       const isV106FrameNode = frameNode.matches(V106_FRAME_NODE_SELECTOR);
 
@@ -4796,7 +3139,6 @@ export default function TemplateExtractPage() {
           startY: event.clientY,
           direction,
           node: frameNode,
-          scale: readFramePreviewScale(frameNode.closest<HTMLElement>('.page-inner')),
           rect: readFrameNodeRect(frameNode),
         };
         return;
@@ -4859,12 +3201,11 @@ export default function TemplateExtractPage() {
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        scale: readFramePreviewScale(frameNode.closest<HTMLElement>('.page-inner')),
         anchorNode: frameNode,
         nodes: nodes.map((node) => ({ node, rect: readFrameNodeRect(node) })),
       };
     },
-    [deleteSelectedFrameGroups, frameCreateMode, getFrameEditorNodes, selectedFrameGroupIds]
+    [getFrameEditorNodes, selectedFrameGroupIds]
   );
 
   const selectReviewedField = (field: TemplateExtractReviewedFieldInput) => {
@@ -4873,25 +3214,6 @@ export default function TemplateExtractPage() {
     const root = draftPreviewRef.current;
 
     if (!root || !field.labelKey) {
-      return;
-    }
-
-    const normalizedLabelKey = normalizeFrameFieldPath(field.labelKey);
-    const matchingFrameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-      .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-      .filter(
-        (node) =>
-          normalizeFrameFieldPath(node.getAttribute('data-template-frame-value-key') || '') === normalizedLabelKey
-      );
-
-    if (matchingFrameNodes.length > 0) {
-      const matchingIds = matchingFrameNodes
-        .map((node) => node.getAttribute('data-template-frame-group') || '')
-        .filter(Boolean);
-      setSelectedFrameGroupIds(matchingIds);
-      window.requestAnimationFrame(() => {
-        matchingFrameNodes[0]?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-      });
       return;
     }
 
@@ -4908,51 +3230,9 @@ export default function TemplateExtractPage() {
       return;
     }
 
-    const matchedValueElements = findTemplateValueElements(root, field.labelKey);
-
-    for (const element of matchedValueElements) {
+    for (const element of findTemplateValueElements(root, field.labelKey)) {
       element.textContent = nextValue;
       markTemplateValueElementEdited(element);
-    }
-
-    const matchedFrameNodes =
-      matchedValueElements.length === 0
-        ? Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-        .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-        .filter(
-          (node) =>
-            normalizeFrameFieldPath(node.getAttribute('data-template-frame-value-key') || '') ===
-            normalizeFrameFieldPath(field.labelKey)
-        )
-        : [];
-
-    if (matchedFrameNodes.length > 0) {
-      setFrameExtractedTextState((previous) => {
-        const nextState = { ...previous };
-
-        matchedFrameNodes.forEach((node) => {
-          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
-
-          if (!extractedTextKey) {
-            return;
-          }
-
-          nextState[extractedTextKey] = formatFrameSourceTextForDisplay(nextValue, {
-            frameGroup: node.getAttribute('data-template-frame-group'),
-            valueKey: node.getAttribute('data-template-frame-value-key'),
-            colorGroup: node.getAttribute('data-template-frame-color-group'),
-          });
-        });
-
-        return nextState;
-      });
-      setFrameTextExtractionCompleted(true);
-      if (typeof window !== 'undefined') {
-        window.requestAnimationFrame(() => {
-          requestPreviewTextFit();
-        });
-      }
-      return;
     }
 
     syncDraftPreviewHtmlRef();
@@ -5127,10 +3407,10 @@ export default function TemplateExtractPage() {
   const unifiedProgress =
     unifiedProgressSource === 'visual'
       ? {
-          title: '교차 검증',
+          title: '유사도 측정',
           percent: visualSimilarityProgress.percent,
           phase: visualSimilarityProgress.phase,
-          stage: visualSimilarityProgress.stage || '교차 검증 중',
+          stage: visualSimilarityProgress.stage || '시각 유사도 측정 중',
           detail:
             visualSimilarityProgress.detail ||
             '원본 PDF와 output HTML을 같은 기준으로 비교하고 있습니다.',
@@ -5148,31 +3428,17 @@ export default function TemplateExtractPage() {
             percent: 0,
             phase: 'idle',
             stage: '작업 대기 중입니다.',
-            detail: '프레임 그룹 생성, 전체 추출, 교차 검증 진행률이 여기에 표시됩니다.',
+            detail: '프레임 그룹 생성, 전체 추출, 유사도 측정 진행률이 여기에 표시됩니다.',
           };
   const unifiedProgressFailed = unifiedProgress.phase === 'failed';
   const unifiedProgressCompleted = unifiedProgress.phase === 'completed';
   const unifiedProgressActive = unifiedProgressSource !== 'idle' && !unifiedProgressFailed && !unifiedProgressCompleted;
+  const frameEditorActive =
+    draftDetail?.draft.generatedDraftHtml?.includes('data-template-extraction-stage="frames"') &&
+    draftDetail?.draft.generatedDraftHtml?.includes('data-template-frame-group-version="v1.06"');
   const availableFrameGroupIds = getFrameEditorNodes()
     .map((node) => node.getAttribute('data-template-frame-group') || '')
     .filter(Boolean);
-  const crossValidationPageCount = Math.max(
-    crossValidationPreview?.pdfPageDataUrls.length || 0,
-    crossValidationPreview?.replicaPageDataUrls.length || 0,
-    visualSimilarityReport?.pageCount || 0
-  );
-  const activeCrossValidationPageIndex =
-    crossValidationPageCount > 0 ? Math.min(crossValidationPageIndex, crossValidationPageCount - 1) : 0;
-  const activeCrossValidationPdfPageUrl =
-    crossValidationPreview?.pdfPageDataUrls[activeCrossValidationPageIndex] || '';
-  const activeCrossValidationReplicaPageUrl =
-    crossValidationPreview?.replicaPageDataUrls[activeCrossValidationPageIndex] || '';
-  const activeCrossValidationPageReport =
-    visualSimilarityReport?.pageReports[activeCrossValidationPageIndex] || null;
-  const crossValidationAspectRatio =
-    activeCrossValidationPageReport && activeCrossValidationPageReport.width > 0 && activeCrossValidationPageReport.height > 0
-      ? `${activeCrossValidationPageReport.width} / ${activeCrossValidationPageReport.height}`
-      : '210 / 297';
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
@@ -5215,30 +3481,6 @@ export default function TemplateExtractPage() {
           padding: 0 !important;
           transform-origin: top left;
           transform: scale(var(--template-preview-scale, 1));
-        }
-        .template-extract-draft-preview[data-cross-validation-reference-visible="true"] {
-          isolation: isolate;
-          background: transparent !important;
-        }
-        .template-extract-draft-preview[data-cross-validation-reference-visible="true"]::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          z-index: 0;
-          pointer-events: none;
-          background-image: var(--cross-validation-reference-image);
-          background-repeat: no-repeat;
-          background-position: center center;
-          background-size: contain;
-          opacity: .92;
-        }
-        .template-extract-draft-preview[data-cross-validation-reference-visible="true"] > * {
-          position: relative;
-          z-index: 1;
-        }
-        .template-extract-draft-preview[data-cross-validation-reference-visible="true"] .page,
-        .template-extract-draft-preview[data-cross-validation-reference-visible="true"] .page-inner {
-          background: transparent !important;
         }
         .template-extract-draft-preview [data-v106-frame-node="true"] {
           cursor: pointer;
@@ -5295,31 +3537,6 @@ export default function TemplateExtractPage() {
           box-shadow: 0 1px 2px rgba(15, 23, 42, .24);
           white-space: nowrap;
         }
-        .template-extract-draft-preview .${FRAME_DELETE_BUTTON_CLASS} {
-          position: absolute;
-          right: 4px;
-          bottom: 4px;
-          z-index: 33;
-          height: 24px;
-          min-width: 24px;
-          border-radius: 6px;
-          border: 1px solid rgba(185, 28, 28, .28);
-          background: rgba(254, 242, 242, .98);
-          color: #991b1b;
-          font-size: 10px;
-          line-height: 1;
-          font-weight: 700;
-          cursor: pointer;
-          pointer-events: auto;
-          box-shadow: 0 1px 2px rgba(15, 23, 42, .2);
-        }
-        .template-extract-draft-preview .${FRAME_DELETE_BUTTON_CLASS}:hover {
-          background: #fee2e2;
-          border-color: rgba(185, 28, 28, .45);
-        }
-        .template-extract-draft-preview .${FRAME_CREATE_GHOST_CLASS} {
-          position: absolute;
-        }
       `}</style>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="space-y-2">
@@ -5330,6 +3547,13 @@ export default function TemplateExtractPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 md:justify-end">
+          <Button
+            variant="outline"
+            onClick={handleMeasureVisualSimilarity}
+            disabled={loading || !draftDetail || !selectedFile || visualSimilarityMeasuring}
+          >
+            {visualSimilarityMeasuring ? `유사도 ${visualSimilarityProgress.percent}%` : '유사도 측정'}
+          </Button>
           <Button
             variant="outline"
             onClick={() => void handleCreateDraft('frames')}
@@ -5349,44 +3573,6 @@ export default function TemplateExtractPage() {
               </option>
             ))}
           </select>
-          {isV109FrameGroupVersion(frameGroupVersion) ? (
-            <Input
-              value={frameProfileName}
-              onChange={(event) => setFrameProfileName(event.target.value)}
-              disabled={loading || visualSimilarityMeasuring}
-              placeholder={`${String(frameGroupVersion || 'v1.10')} 저장명`}
-              className="h-9 w-44"
-            />
-          ) : null}
-          <Button
-            variant="outline"
-            onClick={handleExtractFrameText}
-            disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
-            title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
-          >
-            텍스트 추출
-          </Button>
-          <select
-            value={frameTextExtractionVersion}
-            onChange={(event) => setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)}
-            disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
-            title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
-            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            {FRAME_TEXT_EXTRACTION_VERSION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <Button
-            variant="outline"
-            onClick={handleMeasureVisualSimilarity}
-            disabled={loading || visualSimilarityMeasuring || !crossValidationReady}
-            title={crossValidationReady ? undefined : '텍스트 추출 완료 이후에 활성화됩니다.'}
-          >
-            {visualSimilarityMeasuring ? `교차 검증 ${visualSimilarityProgress.percent}%` : '교차 검증'}
-          </Button>
           <Button onClick={() => void handleCreateDraft('full')} disabled={loading || visualSimilarityMeasuring}>
             전체 추출
           </Button>
@@ -5434,22 +3620,6 @@ export default function TemplateExtractPage() {
                 </Button>
                 {activePreviewPaneMode === 'draft' ? (
                   <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCrossValidationReferenceVisible((previous) => !previous)}
-                      disabled={!crossValidationPreview || !activeCrossValidationPdfPageUrl}
-                      title={
-                        crossValidationPreview && activeCrossValidationPdfPageUrl
-                          ? crossValidationReferenceVisible
-                            ? '문서 미리보기의 원본 문서 배경을 숨깁니다.'
-                            : '문서 미리보기의 원본 문서 배경을 표시합니다.'
-                          : '교차 검증 실행 이후에 활성화됩니다.'
-                      }
-                      aria-label={crossValidationReferenceVisible ? '원본 문서 배경 숨기기' : '원본 문서 배경 표시'}
-                    >
-                      {crossValidationReferenceVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
                     <label className="ml-2 text-xs font-medium text-slate-500">편집 권한</label>
                     <select
                       value={draftPreviewEditRole}
@@ -5483,18 +3653,10 @@ export default function TemplateExtractPage() {
                 data-template-extraction-stage={flattenedFramePreview?.extractionStage || undefined}
                 data-template-frame-group-version={flattenedFramePreview?.frameGroupVersion || undefined}
                 data-template-clone-id={flattenedFramePreview?.cloneId || undefined}
-                data-cross-validation-reference-visible={crossValidationReferenceVisible && activeCrossValidationPdfPageUrl ? 'true' : undefined}
                 onFocusCapture={handleDraftPreviewSelect}
                 onInput={(event) => syncPreviewEditTarget(event.target)}
                 onPasteCapture={handleDraftPreviewPaste}
-                style={
-                  crossValidationReferenceVisible && activeCrossValidationPdfPageUrl
-                    ? ({
-                        ['--cross-validation-reference-image' as string]: `url("${activeCrossValidationPdfPageUrl}")`,
-                      } as React.CSSProperties)
-                    : undefined
-                }
-                dangerouslySetInnerHTML={{ __html: renderedDraftHtml }}
+                dangerouslySetInnerHTML={{ __html: previewDraftHtml }}
               />
             ) : (
               <CardContent className="template-extract-preview-surface flex items-center justify-center !p-0 text-sm text-slate-500">
@@ -5502,168 +3664,6 @@ export default function TemplateExtractPage() {
               </CardContent>
             )}
           </Card>
-
-          {crossValidationReady || crossValidationPreview ? (
-            <Card className="border-slate-200">
-              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-1">
-                  <CardTitle>교차 검증</CardTitle>
-                  <CardDescription>
-                    원본 PDF 렌더와 현재 텍스트 추출 결과를 병치하거나 겹쳐서 점검합니다.
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant={crossValidationViewMode === 'side_by_side' ? 'default' : 'outline'}
-                    onClick={() => setCrossValidationViewMode('side_by_side')}
-                    disabled={!crossValidationPreview}
-                  >
-                    병치
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={crossValidationViewMode === 'overlay' ? 'default' : 'outline'}
-                    onClick={() => setCrossValidationViewMode('overlay')}
-                    disabled={!crossValidationPreview}
-                  >
-                    겹쳐보기
-                  </Button>
-                  <select
-                    value={String(activeCrossValidationPageIndex)}
-                    onChange={(event) => setCrossValidationPageIndex(Number.parseInt(event.target.value, 10) || 0)}
-                    disabled={!crossValidationPreview || crossValidationPageCount <= 1}
-                    className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    {Array.from({ length: crossValidationPageCount }, (_, index) => (
-                      <option key={index} value={index}>
-                        페이지 {index + 1}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {crossValidationPreview ? (
-                  <>
-                    {activeCrossValidationPageReport ? (
-                      <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 md:grid-cols-4">
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">페이지</p>
-                          <p className="font-semibold text-slate-950">{activeCrossValidationPageReport.pageNumber}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">프레임 일치율</p>
-                          <p className="font-semibold text-slate-950">
-                            {formatPercent(activeCrossValidationPageReport.frameLayerReport?.overlapRatio ?? activeCrossValidationPageReport.overlapRatio)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">텍스트 일치율</p>
-                          <p className="font-semibold text-slate-950">
-                            {formatPercent(activeCrossValidationPageReport.textLayerReport?.overlapRatio ?? 0)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">오염 비율</p>
-                          <p className="font-semibold text-slate-950">
-                            {formatPercent(activeCrossValidationPageReport.mismatchRatio)}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {crossValidationViewMode === 'overlay' ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-3">
-                          <label className="text-sm font-medium text-slate-800">겹침 강도</label>
-                          <input
-                            type="range"
-                            min={15}
-                            max={100}
-                            step={1}
-                            value={crossValidationOverlayOpacity}
-                            onChange={(event) => setCrossValidationOverlayOpacity(Number.parseInt(event.target.value, 10) || 55)}
-                            className="w-48"
-                          />
-                          <span className="text-xs text-slate-500">{crossValidationOverlayOpacity}%</span>
-                        </div>
-                        <div
-                          className="relative overflow-hidden rounded-lg border border-slate-200 bg-white"
-                          style={{ aspectRatio: crossValidationAspectRatio }}
-                        >
-                          {activeCrossValidationPdfPageUrl ? (
-                            <img
-                              src={activeCrossValidationPdfPageUrl}
-                              alt={`원본 PDF 페이지 ${activeCrossValidationPageIndex + 1}`}
-                              className="absolute inset-0 h-full w-full object-contain"
-                            />
-                          ) : null}
-                          {activeCrossValidationReplicaPageUrl ? (
-                            <img
-                              src={activeCrossValidationReplicaPageUrl}
-                              alt={`추출 결과 페이지 ${activeCrossValidationPageIndex + 1}`}
-                              className="absolute inset-0 h-full w-full object-contain"
-                              style={{ opacity: crossValidationOverlayOpacity / 100 }}
-                            />
-                          ) : null}
-                        </div>
-                        <div className="flex flex-wrap gap-3 text-xs text-slate-500">
-                          <span>배경: 원본 PDF</span>
-                          <span>상단: 현재 추출 결과</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <div className="space-y-2">
-                          <p className="text-sm font-medium text-slate-800">원본 PDF</p>
-                          <div
-                            className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                            style={{ aspectRatio: crossValidationAspectRatio }}
-                          >
-                            {activeCrossValidationPdfPageUrl ? (
-                              <img
-                                src={activeCrossValidationPdfPageUrl}
-                                alt={`원본 PDF 페이지 ${activeCrossValidationPageIndex + 1}`}
-                                className="h-full w-full object-contain"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                                원본 PDF 페이지가 없습니다.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-sm font-medium text-slate-800">현재 추출 결과</p>
-                          <div
-                            className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                            style={{ aspectRatio: crossValidationAspectRatio }}
-                          >
-                            {activeCrossValidationReplicaPageUrl ? (
-                              <img
-                                src={activeCrossValidationReplicaPageUrl}
-                                alt={`추출 결과 페이지 ${activeCrossValidationPageIndex + 1}`}
-                                className="h-full w-full object-contain"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                                추출 결과 페이지가 없습니다.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-                    텍스트 추출이 끝난 뒤 `교차 검증`을 실행하면, 원본 PDF와 현재 출력 결과를 이 영역에서 병치하거나 겹쳐서 확인할 수 있습니다.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : null}
 
         </div>
 
@@ -5680,16 +3680,7 @@ export default function TemplateExtractPage() {
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                   <p>선택 수: {selectedFrameGroupIds.length}</p>
                   <p className="break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</p>
-                  {isV109FrameGroupVersion(currentFrameGroupVersionTag) ? (
-                    <p className="mt-1 break-all text-xs text-slate-500">현재 프로필: {currentFrameGroupVersionTag}</p>
-                  ) : null}
                 </div>
-
-                {frameEditorNotice ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                    {frameEditorNotice}
-                  </div>
-                ) : null}
 
                 {selectedFrameGroupIds.length > 1 && !frameMergePromptDismissed ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
@@ -5729,19 +3720,6 @@ export default function TemplateExtractPage() {
                     <option value="group">group</option>
                     <option value="key">key</option>
                     <option value="value">value</option>
-                    <option value="key_value">key_value</option>
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">Outline Style</label>
-                  <select
-                    value={frameEditorOutlineStyle}
-                    onChange={(event) => setFrameEditorOutlineStyle(event.target.value as FrameOutlineStyle)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="solid">solid</option>
-                    <option value="dashed">dashed</option>
                   </select>
                 </div>
 
@@ -5758,28 +3736,6 @@ export default function TemplateExtractPage() {
                       <option key={frameGroupId} value={frameGroupId} />
                     ))}
                   </datalist>
-                </div>
-
-                <div className="grid gap-2 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">Chain Key</label>
-                    <Input
-                      value={frameEditorChainKey}
-                      onChange={(event) => setFrameEditorChainKey(event.target.value)}
-                      placeholder="chain key"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">Chain Depth</label>
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      value={frameEditorChainDepth}
-                      onChange={(event) => setFrameEditorChainDepth(event.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
                 </div>
 
                 <div className="grid gap-2 md:grid-cols-2">
@@ -5822,38 +3778,11 @@ export default function TemplateExtractPage() {
                       applyFrameEditorMetadata(nodes, {
                         valueKey: frameEditorValueKey,
                         role: frameEditorRole,
-                        outlineStyle: frameEditorOutlineStyle,
                         parentGroup: frameEditorParentGroup,
-                        chainKey: frameEditorChainKey,
-                        chainDepth: frameEditorChainDepth,
                       });
                     }}
                   >
                     메타데이터 적용
-                  </Button>
-                  <Button
-                    variant={frameCreateMode ? 'default' : 'outline'}
-                    onClick={() => {
-                      setFrameCreateMode((previous) => !previous);
-                      setFrameEditorNotice(null);
-                    }}
-                  >
-                    생성 모드
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={!isV109FrameGroupVersion(currentFrameGroupVersionTag)}
-                    onClick={saveCurrentFrameProfile}
-                  >
-                    프로필 저장
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={selectedFrameGroupIds.length === 0}
-                    onClick={() => deleteSelectedFrameGroups()}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    선택 삭제
                   </Button>
                   <Button
                     variant="outline"

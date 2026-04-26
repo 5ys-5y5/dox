@@ -164,7 +164,7 @@ export const TemplateExtractVersionService = {
     bytes: Uint8Array,
     version: TemplateExtractEngineVersion,
     extractionStage: TemplateExtractExtractionStage = 'full',
-    frameGroupVersion: TemplateExtractFrameGroupVersion = 'v1.06'
+    frameGroupVersion: TemplateExtractFrameGroupVersion = 'v1.10-default'
   ): Promise<TemplateExtractResolvedSource> {
     if (!isPdfUpload(fileName, mimeType)) {
       return TemplateExtractFileService.resolveUploadSource(fileName, mimeType, bytes);
