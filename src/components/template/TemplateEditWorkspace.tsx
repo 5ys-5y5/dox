@@ -63,7 +63,13 @@ type ResizeState = {
   direction: TemplateFrameResizeDirection;
   node: HTMLElement;
   rect: FrameNodeRect;
+  widthInstructions?: FrameWidthResizeInstruction[];
 };
+
+type FrameWidthResizeInstruction =
+  | { kind: 'boundary'; shell: HTMLElement; boundaryIndex: number }
+  | { kind: 'outer-left'; shell: HTMLElement }
+  | { kind: 'outer-right'; shell: HTMLElement };
 
 type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
@@ -73,7 +79,7 @@ const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
 const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
-const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['e', 's', 'se'];
+const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 
 const defaultSelectionStyleDraft: SelectionStyleDraft = {
   width: '',
@@ -142,6 +148,11 @@ const presetStylePatches: Record<
   },
 };
 
+const FRAME_RESIZE_TOLERANCE_PX = 2;
+const MIN_FRAME_SIZE_PX = 12;
+const MIN_TABLE_COLUMN_WIDTH_PX = 1;
+const MIN_TABLE_ROW_HEIGHT_PX = 12;
+
 const parseFramePx = (value: string | null | undefined) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
   return Number.isFinite(parsed) ? parsed : 0;
@@ -154,133 +165,710 @@ const resolveFrameLayoutTable = (node: HTMLElement) => {
   return shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || node.closest<HTMLTableElement>('table');
 };
 
-const distributeFrameTableColWidths = (table: HTMLTableElement, nextWidth: number) => {
-  const cols = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
-
-  if (!cols.length) {
-    return;
-  }
-
-  const currentWidths = cols.map((col) => {
-    const computedWidth = parseFramePx(getComputedStyle(col).width);
-    return computedWidth > 0 ? computedWidth : 1;
-  });
-  const totalWidth = currentWidths.reduce((sum, width) => sum + width, 0) || cols.length;
-  let assignedWidth = 0;
-
-  cols.forEach((col, index) => {
-    const ratio = currentWidths[index] / totalWidth;
-    const nextColWidth =
-      index === cols.length - 1
-        ? Math.max(1, Math.round(nextWidth - assignedWidth))
-        : Math.max(1, Math.round(nextWidth * ratio));
-    assignedWidth += nextColWidth;
-    col.style.width = `${nextColWidth}px`;
-    col.setAttribute('width', String(nextColWidth));
-  });
-};
-
-const applyFrameBoxDimensions = (
-  node: HTMLElement,
-  patch: {
-    left?: number;
-    top?: number;
-    width?: number;
-    height?: number;
-  }
-) => {
-  const shell = resolveFrameLayoutShell(node);
-  const table = resolveFrameLayoutTable(node);
-  const row = node.closest<HTMLTableRowElement>('tr') || table?.querySelector<HTMLTableRowElement>('tr') || null;
-  const cell = node.matches('td') ? node : table?.querySelector<HTMLElement>('td.v202-frame-group') || null;
-  const contentTarget = resolveFrameContentTarget(node);
-
-  if (typeof patch.left === 'number' && Number.isFinite(patch.left)) {
-    shell.style.left = `${Math.round(patch.left)}px`;
-  }
-
-  if (typeof patch.top === 'number' && Number.isFinite(patch.top)) {
-    shell.style.top = `${Math.round(patch.top)}px`;
-  }
-
-  if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
-    const nextWidth = Math.max(1, Math.round(patch.width));
-    shell.style.width = `${nextWidth}px`;
-
-    if (table) {
-      table.style.width = `${nextWidth}px`;
-      distributeFrameTableColWidths(table, nextWidth);
-    } else if (shell === node) {
-      node.style.width = `${nextWidth}px`;
-    }
-
-    if (cell && cell !== shell) {
-      cell.style.width = '100%';
-      cell.setAttribute('width', String(nextWidth));
-    }
-
-    if (contentTarget !== shell) {
-      contentTarget.style.width = '100%';
-    }
-  }
-
-  if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
-    const nextHeight = Math.max(1, Math.round(patch.height));
-    shell.style.height = `${nextHeight}px`;
-
-    if (table) {
-      table.style.height = `${nextHeight}px`;
-    } else if (shell === node) {
-      node.style.height = `${nextHeight}px`;
-    }
-
-    if (row) {
-      row.style.height = `${nextHeight}px`;
-    }
-
-    if (cell && cell !== shell) {
-      cell.style.height = '100%';
-    }
-
-    if (contentTarget !== shell) {
-      contentTarget.style.height = '100%';
-    }
-  }
-};
-
-const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
-  const layoutNode = resolveFrameLayoutShell(node);
-  const pageInner = layoutNode.closest<HTMLElement>('.page-inner');
-  const pageRect = pageInner?.getBoundingClientRect() || null;
-  const nodeRect = layoutNode.getBoundingClientRect();
-  const computedStyle = getComputedStyle(layoutNode);
-  const hasInlineLeft = layoutNode.style.left.trim() !== '';
-  const hasInlineTop = layoutNode.style.top.trim() !== '';
-  const hasInlineWidth = layoutNode.style.width.trim() !== '';
-  const hasInlineHeight = layoutNode.style.height.trim() !== '';
+const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | null): FrameNodeRect => {
+  const resolvedPageInner = pageInner || element.closest<HTMLElement>('.page-inner');
+  const pageRect = resolvedPageInner?.getBoundingClientRect() || null;
+  const elementRect = element.getBoundingClientRect();
+  const computedStyle = getComputedStyle(element);
+  const hasInlineLeft = element.style.left.trim() !== '';
+  const hasInlineTop = element.style.top.trim() !== '';
+  const hasInlineWidth = element.style.width.trim() !== '';
+  const hasInlineHeight = element.style.height.trim() !== '';
 
   return {
-    left: hasInlineLeft ? parseFramePx(layoutNode.style.left) : Math.max(0, nodeRect.left - (pageRect?.left || 0)),
-    top: hasInlineTop ? parseFramePx(layoutNode.style.top) : Math.max(0, nodeRect.top - (pageRect?.top || 0)),
-    width: Math.max(
-      1,
-      hasInlineWidth ? parseFramePx(layoutNode.style.width) : parseFramePx(computedStyle.width) || nodeRect.width
-    ),
+    left: hasInlineLeft ? parseFramePx(element.style.left) : Math.max(0, elementRect.left - (pageRect?.left || 0)),
+    top: hasInlineTop ? parseFramePx(element.style.top) : Math.max(0, elementRect.top - (pageRect?.top || 0)),
+    width: Math.max(1, hasInlineWidth ? parseFramePx(element.style.width) : parseFramePx(computedStyle.width) || elementRect.width),
     height: Math.max(
       1,
-      hasInlineHeight ? parseFramePx(layoutNode.style.height) : parseFramePx(computedStyle.height) || nodeRect.height
+      hasInlineHeight ? parseFramePx(element.style.height) : parseFramePx(computedStyle.height) || elementRect.height
     ),
   };
 };
 
+const readFrameMoveRect = (node: HTMLElement): FrameNodeRect => readFrameElementRect(resolveFrameLayoutShell(node));
+
+const readTableColWidths = (table: HTMLTableElement | null) => {
+  if (!table) {
+    return [];
+  }
+
+  return Array.from(table.querySelectorAll<HTMLTableColElement>('col')).map((col) => {
+    const computedWidth = parseFramePx(getComputedStyle(col).width);
+    return computedWidth > 0 ? computedWidth : MIN_TABLE_COLUMN_WIDTH_PX;
+  });
+};
+
+const readTableRowHeights = (table: HTMLTableElement | null) => {
+  if (!table) {
+    return [];
+  }
+
+  return Array.from(table.querySelectorAll<HTMLTableRowElement>('tr')).map((row) => {
+    const computedHeight = parseFramePx(getComputedStyle(row).height) || row.getBoundingClientRect().height;
+    return computedHeight > 0 ? computedHeight : MIN_TABLE_ROW_HEIGHT_PX;
+  });
+};
+
+const buildBoundaries = (sizes: number[]) => {
+  const boundaries = [0];
+  let cursor = 0;
+  sizes.forEach((size) => {
+    cursor += size;
+    boundaries.push(cursor);
+  });
+  return boundaries;
+};
+
+const findClosestBoundaryIndex = (boundaries: number[], target: number) => {
+  let bestIndex = 0;
+  let bestDiff = Number.POSITIVE_INFINITY;
+
+  boundaries.forEach((boundary, index) => {
+    const diff = Math.abs(boundary - target);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIndex = index;
+    }
+  });
+
+  return bestIndex;
+};
+
+const setTableColWidths = (table: HTMLTableElement, colWidths: number[]) => {
+  const cols = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+  cols.forEach((col, index) => {
+    const nextWidth = Math.max(MIN_TABLE_COLUMN_WIDTH_PX, Math.round(colWidths[index] || MIN_TABLE_COLUMN_WIDTH_PX));
+    col.style.width = `${nextWidth}px`;
+    col.setAttribute('width', String(nextWidth));
+  });
+};
+
+const setTableRowHeights = (table: HTMLTableElement, rowHeights: number[]) => {
+  const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tr'));
+  rows.forEach((row, index) => {
+    const nextHeight = Math.max(MIN_TABLE_ROW_HEIGHT_PX, Math.round(rowHeights[index] || MIN_TABLE_ROW_HEIGHT_PX));
+    row.style.height = `${nextHeight}px`;
+  });
+};
+
+const syncShellSizeFromTable = (
+  shell: HTMLElement,
+  table: HTMLTableElement | null,
+  colWidths: number[],
+  rowHeights: number[]
+) => {
+  const totalWidth =
+    colWidths.length > 0 ? colWidths.reduce((sum, width) => sum + Math.max(MIN_TABLE_COLUMN_WIDTH_PX, width), 0) : 0;
+  const totalHeight =
+    rowHeights.length > 0 ? rowHeights.reduce((sum, height) => sum + Math.max(MIN_TABLE_ROW_HEIGHT_PX, height), 0) : 0;
+
+  if (totalWidth > 0) {
+    shell.style.width = `${Math.round(totalWidth)}px`;
+  }
+
+  if (totalHeight > 0) {
+    shell.style.height = `${Math.round(totalHeight)}px`;
+  }
+
+  if (table) {
+    if (totalWidth > 0) {
+      table.style.width = `${Math.round(totalWidth)}px`;
+    }
+
+    if (totalHeight > 0) {
+      table.style.height = `${Math.round(totalHeight)}px`;
+    }
+  }
+};
+
+const buildFrameResizeContext = (node: HTMLElement) => {
+  const shell = resolveFrameLayoutShell(node);
+  const table = resolveFrameLayoutTable(node);
+  const pageInner = shell.closest<HTMLElement>('.page-inner');
+  const cell = node.matches('td')
+    ? node
+    : table?.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${getFrameGroupId(node)}"]`) ||
+      table?.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) ||
+      node;
+  const frameCellCount = table?.querySelectorAll(RAW_FRAME_NODE_SELECTOR).length || 1;
+  const colWidths = readTableColWidths(table);
+  const rowHeights = readTableRowHeights(table);
+  const singleCellBand = frameCellCount <= 1 && colWidths.length <= 1 && rowHeights.length <= 1;
+  const shellRect = readFrameElementRect(shell, pageInner);
+  const cellRect = readFrameElementRect(cell, pageInner);
+  const tableRect = table?.getBoundingClientRect() || shell.getBoundingClientRect();
+  const borderLeft = table ? parseFramePx(getComputedStyle(table).borderLeftWidth) : 0;
+  const borderTop = table ? parseFramePx(getComputedStyle(table).borderTopWidth) : 0;
+  const relativeLeft = cell.getBoundingClientRect().left - tableRect.left - borderLeft;
+  const relativeTop = cell.getBoundingClientRect().top - tableRect.top - borderTop;
+  const colBoundaries = buildBoundaries(colWidths);
+  const rowBoundaries = buildBoundaries(rowHeights);
+  const domColSpan = cell instanceof HTMLTableCellElement ? Math.max(1, cell.colSpan) : 1;
+  const domRowSpan = cell instanceof HTMLTableCellElement ? Math.max(1, cell.rowSpan) : 1;
+  const startColIndex = findClosestBoundaryIndex(colBoundaries, relativeLeft);
+  const startRowIndex = findClosestBoundaryIndex(rowBoundaries, relativeTop);
+  const endColIndex = Math.max(
+    startColIndex + 1,
+    Math.min(colBoundaries.length - 1, startColIndex + domColSpan, findClosestBoundaryIndex(colBoundaries, relativeLeft + cellRect.width))
+  );
+  const endRowIndex = Math.max(
+    startRowIndex + 1,
+    Math.min(rowBoundaries.length - 1, startRowIndex + domRowSpan, findClosestBoundaryIndex(rowBoundaries, relativeTop + cellRect.height))
+  );
+
+  return {
+    pageInner,
+    shell,
+    table,
+    cell,
+    shellRect,
+    cellRect,
+    colWidths,
+    rowHeights,
+    colBoundaries,
+    rowBoundaries,
+    startColIndex,
+    endColIndex,
+    startRowIndex,
+    endRowIndex,
+    singleCellBand,
+  };
+};
+
+const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
+  const context = buildFrameResizeContext(node);
+  return context.singleCellBand ? context.shellRect : context.cellRect;
+};
+
+const ensurePageInnerBaseMinHeight = (pageInner: HTMLElement) => {
+  if (!pageInner.dataset.templateBaseMinHeight) {
+    pageInner.dataset.templateBaseMinHeight = String(
+      parseFramePx(pageInner.style.minHeight || getComputedStyle(pageInner).minHeight || '0')
+    );
+  }
+
+  return Math.max(MIN_FRAME_SIZE_PX, Number.parseFloat(pageInner.dataset.templateBaseMinHeight || '0') || 0);
+};
+
+const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
+  const baseMinHeight = ensurePageInnerBaseMinHeight(pageInner);
+  const shells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'));
+  const maxBottom = shells.reduce((maxBottomValue, shell) => {
+    const rect = readFrameElementRect(shell, pageInner);
+    return Math.max(maxBottomValue, rect.top + rect.height);
+  }, baseMinHeight);
+  pageInner.style.minHeight = `${Math.max(baseMinHeight, Math.ceil(maxBottom))}px`;
+};
+
+const adjustShrinkableSizes = (
+  sizes: number[],
+  indexes: number[],
+  amount: number,
+  minSize: number
+) => {
+  const nextSizes = [...sizes];
+  let remaining = Math.max(0, amount);
+
+  indexes.forEach((index) => {
+    if (remaining <= 0 || index < 0 || index >= nextSizes.length) {
+      return;
+    }
+
+    const shrinkable = Math.max(0, nextSizes[index] - minSize);
+    const consumed = Math.min(remaining, shrinkable);
+    nextSizes[index] -= consumed;
+    remaining -= consumed;
+  });
+
+  return {
+    sizes: nextSizes,
+    applied: Math.max(0, amount - remaining),
+  };
+};
+
+const applyOuterRightWidthDelta = (shell: HTMLElement, delta: number) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+  const colWidths = readTableColWidths(table);
+  const rowHeights = readTableRowHeights(table);
+
+  if (!table || colWidths.length === 0) {
+    const shellRect = readFrameElementRect(shell);
+    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, Math.round(shellRect.width + delta));
+    shell.style.width = `${nextWidth}px`;
+    return nextWidth - shellRect.width;
+  }
+
+  const nextColWidths = [...colWidths];
+
+  if (delta >= 0) {
+    nextColWidths[nextColWidths.length - 1] += delta;
+    setTableColWidths(table, nextColWidths);
+    syncShellSizeFromTable(shell, table, nextColWidths, rowHeights);
+    return delta;
+  }
+
+  const shrinkResult = adjustShrinkableSizes(
+    nextColWidths,
+    Array.from({ length: nextColWidths.length }, (_, index) => nextColWidths.length - index - 1),
+    Math.abs(delta),
+    MIN_TABLE_COLUMN_WIDTH_PX
+  );
+  setTableColWidths(table, shrinkResult.sizes);
+  syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
+  return -shrinkResult.applied;
+};
+
+const applyOuterLeftWidthDelta = (shell: HTMLElement, delta: number) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+  const colWidths = readTableColWidths(table);
+  const rowHeights = readTableRowHeights(table);
+  const currentLeft = parseFramePx(shell.style.left);
+
+  if (!table || colWidths.length === 0) {
+    const shellRect = readFrameElementRect(shell);
+    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, Math.round(shellRect.width - delta));
+    const appliedDelta = shellRect.width - nextWidth;
+    shell.style.left = `${Math.round(currentLeft + appliedDelta)}px`;
+    shell.style.width = `${Math.round(nextWidth)}px`;
+    return appliedDelta;
+  }
+
+  if (delta >= 0) {
+    const shrinkResult = adjustShrinkableSizes(
+      colWidths,
+      Array.from({ length: colWidths.length }, (_, index) => index),
+      delta,
+      MIN_TABLE_COLUMN_WIDTH_PX
+    );
+    shell.style.left = `${Math.round(currentLeft + shrinkResult.applied)}px`;
+    setTableColWidths(table, shrinkResult.sizes);
+    syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
+    return shrinkResult.applied;
+  }
+
+  const nextColWidths = [...colWidths];
+  nextColWidths[0] += Math.abs(delta);
+  shell.style.left = `${Math.round(currentLeft + delta)}px`;
+  setTableColWidths(table, nextColWidths);
+  syncShellSizeFromTable(shell, table, nextColWidths, rowHeights);
+  return delta;
+};
+
+const applyTableBoundaryWidthDelta = (shell: HTMLElement, boundaryIndex: number, delta: number) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+  const colWidths = readTableColWidths(table);
+  const rowHeights = readTableRowHeights(table);
+
+  if (!table || colWidths.length === 0 || boundaryIndex <= 0 || boundaryIndex >= colWidths.length) {
+    return 0;
+  }
+
+  const nextColWidths = [...colWidths];
+
+  if (delta >= 0) {
+    nextColWidths[boundaryIndex - 1] += delta;
+    const shrinkResult = adjustShrinkableSizes(
+      nextColWidths,
+      Array.from({ length: nextColWidths.length - boundaryIndex }, (_, index) => boundaryIndex + index),
+      delta,
+      MIN_TABLE_COLUMN_WIDTH_PX
+    );
+    if (shrinkResult.applied < delta) {
+      nextColWidths[boundaryIndex - 1] -= delta - shrinkResult.applied;
+    }
+    setTableColWidths(table, shrinkResult.sizes);
+    syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
+    return shrinkResult.applied;
+  }
+
+  const shrinkResult = adjustShrinkableSizes(
+    nextColWidths,
+    Array.from({ length: boundaryIndex }, (_, index) => boundaryIndex - index - 1),
+    Math.abs(delta),
+    MIN_TABLE_COLUMN_WIDTH_PX
+  );
+  if (boundaryIndex < nextColWidths.length) {
+    shrinkResult.sizes[boundaryIndex] += shrinkResult.applied;
+  }
+  setTableColWidths(table, shrinkResult.sizes);
+  syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
+  return -shrinkResult.applied;
+};
+
+const getWidthDeltaCapacity = (shell: HTMLElement, mode: 'left' | 'right' | 'boundary', boundaryIndex = 0) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+  const colWidths = readTableColWidths(table);
+  const shrinkable = (indexes: number[]) =>
+    indexes.reduce((sum, index) => sum + Math.max(0, (colWidths[index] || 0) - MIN_TABLE_COLUMN_WIDTH_PX), 0);
+
+  if (colWidths.length === 0) {
+    const shellRect = readFrameElementRect(shell);
+    return Math.max(0, shellRect.width - MIN_FRAME_SIZE_PX);
+  }
+
+  if (mode === 'left') {
+    return shrinkable(Array.from({ length: colWidths.length }, (_, index) => index));
+  }
+
+  if (mode === 'right') {
+    return shrinkable(Array.from({ length: colWidths.length }, (_, index) => colWidths.length - index - 1));
+  }
+
+  return shrinkable(Array.from({ length: colWidths.length - boundaryIndex }, (_, index) => boundaryIndex + index));
+};
+
+const shiftShellsBelowBoundary = (
+  pageInner: HTMLElement,
+  boundaryY: number,
+  deltaY: number,
+  excludedShells: HTMLElement[] = []
+) => {
+  if (Math.abs(deltaY) < 0.5) {
+    return;
+  }
+
+  const excludedSet = new Set(excludedShells);
+
+  Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
+    if (excludedSet.has(shell)) {
+      return;
+    }
+
+    const shellRect = readFrameElementRect(shell, pageInner);
+
+    if (shellRect.top >= boundaryY - FRAME_RESIZE_TOLERANCE_PX) {
+      shell.style.top = `${Math.round(shellRect.top + deltaY)}px`;
+    }
+  });
+};
+
+const applyOuterBottomHeightDelta = (shell: HTMLElement, delta: number) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+  const colWidths = readTableColWidths(table);
+  const rowHeights = readTableRowHeights(table);
+
+  if (!table || rowHeights.length === 0) {
+    const shellRect = readFrameElementRect(shell);
+    const nextHeight = Math.max(MIN_FRAME_SIZE_PX, Math.round(shellRect.height + delta));
+    shell.style.height = `${nextHeight}px`;
+    return nextHeight - shellRect.height;
+  }
+
+  const nextRowHeights = [...rowHeights];
+
+  if (delta >= 0) {
+    nextRowHeights[nextRowHeights.length - 1] += delta;
+    setTableRowHeights(table, nextRowHeights);
+    syncShellSizeFromTable(shell, table, colWidths, nextRowHeights);
+    return delta;
+  }
+
+  const shrinkResult = adjustShrinkableSizes(
+    nextRowHeights,
+    Array.from({ length: nextRowHeights.length }, (_, index) => nextRowHeights.length - index - 1),
+    Math.abs(delta),
+    MIN_TABLE_ROW_HEIGHT_PX
+  );
+  setTableRowHeights(table, shrinkResult.sizes);
+  syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
+  return -shrinkResult.applied;
+};
+
+const applyFrameResizeHeightDelta = (node: HTMLElement, delta: number) => {
+  const context = buildFrameResizeContext(node);
+
+  if (!context.pageInner || Math.abs(delta) < 0.5) {
+    return 0;
+  }
+
+  const boundaryY = context.cellRect.top + context.cellRect.height;
+  let appliedDelta = 0;
+
+  if (context.singleCellBand || context.rowHeights.length <= context.endRowIndex) {
+    appliedDelta = applyOuterBottomHeightDelta(context.shell, delta);
+  } else if (context.table) {
+    const nextRowHeights = [...context.rowHeights];
+
+    if (delta >= 0) {
+      nextRowHeights[context.endRowIndex - 1] += delta;
+      appliedDelta = delta;
+    } else {
+      const shrinkResult = adjustShrinkableSizes(
+        nextRowHeights,
+        Array.from({ length: context.endRowIndex - context.startRowIndex }, (_, index) => context.endRowIndex - index - 1),
+        Math.abs(delta),
+        MIN_TABLE_ROW_HEIGHT_PX
+      );
+      appliedDelta = -shrinkResult.applied;
+      shrinkResult.sizes.forEach((size, index) => {
+        nextRowHeights[index] = size;
+      });
+    }
+
+    setTableRowHeights(context.table, nextRowHeights);
+    syncShellSizeFromTable(context.shell, context.table, context.colWidths, nextRowHeights);
+  }
+
+  if (Math.abs(appliedDelta) > 0.5) {
+    shiftShellsBelowBoundary(context.pageInner, boundaryY, appliedDelta, [context.shell]);
+    updatePageInnerMinHeight(context.pageInner);
+  }
+
+  return appliedDelta;
+};
+
+const collectWidthResizeInstructions = (
+  context: ReturnType<typeof buildFrameResizeContext>,
+  edge: 'left' | 'right' = 'right'
+): FrameWidthResizeInstruction[] => {
+  const pageInner = context.pageInner;
+
+  if (!pageInner) {
+    return [];
+  }
+
+  const boundaryX = edge === 'left' ? context.cellRect.left : context.cellRect.left + context.cellRect.width;
+  const pageShells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'));
+
+  return pageShells.flatMap((shell) => {
+    const shellRect = readFrameElementRect(shell, pageInner);
+    const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+    const colWidths = readTableColWidths(table);
+    const boundaries = buildBoundaries(colWidths);
+    const internalBoundaryIndex =
+      colWidths.length > 1
+        ? boundaries.findIndex(
+            (boundary, index) =>
+              index > 0 &&
+              index < boundaries.length - 1 &&
+              Math.abs(shellRect.left + boundary - boundaryX) <= FRAME_RESIZE_TOLERANCE_PX
+          )
+        : -1;
+
+    const nextInstructions: FrameWidthResizeInstruction[] = [];
+
+    if (internalBoundaryIndex > 0) {
+      nextInstructions.push({ kind: 'boundary', shell, boundaryIndex: internalBoundaryIndex });
+    }
+
+    if (Math.abs(shellRect.left - boundaryX) <= FRAME_RESIZE_TOLERANCE_PX) {
+      nextInstructions.push({ kind: 'outer-left', shell });
+    }
+
+    if (Math.abs(shellRect.left + shellRect.width - boundaryX) <= FRAME_RESIZE_TOLERANCE_PX) {
+      nextInstructions.push({ kind: 'outer-right', shell });
+    }
+
+    return nextInstructions;
+  });
+};
+
+const applyOuterTopHeightDelta = (shell: HTMLElement, delta: number) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+  const colWidths = readTableColWidths(table);
+  const rowHeights = readTableRowHeights(table);
+  const currentTop = parseFramePx(shell.style.top);
+
+  if (!table || rowHeights.length === 0) {
+    const shellRect = readFrameElementRect(shell);
+    const nextHeight = Math.max(MIN_FRAME_SIZE_PX, Math.round(shellRect.height - delta));
+    const appliedDelta = shellRect.height - nextHeight;
+    shell.style.top = `${Math.round(currentTop + appliedDelta)}px`;
+    shell.style.height = `${Math.round(nextHeight)}px`;
+    return appliedDelta;
+  }
+
+  if (delta >= 0) {
+    const shrinkResult = adjustShrinkableSizes(
+      rowHeights,
+      Array.from({ length: rowHeights.length }, (_, index) => index),
+      delta,
+      MIN_TABLE_ROW_HEIGHT_PX
+    );
+    shell.style.top = `${Math.round(currentTop + shrinkResult.applied)}px`;
+    setTableRowHeights(table, shrinkResult.sizes);
+    syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
+    return shrinkResult.applied;
+  }
+
+  const nextRowHeights = [...rowHeights];
+  nextRowHeights[0] += Math.abs(delta);
+  shell.style.top = `${Math.round(currentTop + delta)}px`;
+  setTableRowHeights(table, nextRowHeights);
+  syncShellSizeFromTable(shell, table, colWidths, nextRowHeights);
+  return delta;
+};
+
+const applyTableBoundaryHeightDelta = (shell: HTMLElement, boundaryIndex: number, delta: number) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+  const colWidths = readTableColWidths(table);
+  const rowHeights = readTableRowHeights(table);
+
+  if (!table || rowHeights.length === 0 || boundaryIndex <= 0 || boundaryIndex >= rowHeights.length) {
+    return 0;
+  }
+
+  const nextRowHeights = [...rowHeights];
+
+  if (delta >= 0) {
+    nextRowHeights[boundaryIndex - 1] += delta;
+    const shrinkResult = adjustShrinkableSizes(
+      nextRowHeights,
+      Array.from({ length: nextRowHeights.length - boundaryIndex }, (_, index) => boundaryIndex + index),
+      delta,
+      MIN_TABLE_ROW_HEIGHT_PX
+    );
+    if (shrinkResult.applied < delta) {
+      nextRowHeights[boundaryIndex - 1] -= delta - shrinkResult.applied;
+    }
+    setTableRowHeights(table, shrinkResult.sizes);
+    syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
+    return shrinkResult.applied;
+  }
+
+  const shrinkResult = adjustShrinkableSizes(
+    nextRowHeights,
+    Array.from({ length: boundaryIndex }, (_, index) => boundaryIndex - index - 1),
+    Math.abs(delta),
+    MIN_TABLE_ROW_HEIGHT_PX
+  );
+  if (boundaryIndex < nextRowHeights.length) {
+    shrinkResult.sizes[boundaryIndex] += shrinkResult.applied;
+  }
+  setTableRowHeights(table, shrinkResult.sizes);
+  syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
+  return -shrinkResult.applied;
+};
+
+const applyFrameResizeTopDelta = (node: HTMLElement, delta: number) => {
+  const context = buildFrameResizeContext(node);
+
+  if (!context.pageInner || Math.abs(delta) < 0.5) {
+    return 0;
+  }
+
+  if (context.singleCellBand || context.startRowIndex === 0) {
+    return applyOuterTopHeightDelta(context.shell, delta);
+  }
+
+  return applyTableBoundaryHeightDelta(context.shell, context.startRowIndex, delta);
+};
+
+const applyFrameResizeWidthDelta = (
+  node: HTMLElement,
+  delta: number,
+  lockedInstructions?: FrameWidthResizeInstruction[]
+) => {
+  const context = buildFrameResizeContext(node);
+  const pageInner = context.pageInner;
+
+  if (!pageInner || Math.abs(delta) < 0.5) {
+    return 0;
+  }
+
+  const instructions = lockedInstructions && lockedInstructions.length > 0 ? lockedInstructions : collectWidthResizeInstructions(context);
+
+  if (!instructions.length) {
+    return 0;
+  }
+
+  let appliedDelta = delta;
+
+  if (delta > 0) {
+    const positiveCapacities = instructions
+      .map((instruction) => {
+        if (instruction.kind === 'boundary') {
+          return getWidthDeltaCapacity(instruction.shell, 'boundary', instruction.boundaryIndex);
+        }
+
+        if (instruction.kind === 'outer-left') {
+          return getWidthDeltaCapacity(instruction.shell, 'left');
+        }
+
+        return Number.POSITIVE_INFINITY;
+      })
+      .filter((value) => Number.isFinite(value));
+
+    if (positiveCapacities.length > 0) {
+      appliedDelta = Math.min(delta, ...positiveCapacities);
+    }
+  } else {
+    const negativeCapacities = instructions
+      .map((instruction) => {
+        if (instruction.kind === 'boundary') {
+          return getWidthDeltaCapacity(instruction.shell, 'right', instruction.boundaryIndex);
+        }
+
+        if (instruction.kind === 'outer-right') {
+          return getWidthDeltaCapacity(instruction.shell, 'right');
+        }
+
+        return Number.POSITIVE_INFINITY;
+      })
+      .filter((value) => Number.isFinite(value));
+
+    if (negativeCapacities.length > 0) {
+      appliedDelta = -Math.min(Math.abs(delta), ...negativeCapacities);
+    }
+  }
+
+  instructions.forEach((instruction) => {
+    if (instruction.kind === 'boundary') {
+      applyTableBoundaryWidthDelta(instruction.shell, instruction.boundaryIndex, appliedDelta);
+      return;
+    }
+
+    if (instruction.kind === 'outer-left') {
+      applyOuterLeftWidthDelta(instruction.shell, appliedDelta);
+      return;
+    }
+
+    applyOuterRightWidthDelta(instruction.shell, appliedDelta);
+  });
+
+  return appliedDelta;
+};
+
+const writeFrameMoveRect = (node: HTMLElement, rect: FrameNodeRect) => {
+  const shell = resolveFrameLayoutShell(node);
+  shell.style.left = `${Math.round(rect.left)}px`;
+  shell.style.top = `${Math.round(rect.top)}px`;
+  shell.style.width = `${Math.max(MIN_FRAME_SIZE_PX, Math.round(rect.width))}px`;
+  shell.style.height = `${Math.max(MIN_FRAME_SIZE_PX, Math.round(rect.height))}px`;
+};
+
 const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
-  applyFrameBoxDimensions(node, rect);
+  const currentRect = readFrameNodeRect(node);
+  applyFrameResizeWidthDelta(node, rect.width - currentRect.width);
+  applyFrameResizeHeightDelta(node, rect.height - currentRect.height);
+};
+
+const applyFrameResizeWithDirection = (
+  node: HTMLElement,
+  nextRect: FrameNodeRect,
+  direction: TemplateFrameResizeDirection,
+  widthInstructions?: FrameWidthResizeInstruction[]
+) => {
+  const currentRect = readFrameNodeRect(node);
+
+  if (direction.includes('w')) {
+    applyFrameResizeWidthDelta(node, nextRect.left - currentRect.left, widthInstructions);
+  } else if (direction.includes('e')) {
+    applyFrameResizeWidthDelta(node, nextRect.width - currentRect.width, widthInstructions);
+  }
+
+  if (direction.includes('n')) {
+    applyFrameResizeTopDelta(node, nextRect.top - currentRect.top);
+  } else if (direction.includes('s')) {
+    applyFrameResizeHeightDelta(node, nextRect.height - currentRect.height);
+  }
 };
 
 const clampFrameNodeRect = (
   rect: FrameNodeRect,
   bounds: { width: number; height: number },
-  minSize = 12
+  minSize = MIN_FRAME_SIZE_PX
 ): FrameNodeRect => {
   const width = Math.max(minSize, Math.min(bounds.width, rect.width));
   const height = Math.max(minSize, Math.min(bounds.height, rect.height));
@@ -478,14 +1066,14 @@ const applyFrameStylePatch = (
   const contentTarget = resolveFrameContentTarget(node);
 
   if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
-    applyFrameBoxDimensions(node, { width: patch.width });
+    applyFrameResizeWidthDelta(node, patch.width - readFrameNodeRect(node).width);
     if (contentTarget !== node) {
       contentTarget.style.width = '100%';
     }
   }
 
   if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
-    applyFrameBoxDimensions(node, { height: patch.height });
+    applyFrameResizeHeightDelta(node, patch.height - readFrameNodeRect(node).height);
     if (contentTarget !== node) {
       contentTarget.style.height = '100%';
     }
@@ -1053,6 +1641,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (resizeHandle) {
         const direction = (resizeHandle.getAttribute('data-direction') || 'se') as TemplateFrameResizeDirection;
+        const resizeContext = buildFrameResizeContext(frameNode);
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         activePointerOwnerRef.current = event.currentTarget;
@@ -1065,6 +1654,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           direction,
           node: frameNode,
           rect: readFrameNodeRect(frameNode),
+          widthInstructions:
+            direction.includes('e') || direction.includes('w')
+              ? collectWidthResizeInstructions(resizeContext, direction.includes('w') ? 'left' : 'right')
+              : undefined,
         };
         return;
       }
@@ -1089,10 +1682,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         startY: event.clientY,
         scale: previewZoom / 100,
         pageInner,
-        anchorRect: readFrameNodeRect(frameNode),
+        anchorRect: readFrameMoveRect(frameNode),
         nodes: selectionOnPage.length
-          ? selectionOnPage.map((node) => ({ node, rect: readFrameNodeRect(node) }))
-          : [{ node: frameNode, rect: readFrameNodeRect(frameNode) }],
+          ? selectionOnPage.map((node) => ({ node, rect: readFrameMoveRect(node) }))
+          : [{ node: frameNode, rect: readFrameMoveRect(frameNode) }],
       };
     },
     [getFrameNodes, previewZoom, selectedFrameGroupIds]
@@ -1117,7 +1710,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       const siblingRects = getFrameNodes(dragState.pageInner)
         .filter((node) => !dragState.nodes.some((selected) => selected.node === node))
-        .map((node) => readFrameNodeRect(node));
+        .map((node) => readFrameMoveRect(node));
       const snapResult = TemplateFrameEditGeometryService.snapMovedRect({
         rect: {
           ...dragState.anchorRect,
@@ -1142,7 +1735,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const moveDy = resolvedRect.top - dragState.anchorRect.top;
 
       dragState.nodes.forEach(({ node, rect }) => {
-        writeFrameNodeRect(
+        writeFrameMoveRect(
           node,
           clampFrameNodeRect(
             {
@@ -1174,8 +1767,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       let nextRect: FrameNodeRect = { ...resizeState.rect };
 
+      if (resizeState.direction.includes('w')) {
+        nextRect.left = resizeState.rect.left + delta.x;
+        nextRect.width = resizeState.rect.width - delta.x;
+      }
+
       if (resizeState.direction.includes('e')) {
         nextRect.width = resizeState.rect.width + delta.x;
+      }
+
+      if (resizeState.direction.includes('n')) {
+        nextRect.top = resizeState.rect.top + delta.y;
+        nextRect.height = resizeState.rect.height - delta.y;
       }
 
       if (resizeState.direction.includes('s')) {
@@ -1193,7 +1796,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
       const resolvedRect =
         snapResult.ok && snapResult.value ? snapResult.value : clampFrameNodeRect(nextRect, pageBounds);
-      writeFrameNodeRect(resizeState.node, resolvedRect);
+      applyFrameResizeWithDirection(
+        resizeState.node,
+        resolvedRect,
+        resizeState.direction,
+        resizeState.widthInstructions
+      );
     }
   }, [getFrameNodes]);
 
@@ -1310,15 +1918,40 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           right: -6px;
           cursor: ew-resize;
         }
+        .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR}[data-direction="w"] {
+          top: calc(50% - 6px);
+          left: -6px;
+          cursor: ew-resize;
+        }
+        .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR}[data-direction="n"] {
+          top: -6px;
+          left: calc(50% - 6px);
+          cursor: ns-resize;
+        }
         .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR}[data-direction="s"] {
           bottom: -6px;
           left: calc(50% - 6px);
           cursor: ns-resize;
         }
+        .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR}[data-direction="ne"] {
+          top: -6px;
+          right: -6px;
+          cursor: nesw-resize;
+        }
+        .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR}[data-direction="nw"] {
+          top: -6px;
+          left: -6px;
+          cursor: nwse-resize;
+        }
         .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR}[data-direction="se"] {
           right: -6px;
           bottom: -6px;
           cursor: nwse-resize;
+        }
+        .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR}[data-direction="sw"] {
+          left: -6px;
+          bottom: -6px;
+          cursor: nesw-resize;
         }
         .template-edit-preview [data-template-edit-scope][data-template-edit-enabled="true"] {
           cursor: text;
@@ -1425,7 +2058,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             <div className="space-y-1">
               <CardTitle>박스 편집 캔버스</CardTitle>
               <CardDescription>
-                Shift+클릭으로 여러 박스를 고른 뒤 드래그로 이동하고, 모서리 핸들로 너비·높이를 조정합니다.
+                Shift+클릭으로 여러 박스를 고른 뒤 드래그로 이동하고, 가장자리와 모서리 핸들로 상하좌우 크기를 조정합니다.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1660,7 +2293,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </CardHeader>
             <CardContent className="space-y-3 text-sm leading-6 text-slate-600">
               <p>박스를 클릭하면 선택되고, Shift+클릭으로 여러 박스를 누적 선택합니다.</p>
-              <p>선택된 박스의 외곽선을 드래그하면 위치가 이동하고, 동/남/남동 핸들을 끌면 너비와 높이가 바뀝니다.</p>
+              <p>선택된 박스의 외곽선을 드래그하면 위치가 이동하고, 상하좌우와 네 모서리 핸들을 끌면 원하는 방향으로 크기가 바뀝니다.</p>
               <p>오른쪽 패널에서는 여러 박스에 동일한 폰트 크기, 패딩, 정렬, 색상, 크기를 일괄 적용할 수 있습니다.</p>
             </CardContent>
           </Card>
