@@ -147,18 +147,134 @@ const parseFramePx = (value: string | null | undefined) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => ({
-  left: parseFramePx(node.style.left),
-  top: parseFramePx(node.style.top),
-  width: Math.max(1, parseFramePx(node.style.width)),
-  height: Math.max(1, parseFramePx(node.style.height)),
-});
+const resolveFrameLayoutShell = (node: HTMLElement) => node.closest<HTMLElement>('.v102-frame-band') || node;
+
+const resolveFrameLayoutTable = (node: HTMLElement) => {
+  const shell = resolveFrameLayoutShell(node);
+  return shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || node.closest<HTMLTableElement>('table');
+};
+
+const distributeFrameTableColWidths = (table: HTMLTableElement, nextWidth: number) => {
+  const cols = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+
+  if (!cols.length) {
+    return;
+  }
+
+  const currentWidths = cols.map((col) => {
+    const computedWidth = parseFramePx(getComputedStyle(col).width);
+    return computedWidth > 0 ? computedWidth : 1;
+  });
+  const totalWidth = currentWidths.reduce((sum, width) => sum + width, 0) || cols.length;
+  let assignedWidth = 0;
+
+  cols.forEach((col, index) => {
+    const ratio = currentWidths[index] / totalWidth;
+    const nextColWidth =
+      index === cols.length - 1
+        ? Math.max(1, Math.round(nextWidth - assignedWidth))
+        : Math.max(1, Math.round(nextWidth * ratio));
+    assignedWidth += nextColWidth;
+    col.style.width = `${nextColWidth}px`;
+    col.setAttribute('width', String(nextColWidth));
+  });
+};
+
+const applyFrameBoxDimensions = (
+  node: HTMLElement,
+  patch: {
+    left?: number;
+    top?: number;
+    width?: number;
+    height?: number;
+  }
+) => {
+  const shell = resolveFrameLayoutShell(node);
+  const table = resolveFrameLayoutTable(node);
+  const row = node.closest<HTMLTableRowElement>('tr') || table?.querySelector<HTMLTableRowElement>('tr') || null;
+  const cell = node.matches('td') ? node : table?.querySelector<HTMLElement>('td.v202-frame-group') || null;
+  const contentTarget = resolveFrameContentTarget(node);
+
+  if (typeof patch.left === 'number' && Number.isFinite(patch.left)) {
+    shell.style.left = `${Math.round(patch.left)}px`;
+  }
+
+  if (typeof patch.top === 'number' && Number.isFinite(patch.top)) {
+    shell.style.top = `${Math.round(patch.top)}px`;
+  }
+
+  if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
+    const nextWidth = Math.max(1, Math.round(patch.width));
+    shell.style.width = `${nextWidth}px`;
+
+    if (table) {
+      table.style.width = `${nextWidth}px`;
+      distributeFrameTableColWidths(table, nextWidth);
+    } else if (shell === node) {
+      node.style.width = `${nextWidth}px`;
+    }
+
+    if (cell && cell !== shell) {
+      cell.style.width = '100%';
+      cell.setAttribute('width', String(nextWidth));
+    }
+
+    if (contentTarget !== shell) {
+      contentTarget.style.width = '100%';
+    }
+  }
+
+  if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
+    const nextHeight = Math.max(1, Math.round(patch.height));
+    shell.style.height = `${nextHeight}px`;
+
+    if (table) {
+      table.style.height = `${nextHeight}px`;
+    } else if (shell === node) {
+      node.style.height = `${nextHeight}px`;
+    }
+
+    if (row) {
+      row.style.height = `${nextHeight}px`;
+    }
+
+    if (cell && cell !== shell) {
+      cell.style.height = '100%';
+    }
+
+    if (contentTarget !== shell) {
+      contentTarget.style.height = '100%';
+    }
+  }
+};
+
+const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
+  const layoutNode = resolveFrameLayoutShell(node);
+  const pageInner = layoutNode.closest<HTMLElement>('.page-inner');
+  const pageRect = pageInner?.getBoundingClientRect() || null;
+  const nodeRect = layoutNode.getBoundingClientRect();
+  const computedStyle = getComputedStyle(layoutNode);
+  const hasInlineLeft = layoutNode.style.left.trim() !== '';
+  const hasInlineTop = layoutNode.style.top.trim() !== '';
+  const hasInlineWidth = layoutNode.style.width.trim() !== '';
+  const hasInlineHeight = layoutNode.style.height.trim() !== '';
+
+  return {
+    left: hasInlineLeft ? parseFramePx(layoutNode.style.left) : Math.max(0, nodeRect.left - (pageRect?.left || 0)),
+    top: hasInlineTop ? parseFramePx(layoutNode.style.top) : Math.max(0, nodeRect.top - (pageRect?.top || 0)),
+    width: Math.max(
+      1,
+      hasInlineWidth ? parseFramePx(layoutNode.style.width) : parseFramePx(computedStyle.width) || nodeRect.width
+    ),
+    height: Math.max(
+      1,
+      hasInlineHeight ? parseFramePx(layoutNode.style.height) : parseFramePx(computedStyle.height) || nodeRect.height
+    ),
+  };
+};
 
 const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
-  node.style.left = `${Math.round(rect.left)}px`;
-  node.style.top = `${Math.round(rect.top)}px`;
-  node.style.width = `${Math.max(1, Math.round(rect.width))}px`;
-  node.style.height = `${Math.max(1, Math.round(rect.height))}px`;
+  applyFrameBoxDimensions(node, rect);
 };
 
 const clampFrameNodeRect = (
@@ -362,11 +478,17 @@ const applyFrameStylePatch = (
   const contentTarget = resolveFrameContentTarget(node);
 
   if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
-    node.style.width = `${Math.max(1, Math.round(patch.width))}px`;
+    applyFrameBoxDimensions(node, { width: patch.width });
+    if (contentTarget !== node) {
+      contentTarget.style.width = '100%';
+    }
   }
 
   if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
-    node.style.height = `${Math.max(1, Math.round(patch.height))}px`;
+    applyFrameBoxDimensions(node, { height: patch.height });
+    if (contentTarget !== node) {
+      contentTarget.style.height = '100%';
+    }
   }
 
   if (patch.fontSize !== undefined) {
@@ -374,7 +496,7 @@ const applyFrameStylePatch = (
   }
 
   if (patch.lineHeight !== undefined) {
-    contentTarget.style.lineHeight = patch.lineHeight || '';
+    contentTarget.style.lineHeight = patch.lineHeight ? `${Number.parseFloat(patch.lineHeight)}px` : '';
   }
 
   if (patch.fontWeight !== undefined) {
@@ -409,6 +531,7 @@ const applyFrameStylePatch = (
 export default function TemplateEditWorkspace({ initialTemplateId = '' }: TemplateEditWorkspaceProps) {
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
+  const [previewHtml, setPreviewHtml] = React.useState('');
   const [selectedTemplateId, setSelectedTemplateId] = React.useState(initialTemplateId.trim());
   const [templateName, setTemplateName] = React.useState('');
   const [sourceDocumentName, setSourceDocumentName] = React.useState('');
@@ -420,8 +543,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
+  const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const draftPreviewHtmlRef = React.useRef('');
   const initializedTemplateIdRef = React.useRef('');
+  const selectedFrameGroupIdsRef = React.useRef<string[]>([]);
   const activePointerOwnerRef = React.useRef<HTMLDivElement | null>(null);
   const dragStateRef = React.useRef<DragState | null>(null);
   const resizeStateRef = React.useRef<ResizeState | null>(null);
@@ -438,9 +563,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const frameNodesAvailable = React.useMemo(
-    () => (templateDetail?.template.draftHtml.match(/data-template-frame-group=/g) || []).length,
-    [templateDetail?.template.draftHtml]
+    () => ((previewHtml || templateDetail?.template.draftHtml || '').match(/data-template-frame-group=/g) || []).length,
+    [previewHtml, templateDetail?.template.draftHtml]
   );
+  const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
 
   const syncTemplateQuery = React.useCallback((templateId: string) => {
     if (typeof window === 'undefined') {
@@ -467,6 +593,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const nextHtml = extractEditorHtml(root);
     draftPreviewHtmlRef.current = nextHtml;
+    setPreviewHtml(nextHtml);
     return nextHtml;
   }, []);
 
@@ -511,6 +638,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (!normalizedTemplateId) {
         setTemplateDetail(null);
+        setPreviewHtml('');
         setSelectedFrameGroupIds([]);
         draftPreviewHtmlRef.current = '';
         syncTemplateQuery('');
@@ -536,6 +664,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setTemplateName(detail.template.templateName);
         setSourceDocumentName(detail.template.sourceDocumentName || '');
         setLayoutResizeMode(detail.template.layoutResizeMode);
+        setPreviewHtml(detail.template.draftHtml);
         setSelectedFrameGroupIds([]);
         draftPreviewHtmlRef.current = detail.template.draftHtml;
         syncTemplateQuery(normalizedTemplateId);
@@ -566,34 +695,48 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [initialTemplateId, loadTemplate]);
 
   React.useEffect(() => {
+    selectedFrameGroupIdsRef.current = selectedFrameGroupIds;
+  }, [selectedFrameGroupIds]);
+
+  React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!root || !templateDetail?.template.draftHtml) {
+    if (!root || !renderedPreviewHtml) {
       return;
     }
 
-    draftPreviewHtmlRef.current = templateDetail.template.draftHtml;
+    draftPreviewHtmlRef.current = renderedPreviewHtml;
+    let cancelled = false;
 
     const applyEditorState = async () => {
       await document.fonts?.ready?.catch(() => undefined);
 
+      if (cancelled) {
+        return;
+      }
+
       applyPreviewEditPermissions(root);
-      applyFrameSelectionUi(root, selectedFrameGroupIds);
+      applyFrameSelectionUi(root, selectedFrameGroupIdsRef.current);
       requestPreviewTextFit();
     };
 
     void applyEditorState();
-  }, [requestPreviewTextFit, selectedFrameGroupIds, templateDetail?.template.draftHtml]);
 
-  React.useEffect(() => {
+    return () => {
+      cancelled = true;
+    };
+  }, [renderedPreviewHtml, requestPreviewTextFit]);
+
+  React.useLayoutEffect(() => {
     const root = previewRef.current;
 
     if (!root) {
       return;
     }
 
+    applyPreviewEditPermissions(root);
     applyFrameSelectionUi(root, selectedFrameGroupIds);
-  }, [selectedFrameGroupIds]);
+  }, [renderedPreviewHtml, selectedFrameGroupIds, selectionStyleDraft]);
 
   const syncSelectionStyleDraft = React.useCallback(() => {
     const root = previewRef.current;
@@ -675,24 +818,54 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [getFrameNodes, requestPreviewTextFit, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
   );
 
+  const readSelectionStyleDraftFromControls = React.useCallback((): SelectionStyleDraft => {
+    const root = stylePanelRef.current;
+
+    if (!root) {
+      return selectionStyleDraft;
+    }
+
+    const readFieldValue = (field: keyof SelectionStyleDraft) => {
+      const element = root.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-style-field="${field}"]`);
+      return element?.value ?? selectionStyleDraft[field];
+    };
+
+    return {
+      width: readFieldValue('width'),
+      height: readFieldValue('height'),
+      fontSize: readFieldValue('fontSize'),
+      lineHeight: readFieldValue('lineHeight'),
+      paddingX: readFieldValue('paddingX'),
+      paddingY: readFieldValue('paddingY'),
+      borderRadius: readFieldValue('borderRadius'),
+      fontWeight: readFieldValue('fontWeight'),
+      textAlign: readFieldValue('textAlign') as SelectionStyleDraft['textAlign'],
+      color: readFieldValue('color'),
+      backgroundColor: readFieldValue('backgroundColor'),
+    };
+  }, [selectionStyleDraft]);
+
   const applySelectionStyleDraft = React.useCallback(() => {
-    const width = Number.parseFloat(selectionStyleDraft.width);
-    const height = Number.parseFloat(selectionStyleDraft.height);
+    const nextDraft = readSelectionStyleDraftFromControls();
+    const width = Number.parseFloat(nextDraft.width);
+    const height = Number.parseFloat(nextDraft.height);
+
+    setSelectionStyleDraft(nextDraft);
 
     applySelectionStylePatch({
       width: Number.isFinite(width) ? width : undefined,
       height: Number.isFinite(height) ? height : undefined,
-      fontSize: selectionStyleDraft.fontSize,
-      lineHeight: selectionStyleDraft.lineHeight,
-      paddingX: selectionStyleDraft.paddingX,
-      paddingY: selectionStyleDraft.paddingY,
-      borderRadius: selectionStyleDraft.borderRadius,
-      fontWeight: selectionStyleDraft.fontWeight,
-      textAlign: selectionStyleDraft.textAlign,
-      color: selectionStyleDraft.color,
-      backgroundColor: selectionStyleDraft.backgroundColor,
+      fontSize: nextDraft.fontSize,
+      lineHeight: nextDraft.lineHeight,
+      paddingX: nextDraft.paddingX,
+      paddingY: nextDraft.paddingY,
+      borderRadius: nextDraft.borderRadius,
+      fontWeight: nextDraft.fontWeight,
+      textAlign: nextDraft.textAlign,
+      color: nextDraft.color,
+      backgroundColor: nextDraft.backgroundColor,
     });
-  }, [applySelectionStylePatch, selectionStyleDraft]);
+  }, [applySelectionStylePatch, readSelectionStyleDraftFromControls]);
 
   const applyPrimaryFrameSizeToSelection = React.useCallback(() => {
     const root = previewRef.current;
@@ -810,6 +983,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [requestPreviewTextFit, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
   );
+
+  const clearFrameSelection = React.useCallback(() => {
+    stopPointerInteraction();
+    setSelectedFrameGroupIds([]);
+  }, [stopPointerInteraction]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== 'Escape' || selectedFrameGroupIdsRef.current.length === 0) {
+        return;
+      }
+
+      clearFrameSelection();
+    };
+
+    window.addEventListener('keydown', handleWindowKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleWindowKeyDown);
+    };
+  }, [clearFrameSelection]);
 
   const handlePreviewPointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1248,7 +1445,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           <CardContent className="p-0">
             <div className="template-edit-preview-shell rounded-b-xl p-4">
               <div className="template-edit-preview-scroll rounded-xl border border-slate-200 bg-white p-4">
-                {templateDetail?.template.draftHtml ? (
+                {renderedPreviewHtml ? (
                   <div
                     ref={previewRef}
                     className="template-edit-preview"
@@ -1259,7 +1456,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     onPointerCancelCapture={handlePreviewPointerCancel}
                     onClickCapture={handlePreviewClickCapture}
                     onInput={handlePreviewInput}
-                    dangerouslySetInnerHTML={{ __html: templateDetail.template.draftHtml }}
+                    dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
                   />
                 ) : (
                   <div className="flex min-h-[560px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
@@ -1277,7 +1474,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <CardTitle>선택 상태</CardTitle>
               <CardDescription>첫 선택 박스가 기준이 되며, 나머지 선택 박스에 같은 스타일을 한 번에 적용합니다.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent ref={stylePanelRef} className="space-y-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                 <div>선택 박스 수: {selectedFrameGroupIds.length}</div>
                 <div className="mt-1 break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</div>
@@ -1285,7 +1482,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => setSelectedFrameGroupIds([])}>
+                <Button size="sm" variant="outline" onClick={clearFrameSelection}>
                   선택 해제
                 </Button>
                 <Button
@@ -1320,6 +1517,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">너비 (px)</label>
                   <Input
+                    data-style-field="width"
                     value={selectionStyleDraft.width}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1330,6 +1528,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">높이 (px)</label>
                   <Input
+                    data-style-field="height"
                     value={selectionStyleDraft.height}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1340,6 +1539,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">폰트 크기</label>
                   <Input
+                    data-style-field="fontSize"
                     value={selectionStyleDraft.fontSize}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1350,6 +1550,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">줄 간격</label>
                   <Input
+                    data-style-field="lineHeight"
                     value={selectionStyleDraft.lineHeight}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1360,6 +1561,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">좌우 여백</label>
                   <Input
+                    data-style-field="paddingX"
                     value={selectionStyleDraft.paddingX}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1370,6 +1572,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">상하 여백</label>
                   <Input
+                    data-style-field="paddingY"
                     value={selectionStyleDraft.paddingY}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1380,6 +1583,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">모서리 반경</label>
                   <Input
+                    data-style-field="borderRadius"
                     value={selectionStyleDraft.borderRadius}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1390,6 +1594,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">글자 굵기</label>
                   <Input
+                    data-style-field="fontWeight"
                     value={selectionStyleDraft.fontWeight}
                     placeholder="혼합"
                     onChange={(event) =>
@@ -1400,6 +1605,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">정렬</label>
                   <select
+                    data-style-field="textAlign"
                     value={selectionStyleDraft.textAlign}
                     onChange={(event) =>
                       setSelectionStyleDraft((previous) => ({
@@ -1418,6 +1624,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">글자 색</label>
                   <Input
+                    data-style-field="color"
                     type="color"
                     value={selectionStyleDraft.color}
                     onChange={(event) =>
@@ -1428,6 +1635,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-sm font-medium text-slate-800">배경 색</label>
                   <Input
+                    data-style-field="backgroundColor"
                     type="color"
                     value={selectionStyleDraft.backgroundColor}
                     onChange={(event) =>
