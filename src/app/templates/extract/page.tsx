@@ -3573,6 +3573,12 @@ export default function TemplateExtractPage() {
     (normalizedCurrentFrameGroupVersionTag === GUARANTEED_FRAME_GROUP_VERSION ||
       normalizedCurrentFrameGroupVersionTag === `${GUARANTEED_FRAME_GROUP_VERSION}-default`);
   const frameEditingEnabled = false;
+  const activeFrameTextExtractionVersionLabel =
+    frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion;
+  const fullExtractVersionSummary =
+    frameTextExtractionMode === 'image'
+      ? `${String(frameGroupVersion || GUARANTEED_FRAME_GROUP_VERSION)} -> 이미지 ${imageFrameTextExtractionVersion}`
+      : `${String(frameGroupVersion || GUARANTEED_FRAME_GROUP_VERSION)} -> 비 이미지 ${frameTextExtractionVersion}`;
 
   React.useEffect(() => {
     if (!isV109FrameGroupVersion(frameGroupVersion)) {
@@ -4658,6 +4664,17 @@ export default function TemplateExtractPage() {
         formData.append('frameGroupVersion', activeRequestedFrameGroupVersion);
         formData.append('file', selectedFile);
 
+        if (extractionStage === 'full') {
+          formData.append('frameTextExtractionMode', frameTextExtractionMode);
+
+          if (frameTextExtractionMode === 'image') {
+            formData.append('imageFrameTextExtractionVersion', imageFrameTextExtractionVersion);
+            formData.append('imageOcrVersion', imageFrameTextExtractionVersion);
+          } else {
+            formData.append('frameTextExtractionVersion', frameTextExtractionVersion);
+          }
+        }
+
         result = await createDraftWithFileUpload(formData, extractionStage);
       } else {
         beginProcessingProgress(
@@ -4709,7 +4726,7 @@ export default function TemplateExtractPage() {
       setMessage(
         actualExtractionStage === 'frames'
           ? `프레임 그룹 초안을 만들었습니다. (${String(activeFrameGroupVersion || activeRequestedFrameGroupVersion)}, ${versionLabel})`
-          : `원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${versionLabel})`
+          : `원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${String(activeFrameGroupVersion || activeRequestedFrameGroupVersion)} -> ${activeFrameTextExtractionVersionLabel}, ${versionLabel})`
       );
     } catch (error) {
       clearDraftProgressTimer();
@@ -6955,115 +6972,13 @@ export default function TemplateExtractPage() {
           position: absolute;
         }
       `}</style>
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-2">
-          <Badge variant="slate">TPL-FLOW-01</Badge>
-          <h1 className="text-3xl font-semibold text-slate-950">템플릿 추출</h1>
-          <p className="max-w-3xl text-sm text-slate-600">
-            문서를 올리면 왼쪽에서 원본과 추출 초안을 크게 보고, 오른쪽에서 필요한 항목만 검토한 뒤 바로 템플릿으로 저장합니다.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2 md:justify-end">
-          <Button
-            variant="outline"
-            onClick={() => void handleCreateDraft('frames')}
-            disabled={loading || visualSimilarityMeasuring || !selectedFile}
-          >
-            프레임 그룹 생성
-          </Button>
-          <select
-            value={frameGroupVersion}
-            onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
-            disabled={loading || visualSimilarityMeasuring}
-            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          {isV109FrameGroupVersion(frameGroupVersion) ? (
-            <Input
-              value={frameProfileName}
-              onChange={(event) => setFrameProfileName(event.target.value)}
-              disabled={loading || visualSimilarityMeasuring}
-              placeholder={`${String(frameGroupVersion || 'fv1.11')} 저장명`}
-              className="h-9 w-44"
-            />
-          ) : null}
-          <Button
-            variant="outline"
-            onClick={handleExtractFrameText}
-            disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
-            title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
-          >
-            텍스트 추출
-          </Button>
-          <div className="inline-flex items-center gap-1 rounded-md border border-input bg-background p-1">
-            <Button
-              variant={frameTextExtractionMode === 'non_image' ? 'default' : 'ghost'}
-              className="h-7 px-2 text-xs"
-              onClick={() => setFrameTextExtractionMode('non_image')}
-              disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
-              title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
-            >
-              비 이미지
-            </Button>
-            <Button
-              variant={frameTextExtractionMode === 'image' ? 'default' : 'ghost'}
-              className="h-7 px-2 text-xs"
-              onClick={() => setFrameTextExtractionMode('image')}
-              disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
-              title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
-            >
-              이미지
-            </Button>
-          </div>
-          <select
-            value={frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion}
-            onChange={(event) =>
-              frameTextExtractionMode === 'image'
-                ? setImageFrameTextExtractionVersion(event.target.value as ImageFrameTextExtractionVersion)
-                : setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)
-            }
-            disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
-            title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
-            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            {(frameTextExtractionMode === 'image'
-              ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-              : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-            ).map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <Button
-            variant="outline"
-            onClick={handleMeasureVisualSimilarity}
-            disabled={loading || visualSimilarityMeasuring || !crossValidationReady}
-            title={crossValidationReady ? undefined : '텍스트 추출 완료 이후에 활성화됩니다.'}
-          >
-            {visualSimilarityMeasuring ? `교차 검증 ${visualSimilarityProgress.percent}%` : '교차 검증'}
-          </Button>
-          <Button onClick={() => void handleCreateDraft('full')} disabled={loading || visualSimilarityMeasuring}>
-            전체 추출
-          </Button>
-          <select
-            value={engineVersion}
-            onChange={(event) => setEngineVersion(event.target.value as TemplateExtractEngineVersion)}
-            disabled={loading || visualSimilarityMeasuring}
-            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            {TEMPLATE_EXTRACT_ENGINE_VERSION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="space-y-2">
+        <Badge variant="slate">TPL-FLOW-01</Badge>
+        <h1 className="text-3xl font-semibold text-slate-950">템플릿 추출</h1>
+        <p className="max-w-3xl text-sm text-slate-600">
+          이 페이지는 PDF를 버전별로 추출하고 결과를 확인한 뒤, 템플릿 관리에 1차 저장하는 용도로만 사용합니다.
+          저장 후의 박스 편집은 별도 <code>/templates/edit</code> 페이지에서 수행합니다.
+        </p>
       </div>
 
       {message ? (
@@ -7071,6 +6986,234 @@ export default function TemplateExtractPage() {
           <CardContent className="p-4 text-sm text-slate-700">{message}</CardContent>
         </Card>
       ) : null}
+
+      <Card className="border-slate-200">
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="amber">실행 패널</Badge>
+            <CardTitle>버전별 추출 실행</CardTitle>
+          </div>
+          <CardDescription>
+            상단에서 프레임 그룹 버전과 텍스트 추출 버전을 고른 뒤 실행합니다. 전체 추출은 항상{' '}
+            <code>프레임 그룹 → 텍스트 추출</code> 순서로 진행됩니다.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">프레임 그룹 생성</p>
+                <p className="text-xs text-slate-500">PDF에서 프레임 그룹만 먼저 추출합니다.</p>
+              </div>
+              <div className="flex flex-col gap-2 md:flex-row">
+                <select
+                  value={frameGroupVersion}
+                  onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
+                  disabled={loading || visualSimilarityMeasuring}
+                  className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {isV109FrameGroupVersion(frameGroupVersion) ? (
+                  <Input
+                    value={frameProfileName}
+                    onChange={(event) => setFrameProfileName(event.target.value)}
+                    disabled={loading || visualSimilarityMeasuring}
+                    placeholder={`${String(frameGroupVersion || 'fv1.11')} 저장명`}
+                    className="h-10 md:w-52"
+                  />
+                ) : null}
+              </div>
+            </div>
+            <div className="flex items-end md:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => void handleCreateDraft('frames')}
+                disabled={loading || visualSimilarityMeasuring || !selectedFile}
+                title={selectedFile ? undefined : 'PDF 파일을 먼저 선택하세요.'}
+              >
+                프레임 그룹 생성
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,.9fr)_auto]">
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">프레임 텍스트 추출</p>
+                <p className="text-xs text-slate-500">이미 생성된 프레임 그룹에 선택한 버전으로 텍스트를 채웁니다.</p>
+              </div>
+              <select
+                value={frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion}
+                onChange={(event) =>
+                  frameTextExtractionMode === 'image'
+                    ? setImageFrameTextExtractionVersion(event.target.value as ImageFrameTextExtractionVersion)
+                    : setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)
+                }
+                disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
+                title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
+                className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {(frameTextExtractionMode === 'image'
+                  ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                  : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                ).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-slate-950">추출 방식</p>
+              <div className="inline-flex h-10 items-center gap-1 rounded-md border border-input bg-white p-1">
+                <Button
+                  variant={frameTextExtractionMode === 'non_image' ? 'default' : 'ghost'}
+                  className="h-8 px-3 text-xs"
+                  onClick={() => setFrameTextExtractionMode('non_image')}
+                  disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
+                  title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
+                >
+                  비 이미지
+                </Button>
+                <Button
+                  variant={frameTextExtractionMode === 'image' ? 'default' : 'ghost'}
+                  className="h-8 px-3 text-xs"
+                  onClick={() => setFrameTextExtractionMode('image')}
+                  disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
+                  title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
+                >
+                  이미지
+                </Button>
+              </div>
+            </div>
+            <div className="flex items-end md:justify-end">
+              <Button
+                variant="outline"
+                onClick={handleExtractFrameText}
+                disabled={loading || visualSimilarityMeasuring || !textExtractionReady}
+                title={textExtractionReady ? undefined : '프레임 그룹 생성 이후에 활성화됩니다.'}
+              >
+                텍스트 추출
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">전체 추출 1열: 프레임 그룹 버전</p>
+                <p className="text-xs text-slate-500">기본 성공 조합은 <code>fv1.11</code> 입니다.</p>
+              </div>
+              <select
+                value={frameGroupVersion}
+                onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
+                disabled={loading || visualSimilarityMeasuring}
+                className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">전체 추출 2열: 텍스트 추출 결정</p>
+                <p className="text-xs text-slate-500">
+                  현재 실행 조합: <code>{fullExtractVersionSummary}</code>
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 md:flex-row">
+                <div className="inline-flex h-10 items-center gap-1 rounded-md border border-input bg-white p-1">
+                  <Button
+                    variant={frameTextExtractionMode === 'non_image' ? 'default' : 'ghost'}
+                    className="h-8 px-3 text-xs"
+                    onClick={() => setFrameTextExtractionMode('non_image')}
+                    disabled={loading || visualSimilarityMeasuring}
+                  >
+                    비 이미지
+                  </Button>
+                  <Button
+                    variant={frameTextExtractionMode === 'image' ? 'default' : 'ghost'}
+                    className="h-8 px-3 text-xs"
+                    onClick={() => setFrameTextExtractionMode('image')}
+                    disabled={loading || visualSimilarityMeasuring}
+                  >
+                    이미지
+                  </Button>
+                </div>
+                <select
+                  value={frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion}
+                  onChange={(event) =>
+                    frameTextExtractionMode === 'image'
+                      ? setImageFrameTextExtractionVersion(event.target.value as ImageFrameTextExtractionVersion)
+                      : setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)
+                  }
+                  disabled={loading || visualSimilarityMeasuring}
+                  className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {(frameTextExtractionMode === 'image'
+                    ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                    : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                  ).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex items-end md:justify-end">
+              <Button
+                onClick={() => void handleCreateDraft('full')}
+                disabled={loading || visualSimilarityMeasuring || !selectedFile}
+                title={selectedFile ? undefined : 'PDF 파일을 먼저 선택하세요.'}
+              >
+                전체 추출
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-slate-950">부가 점검 및 엔진 선택</p>
+              <div className="flex flex-col gap-2 md:flex-row">
+                <select
+                  value={engineVersion}
+                  onChange={(event) => setEngineVersion(event.target.value as TemplateExtractEngineVersion)}
+                  disabled={loading || visualSimilarityMeasuring}
+                  className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {TEMPLATE_EXTRACT_ENGINE_VERSION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                  교차 검증은 텍스트 추출이 끝난 뒤 현재 결과와 원본 PDF를 병치 또는 겹쳐서 확인합니다.
+                </div>
+              </div>
+            </div>
+            <div className="flex items-end md:justify-end">
+              <Button
+                variant="outline"
+                onClick={handleMeasureVisualSimilarity}
+                disabled={loading || visualSimilarityMeasuring || !crossValidationReady}
+                title={crossValidationReady ? undefined : '텍스트 추출 완료 이후에 활성화됩니다.'}
+              >
+                {visualSimilarityMeasuring ? `교차 검증 ${visualSimilarityProgress.percent}%` : '교차 검증'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="border-emerald-200 bg-emerald-50/60">
         <CardHeader className="gap-2">
@@ -7671,7 +7814,7 @@ export default function TemplateExtractPage() {
 
           <Card className="border-slate-200">
             <CardHeader>
-              <CardTitle>원본 문서 입력</CardTitle>
+              <CardTitle>원본 PDF 입력 및 1차 저장</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -7680,10 +7823,10 @@ export default function TemplateExtractPage() {
                   <Input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">업로드 파일</label>
+                  <label className="text-sm font-medium text-slate-800">원본 PDF 업로드</label>
                   <input
                     type="file"
-                    accept=".txt,.html,.htm,.docx,.pdf,text/plain,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+                    accept=".pdf,application/pdf"
                     onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                   />
@@ -7698,11 +7841,11 @@ export default function TemplateExtractPage() {
               <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-3">
                 <div className="flex items-center justify-between gap-3">
                   <label className="text-sm font-medium text-slate-800">템플릿 관리</label>
-                  {viewingRegisteredTemplate ? <Badge variant="green">현재 편집 중</Badge> : null}
+                  {viewingRegisteredTemplate ? <Badge variant="green">불러온 템플릿</Badge> : null}
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-500">등록된 정식 템플릿</label>
+                  <label className="text-xs font-medium text-slate-500">기존 템플릿 불러오기</label>
                   <div className="flex flex-col gap-2 md:flex-row">
                     <EntityPicker
                       value={selectedRegisteredTemplateId}
@@ -7713,8 +7856,6 @@ export default function TemplateExtractPage() {
                       className="flex-1"
                       triggerClassName="h-9 min-h-9 items-center rounded-md py-1"
                       optionLayout="inline"
-                      onDeleteOption={(option) => void handleDeleteRegisteredTemplate(option.id)}
-                      deleteOptionLabel="정식 템플릿 삭제"
                     />
                     <Button
                       type="button"
@@ -7727,31 +7868,15 @@ export default function TemplateExtractPage() {
                   </div>
                 </div>
 
-                {!viewingRegisteredTemplate ? (
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-slate-500">최근 초안 선택</label>
-                    <EntityPicker
-                      value={selectedDraftId}
-                      options={recentDrafts}
-                      onChange={setSelectedDraftId}
-                      placeholder="최근 초안을 선택하세요"
-                      emptyMessage="최근 초안이 없습니다."
-                      className="flex-1"
-                      triggerClassName="h-9 min-h-9 items-center rounded-md py-1"
-                      optionLayout="inline"
-                      onDeleteOption={handleDeleteRecentDraft}
-                      deleteOptionLabel="최근 초안 삭제"
-                    />
-                  </div>
-                ) : (
+                {viewingRegisteredTemplate ? (
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                    현재 정식 템플릿 ID: {loadedTemplateId}
+                    현재 불러온 템플릿 ID: {loadedTemplateId}
                   </div>
-                )}
+                ) : null}
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-slate-500">템플릿 이름</label>
+                    <label className="text-xs font-medium text-slate-500">템플릿 관리 저장 이름</label>
                     <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
                   </div>
 
@@ -7772,16 +7897,15 @@ export default function TemplateExtractPage() {
                 </div>
 
                 {viewingRegisteredTemplate ? (
-                  <Button
-                    variant="outline"
-                    onClick={handleSaveRegisteredTemplate}
-                    disabled={loading || !draftDetail}
+                  <a
+                    href={`/templates/edit?templateId=${loadedTemplateId}`}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                   >
-                    현재 정식 템플릿 저장
-                  </Button>
+                    템플릿 편집 페이지로 이동
+                  </a>
                 ) : (
                   <Button variant="outline" onClick={handleApprove} disabled={loading || !draftDetail}>
-                    정식 템플릿 만들기
+                    템플릿 관리로 1차 저장
                   </Button>
                 )}
 
@@ -7791,10 +7915,10 @@ export default function TemplateExtractPage() {
                     <p>템플릿 ID: {approveResult.templateId}</p>
                     <p>승인 항목 수: {approveResult.approvedFieldCount}</p>
                     <a
-                      href={`/templates?templateId=${approveResult.templateId}`}
+                      href={`/templates/edit?templateId=${approveResult.templateId}`}
                       className="mt-3 inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-white"
                     >
-                      생성된 템플릿 열기
+                      저장된 템플릿 편집하기
                     </a>
                   </div>
                 ) : null}

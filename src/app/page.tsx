@@ -43,6 +43,12 @@ const pageGroups = [
         status: '구현중',
       },
       {
+        href: '/templates/edit',
+        title: '템플릿 편집',
+        summary: '저장된 템플릿의 div 박스를 다중 선택해 크기와 스타일을 일괄 조정합니다.',
+        status: '구현중',
+      },
+      {
         href: '/photos',
         title: '사진 라벨링 보관',
         summary: '사진 메타데이터, 라벨 저장, 누락 경고를 다룹니다.',

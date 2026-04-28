@@ -11,6 +11,11 @@ from pathlib import Path
 from statistics import median
 from types import ModuleType, SimpleNamespace
 
+try:
+    import fitz
+except ModuleNotFoundError:
+    fitz = None
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VISUAL_REFERENCE_CONVERTER = (
@@ -5393,7 +5398,7 @@ def rounded(value: float) -> float:
 
 
 def load_reference_converter(path: Path, module_name: str):
-    if path.exists():
+    if path.exists() and path.stat().st_size > 0:
         spec = importlib.util.spec_from_file_location(module_name, path)
 
         if spec is None or spec.loader is None:
@@ -5405,12 +5410,13 @@ def load_reference_converter(path: Path, module_name: str):
         return module
 
     # The reference converters are source assets under `docs/`. If the working
-    # tree copy is temporarily missing, fall back to the tracked HEAD blob so
-    # raster-first frame extraction does not regress for non-image PDFs.
+    # tree copy is missing or accidentally replaced by an empty tracked blob,
+    # walk git history and recover the most recent non-empty source so raster-
+    # first extraction can still run on environments where docs/ was trimmed.
     try:
         relative_path = path.relative_to(REPO_ROOT).as_posix()
-        completed = subprocess.run(
-            ["git", "show", f"HEAD:{relative_path}"],
+        revisions = subprocess.run(
+            ["git", "log", "--all", "--format=%H", "--", relative_path],
             cwd=str(REPO_ROOT),
             check=True,
             capture_output=True,
@@ -5419,10 +5425,26 @@ def load_reference_converter(path: Path, module_name: str):
     except Exception as error:
         raise FileNotFoundError(f"reference converter not found: {path}") from error
 
+    recovered_source = ""
+    for revision in revisions.stdout.splitlines():
+        completed = subprocess.run(
+            ["git", "show", f"{revision}:{relative_path}"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+        )
+
+        if completed.returncode == 0 and completed.stdout.strip():
+            recovered_source = completed.stdout
+            break
+
+    if not recovered_source.strip():
+        raise FileNotFoundError(f"reference converter source not found in git history: {path}")
+
     module = ModuleType(module_name)
     module.__file__ = str(path)
     sys.modules[module_name] = module
-    exec(compile(completed.stdout, str(path), "exec"), module.__dict__)
+    exec(compile(recovered_source, str(path), "exec"), module.__dict__)
     return module
 
 
@@ -7129,7 +7151,9 @@ def convert(
     frame_group_version_tag = resolve_frame_group_version_tag(frame_group_version)
     visual_converter = load_reference_converter(VISUAL_REFERENCE_CONVERTER, "template_extract_reference_type1")
     edit_converter = load_reference_converter(EDIT_REFERENCE_CONVERTER, "template_extract_reference_type3")
-    doc = visual_converter.fitz.open(str(input_pdf))
+    if fitz is None:
+        raise ModuleNotFoundError("No module named 'fitz'")
+    doc = fitz.open(str(input_pdf))
 
     if engine_config["clone_id"] in {"pdf-raster-first-v2.21", "pdf-raster-first-v2.2", "pdf-raster-first-v2.02", "pdf-raster-first-v2.03", "pdf-raster-first-v2.04", "pdf-raster-first-v2.05", "pdf-raster-first-v2.11"}:
         if engine_config["clone_id"] == "pdf-raster-first-v2.11":
