@@ -51,12 +51,99 @@ export type TemplateExtractMeasuredTextRunInput = {
   fontWeight?: string | number | null;
 };
 
+export type TemplateExtractMeasuredFrameNode = {
+  domIndex: number;
+  pageNumber: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  frameGroup: string;
+  colorGroup: string;
+  valueKey: string;
+  sourceTextHint: string;
+  rowStart: string;
+  rowEnd: string;
+  colStart: string;
+  colEnd: string;
+};
+
 type TemplateExtractMeasuredTextRunOutput = {
   id: string;
   width: number;
 };
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const waitForChildProcessExit = (childProcess: ReturnType<typeof spawn>, timeoutMs: number) =>
+  new Promise<boolean>((resolve) => {
+    if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
+      resolve(true);
+      return;
+    }
+
+    let settled = false;
+    const finalize = (value: boolean) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      childProcess.removeListener('exit', handleExit);
+      resolve(value);
+    };
+    const handleExit = () => finalize(true);
+    const timeout = setTimeout(() => finalize(false), timeoutMs);
+    childProcess.once('exit', handleExit);
+  });
+
+const shutdownChromeProcess = async (chromeProcess: ReturnType<typeof spawn> | null) => {
+  if (!chromeProcess) {
+    return;
+  }
+
+  if (chromeProcess.exitCode !== null || chromeProcess.signalCode !== null) {
+    return;
+  }
+
+  try {
+    chromeProcess.kill('SIGTERM');
+  } catch {
+    // ignore kill failures
+  }
+
+  if (await waitForChildProcessExit(chromeProcess, 1500)) {
+    return;
+  }
+
+  try {
+    chromeProcess.kill('SIGKILL');
+  } catch {
+    // ignore kill failures
+  }
+
+  await waitForChildProcessExit(chromeProcess, 2000);
+};
+
+const removeDirectoryWithRetries = async (targetPath: string, maxAttempts = 6) => {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      await rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code || '') : '';
+
+      if (!['ENOTEMPTY', 'EBUSY', 'EPERM'].includes(code) || attempt === maxAttempts - 1) {
+        throw error;
+      }
+
+      await wait(120 * (attempt + 1));
+    }
+  }
+};
 
 const escapeHtml = (value: string) =>
   String(value || '')
@@ -661,11 +748,8 @@ export const TemplateExtractHtmlRenderService = {
         // ignore close failures
       }
 
-      if (chromeProcess && !chromeProcess.killed) {
-        chromeProcess.kill('SIGKILL');
-      }
-
-      await rm(tempDir, { recursive: true, force: true });
+      await shutdownChromeProcess(chromeProcess);
+      await removeDirectoryWithRetries(tempDir);
     }
   },
 
@@ -762,11 +846,180 @@ export const TemplateExtractHtmlRenderService = {
         // ignore close failures
       }
 
-      if (chromeProcess && !chromeProcess.killed) {
-        chromeProcess.kill('SIGKILL');
+      await shutdownChromeProcess(chromeProcess);
+      await removeDirectoryWithRetries(tempDir);
+    }
+  },
+
+  async measureFrameNodes(html: string): Promise<TemplateExtractMeasuredFrameNode[]> {
+    const normalizedHtml = String(html || '').trim();
+
+    if (!normalizedHtml) {
+      return [];
+    }
+
+    const tempDir = await mkdtemp(join(tmpdir(), 'template-extract-frame-measure-'));
+    const profileDir = join(tempDir, 'chrome-profile');
+    const documentFilePath = join(tempDir, 'measurement-frame.html');
+    let chromeProcess: ReturnType<typeof spawn> | null = null;
+    let browserSocket: WebSocket | null = null;
+
+    try {
+      await writeFile(documentFilePath, buildMeasurementDocumentHtml(normalizedHtml), 'utf8');
+
+      const launched = await launchChrome(profileDir);
+      chromeProcess = launched.chromeProcess;
+      browserSocket = await connectToChrome(launched.debugWebSocketUrl);
+      const client = new ChromeCdpClient(browserSocket);
+      const targetId = ((await client.send('Target.createTarget', {
+        url: 'about:blank',
+      })) as { targetId?: string }).targetId;
+
+      if (!targetId) {
+        throw new Error('Headless Chrome target 을 만들지 못했습니다.');
       }
 
-      await rm(tempDir, { recursive: true, force: true });
+      const sessionId = ((await client.send('Target.attachToTarget', {
+        targetId,
+        flatten: true,
+      })) as { sessionId?: string }).sessionId;
+
+      if (!sessionId) {
+        throw new Error('Headless Chrome target session 을 만들지 못했습니다.');
+      }
+
+      await client.send('Page.enable', {}, sessionId);
+      await client.send('Runtime.enable', {}, sessionId);
+      await client.send(
+        'Emulation.setDeviceMetricsOverride',
+        {
+          width: DEFAULT_VIEWPORT_WIDTH,
+          height: DEFAULT_VIEWPORT_HEIGHT,
+          deviceScaleFactor: DEFAULT_DEVICE_SCALE_FACTOR,
+          mobile: false,
+        },
+        sessionId
+      );
+      await client.send(
+        'Page.navigate',
+        {
+          url: pathToFileURL(documentFilePath).toString(),
+        },
+        sessionId
+      );
+      await waitForDocumentStable(client, sessionId);
+
+      const initialMetrics = await readDocumentMetrics(client, sessionId);
+      const viewportWidth = Math.max(DEFAULT_VIEWPORT_WIDTH, Math.ceil(initialMetrics.contentWidth) + 32);
+      const viewportHeight = Math.max(
+        DEFAULT_VIEWPORT_HEIGHT,
+        Math.min(4096, Math.ceil(initialMetrics.contentHeight || DEFAULT_VIEWPORT_HEIGHT) + 64)
+      );
+
+      await client.send(
+        'Emulation.setDeviceMetricsOverride',
+        {
+          width: viewportWidth,
+          height: viewportHeight,
+          deviceScaleFactor: DEFAULT_DEVICE_SCALE_FACTOR,
+          mobile: false,
+        },
+        sessionId
+      );
+      await waitForDocumentStable(client, sessionId);
+
+      const evaluation = (await client.send(
+        'Runtime.evaluate',
+        {
+          expression: `(() => {
+            const toRounded = (value) => {
+              const numeric = Number(value || 0);
+              return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : 0;
+            };
+            const readAttr = (element, name) => {
+              if (!(element instanceof HTMLElement)) {
+                return '';
+              }
+              return (
+                element.getAttribute(name) ||
+                element.querySelector('[data-template-frame-input="true"]')?.getAttribute(name) ||
+                ''
+              );
+            };
+            return Array.from(document.querySelectorAll('[data-template-frame-group]'))
+              .filter((element) => {
+                return (
+                  element instanceof HTMLElement &&
+                  !element.matches('[data-template-frame-input="true"]') &&
+                  element.classList.contains('v202-frame-group')
+                );
+              })
+              .map((element, domIndex) => {
+                const pageElement =
+                  element.closest('[data-page]') ||
+                  element.closest('[data-page-number]');
+                const pageInner = element.closest('.page-inner');
+                const container = pageInner || pageElement || element;
+                const containerRect = container.getBoundingClientRect();
+                const rect = element.getBoundingClientRect();
+                const pageNumber = Number.parseInt(
+                  pageElement?.getAttribute('data-page') ||
+                    pageElement?.getAttribute('data-page-number') ||
+                    '1',
+                  10
+                ) || 1;
+
+                return {
+                  domIndex,
+                  pageNumber,
+                  left: toRounded(rect.left - containerRect.left),
+                  top: toRounded(rect.top - containerRect.top),
+                  width: toRounded(rect.width),
+                  height: toRounded(rect.height),
+                  viewportWidth: toRounded(pageInner?.clientWidth || containerRect.width),
+                  viewportHeight: toRounded(pageInner?.clientHeight || containerRect.height),
+                  frameGroup: readAttr(element, 'data-template-frame-group'),
+                  colorGroup: readAttr(element, 'data-template-frame-color-group'),
+                  valueKey: readAttr(element, 'data-template-frame-value-key'),
+                  sourceTextHint: readAttr(element, 'data-template-frame-source-text'),
+                  rowStart: readAttr(element, 'data-template-frame-row-start'),
+                  rowEnd: readAttr(element, 'data-template-frame-row-end'),
+                  colStart: readAttr(element, 'data-template-frame-col-start'),
+                  colEnd: readAttr(element, 'data-template-frame-col-end'),
+                };
+              });
+          })()`,
+          awaitPromise: true,
+          returnByValue: true,
+        },
+        sessionId
+      )) as {
+        result?: {
+          value?: TemplateExtractMeasuredFrameNode[];
+        };
+        exceptionDetails?: {
+          text?: string;
+        };
+      };
+
+      if (evaluation.exceptionDetails) {
+        throw new Error(
+          `프레임 좌표를 읽지 못했습니다. ${evaluation.exceptionDetails.text || 'unknown_error'}`
+        );
+      }
+
+      await client.send('Target.closeTarget', { targetId });
+
+      return Array.isArray(evaluation.result?.value) ? evaluation.result?.value : [];
+    } finally {
+      try {
+        browserSocket?.close();
+      } catch {
+        // ignore close failures
+      }
+
+      await shutdownChromeProcess(chromeProcess);
+      await removeDirectoryWithRetries(tempDir);
     }
   },
 };

@@ -12,7 +12,7 @@ const PYTHON_SCRIPT_PATH = join(process.cwd(), 'scripts', 'template-extract-fram
 const LOCAL_VENV_PYTHON_PATH = join(process.cwd(), '.venv-template-extract-v2', 'bin', 'python');
 const IMAGE_TROCR_MODEL_ID = process.env.TEMPLATE_EXTRACT_IMAGE_TROCR_MODEL_ID?.trim() || 'ddobokki/ko-trocr';
 
-export type ImageFrameTextOcrVersion = 'iv1.00' | 'iv2.00' | 'iv2.01' | 'iv2.02' | 'iv2.03' | 'iv2.04' | 'iv3.00';
+export type ImageFrameTextOcrVersion = 'iv1.00' | 'iv2.00' | 'iv2.01' | 'iv2.02';
 
 const resolvePythonBinary = () => {
   const configuredPythonBinary = process.env.TEMPLATE_EXTRACT_PYTHON_BIN?.trim();
@@ -102,44 +102,17 @@ const parseRenderModel = (stdout: string, imageOcrVersion: ImageFrameTextOcrVers
     throw new Error(`텍스트 추출 실패: 이미지 텍스트 추출기(${imageOcrVersion})가 유효한 render model을 반환하지 않았습니다.`);
   }
 
-  if (imageOcrVersion === 'iv2.02' || imageOcrVersion === 'iv2.03' || imageOcrVersion === 'iv2.04' || imageOcrVersion === 'iv3.00') {
+  if (imageOcrVersion === 'iv2.02') {
     const diagnostics = (renderModel as TemplateExtractReplicaRenderModel & {
       diagnostics?: {
-        frameDebug?: Array<{
-          key?: unknown;
-          selectedBy?: unknown;
-          writePolicy?: unknown;
-        }> | unknown;
+        frameDebug?: unknown;
         frameReviewFlags?: unknown;
         fieldAwareEnabled?: unknown;
-        pageOcrSummary?: unknown;
-        ocrLayerSummary?: unknown;
-        frameAssignmentSummary?: unknown;
       };
     }).diagnostics;
 
-    if (
-      !Array.isArray(diagnostics?.frameDebug) ||
-      !diagnostics?.frameReviewFlags ||
-      diagnostics.fieldAwareEnabled !== true ||
-      diagnostics.frameDebug.some(
-        (entry) =>
-          !entry ||
-          typeof entry !== 'object' ||
-          !String(entry.key || '').trim() ||
-          !String(entry.selectedBy || '').trim() ||
-          !String(entry.writePolicy || '').trim()
-      )
-    ) {
+    if (!Array.isArray(diagnostics?.frameDebug) || !diagnostics?.frameReviewFlags || diagnostics.fieldAwareEnabled !== true) {
       throw new Error(`텍스트 추출 실패: 이미지 텍스트 추출기(${imageOcrVersion})가 필수 diagnostics(frameDebug/frameReviewFlags)를 반환하지 않았습니다.`);
-    }
-
-    if ((imageOcrVersion === 'iv2.03' || imageOcrVersion === 'iv2.04' || imageOcrVersion === 'iv3.00') && !Array.isArray(diagnostics?.pageOcrSummary)) {
-      throw new Error(`텍스트 추출 실패: 이미지 텍스트 추출기(${imageOcrVersion})가 pageOcrSummary diagnostics를 반환하지 않았습니다.`);
-    }
-
-    if (imageOcrVersion === 'iv3.00' && (!diagnostics?.ocrLayerSummary || !diagnostics?.frameAssignmentSummary)) {
-      throw new Error(`텍스트 추출 실패: 이미지 텍스트 추출기(${imageOcrVersion})가 ocrLayerSummary/frameAssignmentSummary diagnostics를 반환하지 않았습니다.`);
     }
   }
 

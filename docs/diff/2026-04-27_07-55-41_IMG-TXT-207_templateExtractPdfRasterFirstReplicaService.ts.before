@@ -7,15 +7,10 @@ import { promisify } from 'node:util';
 import type {
   TemplateExtractExtractionStage,
   TemplateExtractFrameGroupVersion,
-  TemplateExtractFrameGroupLegacyVersion,
   TemplateExtractPdfPipelineTrace,
   TemplateExtractPdfSourceMode,
   TemplateExtractEngineVersion,
   TemplateExtractResolvedSource,
-} from '../lib/templateExtractDtos';
-import {
-  toLegacyTemplateExtractFrameGroupVersion,
-  toPublicTemplateExtractFrameGroupVersion,
 } from '../lib/templateExtractDtos';
 import { TemplateExtractReplicaHtmlNormalizerService } from './templateExtractReplicaHtmlNormalizerService';
 
@@ -27,7 +22,7 @@ type RasterFirstReplicaResponse = {
   sourceTitle: string;
   html: string;
   extractionStage?: TemplateExtractExtractionStage;
-  frameGroupVersion?: string;
+  frameGroupVersion?: TemplateExtractFrameGroupVersion;
   pageCount: number;
   sourceMode: TemplateExtractPdfSourceMode;
   documentFamily: TemplateExtractPdfPipelineTrace['documentFamily'];
@@ -155,7 +150,7 @@ const buildPipelineTrace = (
 ): TemplateExtractPdfPipelineTrace => ({
   engineVersion: version,
   extractionStage: response.extractionStage || 'full',
-  frameGroupVersion: response.frameGroupVersion as TemplateExtractFrameGroupVersion | undefined,
+  frameGroupVersion: response.frameGroupVersion,
   sourceMode: response.sourceMode,
   documentFamily: response.documentFamily,
   familyConfidenceScore: 0.85,
@@ -214,14 +209,11 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
     bytes: Uint8Array,
     version: RasterFirstReplicaVersion = '47',
     extractionStage: TemplateExtractExtractionStage = 'full',
-    frameGroupVersion: TemplateExtractFrameGroupVersion = 'fv1.11-default'
+    frameGroupVersion: TemplateExtractFrameGroupVersion = 'v1.11-default'
   ): Promise<TemplateExtractResolvedSource> {
     const sourceTitle = fileName.replace(/\.pdf$/i, '').trim() || '업로드 PDF';
     const tempDir = await mkdtemp(join(tmpdir(), 'template-extract-raster-first-'));
     const tempPdfPath = join(tempDir, fileName || 'upload.pdf');
-    const legacyFrameGroupVersion = String(
-      toLegacyTemplateExtractFrameGroupVersion(frameGroupVersion)
-    ) as TemplateExtractFrameGroupLegacyVersion;
 
     try {
       await writeFile(tempPdfPath, bytes);
@@ -238,7 +230,7 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
           '--extraction-stage',
           extractionStage,
           '--frame-group-version',
-          legacyFrameGroupVersion,
+          frameGroupVersion,
           '--scale',
           '1.28',
           '--raster-scale',
@@ -252,12 +244,7 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
       );
       const response = parseRasterFirstResponse(stdout, version);
       const actualExtractionStage = response.extractionStage || extractionStage;
-      const actualLegacyFrameGroupVersion = String(
-        toLegacyTemplateExtractFrameGroupVersion(response.frameGroupVersion || legacyFrameGroupVersion)
-      ) as TemplateExtractFrameGroupLegacyVersion;
-      const actualFrameGroupVersion = String(
-        toPublicTemplateExtractFrameGroupVersion(actualLegacyFrameGroupVersion)
-      ) as TemplateExtractFrameGroupVersion;
+      const actualFrameGroupVersion = response.frameGroupVersion || frameGroupVersion;
       const pipelineTrace = buildPipelineTrace(
         {
           ...response,

@@ -106,7 +106,7 @@ export type TemplateExtractPdfSourceMode = 'digital' | 'scanned';
 
 export type TemplateExtractDocumentFamily = 'work_order' | 'certificate' | 'generic_form';
 export type TemplateExtractExtractionStage = 'full' | 'frames';
-export type TemplateExtractFrameGroupLegacyBaseVersion =
+export type TemplateExtractFrameGroupBaseVersion =
   | 'v1.01'
   | 'v1.02'
   | 'v1.03'
@@ -118,103 +118,27 @@ export type TemplateExtractFrameGroupLegacyBaseVersion =
   | 'v1.09'
   | 'v1.10'
   | 'v1.11';
-export type TemplateExtractFrameGroupLegacyVersion =
-  | TemplateExtractFrameGroupLegacyBaseVersion
+export type TemplateExtractFrameGroupVersion =
+  | TemplateExtractFrameGroupBaseVersion
   | `v1.09-${string}`
   | `v1.10-${string}`
   | `v1.11-${string}`;
-export type TemplateExtractFrameGroupBaseVersion =
-  | 'fv1.01'
-  | 'fv1.02'
-  | 'fv1.03'
-  | 'fv1.04'
-  | 'fv1.05'
-  | 'fv1.06'
-  | 'fv1.07'
-  | 'fv1.08'
-  | 'fv1.09'
-  | 'fv1.10'
-  | 'fv1.11';
-export type TemplateExtractFrameGroupVersion =
-  | TemplateExtractFrameGroupBaseVersion
-  | `fv1.09-${string}`
-  | `fv1.10-${string}`
-  | `fv1.11-${string}`;
-export type TemplateExtractFrameTextMode = 'non_image' | 'image';
-export type TemplateExtractNonImageFrameTextVersion = 'niv1.01' | 'niv1.02' | 'niv1.12';
-export type TemplateExtractImageFrameTextVersion =
-  | 'iv1.00'
-  | 'iv2.00'
-  | 'iv2.01'
-  | 'iv2.02'
-  | 'iv2.03'
-  | 'iv2.04'
-  | 'iv3.00';
-
-export const toLegacyTemplateExtractFrameGroupVersion = (
-  value: string | null | undefined
-): TemplateExtractFrameGroupLegacyVersion | string => {
-  const normalized = String(value || '').trim();
-
-  if (!normalized) {
-    return '';
-  }
-
-  if (/^fv1\./i.test(normalized)) {
-    return normalized.slice(1);
-  }
-
-  return normalized;
-};
-
-export const toPublicTemplateExtractFrameGroupVersion = (
-  value: string | null | undefined
-): TemplateExtractFrameGroupVersion | string => {
-  const normalized = String(value || '').trim();
-
-  if (!normalized) {
-    return '';
-  }
-
-  if (/^fv1\./i.test(normalized)) {
-    return normalized as TemplateExtractFrameGroupVersion;
-  }
-
-  if (/^v1\./i.test(normalized)) {
-    return `f${normalized}` as TemplateExtractFrameGroupVersion;
-  }
-
-  return normalized;
-};
-
-export const isTemplateExtractProfiledFrameGroupVersion = (value: string | null | undefined) => {
-  const legacyVersion = String(toLegacyTemplateExtractFrameGroupVersion(value) || '');
-
-  return (
-    legacyVersion === 'v1.09' ||
-    legacyVersion === 'v1.10' ||
-    legacyVersion === 'v1.11' ||
-    legacyVersion.startsWith('v1.09-') ||
-    legacyVersion.startsWith('v1.10-') ||
-    legacyVersion.startsWith('v1.11-')
-  );
-};
 
 export const TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS: Array<{
   value: TemplateExtractFrameGroupBaseVersion;
   label: string;
 }> = [
-  { value: 'fv1.11', label: 'fv1.11' },
-  { value: 'fv1.10', label: 'fv1.10' },
-  { value: 'fv1.09', label: 'fv1.09' },
-  { value: 'fv1.08', label: 'fv1.08' },
-  { value: 'fv1.07', label: 'fv1.07' },
-  { value: 'fv1.06', label: 'fv1.06' },
-  { value: 'fv1.05', label: 'fv1.05' },
-  { value: 'fv1.04', label: 'fv1.04' },
-  { value: 'fv1.03', label: 'fv1.03' },
-  { value: 'fv1.02', label: 'fv1.02' },
-  { value: 'fv1.01', label: 'fv1.01' },
+  { value: 'v1.11', label: 'v1.11' },
+  { value: 'v1.10', label: 'v1.10' },
+  { value: 'v1.09', label: 'v1.09' },
+  { value: 'v1.08', label: 'v1.08' },
+  { value: 'v1.07', label: 'v1.07' },
+  { value: 'v1.06', label: 'v1.06' },
+  { value: 'v1.05', label: 'v1.05' },
+  { value: 'v1.04', label: 'v1.04' },
+  { value: 'v1.03', label: 'v1.03' },
+  { value: 'v1.02', label: 'v1.02' },
+  { value: 'v1.01', label: 'v1.01' },
 ];
 
 export type TemplateExtractCreateInput = {

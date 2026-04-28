@@ -1,0 +1,814 @@
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import re
+from difflib import SequenceMatcher
+from collections import defaultdict
+from pathlib import Path
+
+import fitz
+import numpy as np
+import pytesseract
+from PIL import Image, ImageOps
+
+try:
+    import cv2
+except Exception:  # pragma: no cover - optional runtime dependency
+    cv2 = None
+
+
+OCR_MEANINGFUL_TEXT_PATTERN = re.compile(r"[0-9A-Za-z\u3131-\u318e\uac00-\ud7a3]")
+OCR_PUNCTUATION_ONLY_PATTERN = re.compile(r"^[|()/:.,=%\-]+$")
+OCR_TEXT_COMPARISON_PATTERN = re.compile(r"[^0-9A-Za-z\u3131-\u318e\uac00-\ud7a3]+")
+FRAME_OCR_MIN_RASTER_SCALE = 4.2
+FRAME_OCR_BORDER_PX = 18
+FRAME_OCR_USER_DEFINED_DPI = 300
+
+
+def rounded(value: float) -> float:
+    return round(float(value), 2)
+
+
+def normalize_text(value: str) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def normalize_multiline_text(value: str) -> str:
+    return "\n".join(
+        line
+        for line in (normalize_text(raw_line) for raw_line in str(value or "").replace("\r", "").split("\n"))
+        if line
+    ).strip()
+
+
+def normalize_text_for_similarity(value: str) -> str:
+    return OCR_TEXT_COMPARISON_PATTERN.sub("", str(value or "")).strip().lower()
+
+
+def is_compact_token_text(value: str) -> bool:
+    normalized = normalize_multiline_text(value)
+
+    if not normalized:
+        return False
+
+    compact_lines = [line for line in normalized.split("\n") if line]
+    return len(compact_lines) == 1 and len(compact_lines[0].split()) <= 1
+
+
+def normalize_frame_ocr_output(text: str, frame_plan: dict) -> str:
+    normalized = normalize_multiline_text(text)
+    source_hint = normalize_multiline_text(str(frame_plan.get("sourceTextHint") or ""))
+    combined = f"{source_hint}\n{normalized}"
+
+    if "년" in combined and "월" in combined and "일" in combined:
+        groups = re.findall(r"\d+", normalized)
+
+        if len(groups) >= 3 and len(groups[0]) >= 4:
+            year = groups[0][:4]
+            month = groups[1][:2].zfill(2)
+            day = groups[2][:2].zfill(2)
+            return f"{year}년 {month}월 {day}일"
+
+        digits = "".join(groups)
+
+        if len(digits) >= 8:
+            return f"{digits[:4]}년 {digits[4:6]}월 {digits[6:8]}일"
+
+    return normalized
+
+
+def build_plain_text_item(
+    text: str,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    font_size: float | None = None,
+) -> dict | None:
+    normalized_text = normalize_text(text)
+
+    if not normalized_text or width <= 0 or height <= 0:
+        return None
+
+    resolved_font_size = max(8.0, min(18.0, float(font_size or height * 0.82)))
+    resolved_line_height = max(resolved_font_size * 1.18, float(height))
+
+    return {
+        "kind": "plain_text",
+        "left": rounded(left),
+        "top": rounded(top),
+        "width": rounded(width),
+        "height": rounded(height),
+        "fontSize": rounded(resolved_font_size),
+        "lineHeight": rounded(resolved_line_height),
+        "fontWeight": 400,
+        "text": normalized_text,
+    }
+
+
+def extract_digital_text_items(page: fitz.Page) -> list[dict]:
+    words = page.get_text("words", sort=True) or []
+    items: list[dict] = []
+
+    for word in words:
+        x0, y0, x1, y1, text = word[:5]
+        item = build_plain_text_item(
+            str(text or ""),
+            float(x0),
+            float(y0),
+            float(x1) - float(x0),
+            float(y1) - float(y0),
+            float(y1) - float(y0),
+        )
+
+        if item is not None:
+            items.append(item)
+
+    return items
+
+
+def should_use_digital_items(items: list[dict]) -> bool:
+    if len(items) >= 12:
+        return True
+
+    visible_chars = sum(len(str(item.get("text") or "").replace(" ", "")) for item in items)
+    return visible_chars >= 48
+
+
+def preprocess_ocr_image(image: Image.Image) -> Image.Image:
+    return ImageOps.autocontrast(image.convert("L"))
+
+
+def looks_like_meaningful_ocr_text(value: str) -> bool:
+    normalized = normalize_text(value)
+
+    if not normalized:
+        return False
+
+    if OCR_MEANINGFUL_TEXT_PATTERN.search(normalized):
+        return True
+
+    return OCR_PUNCTUATION_ONLY_PATTERN.fullmatch(normalized) is not None
+
+
+def is_single_hangul_token(value: str) -> bool:
+    normalized = normalize_text(value)
+    return len(normalized) == 1 and bool(re.fullmatch(r"[\u3131-\u318e\uac00-\ud7a3]", normalized))
+
+
+def should_merge_ocr_words(previous: dict, current: dict, gap: float, average_char_width: float) -> bool:
+    if gap <= 0:
+        return True
+
+    return gap <= max(14.0, average_char_width * 1.9)
+
+
+def should_insert_space_between_tokens(left_text: str, right_text: str, gap: float, average_char_width: float) -> bool:
+    if gap <= max(6.0, average_char_width * 1.05):
+        return False
+
+    normalized_left = normalize_text(left_text)
+    normalized_right = normalize_text(right_text)
+
+    if not normalized_left or not normalized_right:
+        return False
+
+    left_last = normalized_left[-1]
+    right_first = normalized_right[0]
+
+    if left_last in "([{" or right_first in ")]},.:;|/%":
+        return False
+
+    if is_single_hangul_token(normalized_left) and is_single_hangul_token(normalized_right):
+        return False
+
+    return True
+
+
+def merge_ocr_line_words(words: list[dict]) -> list[dict]:
+    ordered = sorted(words, key=lambda item: (float(item["left"]), float(item["top"])))
+
+    if not ordered:
+        return []
+
+    chunks: list[dict] = []
+    current = dict(ordered[0])
+
+    for word in ordered[1:]:
+        gap = float(word["left"]) - float(current["right"])
+        current_char_width = max(1.0, float(current["width"]) / max(1, len(str(current["text"] or ""))))
+        word_char_width = max(1.0, float(word["width"]) / max(1, len(str(word["text"] or ""))))
+        average_char_width = (current_char_width + word_char_width) * 0.5
+
+        if should_merge_ocr_words(current, word, gap, average_char_width):
+            separator = " " if should_insert_space_between_tokens(str(current["text"] or ""), str(word["text"] or ""), gap, average_char_width) else ""
+            current["text"] = f'{str(current["text"] or "").rstrip()}{separator}{str(word["text"] or "").lstrip()}'
+            current["right"] = max(float(current["right"]), float(word["right"]))
+            current["width"] = float(current["right"]) - float(current["left"])
+            current["top"] = min(float(current["top"]), float(word["top"]))
+            current["bottom"] = max(float(current["bottom"]), float(word["bottom"]))
+            current["height"] = float(current["bottom"]) - float(current["top"])
+            continue
+
+        chunks.append(current)
+        current = dict(word)
+
+    chunks.append(current)
+    return chunks
+
+
+def collect_ocr_line_words(
+    prepared: Image.Image,
+    ocr_lang: str,
+    config: str,
+) -> dict[tuple[int, int, int], list[dict]]:
+    ocr_data = pytesseract.image_to_data(
+        prepared,
+        lang=ocr_lang,
+        config=config,
+        output_type=pytesseract.Output.DICT,
+    )
+    lines: dict[tuple[int, int, int], list[dict]] = defaultdict(list)
+
+    for index, raw_text in enumerate(ocr_data.get("text", [])):
+        text = normalize_text(str(raw_text or ""))
+
+        if not looks_like_meaningful_ocr_text(text):
+            continue
+
+        try:
+            confidence = float(ocr_data.get("conf", [])[index] or -1)
+        except Exception:
+            confidence = -1
+
+        if confidence < 25:
+            continue
+
+        if confidence < 45 and not OCR_MEANINGFUL_TEXT_PATTERN.search(text):
+            continue
+
+        left = float(ocr_data["left"][index])
+        top = float(ocr_data["top"][index])
+        width = float(ocr_data["width"][index])
+        height = float(ocr_data["height"][index])
+
+        if width <= 0 or height <= 0:
+            continue
+
+        line_key = (
+            int(ocr_data.get("block_num", [0])[index] or 0),
+            int(ocr_data.get("par_num", [0])[index] or 0),
+            int(ocr_data.get("line_num", [0])[index] or 0),
+        )
+        lines[line_key].append(
+            {
+                "text": text,
+                "confidence": confidence,
+                "left": left,
+                "top": top,
+                "right": left + width,
+                "bottom": top + height,
+                "width": width,
+                "height": height,
+            }
+        )
+
+    return lines
+
+
+def build_ocr_items_from_lines(
+    page: fitz.Page,
+    prepared: Image.Image,
+    lines: dict[tuple[int, int, int], list[dict]],
+) -> list[dict]:
+    scale_x = float(page.rect.width) / max(1.0, float(prepared.width))
+    scale_y = float(page.rect.height) / max(1.0, float(prepared.height))
+    items: list[dict] = []
+
+    for line_key in sorted(lines):
+        merged_words = merge_ocr_line_words(lines[line_key])
+
+        for word in merged_words:
+            item = build_plain_text_item(
+                str(word["text"] or ""),
+                float(word["left"]) * scale_x,
+                float(word["top"]) * scale_y,
+                float(word["width"]) * scale_x,
+                float(word["height"]) * scale_y,
+                float(word["height"]) * scale_y,
+            )
+
+            if item is not None:
+                items.append(item)
+
+    return items
+
+
+def build_ocr_text_from_lines(lines: dict[tuple[int, int, int], list[dict]]) -> tuple[str, float]:
+    text_lines: list[str] = []
+    confidences: list[float] = []
+
+    for line_key in sorted(lines):
+        merged_words = merge_ocr_line_words(lines[line_key])
+        line_text = normalize_text(" ".join(str(word.get("text") or "") for word in merged_words))
+
+        if not line_text:
+            continue
+
+        text_lines.append(line_text)
+
+        for word in merged_words:
+            confidence = float(word.get("confidence") or 0)
+
+            if confidence > 0:
+                confidences.append(confidence)
+
+    average_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    return normalize_multiline_text("\n".join(text_lines)), average_confidence
+
+
+def extract_ocr_text_items(page: fitz.Page, ocr_lang: str, raster_scale: float) -> list[dict]:
+    matrix = fitz.Matrix(raster_scale, raster_scale)
+    pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+    image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+    prepared = preprocess_ocr_image(image)
+    ocr_passes = [
+        (prepared, "--oem 1 --psm 6 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0"),
+        (
+            prepared.point(lambda value: 255 if value > 180 else 0, mode="1").convert("L"),
+            "--oem 1 --psm 6 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0",
+        ),
+        (prepared, "--oem 1 --psm 11 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0"),
+    ]
+
+    for candidate_image, config in ocr_passes:
+        line_words = collect_ocr_line_words(candidate_image, ocr_lang, config)
+        items = build_ocr_items_from_lines(page, candidate_image, line_words)
+
+        if items:
+            return items
+
+    return []
+
+
+def select_frame_ocr_psm_candidates(frame_plan: dict) -> list[int]:
+    width = max(1.0, float(frame_plan.get("width") or 0))
+    height = max(1.0, float(frame_plan.get("height") or 0))
+    aspect_ratio = width / height
+    source_hint = normalize_multiline_text(str(frame_plan.get("sourceTextHint") or ""))
+    expected_lines = max(1, source_hint.count("\n") + 1) if source_hint else 1
+
+    if is_compact_token_text(source_hint):
+        return [7, 8, 13, 6, 11]
+
+    if expected_lines == 1 and aspect_ratio >= 2.4 and height <= 42.0:
+        return [7, 13, 6, 11]
+
+    if expected_lines >= 3 or height >= 64.0:
+        return [6, 11, 7]
+
+    if aspect_ratio < 1.35:
+        return [11, 6, 7]
+
+    return [6, 7, 11]
+
+
+def trim_frame_border_for_ocr(image: Image.Image) -> Image.Image:
+    pad_x = max(10, min(int(round(image.width * 0.0125)), max(10, image.width // 8)))
+    pad_y = max(6, min(int(round(image.height * 0.10)), max(6, image.height // 5)))
+
+    if image.width <= pad_x * 2 or image.height <= pad_y * 2:
+        return image
+
+    return image.crop((pad_x, pad_y, image.width - pad_x, image.height - pad_y))
+
+
+def build_frame_image_variants(image: Image.Image) -> list[tuple[str, Image.Image]]:
+    prepared = preprocess_ocr_image(image)
+    variants: list[tuple[str, Image.Image]] = [
+        ("gray", ImageOps.expand(prepared, border=FRAME_OCR_BORDER_PX, fill=255)),
+        (
+            "threshold220",
+            ImageOps.expand(
+                prepared.point(lambda value: 255 if value > 220 else 0, mode="1").convert("L"),
+                border=FRAME_OCR_BORDER_PX,
+                fill=255,
+            ),
+        ),
+        (
+            "threshold230",
+            ImageOps.expand(
+                prepared.point(lambda value: 255 if value > 230 else 0, mode="1").convert("L"),
+                border=FRAME_OCR_BORDER_PX,
+                fill=255,
+            ),
+        ),
+        (
+            "threshold240",
+            ImageOps.expand(
+                prepared.point(lambda value: 255 if value > 240 else 0, mode="1").convert("L"),
+                border=FRAME_OCR_BORDER_PX,
+                fill=255,
+            ),
+        ),
+    ]
+
+    if cv2 is not None:
+        adaptive_input = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
+        adaptive_variant = cv2.adaptiveThreshold(
+            adaptive_input,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            11,
+        )
+        variants.append(
+            (
+                "adaptive_gaussian",
+                ImageOps.expand(Image.fromarray(adaptive_variant), border=FRAME_OCR_BORDER_PX, fill=255),
+            )
+        )
+
+    return variants
+
+
+def estimate_text_cluster_count(image: Image.Image) -> int:
+    if cv2 is None:
+        return 0
+
+    grayscale = np.array(preprocess_ocr_image(image))
+    _, thresholded = cv2.threshold(grayscale, 240, 255, cv2.THRESH_BINARY_INV)
+    component_count, _, component_stats, _ = cv2.connectedComponentsWithStats(thresholded, 8)
+    components: list[tuple[int, int, int, int]] = []
+
+    for index in range(1, component_count):
+        x, y, width, height, area = component_stats[index]
+
+        if area < 40 or width < 6 or height < 14:
+            continue
+
+        components.append((x, y, width, height))
+
+    if not components:
+        return 0
+
+    components.sort(key=lambda item: item[0])
+    cluster_count = 0
+    current_right = -1
+    current_top = 0
+    current_bottom = 0
+
+    for x, y, width, height in components:
+        right = x + width
+        bottom = y + height
+
+        if cluster_count == 0:
+            cluster_count = 1
+            current_right = right
+            current_top = y
+            current_bottom = bottom
+            continue
+
+        horizontal_gap = x - current_right
+        overlaps_vertically = y < current_bottom - 3 and bottom > current_top + 3
+
+        if horizontal_gap <= 10 and overlaps_vertically:
+            current_right = max(current_right, right)
+            current_top = min(current_top, y)
+            current_bottom = max(current_bottom, bottom)
+            continue
+
+        cluster_count += 1
+        current_right = right
+        current_top = y
+        current_bottom = bottom
+
+    return cluster_count
+
+
+def should_use_numeric_whitelist(frame_plan: dict) -> bool:
+    raw_source_hint = normalize_multiline_text(str(frame_plan.get("sourceTextHint") or ""))
+    source_hint = normalize_text_for_similarity(raw_source_hint)
+
+    if not source_hint:
+        return False
+
+    if re.search(r"[A-Za-z\u3131-\u318e\uac00-\ud7a3]", raw_source_hint):
+        return False
+
+    digit_count = sum(char.isdigit() for char in source_hint)
+    non_digit_count = sum(not char.isdigit() for char in source_hint if char.strip())
+    return digit_count >= 4 and digit_count >= max(1, non_digit_count)
+
+
+def build_frame_ocr_passes(frame_plan: dict, image: Image.Image) -> list[tuple[str, int, Image.Image, str]]:
+    psm_candidates = select_frame_ocr_psm_candidates(frame_plan)
+    numeric_whitelist = should_use_numeric_whitelist(frame_plan)
+    image_variants = build_frame_image_variants(image)
+    passes: list[tuple[str, int, Image.Image, str]] = []
+
+    for preprocessing_name, variant_image in image_variants:
+        for psm in psm_candidates:
+            config = (
+                f"--oem 1 --psm {psm} -c preserve_interword_spaces=1 "
+                f"-c load_system_dawg=0 -c load_freq_dawg=0 -c user_defined_dpi={FRAME_OCR_USER_DEFINED_DPI}"
+            )
+
+            if numeric_whitelist:
+                config = f"{config} -c tessedit_char_whitelist=0123456789-().:/,%"
+
+            passes.append((preprocessing_name, psm, variant_image, config))
+
+    return passes
+
+
+def score_frame_ocr_result(
+    text: str,
+    average_confidence: float,
+    source_hint: str,
+    *,
+    estimated_cluster_count: int = 0,
+) -> float:
+    normalized_text = normalize_multiline_text(text)
+    compact_text = normalize_text_for_similarity(normalized_text)
+    compact_hint = normalize_text_for_similarity(source_hint)
+    meaningful_length = len(compact_text)
+    similarity_score = SequenceMatcher(None, compact_text, compact_hint).ratio() if compact_text and compact_hint else 0.0
+    line_count_bonus = min(3, max(1, normalized_text.count("\n") + 1)) * 4.0 if normalized_text else 0.0
+    score = meaningful_length * 2.2 + average_confidence * 1.15 + similarity_score * 26.0 + line_count_bonus
+
+    if estimated_cluster_count > 0 and compact_text:
+        cluster_distance = abs(len(compact_text) - estimated_cluster_count)
+        score += max(0.0, 24.0 - cluster_distance * 18.0)
+
+    if is_compact_token_text(source_hint) and any(not char.isalnum() and not re.fullmatch(r"[\u3131-\u318e\uac00-\ud7a3]", char) for char in normalized_text):
+        score -= 12.0
+
+    return score
+
+
+def run_frame_crop_ocr(image: Image.Image, frame_plan: dict, ocr_lang: str) -> tuple[str, dict]:
+    focused = trim_frame_border_for_ocr(image)
+    source_hint = normalize_multiline_text(str(frame_plan.get("sourceTextHint") or ""))
+    estimated_cluster_count = estimate_text_cluster_count(focused)
+    best_text = ""
+    best_debug: dict = {
+        "key": str(frame_plan.get("key") or ""),
+        "pageNumber": int(frame_plan.get("pageNumber") or 1),
+        "psm": 6,
+        "preprocessing": "none",
+        "confidence": 0.0,
+        "text": "",
+        "score": -1.0,
+    }
+
+    for preprocessing_name, psm, variant_image, config in build_frame_ocr_passes(frame_plan, focused):
+        line_words = collect_ocr_line_words(variant_image, ocr_lang, config)
+        candidate_text, average_confidence = build_ocr_text_from_lines(line_words)
+
+        direct_text = normalize_multiline_text(
+            pytesseract.image_to_string(
+                variant_image,
+                lang=ocr_lang,
+                config=config,
+            )
+        )
+
+        candidate_variants = []
+
+        if candidate_text:
+            candidate_variants.append((candidate_text, average_confidence, preprocessing_name))
+
+        if direct_text:
+            candidate_variants.append((direct_text, max(average_confidence, 55.0), f"{preprocessing_name}:string"))
+
+        for resolved_text, resolved_confidence, resolved_preprocessing in candidate_variants:
+            normalized_resolved_text = normalize_frame_ocr_output(resolved_text, frame_plan)
+            score = score_frame_ocr_result(
+                normalized_resolved_text,
+                resolved_confidence,
+                source_hint,
+                estimated_cluster_count=estimated_cluster_count,
+            )
+
+            if score <= float(best_debug["score"]):
+                continue
+
+            best_text = normalized_resolved_text
+            best_debug = {
+                "key": str(frame_plan.get("key") or ""),
+                "pageNumber": int(frame_plan.get("pageNumber") or 1),
+                "psm": psm,
+                "preprocessing": resolved_preprocessing,
+                "confidence": round(float(resolved_confidence), 2),
+                "text": normalized_resolved_text,
+                "score": round(score, 2),
+            }
+
+    best_debug.pop("score", None)
+    return best_text, best_debug
+
+
+def extract_frame_plan_ocr_results(
+    document: fitz.Document,
+    frame_plans: list[dict],
+    ocr_lang: str,
+    raster_scale: float,
+) -> tuple[list[dict], dict[str, str], list[dict], list[str]]:
+    effective_scale = max(float(raster_scale), FRAME_OCR_MIN_RASTER_SCALE)
+    plans_by_page_number: dict[int, list[dict]] = defaultdict(list)
+
+    for frame_plan in frame_plans:
+        page_number = int(frame_plan.get("pageNumber") or 1)
+        plans_by_page_number[page_number].append(frame_plan)
+
+    pages: list[dict] = []
+    frame_results: dict[str, str] = {}
+    frame_debug: list[dict] = []
+    page_modes: list[str] = []
+
+    for page_index, page in enumerate(document):
+        page_number = page_index + 1
+        page_modes.append("ocr_frame_crop" if page_number in plans_by_page_number else "ocr_frame_page_fallback")
+        page_text_items: list[dict] = []
+        page_plans = plans_by_page_number.get(page_number) or []
+
+        if page_plans:
+            matrix = fitz.Matrix(effective_scale, effective_scale)
+            pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+            page_image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+            image_width = max(1, page_image.width)
+            image_height = max(1, page_image.height)
+            scale_x = image_width / max(1.0, float(page.rect.width))
+            scale_y = image_height / max(1.0, float(page.rect.height))
+
+            for frame_plan in page_plans:
+                left = max(0, int(round(float(frame_plan.get("left") or 0) * scale_x)))
+                top = max(0, int(round(float(frame_plan.get("top") or 0) * scale_y)))
+                right = min(
+                    image_width,
+                    int(round((float(frame_plan.get("left") or 0) + float(frame_plan.get("width") or 0)) * scale_x)),
+                )
+                bottom = min(
+                    image_height,
+                    int(round((float(frame_plan.get("top") or 0) + float(frame_plan.get("height") or 0)) * scale_y)),
+                )
+
+                frame_key = str(frame_plan.get("key") or "")
+
+                if right <= left or bottom <= top:
+                    frame_results[frame_key] = ""
+                    continue
+
+                crop_image = page_image.crop((left, top, right, bottom))
+                best_text, debug_entry = run_frame_crop_ocr(crop_image, frame_plan, ocr_lang)
+                normalized_best_text = normalize_multiline_text(best_text)
+                frame_results[frame_key] = normalized_best_text
+                debug_entry["cropWidthPx"] = max(0, right - left)
+                debug_entry["cropHeightPx"] = max(0, bottom - top)
+                debug_entry["rasterScale"] = round(effective_scale, 2)
+                frame_debug.append(debug_entry)
+                item = build_plain_text_item(
+                    normalized_best_text,
+                    float(frame_plan.get("left") or 0),
+                    float(frame_plan.get("top") or 0),
+                    float(frame_plan.get("width") or 0),
+                    float(frame_plan.get("height") or 0),
+                    float(frame_plan.get("height") or 0) * 0.72,
+                )
+
+                if item is not None:
+                    page_text_items.append(item)
+
+        pages.append(
+            {
+                "pageNumber": page_number,
+                "width": rounded(float(page.rect.width)),
+                "height": rounded(float(page.rect.height)),
+                "frameSegments": [],
+                "textItems": page_text_items,
+            }
+        )
+
+    return pages, frame_results, frame_debug, page_modes
+
+
+def extract_page_items(
+    page: fitz.Page,
+    ocr_lang: str,
+    raster_scale: float,
+    *,
+    force_ocr: bool = False,
+) -> tuple[list[dict], str]:
+    digital_items: list[dict] = []
+
+    if not force_ocr:
+        digital_items = extract_digital_text_items(page)
+
+        if should_use_digital_items(digital_items):
+            return digital_items, "digital"
+
+    ocr_items = extract_ocr_text_items(page, ocr_lang, raster_scale)
+
+    if ocr_items:
+        return ocr_items, "ocr"
+
+    if force_ocr:
+        return [], "ocr_fallback"
+
+    return digital_items, "digital_fallback"
+
+
+def build_render_model(
+    pdf_path: Path,
+    ocr_lang: str,
+    raster_scale: float,
+    *,
+    force_ocr: bool = False,
+    frame_plans: list[dict] | None = None,
+) -> dict:
+    document = fitz.open(pdf_path)
+    pages: list[dict] = []
+    extraction_modes: list[str] = []
+    frame_results: dict[str, str] = {}
+    frame_debug: list[dict] = []
+
+    try:
+        if force_ocr and frame_plans:
+            pages, frame_results, frame_debug, extraction_modes = extract_frame_plan_ocr_results(
+                document,
+                frame_plans,
+                ocr_lang,
+                raster_scale,
+            )
+            return {
+                "version": "positioned-v1",
+                "cloneId": "pdf-frame-text-image-v1.00",
+                "pageCount": len(pages),
+                "pages": pages,
+                "diagnostics": {
+                    "pageModes": extraction_modes,
+                    "frameResults": frame_results,
+                    "frameDebug": frame_debug,
+                },
+            }
+
+        for page_index, page in enumerate(document):
+            text_items, mode = extract_page_items(page, ocr_lang, raster_scale, force_ocr=force_ocr)
+            extraction_modes.append(mode)
+            pages.append(
+                {
+                    "pageNumber": page_index + 1,
+                    "width": rounded(float(page.rect.width)),
+                    "height": rounded(float(page.rect.height)),
+                    "frameSegments": [],
+                    "textItems": text_items,
+                }
+            )
+    finally:
+        document.close()
+
+    return {
+        "version": "positioned-v1",
+        "cloneId": "pdf-frame-text-image-v1.00",
+        "pageCount": len(pages),
+        "pages": pages,
+        "diagnostics": {
+            "pageModes": extraction_modes,
+            "frameResults": frame_results,
+            "frameDebug": frame_debug,
+        },
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-pdf", required=True)
+    parser.add_argument("--ocr-lang", default="kor+eng")
+    parser.add_argument("--raster-scale", type=float, default=2.6)
+    parser.add_argument("--force-ocr", action="store_true")
+    parser.add_argument("--frame-plans-json-file")
+    args = parser.parse_args()
+    frame_plans: list[dict] | None = None
+
+    if args.frame_plans_json_file:
+        raw_frame_plans = json.loads(Path(args.frame_plans_json_file).read_text(encoding="utf-8"))
+
+        if isinstance(raw_frame_plans, list):
+            frame_plans = [dict(plan) for plan in raw_frame_plans if isinstance(plan, dict)]
+
+    render_model = build_render_model(
+        Path(args.input_pdf),
+        args.ocr_lang,
+        float(args.raster_scale),
+        force_ocr=bool(args.force_ocr),
+        frame_plans=frame_plans,
+    )
+    print(json.dumps(render_model, ensure_ascii=False, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()

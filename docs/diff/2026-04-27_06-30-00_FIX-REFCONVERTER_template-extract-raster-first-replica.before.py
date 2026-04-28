@@ -5,11 +5,10 @@ import html
 import importlib.util
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 from statistics import median
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -5393,36 +5392,17 @@ def rounded(value: float) -> float:
 
 
 def load_reference_converter(path: Path, module_name: str):
-    if path.exists():
-        spec = importlib.util.spec_from_file_location(module_name, path)
+    if not path.exists():
+        raise FileNotFoundError(f"reference converter not found: {path}")
 
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"reference converter cannot be loaded: {path}")
+    spec = importlib.util.spec_from_file_location(module_name, path)
 
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        return module
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"reference converter cannot be loaded: {path}")
 
-    # The reference converters are source assets under `docs/`. If the working
-    # tree copy is temporarily missing, fall back to the tracked HEAD blob so
-    # raster-first frame extraction does not regress for non-image PDFs.
-    try:
-        relative_path = path.relative_to(REPO_ROOT).as_posix()
-        completed = subprocess.run(
-            ["git", "show", f"HEAD:{relative_path}"],
-            cwd=str(REPO_ROOT),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception as error:
-        raise FileNotFoundError(f"reference converter not found: {path}") from error
-
-    module = ModuleType(module_name)
-    module.__file__ = str(path)
-    sys.modules[module_name] = module
-    exec(compile(completed.stdout, str(path), "exec"), module.__dict__)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
     return module
 
 

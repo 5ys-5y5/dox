@@ -31,9 +31,6 @@ IMAGE_OCR_VERSION_IV100 = "iv1.00"
 IMAGE_OCR_VERSION_IV200 = "iv2.00"
 IMAGE_OCR_VERSION_IV201 = "iv2.01"
 IMAGE_OCR_VERSION_IV202 = "iv2.02"
-IMAGE_OCR_VERSION_IV203 = "iv2.03"
-IMAGE_OCR_VERSION_IV204 = "iv2.04"
-IMAGE_OCR_VERSION_IV300 = "iv3.00"
 IMAGE_TROCR_MODEL_ID = os.environ.get("TEMPLATE_EXTRACT_IMAGE_TROCR_MODEL_ID", "ddobokki/ko-trocr").strip() or "ddobokki/ko-trocr"
 IMAGE_TROCR_LOCAL_FILES_ONLY = os.environ.get("TEMPLATE_EXTRACT_IMAGE_TROCR_LOCAL_FILES_ONLY", "").strip().lower() in {
     "1",
@@ -67,15 +64,6 @@ def normalize_text_for_similarity(value: str) -> str:
 def resolve_image_ocr_version(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
 
-    if normalized == IMAGE_OCR_VERSION_IV300.lower():
-        return IMAGE_OCR_VERSION_IV300
-
-    if normalized == IMAGE_OCR_VERSION_IV204.lower():
-        return IMAGE_OCR_VERSION_IV204
-
-    if normalized == IMAGE_OCR_VERSION_IV203.lower():
-        return IMAGE_OCR_VERSION_IV203
-
     if normalized == IMAGE_OCR_VERSION_IV202.lower():
         return IMAGE_OCR_VERSION_IV202
 
@@ -86,16 +74,6 @@ def resolve_image_ocr_version(value: str | None) -> str:
         return IMAGE_OCR_VERSION_IV200
 
     return IMAGE_OCR_VERSION_IV100
-
-
-def is_field_aware_image_ocr_version(image_ocr_version: str) -> bool:
-    return image_ocr_version in {
-        IMAGE_OCR_VERSION_IV201,
-        IMAGE_OCR_VERSION_IV202,
-        IMAGE_OCR_VERSION_IV203,
-        IMAGE_OCR_VERSION_IV204,
-        IMAGE_OCR_VERSION_IV300,
-    }
 
 
 def to_float(value: object, default: float = 0.0) -> float:
@@ -377,14 +355,14 @@ def levenshtein_distance(left: str, right: str) -> int:
     return previous[-1]
 
 
-def infer_frame_semantics(frame_plan: dict, *, use_known_grid_labels: bool = True) -> dict:
+def infer_frame_semantics(frame_plan: dict) -> dict:
     explicit_field_type = normalize_text(str(frame_plan.get("fieldType") or ""))
     explicit_role = normalize_text(str(frame_plan.get("semanticRole") or ""))
     value_key = normalize_text(str(frame_plan.get("valueKey") or ""))
     source_hint = normalize_multiline_text(str(frame_plan.get("sourceTextHint") or ""))
     frame_group = normalize_text(str(frame_plan.get("frameGroup") or ""))
     expected_pattern = normalize_text(str(frame_plan.get("expectedPattern") or ""))
-    known_label_text = resolve_known_label_from_grid(frame_plan) if use_known_grid_labels else ""
+    known_label_text = resolve_known_label_from_grid(frame_plan)
     ignore_role = resolve_frame_ignore_role(frame_group)
 
     if explicit_field_type == "ignore" or ignore_role:
@@ -479,20 +457,12 @@ def infer_frame_label_from_ocr(label_candidates: list[str]) -> tuple[str | None,
     return None, "unmatched"
 
 
-def enrich_page_frame_semantics(
-    page_contexts: list[dict],
-    ocr_lang: str,
-    *,
-    use_known_grid_labels: bool = True,
-) -> dict[str, dict]:
+def enrich_page_frame_semantics(page_contexts: list[dict], ocr_lang: str) -> dict[str, dict]:
     page_plans = [context.get("framePlan") or {} for context in page_contexts]
     semantics_by_key: dict[str, dict] = {}
 
     for frame_plan in page_plans:
-        semantics_by_key[str(frame_plan.get("key") or "")] = infer_frame_semantics(
-            frame_plan,
-            use_known_grid_labels=use_known_grid_labels,
-        )
+        semantics_by_key[str(frame_plan.get("key") or "")] = infer_frame_semantics(frame_plan)
 
     rows: dict[tuple[int, int], list[dict]] = defaultdict(list)
 
@@ -568,8 +538,7 @@ def enrich_page_frame_semantics(
                             "frameGroup": semantics.get("frameGroup") or "",
                             "rowStart": frame_plan.get("rowStart") or "",
                             "colStart": frame_plan.get("colStart") or "",
-                        },
-                        use_known_grid_labels=use_known_grid_labels,
+                        }
                     )
                     semantics_by_key[key] = {
                         **semantics,
@@ -612,8 +581,7 @@ def enrich_page_frame_semantics(
                     "frameGroup": next_semantics.get("frameGroup") or "",
                     "rowStart": next_frame_plan.get("rowStart") or "",
                     "colStart": next_frame_plan.get("colStart") or "",
-                },
-                use_known_grid_labels=use_known_grid_labels,
+                }
             )
             semantics_by_key[next_key] = {
                 **next_semantics,
@@ -624,118 +592,6 @@ def enrich_page_frame_semantics(
                 "expectedPattern": inherited_semantics.get("expectedPattern") or next_semantics.get("expectedPattern"),
                 "strongSchema": bool(inherited_semantics.get("strongSchema")),
                 "canonicalLabel": canonical_label,
-                "propagatedFrom": key,
-            }
-
-    return semantics_by_key
-
-
-def enrich_universal_page_semantics(page_contexts: list[dict], page_lines: list[dict]) -> dict[str, dict]:
-    semantics_by_key: dict[str, dict] = {}
-    rows: dict[tuple[int, int], list[dict]] = defaultdict(list)
-
-    for context in page_contexts:
-        frame_plan = context.get("framePlan") or {}
-        semantics = infer_frame_semantics(frame_plan, use_known_grid_labels=False)
-        row_key = (to_int(frame_plan.get("rowStart"), -1), to_int(frame_plan.get("rowEnd"), -1))
-        assigned_lines = assign_page_lines_to_frame(
-            [int(context.get("left") or 0), int(context.get("top") or 0), int(context.get("right") or 0), int(context.get("bottom") or 0)],
-            page_lines,
-        )
-        assigned_text, _ = build_text_from_assigned_page_lines(assigned_lines)
-        context["assignedPageLines"] = assigned_lines
-        context["assignedPageText"] = assigned_text
-
-        if semantics.get("semanticRole") == "unknown" and to_int(frame_plan.get("colStart"), -1) == 1 and assigned_text:
-            semantics["semanticRole"] = "label"
-
-        semantics_by_key[str(frame_plan.get("key") or "")] = semantics
-        rows[row_key].append(context)
-
-    for row_contexts in rows.values():
-        sorted_contexts = sorted(
-            row_contexts,
-            key=lambda context: (
-                to_int((context.get("framePlan") or {}).get("colStart"), 9999),
-                int(context.get("left") or 0),
-            ),
-        )
-
-        for index, context in enumerate(sorted_contexts[:-1]):
-            frame_plan = context.get("framePlan") or {}
-            key = str(frame_plan.get("key") or "")
-            semantics = semantics_by_key.get(key)
-
-            if not semantics or semantics.get("fieldType") == "ignore":
-                continue
-
-            next_context = sorted_contexts[index + 1]
-            next_frame_plan = next_context.get("framePlan") or {}
-            next_key = str(next_frame_plan.get("key") or "")
-            next_semantics = semantics_by_key.get(next_key)
-
-            if not next_semantics or next_semantics.get("fieldType") == "ignore":
-                continue
-
-            label_text = normalize_multiline_text(str(context.get("assignedPageText") or ""))
-            if not label_text:
-                label_text = normalize_multiline_text(str(semantics.get("sourceTextHint") or ""))
-
-            compact_label = compact_ko_label(label_text)
-            resolved_field_type = None
-            resolved_reason = "unmatched"
-
-            if semantics.get("fieldType") not in {"", "free_text", "ignore", None}:
-                resolved_field_type = str(semantics.get("fieldType") or "")
-                resolved_reason = "preserve_explicit_or_inferred"
-
-            if not resolved_field_type:
-                resolved_field_type, resolved_reason = resolve_field_type_from_compact_label(compact_label)
-
-            if (not resolved_field_type or resolved_field_type == "free_text") and semantics.get("sourceTextHint"):
-                source_hint_label = compact_ko_label(str(semantics.get("sourceTextHint") or ""))
-                source_hint_field_type, source_hint_reason = resolve_field_type_from_compact_label(source_hint_label)
-
-                if source_hint_field_type:
-                    compact_label = source_hint_label or compact_label
-                    resolved_field_type = source_hint_field_type
-                    resolved_reason = f"source_hint:{source_hint_reason}"
-
-            if not resolved_field_type:
-                continue
-
-            semantics_by_key[key] = {
-                **semantics,
-                "semanticRole": "label",
-                "canonicalLabel": compact_label,
-                "fieldTypeReason": resolved_reason,
-            }
-
-            if next_semantics.get("fieldType") != "free_text":
-                continue
-
-            inherited_semantics = infer_frame_semantics(
-                {
-                    "fieldType": resolved_field_type,
-                    "semanticRole": "value",
-                    "expectedPattern": next_semantics.get("expectedPattern") or "",
-                    "sourceTextHint": next_semantics.get("sourceTextHint") or "",
-                    "valueKey": next_semantics.get("valueKey") or "",
-                    "frameGroup": next_semantics.get("frameGroup") or "",
-                    "rowStart": next_frame_plan.get("rowStart") or "",
-                    "colStart": next_frame_plan.get("colStart") or "",
-                },
-                use_known_grid_labels=False,
-            )
-            semantics_by_key[next_key] = {
-                **next_semantics,
-                **inherited_semantics,
-                "semanticRole": "value",
-                "fieldType": resolved_field_type,
-                "fieldKey": inherited_semantics.get("fieldKey") or next_semantics.get("fieldKey"),
-                "expectedPattern": inherited_semantics.get("expectedPattern") or next_semantics.get("expectedPattern"),
-                "strongSchema": bool(inherited_semantics.get("strongSchema")),
-                "canonicalLabel": compact_label,
                 "propagatedFrom": key,
             }
 
@@ -1046,771 +902,6 @@ def extract_ocr_text_items(page: fitz.Page, ocr_lang: str, raster_scale: float) 
             return items
 
     return []
-
-
-def build_page_ocr_lines_from_words(
-    lines: dict[tuple[int, int, int], list[dict]],
-    source_name: str,
-) -> list[dict]:
-    line_entries: list[dict] = []
-
-    for line_key in sorted(lines):
-        merged_words = merge_ocr_line_words(lines[line_key])
-        line_text = normalize_text(" ".join(str(word.get("text") or "") for word in merged_words))
-
-        if not line_text:
-            continue
-
-        confidences = [float(word.get("confidence") or 0.0) for word in merged_words if float(word.get("confidence") or 0.0) > 0]
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        left = min(float(word.get("left") or 0.0) for word in merged_words)
-        top = min(float(word.get("top") or 0.0) for word in merged_words)
-        right = max(float(word.get("right") or 0.0) for word in merged_words)
-        bottom = max(float(word.get("bottom") or 0.0) for word in merged_words)
-        line_entries.append(
-            {
-                "text": line_text,
-                "bboxPx": [rounded(left), rounded(top), rounded(right), rounded(bottom)],
-                "detConf": round(avg_confidence / 100.0, 4),
-                "recConf": round(avg_confidence / 100.0, 4),
-                "confidence": round(avg_confidence, 2),
-                "source": source_name,
-            }
-        )
-
-    return line_entries
-
-
-def score_page_ocr_lines(lines: list[dict]) -> float:
-    if not lines:
-        return -1.0
-
-    char_count = sum(len(normalize_text(str(line.get("text") or "")).replace(" ", "")) for line in lines)
-    avg_confidence = sum(float(line.get("confidence") or 0.0) for line in lines) / max(1, len(lines))
-    return char_count * 1.6 + len(lines) * 12.0 + avg_confidence * 0.35
-
-
-def extract_page_level_ocr_lines(page_image: Image.Image, ocr_lang: str) -> tuple[list[dict], dict]:
-    prepared = preprocess_ocr_image(page_image)
-    page_passes: list[tuple[str, Image.Image, str]] = [
-        (
-            "page_gray_psm6",
-            prepared,
-            "--oem 1 --psm 6 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0",
-        ),
-        (
-            "page_gray_psm11",
-            prepared,
-            "--oem 1 --psm 11 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0",
-        ),
-        (
-            "page_threshold_psm6",
-            prepared.point(lambda value: 255 if value > 200 else 0, mode="1").convert("L"),
-            "--oem 1 --psm 6 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0",
-        ),
-    ]
-    best_lines: list[dict] = []
-    best_summary = {
-        "pagePass": "none",
-        "detectedLineCount": 0,
-        "detectedCharCount": 0,
-    }
-    best_score = -1.0
-
-    for pass_name, candidate_image, config in page_passes:
-        line_words = collect_ocr_line_words(candidate_image, ocr_lang, config)
-        lines = build_page_ocr_lines_from_words(line_words, pass_name)
-        score = score_page_ocr_lines(lines)
-
-        if score <= best_score:
-            continue
-
-        best_score = score
-        best_lines = lines
-        best_summary = {
-            "pagePass": pass_name,
-            "detectedLineCount": len(lines),
-            "detectedCharCount": sum(len(normalize_text(str(line.get("text") or "")).replace(" ", "")) for line in lines),
-        }
-
-    return best_lines, best_summary
-
-
-def extract_page_level_ocr_tokens(page_image: Image.Image, ocr_lang: str) -> list[dict]:
-    prepared = preprocess_ocr_image(page_image)
-    ocr_data = pytesseract.image_to_data(
-        prepared,
-        lang=ocr_lang,
-        config="--oem 1 --psm 11 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0",
-        output_type=pytesseract.Output.DICT,
-    )
-    tokens: list[dict] = []
-
-    for index, raw_text in enumerate(ocr_data.get("text", [])):
-        text = normalize_text(str(raw_text or ""))
-
-        if not looks_like_meaningful_ocr_text(text):
-            continue
-
-        try:
-            confidence = float(ocr_data.get("conf", [])[index] or -1)
-        except Exception:
-            confidence = -1
-
-        if confidence < 20:
-            continue
-
-        left = float(ocr_data["left"][index])
-        top = float(ocr_data["top"][index])
-        width = float(ocr_data["width"][index])
-        height = float(ocr_data["height"][index])
-
-        if width <= 0 or height <= 0:
-            continue
-
-        tokens.append(
-            {
-                "text": text,
-                "bboxPx": [rounded(left), rounded(top), rounded(left + width), rounded(top + height)],
-                "confidence": round(confidence, 2),
-                "centerY": rounded(top + height * 0.5),
-            }
-        )
-
-    return tokens
-
-
-def extract_page_level_ocr_glyphs(page_image: Image.Image, ocr_lang: str) -> list[dict]:
-    prepared = preprocess_ocr_image(page_image)
-    boxes_output = pytesseract.image_to_boxes(
-        prepared,
-        lang=ocr_lang,
-        config="--oem 1 --psm 11 -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0",
-    )
-    glyphs: list[dict] = []
-    image_height = prepared.height
-
-    for raw_line in str(boxes_output or "").splitlines():
-        parts = raw_line.strip().split()
-
-        if len(parts) < 5:
-            continue
-
-        character = str(parts[0] or "")
-
-        if not OCR_MEANINGFUL_TEXT_PATTERN.search(character):
-            continue
-
-        try:
-            left = float(parts[1])
-            bottom = float(parts[2])
-            right = float(parts[3])
-            top_from_bottom = float(parts[4])
-        except Exception:
-            continue
-
-        top = float(image_height) - top_from_bottom
-        bottom_px = float(image_height) - bottom
-
-        if right <= left or bottom_px <= top:
-            continue
-
-        glyphs.append(
-            {
-                "text": character,
-                "bboxPx": [rounded(left), rounded(top), rounded(right), rounded(bottom_px)],
-                "centerY": rounded((top + bottom_px) * 0.5),
-                "width": rounded(right - left),
-                "height": rounded(bottom_px - top),
-            }
-        )
-
-    return glyphs
-
-
-def extract_component_glyphs_from_crop(crop_image: Image.Image, ocr_lang: str) -> list[dict]:
-    if cv2 is None:
-        return []
-
-    grayscale = np.array(preprocess_ocr_image(crop_image))
-    _, thresholded = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-    component_total, _, component_stats, _ = cv2.connectedComponentsWithStats(thresholded, connectivity=8)
-    image_height, image_width = thresholded.shape[:2]
-    glyphs: list[dict] = []
-
-    for component_index in range(1, component_total):
-        left, top, width, height, area = component_stats[component_index]
-
-        if area < 24:
-            continue
-
-        if width < 8 or height < 14:
-            continue
-
-        if width > image_width * 0.28 or height > image_height * 0.7:
-            continue
-
-        touches_border = left <= 1 or top <= 1 or (left + width) >= image_width - 1 or (top + height) >= image_height - 1
-        if touches_border and (width > image_width * 0.18 or height > image_height * 0.45):
-            continue
-
-        pad = 3
-        crop_left = max(0, int(left) - pad)
-        crop_top = max(0, int(top) - pad)
-        crop_right = min(image_width, int(left + width) + pad)
-        crop_bottom = min(image_height, int(top + height) + pad)
-
-        glyph_crop = crop_image.crop((crop_left, crop_top, crop_right, crop_bottom))
-        glyph_crop = glyph_crop.resize(
-            (
-                max(1, glyph_crop.width * 4),
-                max(1, glyph_crop.height * 4),
-            ),
-            Image.Resampling.LANCZOS,
-        )
-
-        candidates: list[str] = []
-        for psm in (10, 13):
-            raw_text = pytesseract.image_to_string(
-                glyph_crop,
-                lang=ocr_lang,
-                config=f"--oem 1 --psm {psm} -c preserve_interword_spaces=1 -c load_system_dawg=0 -c load_freq_dawg=0",
-            )
-            normalized = compact_distributed_text(raw_text)
-
-            if normalized and OCR_MEANINGFUL_TEXT_PATTERN.search(normalized):
-                candidates.append(normalized)
-
-        if not candidates:
-            continue
-
-        glyph_text = min(candidates, key=len)
-        if len(glyph_text) > 2:
-            glyph_text = glyph_text[:2]
-
-        glyphs.append(
-            {
-                "text": glyph_text,
-                "bboxPx": [rounded(float(left)), rounded(float(top)), rounded(float(left + width)), rounded(float(top + height))],
-                "centerY": rounded(float(top) + float(height) * 0.5),
-                "width": rounded(float(width)),
-                "height": rounded(float(height)),
-            }
-        )
-
-    glyphs.sort(key=lambda glyph: (float(glyph.get("centerY") or 0.0), float((glyph.get("bboxPx") or [0, 0, 0, 0])[0])))
-    return glyphs
-
-
-def build_page_text_from_lines(page_lines: list[dict]) -> str:
-    ordered_lines = sorted(
-        page_lines,
-        key=lambda line: (
-            float((line.get("bboxPx") or [0, 0, 0, 0])[1]),
-            float((line.get("bboxPx") or [0, 0, 0, 0])[0]),
-        ),
-    )
-    return normalize_multiline_text("\n".join(str(line.get("text") or "") for line in ordered_lines))
-
-
-def project_page_boxes_to_pdf(boxes: list[dict], scale_x: float, scale_y: float) -> list[dict]:
-    projected: list[dict] = []
-
-    for box in boxes:
-        bbox_px = box.get("bboxPx") or [0, 0, 0, 0]
-        if len(bbox_px) != 4:
-            continue
-
-        left = float(bbox_px[0]) / max(scale_x, 1e-6)
-        top = float(bbox_px[1]) / max(scale_y, 1e-6)
-        right = float(bbox_px[2]) / max(scale_x, 1e-6)
-        bottom = float(bbox_px[3]) / max(scale_y, 1e-6)
-        projected.append(
-            {
-                "text": str(box.get("text") or ""),
-                "bboxPdf": [rounded(left), rounded(top), rounded(right), rounded(bottom)],
-                "bboxPx": [rounded(float(v)) for v in bbox_px],
-                "confidence": round(float(box.get("confidence") or 0.0), 2),
-            }
-        )
-
-    return projected
-
-
-def build_ocr_page_layer(
-    *,
-    page_number: int,
-    page_width: float,
-    page_height: float,
-    image_width: int,
-    image_height: int,
-    dpi: int,
-    page_lines: list[dict],
-    page_tokens: list[dict],
-    page_glyphs: list[dict],
-    scale_x: float,
-    scale_y: float,
-) -> dict:
-    projected_lines = project_page_boxes_to_pdf(page_lines, scale_x, scale_y)
-    projected_words = project_page_boxes_to_pdf(page_tokens, scale_x, scale_y)
-    projected_glyphs = project_page_boxes_to_pdf(page_glyphs, scale_x, scale_y)
-    confidences = [float(line.get("confidence") or 0.0) for line in page_lines if float(line.get("confidence") or 0.0) > 0]
-    average_confidence = round(sum(confidences) / len(confidences), 2) if confidences else 0.0
-    return {
-        "pageNumber": page_number,
-        "pageWidth": rounded(page_width),
-        "pageHeight": rounded(page_height),
-        "imageWidth": int(image_width),
-        "imageHeight": int(image_height),
-        "dpi": int(dpi),
-        "orientation": 0,
-        "blocks": [],
-        "lines": projected_lines,
-        "words": projected_words,
-        "glyphs": projected_glyphs,
-        "nonTextRegions": [],
-        "engineRuns": [
-            {
-                "engine": "tesseract_page_ocr_layer",
-                "lineCount": len(projected_lines),
-                "wordCount": len(projected_words),
-                "glyphCount": len(projected_glyphs),
-                "averageConfidence": average_confidence,
-            }
-        ],
-    }
-
-
-def build_frame_assignment_summary(frame_debug: list[dict]) -> dict:
-    summary = {
-        "frameCount": len(frame_debug),
-        "framesWithAssignedText": 0,
-        "blankAcceptCount": 0,
-        "blankReviewCount": 0,
-        "displayAcceptCount": 0,
-        "displayReviewCount": 0,
-        "hiddenIgnoreCount": 0,
-        "schemaInvalidRejectedCount": 0,
-        "garbageRejectedCount": 0,
-    }
-
-    for entry in frame_debug:
-        write_policy = str(entry.get("writePolicy") or "")
-        if write_policy == "blank_accept":
-            summary["blankAcceptCount"] += 1
-        elif write_policy == "blank_review":
-            summary["blankReviewCount"] += 1
-        elif write_policy == "display_accept":
-            summary["displayAcceptCount"] += 1
-        elif write_policy == "display_review":
-            summary["displayReviewCount"] += 1
-        elif write_policy == "hidden_ignore":
-            summary["hiddenIgnoreCount"] += 1
-
-        if normalize_multiline_text(str(entry.get("displayText") or entry.get("selectedText") or entry.get("text") or "")):
-            summary["framesWithAssignedText"] += 1
-
-        if str(entry.get("selectedBy") or "").startswith("schema_failed"):
-            summary["schemaInvalidRejectedCount"] += 1
-
-        summary["garbageRejectedCount"] += len(entry.get("rawRejectedCandidates") or [])
-
-    return summary
-
-
-def rect_intersection_area(left_rect: list[float], right_rect: list[float]) -> float:
-    overlap_left = max(float(left_rect[0]), float(right_rect[0]))
-    overlap_top = max(float(left_rect[1]), float(right_rect[1]))
-    overlap_right = min(float(left_rect[2]), float(right_rect[2]))
-    overlap_bottom = min(float(left_rect[3]), float(right_rect[3]))
-
-    if overlap_right <= overlap_left or overlap_bottom <= overlap_top:
-        return 0.0
-
-    return float(overlap_right - overlap_left) * float(overlap_bottom - overlap_top)
-
-
-def bbox_area(rect: list[float]) -> float:
-    return max(0.0, float(rect[2]) - float(rect[0])) * max(0.0, float(rect[3]) - float(rect[1]))
-
-
-def assign_page_lines_to_frame(frame_rect_px: list[int], page_lines: list[dict]) -> list[dict]:
-    frame_rect = [float(value) for value in frame_rect_px]
-    frame_area = max(1.0, bbox_area(frame_rect))
-    assigned: list[dict] = []
-
-    for line in page_lines:
-        bbox = [float(value) for value in (line.get("bboxPx") or [0, 0, 0, 0])]
-        if len(bbox) != 4:
-            continue
-
-        intersection_area = rect_intersection_area(frame_rect, bbox)
-
-        if intersection_area <= 0:
-            continue
-
-        line_area = max(1.0, bbox_area(bbox))
-        line_center_x = (bbox[0] + bbox[2]) * 0.5
-        line_center_y = (bbox[1] + bbox[3]) * 0.5
-        center_inside = (
-            frame_rect[0] - 3.0 <= line_center_x <= frame_rect[2] + 3.0
-            and frame_rect[1] - 3.0 <= line_center_y <= frame_rect[3] + 3.0
-        )
-        line_overlap_ratio = intersection_area / line_area
-        frame_overlap_ratio = intersection_area / frame_area
-
-        if center_inside or line_overlap_ratio >= 0.42 or frame_overlap_ratio >= 0.12:
-            assigned.append(line)
-
-    assigned.sort(key=lambda item: (float((item.get("bboxPx") or [0, 0, 0, 0])[1]), float((item.get("bboxPx") or [0, 0, 0, 0])[0])))
-    return assigned
-
-
-def assign_boxes_to_frame(frame_rect_px: list[int], boxes: list[dict], *, overlap_threshold: float = 0.2, pad: float = 3.0) -> list[dict]:
-    frame_rect = [
-        float(frame_rect_px[0]) - pad,
-        float(frame_rect_px[1]) - pad,
-        float(frame_rect_px[2]) + pad,
-        float(frame_rect_px[3]) + pad,
-    ]
-    assigned: list[dict] = []
-
-    for box in boxes:
-        bbox = [float(value) for value in (box.get("bboxPx") or [0, 0, 0, 0])]
-
-        if len(bbox) != 4:
-            continue
-
-        intersection_area = rect_intersection_area(frame_rect, bbox)
-
-        if intersection_area <= 0:
-            continue
-
-        area = max(1.0, bbox_area(bbox))
-        center_x = (bbox[0] + bbox[2]) * 0.5
-        center_y = (bbox[1] + bbox[3]) * 0.5
-        center_inside = frame_rect[0] <= center_x <= frame_rect[2] and frame_rect[1] <= center_y <= frame_rect[3]
-
-        if center_inside or (intersection_area / area) >= overlap_threshold:
-            assigned.append(box)
-
-    assigned.sort(key=lambda item: (float((item.get("bboxPx") or [0, 0, 0, 0])[1]), float((item.get("bboxPx") or [0, 0, 0, 0])[0])))
-    return assigned
-
-
-def build_text_from_assigned_page_lines(lines: list[dict]) -> tuple[str, float]:
-    if not lines:
-        return "", 0.0
-
-    text = normalize_multiline_text("\n".join(normalize_text(str(line.get("text") or "")) for line in lines if normalize_text(str(line.get("text") or ""))))
-    confidences = [float(line.get("confidence") or 0.0) for line in lines if float(line.get("confidence") or 0.0) > 0]
-    return text, round(sum(confidences) / len(confidences), 2) if confidences else 0.0
-
-
-def cluster_boxes_by_baseline(boxes: list[dict], *, y_tolerance: float = 12.0) -> list[list[dict]]:
-    if not boxes:
-        return []
-
-    ordered = sorted(boxes, key=lambda item: (float(item.get("centerY") or 0.0), float((item.get("bboxPx") or [0, 0, 0, 0])[0])))
-    lines: list[list[dict]] = []
-
-    for box in ordered:
-        center_y = float(box.get("centerY") or 0.0)
-
-        if not lines:
-            lines.append([box])
-            continue
-
-        previous_line = lines[-1]
-        previous_center = sum(float(candidate.get("centerY") or 0.0) for candidate in previous_line) / max(1, len(previous_line))
-
-        if abs(center_y - previous_center) <= y_tolerance:
-            previous_line.append(box)
-        else:
-            lines.append([box])
-
-    for line in lines:
-        line.sort(key=lambda item: float((item.get("bboxPx") or [0, 0, 0, 0])[0]))
-
-    return lines
-
-
-def compact_distributed_text(text: str) -> str:
-    return normalize_text(re.sub(r"\s+", "", normalize_multiline_text(text)))
-
-
-def build_token_line_candidate(tokens: list[dict]) -> tuple[str, float]:
-    if not tokens:
-        return "", 0.0
-
-    lines = cluster_boxes_by_baseline(tokens)
-    line_texts: list[str] = []
-    confidences: list[float] = []
-
-    for line in lines:
-        line_text = normalize_text(" ".join(str(token.get("text") or "") for token in line))
-
-        if line_text:
-            line_texts.append(line_text)
-
-        for token in line:
-            confidence = float(token.get("confidence") or 0.0)
-            if confidence > 0:
-                confidences.append(confidence)
-
-    return normalize_multiline_text("\n".join(line_texts)), round(sum(confidences) / len(confidences), 2) if confidences else 0.0
-
-
-def build_glyph_line_candidate(glyphs: list[dict]) -> tuple[str, str, float, list[list[dict]]]:
-    if not glyphs:
-        return "", "", 0.0, []
-
-    lines = cluster_boxes_by_baseline(glyphs, y_tolerance=10.0)
-    visual_lines: list[str] = []
-    canonical_lines: list[str] = []
-    distributed_score = 0.0
-
-    for line in lines:
-        if not line:
-            continue
-
-        line_visual_parts: list[str] = []
-        line_compact_parts: list[str] = []
-        x_positions = [float((glyph.get("bboxPx") or [0, 0, 0, 0])[0]) for glyph in line]
-        widths = [max(1.0, float(glyph.get("width") or ((glyph.get("bboxPx") or [0, 0, 0, 0])[2] - (glyph.get("bboxPx") or [0, 0, 0, 0])[0]))) for glyph in line]
-        avg_width = sum(widths) / max(1, len(widths))
-
-        for index, glyph in enumerate(line):
-            glyph_text = str(glyph.get("text") or "")
-            line_visual_parts.append(glyph_text)
-            line_compact_parts.append(glyph_text)
-
-            if index >= len(line) - 1:
-                continue
-
-            current_right = float((glyph.get("bboxPx") or [0, 0, 0, 0])[2])
-            next_left = float((line[index + 1].get("bboxPx") or [0, 0, 0, 0])[0])
-            gap = max(0.0, next_left - current_right)
-
-            if gap >= avg_width * 0.85:
-                line_visual_parts.append(" ")
-                distributed_score += min(1.0, gap / max(1.0, avg_width * 2.6))
-
-        visual_lines.append("".join(line_visual_parts).strip())
-        canonical_lines.append("".join(line_compact_parts).strip())
-
-    max_possible = max(1.0, float(sum(max(0, len(line) - 1) for line in lines)))
-    normalized_score = max(0.0, min(1.0, distributed_score / max_possible))
-    return normalize_multiline_text("\n".join(canonical_lines)), normalize_multiline_text("\n".join(visual_lines)), round(normalized_score, 4), lines
-
-
-def build_text_class(semantics: dict) -> str:
-    semantic_role = str(semantics.get("semanticRole") or "")
-
-    if semantic_role == "label":
-        return "label_text"
-    if semantic_role == "value":
-        return "value_text"
-    if semantic_role in {"ignore", "footer", "barcode", "qr"}:
-        return "decorative"
-    if semantic_role in {"paragraph", "table_cell"}:
-        return "body_text"
-    return "unknown"
-
-
-def estimate_frame_textness(image: Image.Image) -> dict:
-    if cv2 is None:
-        grayscale = np.array(preprocess_ocr_image(image))
-        dark_ink_density = max(0.0, min(1.0, 1.0 - float(np.mean(grayscale) / 255.0)))
-        textness_score = max(0.0, min(1.0, dark_ink_density * 2.2))
-        blank_score = max(0.0, min(1.0, 1.0 - dark_ink_density * 4.0))
-        noise_score = max(0.0, min(1.0, 0.35 - dark_ink_density))
-        return {
-            "foregroundDensity": round(dark_ink_density, 4),
-            "darkInkDensity": round(dark_ink_density, 4),
-            "textLikeComponentCount": 0,
-            "lineLikeComponentCount": 0,
-            "textnessScore": round(textness_score, 4),
-            "blankScore": round(blank_score, 4),
-            "noiseScore": round(noise_score, 4),
-        }
-
-    grayscale = np.array(preprocess_ocr_image(image))
-    _, thresholded = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-    total_pixels = max(1, thresholded.shape[0] * thresholded.shape[1])
-    dark_ink_density = float(np.count_nonzero(thresholded)) / float(total_pixels)
-    component_count, _, component_stats, _ = cv2.connectedComponentsWithStats(thresholded, connectivity=8)
-    text_like_count = 0
-    line_like_count = 0
-
-    for index in range(1, component_count):
-        x, y, width, height, area = component_stats[index]
-
-        if area < 4:
-            continue
-
-        aspect_ratio = float(width) / max(1.0, float(height))
-
-        if width > thresholded.shape[1] * 0.72 and height <= max(3, thresholded.shape[0] * 0.16):
-            line_like_count += 1
-            continue
-
-        if height > thresholded.shape[0] * 0.72 and width <= max(3, thresholded.shape[1] * 0.16):
-            line_like_count += 1
-            continue
-
-        if 2 <= width <= thresholded.shape[1] * 0.42 and 6 <= height <= thresholded.shape[0] * 0.65 and 0.18 <= aspect_ratio <= 12.0:
-            text_like_count += 1
-
-    foreground_density = min(1.0, dark_ink_density * 1.25)
-    textness_score = max(
-        0.0,
-        min(
-            1.0,
-            dark_ink_density * 3.4
-            + min(1.0, text_like_count / 12.0) * 0.65
-            - min(1.0, line_like_count / 6.0) * 0.35,
-        ),
-    )
-    blank_score = max(0.0, min(1.0, 1.0 - min(1.0, dark_ink_density * 7.0 + text_like_count / 9.0)))
-    noise_score = max(0.0, min(1.0, min(1.0, line_like_count / 5.0) * 0.55 + max(0, component_count - text_like_count - 1) / 90.0))
-    return {
-        "foregroundDensity": round(foreground_density, 4),
-        "darkInkDensity": round(dark_ink_density, 4),
-        "textLikeComponentCount": int(text_like_count),
-        "lineLikeComponentCount": int(line_like_count),
-        "textnessScore": round(textness_score, 4),
-        "blankScore": round(blank_score, 4),
-        "noiseScore": round(noise_score, 4),
-    }
-
-
-def classify_script_profile(text: str) -> dict:
-    normalized = normalize_multiline_text(text)
-    counts = {
-        "hangul": len(re.findall(r"[\u3131-\u318e\uac00-\ud7a3]", normalized)),
-        "latin": len(re.findall(r"[A-Za-z]", normalized)),
-        "digits": len(re.findall(r"\d", normalized)),
-        "symbols": len(re.findall(r"[^0-9A-Za-z\u3131-\u318e\uac00-\ud7a3\s]", normalized)),
-    }
-    dominant_script = "unknown"
-    dominant_count = 0
-
-    for key in ("hangul", "latin", "digits", "symbols"):
-        if counts[key] > dominant_count:
-            dominant_script = key
-            dominant_count = counts[key]
-
-    return {
-        **counts,
-        "dominantScript": dominant_script,
-    }
-
-
-def analyze_text_candidate_noise(text: str) -> tuple[bool, str]:
-    normalized = normalize_multiline_text(text)
-
-    if not normalized:
-        return True, "empty"
-
-    if len(normalized.replace(" ", "")) <= 1:
-        return True, "too_short"
-
-    if OCR_PUNCTUATION_ONLY_PATTERN.fullmatch(normalized):
-        return True, "punctuation_only"
-
-    script_profile = classify_script_profile(normalized)
-    total_length = max(1, len(normalized.replace(" ", "")))
-    symbol_ratio = float(script_profile["symbols"]) / float(total_length)
-    alpha_numeric_ratio = float(script_profile["hangul"] + script_profile["latin"] + script_profile["digits"]) / float(total_length)
-
-    if alpha_numeric_ratio < 0.35 and symbol_ratio > 0.4:
-        return True, "symbol_heavy_noise"
-
-    if script_profile["digits"] == 0 and script_profile["hangul"] == 0 and script_profile["latin"] == 0:
-        return True, "no_readable_script"
-
-    return False, ""
-
-
-def looks_like_distributed_text_candidate(
-    *,
-    semantics: dict,
-    line_candidate_text: str,
-    glyph_lines: list[list[dict]],
-    frame_rect_px: list[int],
-) -> bool:
-    if str(semantics.get("semanticRole") or "") not in {"label", "unknown"}:
-        return False
-
-    glyphs = [glyph for line in glyph_lines for glyph in line]
-
-    if len(glyphs) < 2 or len(glyphs) > 12:
-        return False
-
-    compact_line = compact_distributed_text(line_candidate_text)
-    glyph_count = len(glyphs)
-
-    if compact_line and len(compact_line) >= max(2, int(glyph_count * 0.8)):
-        return False
-
-    min_left = min(float((glyph.get("bboxPx") or [0, 0, 0, 0])[0]) for glyph in glyphs)
-    max_right = max(float((glyph.get("bboxPx") or [0, 0, 0, 0])[2]) for glyph in glyphs)
-    frame_width = max(1.0, float(frame_rect_px[2] - frame_rect_px[0]))
-    x_coverage = (max_right - min_left) / frame_width
-
-    if x_coverage < 0.22:
-        return False
-
-    if not glyph_lines:
-        return False
-
-    first_line = glyph_lines[0]
-    if len(first_line) < 2:
-        return False
-
-    widths = [
-        max(1.0, float(glyph.get("width") or ((glyph.get("bboxPx") or [0, 0, 0, 0])[2] - (glyph.get("bboxPx") or [0, 0, 0, 0])[0])))
-        for glyph in first_line
-    ]
-    avg_width = sum(widths) / max(1, len(widths))
-    large_gaps = 0
-
-    for index, glyph in enumerate(first_line[:-1]):
-        current_right = float((glyph.get("bboxPx") or [0, 0, 0, 0])[2])
-        next_left = float((first_line[index + 1].get("bboxPx") or [0, 0, 0, 0])[0])
-        gap = max(0.0, next_left - current_right)
-
-        if gap >= avg_width * 0.85:
-            large_gaps += 1
-
-    return large_gaps >= 1
-
-
-def classify_source_hint_trust(text: str) -> str:
-    normalized = normalize_multiline_text(text)
-
-    if not normalized:
-        return "none"
-
-    is_garbage, _ = analyze_text_candidate_noise(normalized)
-
-    if is_garbage:
-        return "untrusted"
-
-    return "ocr_derived_hint"
-
-
-def should_run_universal_crop_fallback(semantics: dict, assigned_lines: list[dict], textness: dict) -> bool:
-    if assigned_lines:
-        return False
-
-    if semantics.get("strongSchema"):
-        return True
-
-    return float(textness.get("textnessScore") or 0.0) >= 0.62 and float(textness.get("blankScore") or 0.0) < 0.48 and float(
-        textness.get("noiseScore") or 0.0
-    ) < 0.5
 
 
 def select_frame_ocr_psm_candidates(frame_plan: dict) -> list[int]:
@@ -2836,12 +1927,149 @@ def should_ocr_frame(semantics: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def build_field_crop_raw_candidates(
+def select_best_candidate(semantics: dict, raw_candidates: list[dict], crop_stats: dict | None = None) -> dict:
+    normalized_candidates: list[dict] = []
+
+    for candidate in raw_candidates:
+        normalized_text, valid, validation_reason = normalize_candidate_for_field(
+            candidate.get("text") or "",
+            semantics,
+            crop_stats if candidate.get("engine") != "sourceTextHint" else None,
+        )
+        normalized_candidates.append(
+            {
+                **candidate,
+                "normalizedText": normalized_text or "",
+                "valid": valid and bool(normalized_text),
+                "validationReason": validation_reason,
+            }
+        )
+
+    valid_candidates = [candidate for candidate in normalized_candidates if candidate.get("valid")]
+
+    if (
+        semantics.get("fieldType") == "free_text"
+        and semantics.get("semanticRole") == "unknown"
+        and not normalize_multiline_text(str(semantics.get("sourceTextHint") or ""))
+        and not normalize_text(str(semantics.get("valueKey") or ""))
+    ):
+        display_text = resolve_review_display_text_for_semantics(semantics, normalized_candidates)
+        return make_frame_result(
+            selected_text="",
+            display_text=display_text,
+            write_policy="display_review",
+            needs_review=True,
+            selected_by="free_text_review_fallback",
+            validation_reason="free_text_review_fallback",
+            raw_candidates=normalized_candidates,
+        )
+
+    if semantics.get("semanticRole") == "label":
+        display_text, accepted, selected_by = resolve_label_display_text_for_semantics(semantics, normalized_candidates)
+        return make_frame_result(
+            selected_text=display_text if accepted else "",
+            display_text=display_text,
+            write_policy="display_accept" if accepted else "display_review",
+            needs_review=not accepted,
+            selected_by=selected_by,
+            validation_reason=selected_by,
+            raw_candidates=normalized_candidates,
+        )
+
+    if valid_candidates:
+        valid_candidates.sort(
+            key=lambda candidate: (
+                1 if candidate.get("engine") == "tesseract_numeric" else 0,
+                1 if candidate.get("engine") == "tesseract_general" else 0,
+                float(candidate.get("confidence") or 0.0),
+                len(str(candidate.get("normalizedText") or "")),
+            ),
+            reverse=True,
+        )
+        selected = dict(valid_candidates[0])
+        return make_frame_result(
+            selected_text=str(selected.get("normalizedText") or ""),
+            display_text=str(selected.get("normalizedText") or ""),
+            write_policy="display_accept",
+            needs_review=False,
+            selected_by=str(selected.get("validationReason") or selected.get("engine") or "ocr"),
+            validation_reason=str(selected.get("validationReason") or ""),
+            engine=str(selected.get("engine") or ""),
+            crop_variant=str(selected.get("cropVariant") or ""),
+            confidence=float(selected.get("confidence") or 0.0),
+            preprocessing=str(selected.get("preprocessing") or ""),
+            raw_candidates=normalized_candidates,
+        )
+
+    hint_candidate = build_validated_hint_candidate(semantics, normalized_candidates, crop_stats)
+
+    if hint_candidate is not None:
+        return make_frame_result(
+            selected_text=str(hint_candidate.get("normalizedText") or ""),
+            display_text=str(hint_candidate.get("normalizedText") or ""),
+            write_policy="display_review" if hint_candidate.get("needsReview") else "display_accept",
+            needs_review=bool(hint_candidate.get("needsReview")),
+            selected_by=str(hint_candidate.get("selectedBy") or ""),
+            validation_reason=str(hint_candidate.get("validationReason") or ""),
+            engine=str(hint_candidate.get("engine") or ""),
+            crop_variant=str(hint_candidate.get("cropVariant") or ""),
+            confidence=float(hint_candidate.get("confidence") or 0.0),
+            raw_candidates=normalized_candidates,
+        )
+
+    if semantics.get("strongSchema"):
+        return make_frame_result(
+            selected_text="",
+            display_text="",
+            write_policy="blank_review",
+            needs_review=True,
+            selected_by="schema_failed_no_fallback",
+            validation_reason="schema_failed_no_fallback",
+            raw_candidates=normalized_candidates,
+        )
+
+    display_text = resolve_review_display_text_for_semantics(semantics, normalized_candidates)
+    return make_frame_result(
+        selected_text="",
+        display_text=display_text,
+        write_policy="display_review",
+        needs_review=True,
+        selected_by="free_text_review_fallback" if display_text else "no_candidate",
+        validation_reason="free_text_review_fallback" if display_text else "no_candidate",
+        raw_candidates=normalized_candidates,
+    )
+
+
+def run_field_aware_frame_crop_ocr(
     crop_variants: list[dict],
     frame_plan: dict,
     semantics: dict,
     ocr_lang: str,
-) -> tuple[list[dict], dict]:
+) -> tuple[str, dict]:
+    should_run_ocr, ignore_reason = should_ocr_frame(semantics)
+
+    if not should_run_ocr:
+        return "", {
+            "key": str(frame_plan.get("key") or ""),
+            "pageNumber": int(frame_plan.get("pageNumber") or 1),
+            "psm": 0,
+            "preprocessing": "",
+            "confidence": 0.0,
+            "text": "",
+            "selectedText": "",
+            "displayText": "",
+            "writePolicy": "hidden_ignore",
+            "fieldType": semantics.get("fieldType") or "ignore",
+            "semanticRole": semantics.get("semanticRole") or "ignore",
+            "selectedBy": "ignored_frame",
+            "needsReview": False,
+            "ignored": True,
+            "ignoreReason": ignore_reason,
+            "canonicalLabel": semantics.get("canonicalLabel") or "",
+            "propagatedFrom": semantics.get("propagatedFrom") or "",
+            "rawCandidates": [],
+        }
+
     raw_candidates: list[dict] = []
     field_type = semantics.get("fieldType") or "free_text"
     source_hint = normalize_multiline_text(str(semantics.get("sourceTextHint") or ""))
@@ -2989,153 +2217,6 @@ def build_field_crop_raw_candidates(
     aggregate_crop_stats = {
         "maskBlobCount": max((int(candidate.get("cropStats", {}).get("maskBlobCount") or 0) for candidate in raw_candidates), default=0)
     }
-    return raw_candidates, aggregate_crop_stats
-
-
-def select_best_candidate(semantics: dict, raw_candidates: list[dict], crop_stats: dict | None = None) -> dict:
-    normalized_candidates: list[dict] = []
-
-    for candidate in raw_candidates:
-        normalized_text, valid, validation_reason = normalize_candidate_for_field(
-            candidate.get("text") or "",
-            semantics,
-            crop_stats if candidate.get("engine") != "sourceTextHint" else None,
-        )
-        normalized_candidates.append(
-            {
-                **candidate,
-                "normalizedText": normalized_text or "",
-                "valid": valid and bool(normalized_text),
-                "validationReason": validation_reason,
-            }
-        )
-
-    valid_candidates = [candidate for candidate in normalized_candidates if candidate.get("valid")]
-
-    if (
-        semantics.get("fieldType") == "free_text"
-        and semantics.get("semanticRole") == "unknown"
-        and not normalize_multiline_text(str(semantics.get("sourceTextHint") or ""))
-        and not normalize_text(str(semantics.get("valueKey") or ""))
-    ):
-        display_text = resolve_review_display_text_for_semantics(semantics, normalized_candidates)
-        return make_frame_result(
-            selected_text="",
-            display_text=display_text,
-            write_policy="display_review",
-            needs_review=True,
-            selected_by="free_text_review_fallback",
-            validation_reason="free_text_review_fallback",
-            raw_candidates=normalized_candidates,
-        )
-
-    if semantics.get("semanticRole") == "label":
-        display_text, accepted, selected_by = resolve_label_display_text_for_semantics(semantics, normalized_candidates)
-        return make_frame_result(
-            selected_text=display_text if accepted else "",
-            display_text=display_text,
-            write_policy="display_accept" if accepted else "display_review",
-            needs_review=not accepted,
-            selected_by=selected_by,
-            validation_reason=selected_by,
-            raw_candidates=normalized_candidates,
-        )
-
-    if valid_candidates:
-        valid_candidates.sort(
-            key=lambda candidate: (
-                1 if candidate.get("engine") == "tesseract_numeric" else 0,
-                1 if candidate.get("engine") == "tesseract_general" else 0,
-                float(candidate.get("confidence") or 0.0),
-                len(str(candidate.get("normalizedText") or "")),
-            ),
-            reverse=True,
-        )
-        selected = dict(valid_candidates[0])
-        return make_frame_result(
-            selected_text=str(selected.get("normalizedText") or ""),
-            display_text=str(selected.get("normalizedText") or ""),
-            write_policy="display_accept",
-            needs_review=False,
-            selected_by=str(selected.get("validationReason") or selected.get("engine") or "ocr"),
-            validation_reason=str(selected.get("validationReason") or ""),
-            engine=str(selected.get("engine") or ""),
-            crop_variant=str(selected.get("cropVariant") or ""),
-            confidence=float(selected.get("confidence") or 0.0),
-            preprocessing=str(selected.get("preprocessing") or ""),
-            raw_candidates=normalized_candidates,
-        )
-
-    hint_candidate = build_validated_hint_candidate(semantics, normalized_candidates, crop_stats)
-
-    if hint_candidate is not None:
-        return make_frame_result(
-            selected_text=str(hint_candidate.get("normalizedText") or ""),
-            display_text=str(hint_candidate.get("normalizedText") or ""),
-            write_policy="display_review" if hint_candidate.get("needsReview") else "display_accept",
-            needs_review=bool(hint_candidate.get("needsReview")),
-            selected_by=str(hint_candidate.get("selectedBy") or ""),
-            validation_reason=str(hint_candidate.get("validationReason") or ""),
-            engine=str(hint_candidate.get("engine") or ""),
-            crop_variant=str(hint_candidate.get("cropVariant") or ""),
-            confidence=float(hint_candidate.get("confidence") or 0.0),
-            raw_candidates=normalized_candidates,
-        )
-
-    if semantics.get("strongSchema"):
-        return make_frame_result(
-            selected_text="",
-            display_text="",
-            write_policy="blank_review",
-            needs_review=True,
-            selected_by="schema_failed_no_fallback",
-            validation_reason="schema_failed_no_fallback",
-            raw_candidates=normalized_candidates,
-        )
-
-    display_text = resolve_review_display_text_for_semantics(semantics, normalized_candidates)
-    return make_frame_result(
-        selected_text="",
-        display_text=display_text,
-        write_policy="display_review",
-        needs_review=True,
-        selected_by="free_text_review_fallback" if display_text else "no_candidate",
-        validation_reason="free_text_review_fallback" if display_text else "no_candidate",
-        raw_candidates=normalized_candidates,
-    )
-
-
-def run_field_aware_frame_crop_ocr(
-    crop_variants: list[dict],
-    frame_plan: dict,
-    semantics: dict,
-    ocr_lang: str,
-) -> tuple[str, dict]:
-    should_run_ocr, ignore_reason = should_ocr_frame(semantics)
-
-    if not should_run_ocr:
-        return "", {
-            "key": str(frame_plan.get("key") or ""),
-            "pageNumber": int(frame_plan.get("pageNumber") or 1),
-            "psm": 0,
-            "preprocessing": "",
-            "confidence": 0.0,
-            "text": "",
-            "selectedText": "",
-            "displayText": "",
-            "writePolicy": "hidden_ignore",
-            "fieldType": semantics.get("fieldType") or "ignore",
-            "semanticRole": semantics.get("semanticRole") or "ignore",
-            "selectedBy": "ignored_frame",
-            "needsReview": False,
-            "ignored": True,
-            "ignoreReason": ignore_reason,
-            "canonicalLabel": semantics.get("canonicalLabel") or "",
-            "propagatedFrom": semantics.get("propagatedFrom") or "",
-            "rawCandidates": [],
-        }
-
-    raw_candidates, aggregate_crop_stats = build_field_crop_raw_candidates(crop_variants, frame_plan, semantics, ocr_lang)
     selected = select_best_candidate(semantics, raw_candidates, aggregate_crop_stats)
     display_text = str(selected.get("displayText") or selected.get("selectedText") or selected.get("text") or "")
     debug_entry = {
@@ -3172,281 +2253,13 @@ def run_field_aware_frame_crop_ocr(
     return normalize_multiline_text(display_text), debug_entry
 
 
-def run_universal_detection_first_frame_ocr(
-    *,
-    page_lines: list[dict],
-    page_tokens: list[dict],
-    page_glyphs: list[dict],
-    page_image: Image.Image,
-    frame_plan: dict,
-    semantics: dict,
-    crop_variants: list[dict],
-    rect_px: list[int],
-    ocr_lang: str,
-) -> tuple[str, dict]:
-    should_run_ocr, ignore_reason = should_ocr_frame(semantics)
-    frame_key = str(frame_plan.get("key") or "")
-    page_number = int(frame_plan.get("pageNumber") or 1)
-    base_crop = crop_variants[0].get("image") if crop_variants else page_image.crop(tuple(rect_px))
-    textness = estimate_frame_textness(base_crop if isinstance(base_crop, Image.Image) else page_image.crop(tuple(rect_px)))
-    source_hint = normalize_multiline_text(str(semantics.get("sourceTextHint") or ""))
-    source_hint_trust = classify_source_hint_trust(source_hint)
-    text_class = build_text_class(semantics)
-
-    if not should_run_ocr:
-        return "", {
-            "key": frame_key,
-            "pageNumber": page_number,
-            "psm": 0,
-            "preprocessing": "",
-            "confidence": 0.0,
-            "text": "",
-            "selectedText": "",
-            "displayText": "",
-            "writePolicy": "hidden_ignore",
-            "fieldType": semantics.get("fieldType") or "ignore",
-            "textClass": text_class,
-            "semanticRole": semantics.get("semanticRole") or "ignore",
-            "selectedBy": "ignored_frame",
-            "needsReview": False,
-            "ignored": True,
-            "ignoreReason": ignore_reason,
-            "canonicalLabel": semantics.get("canonicalLabel") or "",
-            "propagatedFrom": semantics.get("propagatedFrom") or "",
-            "assignedPageLineCount": 0,
-            "cropFallbackRan": False,
-            "sourceHintTrust": source_hint_trust,
-            "textness": textness,
-            "rawCandidates": [],
-            "rawRejectedCandidates": [],
-        }
-
-    assigned_lines = assign_page_lines_to_frame(rect_px, page_lines)
-    assigned_tokens = assign_boxes_to_frame(rect_px, page_tokens, overlap_threshold=0.3, pad=3.0)
-    assigned_glyphs = assign_boxes_to_frame(rect_px, page_glyphs, overlap_threshold=0.18, pad=4.0)
-    assigned_text, assigned_confidence = build_text_from_assigned_page_lines(assigned_lines)
-    token_candidate_text, token_candidate_confidence = build_token_line_candidate(assigned_tokens)
-    glyph_candidate_text, glyph_visual_text, distributed_score, glyph_lines = build_glyph_line_candidate(assigned_glyphs)
-    local_component_glyphs: list[dict] = []
-    local_component_glyph_text = ""
-    local_component_visual_text = ""
-    local_component_distributed_score = 0.0
-    local_component_glyph_lines: list[list[dict]] = []
-
-    if text_class == "label_text" and len(assigned_glyphs) < 2:
-        local_component_glyphs = extract_component_glyphs_from_crop(base_crop, ocr_lang)
-        (
-            local_component_glyph_text,
-            local_component_visual_text,
-            local_component_distributed_score,
-            local_component_glyph_lines,
-        ) = build_glyph_line_candidate(local_component_glyphs)
-
-        if len(compact_distributed_text(local_component_glyph_text)) > len(compact_distributed_text(glyph_candidate_text)):
-            glyph_candidate_text = local_component_glyph_text
-            glyph_visual_text = local_component_visual_text
-            distributed_score = max(distributed_score, local_component_distributed_score)
-            glyph_lines = local_component_glyph_lines
-            assigned_glyphs = local_component_glyphs
-    raw_candidates: list[dict] = []
-    raw_rejected_candidates: list[dict] = []
-
-    if assigned_text:
-        raw_candidates.append(
-            {
-                "engine": "page_ocr",
-                "cropVariant": "assigned_page_lines",
-                "text": assigned_text,
-                "confidence": assigned_confidence,
-                "preprocessing": "page_line_assignment",
-                "cropStats": {"maskBlobCount": estimate_mask_blob_count(base_crop if isinstance(base_crop, Image.Image) else page_image.crop(tuple(rect_px)))},
-            }
-        )
-
-    if token_candidate_text:
-        raw_candidates.append(
-            {
-                "engine": "page_token_assembly",
-                "cropVariant": "assigned_page_tokens",
-                "text": token_candidate_text,
-                "confidence": token_candidate_confidence,
-                "preprocessing": "page_token_assignment",
-                "cropStats": {"maskBlobCount": estimate_mask_blob_count(base_crop if isinstance(base_crop, Image.Image) else page_image.crop(tuple(rect_px)))},
-            }
-        )
-
-    if glyph_candidate_text:
-        raw_candidates.append(
-            {
-                "engine": "page_glyph_assembly" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "local_component_glyph_assembly",
-                "cropVariant": "assigned_page_glyphs" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "local_component_glyphs",
-                "text": glyph_candidate_text,
-                "confidence": max(token_candidate_confidence, assigned_confidence, 65.0),
-                "preprocessing": "page_glyph_assignment" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "frame_local_component_assignment",
-                "cropStats": {"maskBlobCount": estimate_mask_blob_count(base_crop if isinstance(base_crop, Image.Image) else page_image.crop(tuple(rect_px)))},
-            }
-        )
-
-    aggregate_crop_stats = {
-        "maskBlobCount": max((int(candidate.get("cropStats", {}).get("maskBlobCount") or 0) for candidate in raw_candidates), default=0)
-    }
-    selected = select_best_candidate(semantics, raw_candidates, aggregate_crop_stats)
-    crop_fallback_ran = False
-
-    if looks_like_distributed_text_candidate(
-        semantics=semantics,
-        line_candidate_text=assigned_text or token_candidate_text,
-        glyph_lines=glyph_lines,
-        frame_rect_px=rect_px,
-    ) and glyph_candidate_text:
-        selected = make_frame_result(
-            selected_text=compact_distributed_text(glyph_candidate_text),
-            display_text=compact_distributed_text(glyph_candidate_text),
-            write_policy="display_accept",
-            needs_review=False,
-            selected_by="distributed_glyph_assembly" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "distributed_component_glyph_assembly",
-            validation_reason="distributed_glyph_assembly" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "distributed_component_glyph_assembly",
-            engine="page_glyph_assembly" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "local_component_glyph_assembly",
-            crop_variant="assigned_page_glyphs" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "local_component_glyphs",
-            confidence=max(assigned_confidence, token_candidate_confidence, 72.0),
-            preprocessing="page_glyph_assignment" if not local_component_glyphs or assigned_glyphs is not local_component_glyphs else "frame_local_component_assignment",
-            raw_candidates=raw_candidates,
-        )
-
-    if assigned_lines and semantics.get("strongSchema") and str(selected.get("writePolicy") or "") not in {"display_accept", "display_review"}:
-        crop_fallback_ran = True
-        fallback_raw_candidates, fallback_crop_stats = build_field_crop_raw_candidates(crop_variants, frame_plan, semantics, ocr_lang)
-        raw_candidates = raw_candidates + fallback_raw_candidates
-        aggregate_crop_stats = {
-            "maskBlobCount": max(
-                aggregate_crop_stats.get("maskBlobCount", 0),
-                int(fallback_crop_stats.get("maskBlobCount") or 0),
-            )
-        }
-        selected = select_best_candidate(semantics, raw_candidates, aggregate_crop_stats)
-
-    if should_run_universal_crop_fallback(semantics, assigned_lines, textness):
-        crop_fallback_ran = True
-        fallback_raw_candidates, fallback_crop_stats = build_field_crop_raw_candidates(crop_variants, frame_plan, semantics, ocr_lang)
-        raw_candidates = raw_candidates + fallback_raw_candidates
-        aggregate_crop_stats = {
-            "maskBlobCount": max(
-                aggregate_crop_stats.get("maskBlobCount", 0),
-                int(fallback_crop_stats.get("maskBlobCount") or 0),
-            )
-        }
-        selected = select_best_candidate(semantics, raw_candidates, aggregate_crop_stats)
-
-    write_policy = str(selected.get("writePolicy") or "display_review")
-    display_text = normalize_multiline_text(str(selected.get("displayText") or selected.get("selectedText") or selected.get("text") or ""))
-    confidence = float(selected.get("confidence") or assigned_confidence or 0.0)
-
-    if write_policy in {"display_review", "display_accept"} and not assigned_lines and not semantics.get("strongSchema"):
-        garbage_candidate, garbage_reason = analyze_text_candidate_noise(display_text)
-
-        if garbage_candidate or float(textness.get("textnessScore") or 0.0) < 0.65 or float(textness.get("noiseScore") or 0.0) > 0.45 or confidence < 48.0:
-            if display_text:
-                raw_rejected_candidates.append(
-                    {
-                        "source": str(selected.get("engine") or "crop_fallback"),
-                        "text": display_text,
-                        "reason": garbage_reason or "crop_ocr_without_detected_text_line",
-                    }
-                )
-
-            trusted_hint = source_hint if source_hint_trust != "untrusted" else ""
-
-            if trusted_hint:
-                selected = make_frame_result(
-                    selected_text="",
-                    display_text=trusted_hint,
-                    write_policy="display_review",
-                    needs_review=True,
-                    selected_by="source_hint_review_fallback",
-                    validation_reason="source_hint_review_fallback",
-                    raw_candidates=raw_candidates,
-                )
-            else:
-                selected = make_frame_result(
-                    selected_text="",
-                    display_text="",
-                    write_policy="blank_accept",
-                    needs_review=False,
-                    selected_by="no_detected_text_line",
-                    validation_reason="no_detected_text_line",
-                    raw_candidates=raw_candidates,
-                )
-
-            write_policy = str(selected.get("writePolicy") or "blank_accept")
-            display_text = normalize_multiline_text(str(selected.get("displayText") or selected.get("text") or ""))
-
-    if not assigned_lines and semantics.get("strongSchema") and write_policy not in {"display_accept", "display_review"}:
-        write_policy = "blank_review"
-        selected = {
-            **selected,
-            "selectedText": "",
-            "displayText": "",
-            "text": "",
-            "writePolicy": "blank_review",
-            "needsReview": True,
-            "selectedBy": selected.get("selectedBy") or "schema_failed_no_fallback",
-        }
-
-    debug_entry = {
-        "key": frame_key,
-        "pageNumber": page_number,
-        "psm": 0,
-        "preprocessing": selected.get("preprocessing") or "page_line_assignment",
-        "confidence": round(float(selected.get("confidence") or assigned_confidence or 0.0), 2),
-        "text": normalize_multiline_text(str(selected.get("displayText") or selected.get("selectedText") or selected.get("text") or "")),
-        "selectedText": str(selected.get("selectedText") or ""),
-        "displayText": normalize_multiline_text(str(selected.get("displayText") or selected.get("selectedText") or selected.get("text") or "")),
-        "writePolicy": write_policy,
-        "fieldType": semantics.get("fieldType") or "free_text",
-        "textClass": text_class,
-        "semanticRole": semantics.get("semanticRole") or "unknown",
-        "selectedBy": selected.get("selectedBy") or "",
-        "needsReview": bool(selected.get("needsReview")),
-        "ignored": False,
-        "ignoreReason": semantics.get("ignoreReason") or "",
-        "canonicalLabel": semantics.get("canonicalLabel") or "",
-        "propagatedFrom": semantics.get("propagatedFrom") or "",
-        "assignedPageLineCount": len(assigned_lines),
-        "assignedTokenCount": len(assigned_tokens),
-        "assignedGlyphCount": len(assigned_glyphs),
-        "cropFallbackRan": crop_fallback_ran,
-        "sourceHintTrust": source_hint_trust,
-        "lineCandidateText": assigned_text,
-        "tokenCandidateText": token_candidate_text,
-        "glyphCandidateText": glyph_candidate_text,
-        "visualText": glyph_visual_text,
-        "canonicalText": compact_distributed_text(str(selected.get("selectedText") or selected.get("displayText") or selected.get("text") or "")),
-        "distributedTextScore": distributed_score,
-        "textness": textness,
-        "rawCandidates": [
-            {
-                "engine": candidate.get("engine") or "",
-                "cropVariant": candidate.get("cropVariant") or "",
-                "text": candidate.get("text") or "",
-                "normalizedText": candidate.get("normalizedText") or "",
-                "confidence": round(float(candidate.get("confidence") or 0.0), 2),
-                "valid": bool(candidate.get("valid")),
-                "validationReason": candidate.get("validationReason") or "",
-            }
-            for candidate in selected.get("rawCandidates", [])
-        ],
-        "rawRejectedCandidates": raw_rejected_candidates,
-    }
-    return normalize_multiline_text(str(selected.get("displayText") or selected.get("selectedText") or selected.get("text") or "")), debug_entry
-
-
 def extract_frame_plan_ocr_results(
     document: fitz.Document,
     frame_plans: list[dict],
     ocr_lang: str,
     raster_scale: float,
     image_ocr_version: str,
-) -> tuple[list[dict], dict[str, str], list[dict], list[str], list[dict], list[dict], list[dict]]:
+) -> tuple[list[dict], dict[str, str], list[dict], list[str]]:
     effective_scale = max(float(raster_scale), FRAME_OCR_MIN_RASTER_SCALE)
     plans_by_page_number: dict[int, list[dict]] = defaultdict(list)
 
@@ -3458,23 +2271,11 @@ def extract_frame_plan_ocr_results(
     frame_results: dict[str, str] = {}
     frame_debug: list[dict] = []
     page_modes: list[str] = []
-    page_ocr_summaries: list[dict] = []
-    ocr_page_layers: list[dict] = []
-    page_text_outputs: list[dict] = []
 
     for page_index, page in enumerate(document):
         page_number = page_index + 1
         page_modes.append(
             (
-                "ocr_page_layer_v300"
-                if image_ocr_version == IMAGE_OCR_VERSION_IV300
-                else
-                "ocr_page_detection_first_v204"
-                if image_ocr_version == IMAGE_OCR_VERSION_IV204
-                else
-                "ocr_page_detection_first_v203"
-                if image_ocr_version == IMAGE_OCR_VERSION_IV203
-                else
                 "ocr_frame_crop_field_aware_v202"
                 if image_ocr_version == IMAGE_OCR_VERSION_IV202
                 else "ocr_frame_crop_field_aware"
@@ -3498,43 +2299,6 @@ def extract_frame_plan_ocr_results(
             scale_x = image_width / max(1.0, float(page.rect.width))
             scale_y = image_height / max(1.0, float(page.rect.height))
             page_contexts: list[dict] = []
-            page_lines: list[dict] = []
-            page_tokens: list[dict] = []
-            page_glyphs: list[dict] = []
-            page_summary: dict = {
-                "pageNumber": page_number,
-                "detectedLineCount": 0,
-                "detectedTokenCount": 0,
-                "detectedGlyphCount": 0,
-                "assignedLineCount": 0,
-                "assignedTokenCount": 0,
-                "assignedGlyphCount": 0,
-                "unassignedLineCount": 0,
-                "blankFrameCount": 0,
-                "cropFallbackCount": 0,
-                "garbageRejectedCount": 0,
-            }
-
-            if image_ocr_version == IMAGE_OCR_VERSION_IV203:
-                page_lines, detected_summary = extract_page_level_ocr_lines(page_image, ocr_lang)
-                page_summary = {
-                    **page_summary,
-                    "detectedLineCount": len(page_lines),
-                    "pagePass": detected_summary.get("pagePass") or "",
-                    "detectedCharCount": int(detected_summary.get("detectedCharCount") or 0),
-                }
-            elif image_ocr_version in {IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300}:
-                page_lines, detected_summary = extract_page_level_ocr_lines(page_image, ocr_lang)
-                page_tokens = extract_page_level_ocr_tokens(page_image, ocr_lang)
-                page_glyphs = extract_page_level_ocr_glyphs(page_image, ocr_lang)
-                page_summary = {
-                    **page_summary,
-                    "detectedLineCount": len(page_lines),
-                    "detectedTokenCount": len(page_tokens),
-                    "detectedGlyphCount": len(page_glyphs),
-                    "pagePass": detected_summary.get("pagePass") or "",
-                    "detectedCharCount": int(detected_summary.get("detectedCharCount") or 0),
-                }
 
             for frame_plan in page_plans:
                 normalized_rect, rect_diagnostics = normalize_frame_plan_rect(frame_plan, page)
@@ -3578,10 +2342,8 @@ def extract_frame_plan_ocr_results(
                             "cropHeightPx": max(0, bottom - top),
                             "rasterScale": round(effective_scale, 2),
                             "imageOcrVersion": image_ocr_version,
-                            "fieldAwareEnabled": image_ocr_version in {IMAGE_OCR_VERSION_IV202, IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300},
-                            "detectionFirstEnabled": image_ocr_version in {IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300},
+                            "fieldAwareEnabled": image_ocr_version == IMAGE_OCR_VERSION_IV202,
                             "rawCandidates": [],
-                            "rawRejectedCandidates": [],
                         }
                     )
                     continue
@@ -3616,21 +2378,7 @@ def extract_frame_plan_ocr_results(
                     }
                 )
 
-            if image_ocr_version in {IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300}:
-                page_semantics_by_key = enrich_universal_page_semantics(page_contexts, page_lines)
-            elif image_ocr_version == IMAGE_OCR_VERSION_IV203:
-                page_semantics_by_key = enrich_universal_page_semantics(page_contexts, page_lines)
-            else:
-                page_semantics_by_key = (
-                    enrich_page_frame_semantics(
-                        page_contexts,
-                        ocr_lang,
-                        use_known_grid_labels=True,
-                    )
-                    if page_contexts
-                    else {}
-                )
-            assigned_line_signatures: set[tuple[float, float, float, float, str]] = set()
+            page_semantics_by_key = enrich_page_frame_semantics(page_contexts, ocr_lang) if page_contexts else {}
 
             for page_context in page_contexts:
                 frame_plan = page_context["framePlan"]
@@ -3641,10 +2389,7 @@ def extract_frame_plan_ocr_results(
                 top = int(page_context["top"])
                 right = int(page_context["right"])
                 bottom = int(page_context["bottom"])
-                semantics = page_semantics_by_key.get(frame_key) or infer_frame_semantics(
-                    frame_plan,
-                    use_known_grid_labels=image_ocr_version not in {IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300},
-                )
+                semantics = page_semantics_by_key.get(frame_key) or infer_frame_semantics(frame_plan)
                 crop_variants = build_field_crop_variants(
                     page_image,
                     left,
@@ -3655,31 +2400,7 @@ def extract_frame_plan_ocr_results(
                 )
                 crop_image = crop_variants[0]["image"] if crop_variants else page_image.crop((left, top, right, bottom))
 
-                if image_ocr_version in {IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300}:
-                    best_text, debug_entry = run_universal_detection_first_frame_ocr(
-                        page_lines=page_lines,
-                        page_tokens=page_tokens,
-                        page_glyphs=page_glyphs,
-                        page_image=page_image,
-                        frame_plan=frame_plan,
-                        semantics=semantics,
-                        crop_variants=crop_variants,
-                        rect_px=[left, top, right, bottom],
-                        ocr_lang=ocr_lang,
-                    )
-                elif image_ocr_version == IMAGE_OCR_VERSION_IV203:
-                    best_text, debug_entry = run_universal_detection_first_frame_ocr(
-                        page_lines=page_lines,
-                        page_tokens=[],
-                        page_glyphs=[],
-                        page_image=page_image,
-                        frame_plan=frame_plan,
-                        semantics=semantics,
-                        crop_variants=crop_variants,
-                        rect_px=[left, top, right, bottom],
-                        ocr_lang=ocr_lang,
-                    )
-                elif image_ocr_version in {IMAGE_OCR_VERSION_IV201, IMAGE_OCR_VERSION_IV202}:
+                if image_ocr_version in {IMAGE_OCR_VERSION_IV201, IMAGE_OCR_VERSION_IV202}:
                     best_text, debug_entry = run_field_aware_frame_crop_ocr(crop_variants, frame_plan, semantics, ocr_lang)
                 elif image_ocr_version == IMAGE_OCR_VERSION_IV200:
                     best_text, debug_entry = run_transformer_frame_crop_ocr(crop_image, frame_plan)
@@ -3696,8 +2417,7 @@ def extract_frame_plan_ocr_results(
                 debug_entry["normalizedRectPdf"] = rect_diagnostics["normalizedRectPdf"]
                 debug_entry["cropRectPx"] = [left, top, right, bottom]
                 debug_entry["imageOcrVersion"] = image_ocr_version
-                debug_entry["fieldAwareEnabled"] = image_ocr_version in {IMAGE_OCR_VERSION_IV202, IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300}
-                debug_entry["detectionFirstEnabled"] = image_ocr_version in {IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300}
+                debug_entry["fieldAwareEnabled"] = image_ocr_version == IMAGE_OCR_VERSION_IV202
                 debug_entry["cropVariants"] = [
                     {
                         "name": str(crop_variant.get("name") or ""),
@@ -3710,29 +2430,6 @@ def extract_frame_plan_ocr_results(
                 debug_entry["cropHeightPx"] = max(0, bottom - top)
                 debug_entry["rasterScale"] = round(effective_scale, 2)
                 frame_debug.append(debug_entry)
-
-                if image_ocr_version in {IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300}:
-                    page_summary["assignedLineCount"] += int(debug_entry.get("assignedPageLineCount") or 0)
-                    page_summary["assignedTokenCount"] += int(debug_entry.get("assignedTokenCount") or 0)
-                    page_summary["assignedGlyphCount"] += int(debug_entry.get("assignedGlyphCount") or 0)
-                    page_summary["cropFallbackCount"] += 1 if bool(debug_entry.get("cropFallbackRan")) else 0
-                    page_summary["garbageRejectedCount"] += len(debug_entry.get("rawRejectedCandidates") or [])
-
-                    if str(debug_entry.get("writePolicy") or "") in {"blank_accept", "blank_review"}:
-                        page_summary["blankFrameCount"] += 1
-
-                    for line in assign_page_lines_to_frame([left, top, right, bottom], page_lines):
-                        bbox = line.get("bboxPx") or [0, 0, 0, 0]
-                        assigned_line_signatures.add(
-                            (
-                                float(bbox[0]),
-                                float(bbox[1]),
-                                float(bbox[2]),
-                                float(bbox[3]),
-                                str(line.get("text") or ""),
-                            )
-                        )
-
                 item = build_plain_text_item(
                     normalized_best_text,
                     float(normalized_rect.x0),
@@ -3745,33 +2442,6 @@ def extract_frame_plan_ocr_results(
                 if item is not None:
                     page_text_items.append(item)
 
-            if image_ocr_version in {IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300}:
-                page_summary["unassignedLineCount"] = max(0, len(page_lines) - len(assigned_line_signatures))
-                page_ocr_summaries.append(page_summary)
-
-            if image_ocr_version == IMAGE_OCR_VERSION_IV300:
-                ocr_page_layers.append(
-                    build_ocr_page_layer(
-                        page_number=page_number,
-                        page_width=float(page.rect.width),
-                        page_height=float(page.rect.height),
-                        image_width=image_width,
-                        image_height=image_height,
-                        dpi=int(FRAME_OCR_USER_DEFINED_DPI),
-                        page_lines=page_lines,
-                        page_tokens=page_tokens,
-                        page_glyphs=page_glyphs,
-                        scale_x=scale_x,
-                        scale_y=scale_y,
-                    )
-                )
-                page_text_outputs.append(
-                    {
-                        "pageNumber": page_number,
-                        "text": build_page_text_from_lines(page_lines),
-                    }
-                )
-
         pages.append(
             {
                 "pageNumber": page_number,
@@ -3782,7 +2452,7 @@ def extract_frame_plan_ocr_results(
             }
         )
 
-    return pages, frame_results, frame_debug, page_modes, page_ocr_summaries, ocr_page_layers, page_text_outputs
+    return pages, frame_results, frame_debug, page_modes
 
 
 def extract_page_items(
@@ -3825,13 +2495,10 @@ def build_render_model(
     extraction_modes: list[str] = []
     frame_results: dict[str, str] = {}
     frame_debug: list[dict] = []
-    page_ocr_summaries: list[dict] = []
-    ocr_page_layers: list[dict] = []
-    page_text_outputs: list[dict] = []
 
     try:
         if force_ocr and frame_plans:
-            pages, frame_results, frame_debug, extraction_modes, page_ocr_summaries, ocr_page_layers, page_text_outputs = extract_frame_plan_ocr_results(
+            pages, frame_results, frame_debug, extraction_modes = extract_frame_plan_ocr_results(
                 document,
                 frame_plans,
                 ocr_lang,
@@ -3843,20 +2510,6 @@ def build_render_model(
                 for entry in frame_debug
                 if str(entry.get("key") or "")
             }
-            frame_assignment_summary = build_frame_assignment_summary(frame_debug)
-            ocr_layer_summary = {
-                "engine": "tesseract_page_ocr_layer_v300" if image_ocr_version == IMAGE_OCR_VERSION_IV300 else "tesseract_detection_first",
-                "pageCount": len(ocr_page_layers),
-                "lineCount": sum(len(layer.get("lines") or []) for layer in ocr_page_layers),
-                "wordCount": sum(len(layer.get("words") or []) for layer in ocr_page_layers),
-                "glyphCount": sum(len(layer.get("glyphs") or []) for layer in ocr_page_layers),
-                "averageConfidence": round(
-                    sum(float(run.get("averageConfidence") or 0.0) for layer in ocr_page_layers for run in layer.get("engineRuns") or [])
-                    / max(1, sum(len(layer.get("engineRuns") or []) for layer in ocr_page_layers)),
-                    2,
-                ),
-                "nonTextRegionCount": sum(len(layer.get("nonTextRegions") or []) for layer in ocr_page_layers),
-            }
             return {
                 "version": "positioned-v1",
                 "cloneId": f"pdf-frame-text-image-{image_ocr_version}",
@@ -3867,13 +2520,7 @@ def build_render_model(
                     "frameResults": frame_results,
                     "frameReviewFlags": frame_review_flags,
                     "imageOcrVersion": image_ocr_version,
-                    "fieldAwareEnabled": image_ocr_version in {IMAGE_OCR_VERSION_IV202, IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300},
-                    "detectionFirstEnabled": image_ocr_version in {IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300},
-                    "pageOcrSummary": page_ocr_summaries,
-                    "ocrLayerSummary": ocr_layer_summary,
-                    "frameAssignmentSummary": frame_assignment_summary,
-                    "ocrPageLayers": ocr_page_layers,
-                    "pageTextOutput": page_text_outputs,
+                    "fieldAwareEnabled": image_ocr_version == IMAGE_OCR_VERSION_IV202,
                     "frameDebug": frame_debug,
                 },
             }
@@ -3903,21 +2550,7 @@ def build_render_model(
             "frameResults": frame_results,
             "frameReviewFlags": {},
             "imageOcrVersion": image_ocr_version,
-            "fieldAwareEnabled": image_ocr_version in {IMAGE_OCR_VERSION_IV202, IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300},
-            "detectionFirstEnabled": image_ocr_version in {IMAGE_OCR_VERSION_IV203, IMAGE_OCR_VERSION_IV204, IMAGE_OCR_VERSION_IV300},
-            "pageOcrSummary": page_ocr_summaries,
-            "ocrLayerSummary": {
-                "engine": "page_text_items_only",
-                "pageCount": len(pages),
-                "lineCount": 0,
-                "wordCount": 0,
-                "glyphCount": 0,
-                "averageConfidence": 0.0,
-                "nonTextRegionCount": 0,
-            },
-            "frameAssignmentSummary": build_frame_assignment_summary(frame_debug),
-            "ocrPageLayers": ocr_page_layers,
-            "pageTextOutput": page_text_outputs,
+            "fieldAwareEnabled": image_ocr_version == IMAGE_OCR_VERSION_IV202,
             "frameDebug": frame_debug,
         },
     }

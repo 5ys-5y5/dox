@@ -2,7 +2,18 @@ import { NextResponse } from 'next/server';
 import type {
   TemplateExtractExtractionStage,
   TemplateExtractFrameGroupVersion,
+  TemplateExtractFrameTextMode,
+  TemplateExtractImageFrameTextVersion,
+  TemplateExtractNonImageFrameTextVersion,
 } from '../../../../lib/templateExtractDtos';
+import {
+  toLegacyTemplateExtractFrameGroupVersion,
+  toPublicTemplateExtractFrameGroupVersion,
+} from '../../../../lib/templateExtractDtos';
+import {
+  TemplateExtractFrameFinalHtmlService,
+  type TemplateExtractFrameTextDecision,
+} from '../../../../services/templateExtractFrameFinalHtmlService';
 import { TemplateExtractService } from '../../../../services/templateExtractService';
 import { TemplateExtractVersionService } from '../../../../services/templateExtractVersionService';
 
@@ -10,7 +21,7 @@ const normalizeExtractionStage = (value: unknown): TemplateExtractExtractionStag
   value === 'frames' ? 'frames' : 'full';
 
 const normalizeFrameGroupVersion = (value: unknown): TemplateExtractFrameGroupVersion => {
-  const normalized = String(value || '').trim().toLowerCase();
+  const normalized = String(toLegacyTemplateExtractFrameGroupVersion(String(value || '').trim().toLowerCase()) || '');
 
   if (
     normalized === 'v1.01' ||
@@ -25,22 +36,110 @@ const normalizeFrameGroupVersion = (value: unknown): TemplateExtractFrameGroupVe
     normalized === 'v1.10' ||
     normalized === 'v1.11'
   ) {
-    return normalized as TemplateExtractFrameGroupVersion;
+    return toPublicTemplateExtractFrameGroupVersion(normalized) as TemplateExtractFrameGroupVersion;
   }
 
   if (/^v1\.09-[0-9a-z._\-\u3131-\u318e\uac00-\ud7a3]+$/i.test(normalized)) {
-    return normalized as TemplateExtractFrameGroupVersion;
+    return toPublicTemplateExtractFrameGroupVersion(normalized) as TemplateExtractFrameGroupVersion;
   }
 
   if (/^v1\.10-[0-9a-z._\-\u3131-\u318e\uac00-\ud7a3]+$/i.test(normalized)) {
-    return normalized as TemplateExtractFrameGroupVersion;
+    return toPublicTemplateExtractFrameGroupVersion(normalized) as TemplateExtractFrameGroupVersion;
   }
 
   if (/^v1\.11-[0-9a-z._\-\u3131-\u318e\uac00-\ud7a3]+$/i.test(normalized)) {
-    return normalized as TemplateExtractFrameGroupVersion;
+    return toPublicTemplateExtractFrameGroupVersion(normalized) as TemplateExtractFrameGroupVersion;
   }
 
-  return 'v1.11-default';
+  return 'fv1.11-default';
+};
+
+const getFileExtension = (fileName: string) => {
+  const matched = String(fileName || '')
+    .trim()
+    .toLowerCase()
+    .match(/\.([a-z0-9]+)$/);
+
+  return matched?.[1] || '';
+};
+
+const isPdfUpload = (fileName: string, mimeType: string) => {
+  const extension = getFileExtension(fileName);
+  return mimeType === 'application/pdf' || extension === 'pdf';
+};
+
+const normalizeFrameTextExtractionMode = (value: unknown): TemplateExtractFrameTextMode | null => {
+  switch (String(value || '').trim().toLowerCase()) {
+    case 'image':
+      return 'image';
+    case 'non_image':
+      return 'non_image';
+    default:
+      return null;
+  }
+};
+
+const normalizeFrameTextExtractionVersion = (value: unknown): TemplateExtractNonImageFrameTextVersion => {
+  switch (String(value || '').trim()) {
+    case 'niv1.01':
+    case 'niv1.02':
+    case 'niv1.12':
+      return String(value).trim() as TemplateExtractNonImageFrameTextVersion;
+    default:
+      return 'niv1.12';
+  }
+};
+
+const normalizeImageFrameTextExtractionVersion = (value: unknown): TemplateExtractImageFrameTextVersion => {
+  switch (String(value || '').trim()) {
+    case 'iv3.00':
+    case 'iv2.04':
+    case 'iv2.03':
+    case 'iv2.02':
+    case 'iv2.01':
+    case 'iv2.00':
+    case 'iv1.00':
+      return String(value).trim() as TemplateExtractImageFrameTextVersion;
+    default:
+      return 'iv1.00';
+  }
+};
+
+const resolveFrameTextDecision = (source: {
+  frameTextExtractionMode?: unknown;
+  mode?: unknown;
+  frameTextExtractionVersion?: unknown;
+  imageFrameTextExtractionVersion?: unknown;
+  imageOcrVersion?: unknown;
+}): TemplateExtractFrameTextDecision | null => {
+  const explicitMode =
+    normalizeFrameTextExtractionMode(source.frameTextExtractionMode) ||
+    normalizeFrameTextExtractionMode(source.mode);
+  const hasNonImageVersion = Boolean(String(source.frameTextExtractionVersion || '').trim());
+  const hasImageVersion = Boolean(
+    String(source.imageFrameTextExtractionVersion || source.imageOcrVersion || '').trim()
+  );
+  const mode =
+    explicitMode ||
+    (hasImageVersion ? 'image' : hasNonImageVersion ? 'non_image' : null);
+
+  if (!mode) {
+    return null;
+  }
+
+  if (mode === 'image') {
+    return {
+      mode,
+      imageFrameTextExtractionVersion: normalizeImageFrameTextExtractionVersion(
+        source.imageFrameTextExtractionVersion || source.imageOcrVersion
+      ),
+    };
+  }
+
+  return {
+    mode,
+    frameTextExtractionVersion: normalizeFrameTextExtractionVersion(source.frameTextExtractionVersion),
+  };
 };
 
 export async function POST(request: Request) {
@@ -57,17 +156,40 @@ export async function POST(request: Request) {
       }
 
       const engineVersion = TemplateExtractVersionService.normalizeVersion(formData.get('engineVersion'));
-      const extractionStage = normalizeExtractionStage(formData.get('extractionStage'));
+      const requestedExtractionStage = normalizeExtractionStage(formData.get('extractionStage'));
       const frameGroupVersion = normalizeFrameGroupVersion(formData.get('frameGroupVersion'));
+      const frameTextDecision = resolveFrameTextDecision({
+        frameTextExtractionMode: formData.get('frameTextExtractionMode'),
+        mode: formData.get('mode'),
+        frameTextExtractionVersion: formData.get('frameTextExtractionVersion'),
+        imageFrameTextExtractionVersion: formData.get('imageFrameTextExtractionVersion'),
+        imageOcrVersion: formData.get('imageOcrVersion'),
+      });
+      const uploadedBytes = new Uint8Array(await file.arrayBuffer());
+      const shouldApplyFrameTextDecision =
+        Boolean(frameTextDecision) && isPdfUpload(file.name, file.type || 'application/octet-stream');
+      const extractionStage =
+        shouldApplyFrameTextDecision && requestedExtractionStage !== 'frames'
+          ? 'frames'
+          : requestedExtractionStage;
 
-      const resolvedSource = await TemplateExtractVersionService.resolveUploadSource(
+      let resolvedSource = await TemplateExtractVersionService.resolveUploadSource(
         file.name,
         file.type || 'application/octet-stream',
-        new Uint8Array(await file.arrayBuffer()),
+        uploadedBytes,
         engineVersion,
         extractionStage,
         frameGroupVersion
       );
+
+      if (shouldApplyFrameTextDecision && frameTextDecision) {
+        resolvedSource = await TemplateExtractFrameFinalHtmlService.applyToResolvedSource(
+          file.name,
+          uploadedBytes,
+          resolvedSource,
+          frameTextDecision
+        );
+      }
 
       draft = await TemplateExtractService.createDraftFromResolvedSource(
         {

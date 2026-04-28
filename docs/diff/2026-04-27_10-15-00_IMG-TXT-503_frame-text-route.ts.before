@@ -20,7 +20,7 @@ type ImageFrameTextRequestPlan = {
   rowEnd?: string;
   colStart?: string;
   colEnd?: string;
-  semanticRole?: 'label' | 'value' | 'footer' | 'barcode' | 'stamp' | 'qr' | 'ignore' | 'unknown';
+  semanticRole?: 'label' | 'value' | 'footer' | 'barcode' | 'stamp' | 'unknown';
   fieldType?:
     | 'fixed_enum'
     | 'business_registration_number'
@@ -62,15 +62,7 @@ export async function POST(request: Request) {
     const file = formData.get('file');
     const mode = String(formData.get('mode') || '').trim().toLowerCase();
     const imageOcrVersion = (
-      String(formData.get('imageOcrVersion') || '').trim() === 'iv3.00'
-        ? 'iv3.00'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.04'
-        ? 'iv2.04'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.03'
-        ? 'iv2.03'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.02'
-        ? 'iv2.02'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.01'
+      String(formData.get('imageOcrVersion') || '').trim() === 'iv2.01'
         ? 'iv2.01'
         : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.00'
         ? 'iv2.00'

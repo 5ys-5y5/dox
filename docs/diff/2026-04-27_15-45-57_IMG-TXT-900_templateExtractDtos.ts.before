@@ -140,16 +140,6 @@ export type TemplateExtractFrameGroupVersion =
   | `fv1.09-${string}`
   | `fv1.10-${string}`
   | `fv1.11-${string}`;
-export type TemplateExtractFrameTextMode = 'non_image' | 'image';
-export type TemplateExtractNonImageFrameTextVersion = 'niv1.01' | 'niv1.02' | 'niv1.12';
-export type TemplateExtractImageFrameTextVersion =
-  | 'iv1.00'
-  | 'iv2.00'
-  | 'iv2.01'
-  | 'iv2.02'
-  | 'iv2.03'
-  | 'iv2.04'
-  | 'iv3.00';
 
 export const toLegacyTemplateExtractFrameGroupVersion = (
   value: string | null | undefined

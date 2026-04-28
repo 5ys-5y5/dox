@@ -158,7 +158,7 @@ type FrameExtractedTextMetaState = Record<
     semanticRole: string;
   }
 >;
-type ImageFrameTextExtractionVersion = 'iv1.00' | 'iv2.00' | 'iv2.01' | 'iv2.02' | 'iv2.03' | 'iv2.04' | 'iv3.00';
+type ImageFrameTextExtractionVersion = 'iv1.00' | 'iv2.00' | 'iv2.01' | 'iv2.02' | 'iv2.03';
 type ImageFrameTextSemanticRole =
   | 'label'
   | 'value'
@@ -191,53 +191,11 @@ type FrameTextRenderModelV112 = TemplateExtractReplicaRenderModel & {
     pageOcrSummary?: Array<{
       pageNumber: number;
       detectedLineCount: number;
-      detectedTokenCount?: number;
-      detectedGlyphCount?: number;
       assignedLineCount: number;
-      assignedTokenCount?: number;
-      assignedGlyphCount?: number;
       unassignedLineCount: number;
       blankFrameCount: number;
       cropFallbackCount: number;
       garbageRejectedCount: number;
-    }>;
-    ocrLayerSummary?: {
-      engine: string;
-      pageCount: number;
-      lineCount: number;
-      wordCount: number;
-      glyphCount: number;
-      averageConfidence: number;
-      nonTextRegionCount: number;
-    };
-    frameAssignmentSummary?: {
-      frameCount: number;
-      framesWithAssignedText: number;
-      blankAcceptCount: number;
-      blankReviewCount: number;
-      displayAcceptCount: number;
-      displayReviewCount: number;
-      hiddenIgnoreCount: number;
-      schemaInvalidRejectedCount: number;
-      garbageRejectedCount: number;
-    };
-    pageTextOutput?: Array<{
-      pageNumber: number;
-      text: string;
-    }>;
-    ocrPageLayers?: Array<{
-      pageNumber: number;
-      pageWidth: number;
-      pageHeight: number;
-      imageWidth: number;
-      imageHeight: number;
-      dpi: number;
-      orientation: number;
-      lines: Array<{ text: string; bboxPdf: number[]; bboxPx: number[]; confidence: number }>;
-      words: Array<{ text: string; bboxPdf: number[]; bboxPx: number[]; confidence: number }>;
-      glyphs: Array<{ text: string; bboxPdf: number[]; bboxPx: number[]; confidence: number }>;
-      nonTextRegions: Array<unknown>;
-      engineRuns: Array<{ engine: string; lineCount: number; wordCount: number; glyphCount: number; averageConfidence: number }>;
     }>;
     frameDebug?: Array<{
       key: string;
@@ -248,11 +206,8 @@ type FrameTextRenderModelV112 = TemplateExtractReplicaRenderModel & {
       text: string;
       fieldType?: string;
       semanticRole?: string;
-      textClass?: string;
       selectedText?: string;
       displayText?: string;
-      canonicalText?: string;
-      visualText?: string;
       writePolicy?: FrameWritePolicy;
       selectedBy?: string;
       needsReview?: boolean;
@@ -284,12 +239,6 @@ type FrameTextRenderModelV112 = TemplateExtractReplicaRenderModel & {
       cropWidthPx?: number;
       cropHeightPx?: number;
       assignedPageLineCount?: number;
-      assignedTokenCount?: number;
-      assignedGlyphCount?: number;
-      lineCandidateText?: string;
-      tokenCandidateText?: string;
-      glyphCandidateText?: string;
-      distributedTextScore?: number;
       cropFallbackRan?: boolean;
       sourceHintTrust?: string;
       textness?: {
@@ -411,16 +360,12 @@ const IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
   value: ImageFrameTextExtractionVersion;
   label: string;
 }> = [
-  { value: 'iv3.00', label: 'iv3.00' },
-  { value: 'iv2.04', label: 'iv2.04' },
   { value: 'iv2.03', label: 'iv2.03' },
   { value: 'iv2.02', label: 'iv2.02' },
   { value: 'iv2.01', label: 'iv2.01' },
   { value: 'iv2.00', label: 'iv2.00' },
   { value: 'iv1.00', label: 'iv1.00' },
 ];
-const GUARANTEED_FRAME_GROUP_VERSION: TemplateExtractFrameGroupVersion = 'fv1.11';
-const GUARANTEED_NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION: FrameTextExtractionVersion = 'niv1.12';
 const RENDER_MODEL_SCRIPT_PATTERN =
   /<script\b[^>]*data-template-render-model="positioned-v1"[^>]*>([\s\S]*?)<\/script>/i;
 
@@ -1504,7 +1449,7 @@ const isImageFrameDiagnosticsComplete = (
     return false;
   }
 
-  if (imageOcrVersion === 'iv2.02' || imageOcrVersion === 'iv2.03' || imageOcrVersion === 'iv2.04' || imageOcrVersion === 'iv3.00') {
+  if (imageOcrVersion === 'iv2.02' || imageOcrVersion === 'iv2.03') {
     if (diagnostics?.fieldAwareEnabled !== true) {
       return false;
     }
@@ -1520,11 +1465,7 @@ const isImageFrameDiagnosticsComplete = (
       return false;
     }
 
-    if ((imageOcrVersion === 'iv2.03' || imageOcrVersion === 'iv2.04' || imageOcrVersion === 'iv3.00') && !Array.isArray(diagnostics?.pageOcrSummary)) {
-      return false;
-    }
-
-    if (imageOcrVersion === 'iv3.00' && (!diagnostics?.ocrLayerSummary || !diagnostics?.frameAssignmentSummary)) {
+    if (imageOcrVersion === 'iv2.03' && !Array.isArray(diagnostics?.pageOcrSummary)) {
       return false;
     }
   }
@@ -1686,24 +1627,13 @@ const buildAppliedImageFrameTextRenderModel = (
       ...(renderModel.diagnostics || {}),
       imageOcrVersion,
       fieldAwareEnabled:
-        imageOcrVersion === 'iv2.02' ||
-        imageOcrVersion === 'iv2.03' ||
-        imageOcrVersion === 'iv2.04' ||
-        imageOcrVersion === 'iv3.00' ||
-        renderModel.diagnostics?.fieldAwareEnabled === true,
+        imageOcrVersion === 'iv2.02' || imageOcrVersion === 'iv2.03' || renderModel.diagnostics?.fieldAwareEnabled === true,
       detectionFirstEnabled:
-        imageOcrVersion === 'iv2.03' ||
-        imageOcrVersion === 'iv2.04' ||
-        imageOcrVersion === 'iv3.00' ||
-        Boolean(renderModel.diagnostics?.detectionFirstEnabled),
+        imageOcrVersion === 'iv2.03' || Boolean(renderModel.diagnostics?.detectionFirstEnabled),
       frameResults: appliedFrameResults,
       frameReviewFlags: Object.fromEntries(
         frameDebug.map((entry) => [String(entry.key || ''), Boolean(entry.needsReview)] as const).filter(([key]) => key)
       ),
-      ocrLayerSummary: renderModel.diagnostics?.ocrLayerSummary,
-      frameAssignmentSummary: renderModel.diagnostics?.frameAssignmentSummary,
-      pageTextOutput: renderModel.diagnostics?.pageTextOutput,
-      ocrPageLayers: renderModel.diagnostics?.ocrPageLayers,
       frameDebug,
     },
   };
@@ -3551,7 +3481,6 @@ export default function TemplateExtractPage() {
   const currentFrameGroupVersionTag =
     flattenedFramePreview?.frameGroupVersion ||
     (draftDetail?.draft.generatedDraftHtml.match(/data-template-frame-group-version="([^"]+)"/i)?.[1] || '');
-  const normalizedCurrentFrameGroupVersionTag = normalizePublicFrameGroupVersion(currentFrameGroupVersionTag);
   const currentFrameProfileSourceSignature = React.useMemo(
     () => buildFrameSourceSignatureFromHtml(draftDetail?.draft.generatedDraftHtml || ''),
     [draftDetail?.draft.generatedDraftHtml]
@@ -3568,11 +3497,6 @@ export default function TemplateExtractPage() {
   const frameEditorActive =
     Boolean(draftDetail?.draft.generatedDraftHtml?.includes('data-template-extraction-stage="frames"')) &&
     hasSupportedFrameEditorMarkup(draftDetail?.draft.generatedDraftHtml);
-  const guaranteedFrameTextExtractionReady =
-    textExtractionReady &&
-    (normalizedCurrentFrameGroupVersionTag === GUARANTEED_FRAME_GROUP_VERSION ||
-      normalizedCurrentFrameGroupVersionTag === `${GUARANTEED_FRAME_GROUP_VERSION}-default`);
-  const frameEditingEnabled = false;
 
   React.useEffect(() => {
     if (!isV109FrameGroupVersion(frameGroupVersion)) {
@@ -4464,7 +4388,7 @@ export default function TemplateExtractPage() {
     setMessage(null);
 
     try {
-      if (frameEditingEnabled && isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
+      if (isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
         saveCurrentFrameProfile();
       }
 
@@ -4502,7 +4426,6 @@ export default function TemplateExtractPage() {
     }
   }, [
     currentFrameGroupVersionTag,
-    frameEditingEnabled,
     getCurrentDraftPreviewHtml,
     layoutResizeMode,
     loadedTemplateId,
@@ -4589,22 +4512,12 @@ export default function TemplateExtractPage() {
     setSelectedDraftId((previous) => (previous === normalizedDraftId ? '' : previous));
   }, []);
 
-  const handleCreateDraft = async (
-    extractionStage: TemplateExtractExtractionStage = 'full',
-    options?: {
-      frameGroupVersionOverride?: TemplateExtractFrameGroupVersion;
-      requestedFrameGroupVersionOverride?: TemplateExtractFrameGroupVersion;
-    }
-  ) => {
+  const handleCreateDraft = async (extractionStage: TemplateExtractExtractionStage = 'full') => {
     if (extractionStage === 'frames' && !selectedFile) {
       setMessage('프레임 그룹 생성은 PDF 업로드에서만 지원합니다.');
       return;
     }
 
-    const activeFrameGroupVersion = options?.frameGroupVersionOverride || frameGroupVersion;
-    const activeRequestedFrameGroupVersion =
-      options?.requestedFrameGroupVersionOverride ||
-      buildRequestedFrameGroupVersion(String(activeFrameGroupVersion || GUARANTEED_FRAME_GROUP_VERSION), frameProfileName);
     const frameStage = extractionStage === 'frames';
     setLoading(true);
     setMessage(null);
@@ -4655,7 +4568,7 @@ export default function TemplateExtractPage() {
         formData.append('similarTemplateIds', similarTemplateIds.join(','));
         formData.append('engineVersion', engineVersion);
         formData.append('extractionStage', extractionStage);
-        formData.append('frameGroupVersion', activeRequestedFrameGroupVersion);
+        formData.append('frameGroupVersion', requestedFrameGroupVersion);
         formData.append('file', selectedFile);
 
         result = await createDraftWithFileUpload(formData, extractionStage);
@@ -4677,7 +4590,7 @@ export default function TemplateExtractPage() {
             similarTemplateIds,
             engineVersion,
             extractionStage,
-            frameGroupVersion: activeRequestedFrameGroupVersion,
+            frameGroupVersion: requestedFrameGroupVersion,
           }),
         });
         result = await response.json();
@@ -4708,7 +4621,7 @@ export default function TemplateExtractPage() {
       const versionLabel = formatTemplateExtractEngineVersionLabel(engineVersion);
       setMessage(
         actualExtractionStage === 'frames'
-          ? `프레임 그룹 초안을 만들었습니다. (${String(activeFrameGroupVersion || activeRequestedFrameGroupVersion)}, ${versionLabel})`
+          ? `프레임 그룹 초안을 만들었습니다. (${requestedFrameGroupVersion}, ${versionLabel})`
           : `원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${versionLabel})`
       );
     } catch (error) {
@@ -4739,7 +4652,7 @@ export default function TemplateExtractPage() {
     setMessage(null);
 
     try {
-      if (frameEditingEnabled && isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
+      if (isV109FrameGroupVersion(currentFrameGroupVersionTag)) {
         saveCurrentFrameProfile();
       }
 
@@ -5281,276 +5194,245 @@ export default function TemplateExtractPage() {
     [selectedFile]
   );
 
-  const handleExtractFrameText = React.useCallback(
-    async (options?: {
-      frameTextExtractionMode?: FrameTextExtractionMode;
-      frameTextExtractionVersion?: FrameTextExtractionVersion;
-      imageFrameTextExtractionVersion?: ImageFrameTextExtractionVersion;
-    }) => {
-      const root = draftPreviewRef.current;
-      const activeFrameTextExtractionMode = options?.frameTextExtractionMode || frameTextExtractionMode;
-      const activeFrameTextExtractionVersion =
-        options?.frameTextExtractionVersion || frameTextExtractionVersion;
-      const activeImageFrameTextExtractionVersion =
-        options?.imageFrameTextExtractionVersion || imageFrameTextExtractionVersion;
+  const handleExtractFrameText = React.useCallback(async () => {
+    const root = draftPreviewRef.current;
 
-      if (!root || !textExtractionReady) {
-        setMessage('텍스트 추출은 프레임 그룹 생성 이후에 실행할 수 있습니다.');
+    if (!root || !textExtractionReady) {
+      setMessage('텍스트 추출은 프레임 그룹 생성 이후에 실행할 수 있습니다.');
+      return;
+    }
+    const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).filter(
+      (node) => !node.matches('[data-template-frame-input="true"]')
+    );
+
+    if (!frameNodes.length) {
+      setMessage('텍스트를 채울 프레임이 없습니다.');
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const defaultRenderModel =
+        parseReplicaRenderModelFromHtml(draftDetail?.draft.generatedDraftHtml || '') ||
+        parseReplicaRenderModelFromHtml(draftDetail?.draft.sourceContent || '');
+      const activeTextExtractionVersion =
+        frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion;
+      const imageFramePlans =
+        frameTextExtractionMode === 'image' ? buildImageFrameTextRequestPlans(frameNodes, defaultRenderModel) : [];
+      const renderModel =
+        frameTextExtractionMode === 'image'
+          ? await loadImageFrameTextRenderModel(imageFramePlans, imageFrameTextExtractionVersion)
+          : defaultRenderModel;
+
+      if (!renderModel?.pages?.length) {
+        setMessage('텍스트 추출용 렌더 모델을 찾지 못했습니다.');
         return;
       }
-      const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).filter(
-        (node) => !node.matches('[data-template-frame-input="true"]')
+
+      const pageModelByPageNumber = new Map(
+        (renderModel.pages || []).map((page) => [String(page.pageNumber), page] as const)
       );
+      let filledCount = 0;
+      const nextExtractedTextState: FrameExtractedTextState = {};
+      const nextExtractedTextMetaState: FrameExtractedTextMetaState = {};
+      let nextAppliedImageRenderModel: FrameTextRenderModelV112 | null = null;
+      if (frameTextExtractionMode === 'image') {
+        const imageRenderModel = renderModel as FrameTextRenderModelV112;
+        const frameResults = imageRenderModel.diagnostics?.frameResults || {};
+        const frameDebugByKey = buildImageFrameDebugEntryMap(imageRenderModel);
+        const appliedFrameResults: Record<string, string> = {};
 
-      if (!frameNodes.length) {
-        setMessage('텍스트를 채울 프레임이 없습니다.');
-        return;
-      }
+        if (imageFrameTextExtractionVersion === 'iv2.02' || imageFrameTextExtractionVersion === 'iv2.03') {
+          const missingFrameDebugKeys = imageFramePlans
+            .map((plan) => plan.key)
+            .filter((key) => key && !frameDebugByKey.has(key));
 
-      setLoading(true);
-      setMessage(null);
-
-      try {
-        const defaultRenderModel =
-          parseReplicaRenderModelFromHtml(draftDetail?.draft.generatedDraftHtml || '') ||
-          parseReplicaRenderModelFromHtml(draftDetail?.draft.sourceContent || '');
-        const activeTextExtractionVersion =
-          activeFrameTextExtractionMode === 'image'
-            ? activeImageFrameTextExtractionVersion
-            : activeFrameTextExtractionVersion;
-        const imageFramePlans =
-          activeFrameTextExtractionMode === 'image'
-            ? buildImageFrameTextRequestPlans(frameNodes, defaultRenderModel)
-            : [];
-        const renderModel =
-          activeFrameTextExtractionMode === 'image'
-            ? await loadImageFrameTextRenderModel(imageFramePlans, activeImageFrameTextExtractionVersion)
-            : defaultRenderModel;
-
-        if (!renderModel?.pages?.length) {
-          setMessage('텍스트 추출용 렌더 모델을 찾지 못했습니다.');
-          return;
+          if (missingFrameDebugKeys.length > 0) {
+            throw new Error(
+              `텍스트 추출 실패: ${imageFrameTextExtractionVersion} diagnostics.frameDebug가 일부 프레임에 연결되지 않았습니다. (${missingFrameDebugKeys.slice(0, 5).join(', ')})`
+            );
+          }
         }
 
-        const pageModelByPageNumber = new Map(
-          (renderModel.pages || []).map((page) => [String(page.pageNumber), page] as const)
-        );
-        let filledCount = 0;
-        const nextExtractedTextState: FrameExtractedTextState = {};
-        const nextExtractedTextMetaState: FrameExtractedTextMetaState = {};
-        let nextAppliedImageRenderModel: FrameTextRenderModelV112 | null = null;
-        if (activeFrameTextExtractionMode === 'image') {
-          const imageRenderModel = renderModel as FrameTextRenderModelV112;
-          const frameResults = imageRenderModel.diagnostics?.frameResults || {};
-          const frameDebugByKey = buildImageFrameDebugEntryMap(imageRenderModel);
-          const appliedFrameResults: Record<string, string> = {};
+        frameNodes.forEach((node) => {
+          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
 
-          if (
-            activeImageFrameTextExtractionVersion === 'iv2.02' ||
-            activeImageFrameTextExtractionVersion === 'iv2.03' ||
-            activeImageFrameTextExtractionVersion === 'iv2.04' ||
-            activeImageFrameTextExtractionVersion === 'iv3.00'
-          ) {
-            const missingFrameDebugKeys = imageFramePlans
-              .map((plan) => plan.key)
-              .filter((key) => key && !frameDebugByKey.has(key));
-
-            if (missingFrameDebugKeys.length > 0) {
-              throw new Error(
-                `텍스트 추출 실패: ${activeImageFrameTextExtractionVersion} diagnostics.frameDebug가 일부 프레임에 연결되지 않았습니다. (${missingFrameDebugKeys.slice(0, 5).join(', ')})`
-              );
-            }
+          if (!extractedTextKey) {
+            return;
           }
 
-          frameNodes.forEach((node) => {
-            const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
+          const debugEntry = frameDebugByKey.get(extractedTextKey);
 
-            if (!extractedTextKey) {
-              return;
-            }
-
-            const debugEntry = frameDebugByKey.get(extractedTextKey);
-
-            if (
-              (activeImageFrameTextExtractionVersion === 'iv2.02' ||
-                activeImageFrameTextExtractionVersion === 'iv2.03' ||
-                activeImageFrameTextExtractionVersion === 'iv2.04' ||
-                activeImageFrameTextExtractionVersion === 'iv3.00') &&
-              !debugEntry
-            ) {
-              throw new Error(
-                `텍스트 추출 실패: ${activeImageFrameTextExtractionVersion} diagnostics.frameDebug가 프레임 ${extractedTextKey} 에 없습니다.`
-              );
-            }
-
-            const metadata = {
-              frameGroup: node.getAttribute('data-template-frame-group'),
-              valueKey: node.getAttribute('data-template-frame-value-key'),
-              colorGroup: node.getAttribute('data-template-frame-color-group'),
-            };
-            const displayState =
-              activeImageFrameTextExtractionVersion === 'iv2.02' ||
-              activeImageFrameTextExtractionVersion === 'iv2.03' ||
-              activeImageFrameTextExtractionVersion === 'iv2.04' ||
-              activeImageFrameTextExtractionVersion === 'iv3.00'
-                ? resolveImageFrameTextDisplayState({
-                    debugEntry,
-                    rawFrameText: frameResults[extractedTextKey] || '',
-                    sourceTextHint: readFrameNodeSourceText(node),
-                    metadata,
-                  })
-                : {
-                    text: formatFrameSourceTextForDisplay(frameResults[extractedTextKey] || '', metadata),
-                    visible: Boolean(frameResults[extractedTextKey] || ''),
-                    writePolicy: 'display_review' as FrameWritePolicy,
-                    needsReview: false,
-                    selectedBy: '',
-                    fieldType: '',
-                    semanticRole: '',
-                  };
-            const normalizedText = formatFrameSourceTextForDisplay(displayState.text, metadata);
-
-            nextExtractedTextState[extractedTextKey] = normalizedText;
-            nextExtractedTextMetaState[extractedTextKey] = {
-              writePolicy: displayState.writePolicy,
-              visible: displayState.visible,
-              needsReview: displayState.needsReview,
-              selectedBy: displayState.selectedBy,
-              fieldType: displayState.fieldType,
-              semanticRole: displayState.semanticRole,
-            };
-            appliedFrameResults[extractedTextKey] = normalizedText;
-
-            if (normalizedText) {
-              filledCount += 1;
-            }
-          });
-
-          nextAppliedImageRenderModel = buildAppliedImageFrameTextRenderModel(
-            imageRenderModel,
-            appliedFrameResults,
-            activeImageFrameTextExtractionVersion
-          );
-        } else if (activeFrameTextExtractionVersion === 'niv1.12') {
-          const framePlansByPageNumber = new Map<
-            string,
-            Array<{
-              key: string;
-              frameRect: FrameNodeRect;
-              sourceTextHint: string;
-              node: HTMLElement;
-            }>
-          >();
-
-          frameNodes.forEach((node) => {
-            const pageNumber =
-              node.getAttribute('data-template-frame-page') ||
-              node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
-              '1';
-            const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
-
-            if (!extractedTextKey) {
-              return;
-            }
-
-            const pagePlans = framePlansByPageNumber.get(pageNumber) || [];
-            pagePlans.push({
-              key: extractedTextKey,
-              frameRect: readSelectableFrameNodeRect(node),
-              sourceTextHint: readFrameNodeSourceText(node),
-              node,
-            });
-            framePlansByPageNumber.set(pageNumber, pagePlans);
-          });
-
-          framePlansByPageNumber.forEach((plans, pageNumber) => {
-            const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
-            const normalizedPlans = plans.map((plan) => ({
-              key: plan.key,
-              frameRect: plan.frameRect,
-              sourceTextHint: plan.sourceTextHint,
-            }));
-            const extractedTextState = extractFrameTextStateFromRenderPageV112(pageModel, normalizedPlans);
-
-            plans.forEach((plan) => {
-              const nextText = extractedTextState[plan.key] || '';
-              const normalizedText = formatFrameSourceTextForDisplay(nextText, {
-                frameGroup: plan.node.getAttribute('data-template-frame-group'),
-                valueKey: plan.node.getAttribute('data-template-frame-value-key'),
-                colorGroup: plan.node.getAttribute('data-template-frame-color-group'),
-              });
-
-              nextExtractedTextState[plan.key] = normalizedText;
-
-              if (normalizedText) {
-                filledCount += 1;
-              }
-            });
-          });
-        } else {
-          frameNodes.forEach((node) => {
-            const pageNumber =
-              node.getAttribute('data-template-frame-page') ||
-              node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
-              '1';
-            const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
-            const frameRect = readSelectableFrameNodeRect(node);
-            const sourceTextHint = readFrameNodeSourceText(node);
-            const nextText = extractFrameTextFromRenderPage(
-              pageModel,
-              frameRect,
-              activeFrameTextExtractionVersion,
-              sourceTextHint
+          if ((imageFrameTextExtractionVersion === 'iv2.02' || imageFrameTextExtractionVersion === 'iv2.03') && !debugEntry) {
+            throw new Error(
+              `텍스트 추출 실패: ${imageFrameTextExtractionVersion} diagnostics.frameDebug가 프레임 ${extractedTextKey} 에 없습니다.`
             );
-            const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
+          }
+
+          const metadata = {
+            frameGroup: node.getAttribute('data-template-frame-group'),
+            valueKey: node.getAttribute('data-template-frame-value-key'),
+            colorGroup: node.getAttribute('data-template-frame-color-group'),
+          };
+          const displayState =
+            imageFrameTextExtractionVersion === 'iv2.02' || imageFrameTextExtractionVersion === 'iv2.03'
+              ? resolveImageFrameTextDisplayState({
+                  debugEntry,
+                  rawFrameText: frameResults[extractedTextKey] || '',
+                  sourceTextHint: readFrameNodeSourceText(node),
+                  metadata,
+                })
+              : {
+                  text: formatFrameSourceTextForDisplay(frameResults[extractedTextKey] || '', metadata),
+                  visible: Boolean(frameResults[extractedTextKey] || ''),
+                  writePolicy: 'display_review' as FrameWritePolicy,
+                  needsReview: false,
+                  selectedBy: '',
+                  fieldType: '',
+                  semanticRole: '',
+                };
+          const normalizedText = formatFrameSourceTextForDisplay(displayState.text, metadata);
+
+          nextExtractedTextState[extractedTextKey] = normalizedText;
+          nextExtractedTextMetaState[extractedTextKey] = {
+            writePolicy: displayState.writePolicy,
+            visible: displayState.visible,
+            needsReview: displayState.needsReview,
+            selectedBy: displayState.selectedBy,
+            fieldType: displayState.fieldType,
+            semanticRole: displayState.semanticRole,
+          };
+          appliedFrameResults[extractedTextKey] = normalizedText;
+
+          if (normalizedText) {
+            filledCount += 1;
+          }
+        });
+
+        nextAppliedImageRenderModel = buildAppliedImageFrameTextRenderModel(
+          imageRenderModel,
+          appliedFrameResults,
+          imageFrameTextExtractionVersion
+        );
+      } else if (frameTextExtractionVersion === 'niv1.12') {
+        const framePlansByPageNumber = new Map<
+          string,
+          Array<{
+            key: string;
+            frameRect: FrameNodeRect;
+            sourceTextHint: string;
+            node: HTMLElement;
+          }>
+        >();
+
+        frameNodes.forEach((node) => {
+          const pageNumber =
+            node.getAttribute('data-template-frame-page') ||
+            node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
+            '1';
+          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
+
+          if (!extractedTextKey) {
+            return;
+          }
+
+          const pagePlans = framePlansByPageNumber.get(pageNumber) || [];
+          pagePlans.push({
+            key: extractedTextKey,
+            frameRect: readSelectableFrameNodeRect(node),
+            sourceTextHint: readFrameNodeSourceText(node),
+            node,
+          });
+          framePlansByPageNumber.set(pageNumber, pagePlans);
+        });
+
+        framePlansByPageNumber.forEach((plans, pageNumber) => {
+          const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
+          const normalizedPlans = plans.map((plan) => ({
+            key: plan.key,
+            frameRect: plan.frameRect,
+            sourceTextHint: plan.sourceTextHint,
+          }));
+          const extractedTextState = extractFrameTextStateFromRenderPageV112(pageModel, normalizedPlans);
+
+          plans.forEach((plan) => {
+            const nextText = extractedTextState[plan.key] || '';
             const normalizedText = formatFrameSourceTextForDisplay(nextText, {
-              frameGroup: node.getAttribute('data-template-frame-group'),
-              valueKey: node.getAttribute('data-template-frame-value-key'),
-              colorGroup: node.getAttribute('data-template-frame-color-group'),
+              frameGroup: plan.node.getAttribute('data-template-frame-group'),
+              valueKey: plan.node.getAttribute('data-template-frame-value-key'),
+              colorGroup: plan.node.getAttribute('data-template-frame-color-group'),
             });
 
-            if (extractedTextKey) {
-              nextExtractedTextState[extractedTextKey] = normalizedText;
-            }
+            nextExtractedTextState[plan.key] = normalizedText;
 
             if (normalizedText) {
               filledCount += 1;
             }
           });
-        }
-
-        setFrameExtractedTextState(nextExtractedTextState);
-        setFrameExtractedTextMetaState(nextExtractedTextMetaState);
-        setFrameTextExtractionCompleted(true);
-        setAppliedImageFrameTextRenderModel(
-          activeFrameTextExtractionMode === 'image' ? nextAppliedImageRenderModel : null
-        );
-        if (typeof window !== 'undefined') {
-          window.requestAnimationFrame(() => {
-            requestPreviewTextFit();
+        });
+      } else {
+        frameNodes.forEach((node) => {
+          const pageNumber =
+            node.getAttribute('data-template-frame-page') ||
+            node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
+            '1';
+          const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
+          const frameRect = readSelectableFrameNodeRect(node);
+          const sourceTextHint = readFrameNodeSourceText(node);
+          const nextText = extractFrameTextFromRenderPage(
+            pageModel,
+            frameRect,
+            frameTextExtractionVersion,
+            sourceTextHint
+          );
+          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
+          const normalizedText = formatFrameSourceTextForDisplay(nextText, {
+            frameGroup: node.getAttribute('data-template-frame-group'),
+            valueKey: node.getAttribute('data-template-frame-value-key'),
+            colorGroup: node.getAttribute('data-template-frame-color-group'),
           });
-        }
-        setMessage(
-          `텍스트 추출을 완료했습니다. (${activeFrameTextExtractionMode === 'image' ? '이미지' : '비 이미지'} ${activeTextExtractionVersion}, ${filledCount}개 프레임)`
-        );
-      } catch (error) {
-        const nextMessage = error instanceof Error ? error.message : '텍스트 추출에 실패했습니다.';
-        setMessage(nextMessage);
-      } finally {
-        setLoading(false);
+
+          if (extractedTextKey) {
+            nextExtractedTextState[extractedTextKey] = normalizedText;
+          }
+
+          if (normalizedText) {
+            filledCount += 1;
+          }
+        });
       }
-    },
-    [
-      draftDetail?.draft.generatedDraftHtml,
-      draftDetail?.draft.sourceContent,
-      frameTextExtractionMode,
-      frameTextExtractionVersion,
-      imageFrameTextExtractionVersion,
-      loadImageFrameTextRenderModel,
-      requestPreviewTextFit,
-      textExtractionReady,
-    ]
-  );
+
+      setFrameExtractedTextState(nextExtractedTextState);
+      setFrameExtractedTextMetaState(nextExtractedTextMetaState);
+      setFrameTextExtractionCompleted(true);
+      setAppliedImageFrameTextRenderModel(frameTextExtractionMode === 'image' ? nextAppliedImageRenderModel : null);
+      if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+          requestPreviewTextFit();
+        });
+      }
+      setMessage(
+        `텍스트 추출을 완료했습니다. (${frameTextExtractionMode === 'image' ? '이미지' : '비 이미지'} ${activeTextExtractionVersion}, ${filledCount}개 프레임)`
+      );
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '텍스트 추출에 실패했습니다.';
+      setMessage(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    draftDetail?.draft.generatedDraftHtml,
+    draftDetail?.draft.sourceContent,
+    frameTextExtractionMode,
+    frameTextExtractionVersion,
+    imageFrameTextExtractionVersion,
+    imageFrameTextExtractionVersion,
+    loadImageFrameTextRenderModel,
+    requestPreviewTextFit,
+    textExtractionReady,
+  ]);
 
   const getFrameEditorNodes = React.useCallback(
     (root?: HTMLElement | null) =>
@@ -6695,7 +6577,7 @@ export default function TemplateExtractPage() {
       const root = draftPreviewRef.current;
       const target = event.target instanceof Node ? event.target : null;
 
-      if (!frameEditingEnabled || !root || !target || !root.contains(target)) {
+      if (!root || !target || !root.contains(target)) {
         return;
       }
 
@@ -6720,7 +6602,7 @@ export default function TemplateExtractPage() {
       document.removeEventListener('pointerdown', handleNativePointerDown, true);
       document.removeEventListener('click', handleNativeClick, true);
     };
-  }, [draftDetail?.draft.generatedDraftHtml, frameEditingEnabled, handleDraftPreviewPointerDown, handleDraftPreviewSelect]);
+  }, [handleDraftPreviewPointerDown, handleDraftPreviewSelect, draftDetail?.draft.generatedDraftHtml]);
 
   const handleDraftPreviewPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     const targetElement = event.target instanceof HTMLElement ? event.target : null;
@@ -7072,88 +6954,6 @@ export default function TemplateExtractPage() {
         </Card>
       ) : null}
 
-      <Card className="border-emerald-200 bg-emerald-50/60">
-        <CardHeader className="gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="green">보장 조합</Badge>
-            <CardTitle>PDF 보장 추출 조합</CardTitle>
-          </div>
-          <CardDescription>
-            현재 서비스에서 확정 성공값으로 운영 중인 PDF 추출 조합입니다. 아래 버튼은 상단 선택값과 무관하게{' '}
-            <code>fv1.11</code>, <code>niv1.12</code> 고정값으로 실행됩니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-emerald-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">1차 보장 조합: 프레임 그룹 생성</p>
-                <p className="text-xs text-slate-500">
-                  기능 조합: PDF 업로드 + 프레임 그룹 버전 <code>fv1.11</code>
-                </p>
-              </div>
-              <Badge variant="green">fv1.11</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-slate-700">
-              원본 PDF에서 문서 구조를 먼저 고정해야 할 때 사용합니다. 확정 성과는 <code>fv1.11</code> 기준
-              프레임 그룹 초안을 안정적으로 생성하는 것입니다.
-            </p>
-            <Button
-              className="mt-4 w-full"
-              variant="outline"
-              onClick={() => {
-                setFrameGroupVersion(GUARANTEED_FRAME_GROUP_VERSION);
-                void handleCreateDraft('frames', {
-                  frameGroupVersionOverride: GUARANTEED_FRAME_GROUP_VERSION,
-                  requestedFrameGroupVersionOverride: GUARANTEED_FRAME_GROUP_VERSION,
-                });
-              }}
-              disabled={loading || visualSimilarityMeasuring || !selectedFile}
-              title={selectedFile ? undefined : 'PDF 파일을 먼저 선택하세요.'}
-            >
-              fv1.11 보장 조합으로 프레임 그룹 생성
-            </Button>
-          </div>
-
-          <div className="rounded-xl border border-emerald-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">2차 보장 조합: 프레임 텍스트 추출</p>
-                <p className="text-xs text-slate-500">
-                  기능 조합: <code>fv1.11</code> 프레임 그룹 + 비 이미지 텍스트 추출 <code>niv1.12</code>
-                </p>
-              </div>
-              <Badge variant="green">fv1.11 + niv1.12</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-slate-700">
-              <code>fv1.11</code> 프레임 그룹이 이미 만들어진 PDF에서 텍스트 레이어 기준 값을 채워야 할 때
-              사용합니다. 확정 성과는 비 이미지 <code>niv1.12</code> 기준 프레임 텍스트 자동 채움입니다.
-            </p>
-            <Button
-              className="mt-4 w-full"
-              variant="outline"
-              onClick={() => {
-                setFrameGroupVersion(GUARANTEED_FRAME_GROUP_VERSION);
-                setFrameTextExtractionMode('non_image');
-                setFrameTextExtractionVersion(GUARANTEED_NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION);
-                void handleExtractFrameText({
-                  frameTextExtractionMode: 'non_image',
-                  frameTextExtractionVersion: GUARANTEED_NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION,
-                });
-              }}
-              disabled={loading || visualSimilarityMeasuring || !guaranteedFrameTextExtractionReady}
-              title={
-                guaranteedFrameTextExtractionReady
-                  ? undefined
-                  : '먼저 fv1.11 보장 조합으로 프레임 그룹 생성을 완료하세요.'
-              }
-            >
-              fv1.11 + niv1.12 보장 조합으로 텍스트 추출
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="grid gap-6 lg:grid-cols-[1.45fr_0.85fr]">
         <div className="space-y-6">
           <Card className="flex flex-col gap-6 border-slate-200 p-6">
@@ -7411,7 +7211,7 @@ export default function TemplateExtractPage() {
         </div>
 
         <div className="space-y-6">
-          {frameEditingEnabled && frameEditorActive ? (
+          {frameEditorActive ? (
             <Card className="border-slate-200">
               <CardHeader>
                 <CardTitle>프레임 편집</CardTitle>

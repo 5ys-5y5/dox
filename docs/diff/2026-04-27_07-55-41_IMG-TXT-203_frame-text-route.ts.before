@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
-import {
-  TemplateExtractFrameTextService,
-  type ImageFrameTextOcrVersion,
-} from '../../../../../services/templateExtractFrameTextService';
+import { TemplateExtractFrameTextService } from '../../../../../services/templateExtractFrameTextService';
 
 type ImageFrameTextRequestPlan = {
   key: string;
@@ -11,29 +8,6 @@ type ImageFrameTextRequestPlan = {
   top: number;
   width: number;
   height: number;
-  coordinateSpace?: 'css-px';
-  viewportWidth?: number;
-  viewportHeight?: number;
-  pdfPageWidth?: number;
-  pdfPageHeight?: number;
-  rowStart?: string;
-  rowEnd?: string;
-  colStart?: string;
-  colEnd?: string;
-  semanticRole?: 'label' | 'value' | 'footer' | 'barcode' | 'stamp' | 'qr' | 'ignore' | 'unknown';
-  fieldType?:
-    | 'fixed_enum'
-    | 'business_registration_number'
-    | 'resident_or_corporate_number_masked'
-    | 'issue_number'
-    | 'receipt_number'
-    | 'date'
-    | 'phone'
-    | 'korean_name'
-    | 'address'
-    | 'free_text'
-    | 'ignore';
-  expectedPattern?: string;
   sourceTextHint?: string;
   frameGroup?: string;
   valueKey?: string;
@@ -61,21 +35,6 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get('file');
     const mode = String(formData.get('mode') || '').trim().toLowerCase();
-    const imageOcrVersion = (
-      String(formData.get('imageOcrVersion') || '').trim() === 'iv3.00'
-        ? 'iv3.00'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.04'
-        ? 'iv2.04'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.03'
-        ? 'iv2.03'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.02'
-        ? 'iv2.02'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.01'
-        ? 'iv2.01'
-        : String(formData.get('imageOcrVersion') || '').trim() === 'iv2.00'
-        ? 'iv2.00'
-        : 'iv1.00'
-    ) as ImageFrameTextOcrVersion;
     const framePlansJson = String(formData.get('framePlans') || '').trim();
 
     if (!(file instanceof File)) {
@@ -102,7 +61,6 @@ export async function POST(request: Request) {
       {
         forceOcr: mode === 'image',
         framePlans: mode === 'image' ? framePlans : [],
-        imageOcrVersion: mode === 'image' ? imageOcrVersion : 'iv1.00',
       }
     );
 
