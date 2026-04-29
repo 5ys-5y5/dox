@@ -520,6 +520,8 @@ type ResizeApplicationPlan = {
   - 이번 턴 반영:
     - 현재 선택 경계와 겹치는 outer shell 경계를 잘못 instruction에 포함하지 않도록 내부 경계 우선 규칙 유지
     - width 0 적용에서도 2px/10px 보조 열이 12px로 커지지 않도록 baseline minimum 규칙으로 보정
+    - outer-left / outer-right width resize에서 확장용 `shrinkRange`와 최소 차단용 `minimumStopRange`를 분리
+    - `status-history-1`처럼 trailing scaffold column이 있는 shared cell은 same table의 가장 바깥쪽 정렬 셀 구간만 최소 차단 범위로 사용
 
 - `CHK-IMPL-006`
   - 목표: `status-history-1` 기준 회귀 테스트
@@ -528,6 +530,7 @@ type ResizeApplicationPlan = {
   - 이번 턴 반영:
     - 브라우저에서 `status-history-1` 너비 `411 -> 300`, 높이 `102 -> 24`를 확인
     - 동일 테스트에서 shell 전체 폭이 불필요하게 바뀌지 않고, 선택 패널 입력값과 실제 셀 rect가 일치함을 확인
+    - 브라우저에서 `width=200` 적용 시 실제 `status-history-1`가 `286px`에서 멈추고, 정렬된 인접 셀 `band-5-cell-6`는 `14px`에서 멈추는 것을 확인
 
 ## 11. 테스트 기록
 
@@ -557,6 +560,11 @@ type ResizeApplicationPlan = {
    - 기존: scaffold column만 확장되어 current rect가 갱신되지 않아 드래그 이동량보다 큰 폭으로 누적 확대됨
    - 수정 후: `e` handle을 `20px` 드래그했을 때 실제 셀 width가 `411 -> 431`로 정확히 `20px`만 증가
    - 결과: 선택 활성 박스와 실제 출력 셀이 동일한 폭으로 함께 확장됨
+10. 구현 후 `status-history-1` 최소 너비 차단 재확인
+   - 우측 패널에서 `width=200`을 적용
+   - 수정 전: selected span 전체 열이 순차로 줄어들어 `band-5-cell-6`의 폭이 최소에 닿은 뒤에도 `status-history-1`가 계속 축소됨
+   - 수정 후: 실제 `status-history-1` width가 `286px`에서 멈추고, `band-5-cell-6` width가 `14px`에서 멈춤
+   - 결과: 인접한 바깥쪽 정렬 셀의 최소 너비에 도달하면 더 이상 폭이 줄어들지 않음
 
 ### 11.2 supabase MCP
 

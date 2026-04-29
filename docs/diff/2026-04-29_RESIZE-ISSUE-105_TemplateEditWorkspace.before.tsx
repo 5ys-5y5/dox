@@ -73,15 +73,9 @@ type BoundaryShrinkRange = {
 };
 
 type FrameWidthResizeInstruction =
-  | {
-      kind: 'boundary';
-      shell: HTMLElement;
-      boundaryIndex: number;
-      shrinkRange?: BoundaryShrinkRange;
-      minimumStopRange?: BoundaryShrinkRange;
-    }
-  | { kind: 'outer-left'; shell: HTMLElement; shrinkRange?: BoundaryShrinkRange; minimumStopRange?: BoundaryShrinkRange }
-  | { kind: 'outer-right'; shell: HTMLElement; shrinkRange?: BoundaryShrinkRange; minimumStopRange?: BoundaryShrinkRange };
+  | { kind: 'boundary'; shell: HTMLElement; boundaryIndex: number; shrinkRange?: BoundaryShrinkRange }
+  | { kind: 'outer-left'; shell: HTMLElement; shrinkRange?: BoundaryShrinkRange }
+  | { kind: 'outer-right'; shell: HTMLElement; shrinkRange?: BoundaryShrinkRange };
 
 type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
@@ -533,12 +527,7 @@ const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
   pageInner.style.minHeight = `${Math.max(baseMinHeight, Math.ceil(maxBottom))}px`;
 };
 
-const applyOuterRightWidthDelta = (
-  shell: HTMLElement,
-  delta: number,
-  shrinkRange?: BoundaryShrinkRange,
-  minimumStopRange?: BoundaryShrinkRange
-) => {
+const applyOuterRightWidthDelta = (shell: HTMLElement, delta: number, shrinkRange?: BoundaryShrinkRange) => {
   const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
   const colWidths = readTableColWidths(table);
   const rowHeights = readTableRowHeights(table);
@@ -565,14 +554,13 @@ const applyOuterRightWidthDelta = (
     return delta;
   }
 
-  const effectiveShrinkRange = minimumStopRange || shrinkRange;
   const shrinkable =
-    effectiveShrinkRange?.side === 'before'
-      ? getRangeShrinkCapacity(nextColWidths, minimums, effectiveShrinkRange)
+    shrinkRange?.side === 'before'
+      ? getRangeShrinkCapacity(nextColWidths, minimums, shrinkRange)
       : Math.max(0, nextColWidths[lastIndex] - getWritableTableSize(minimums[lastIndex] || 0));
   const applied = Math.min(Math.abs(delta), shrinkable);
-  if (effectiveShrinkRange?.side === 'before') {
-    shrinkSizeRange(nextColWidths, minimums, effectiveShrinkRange, applied);
+  if (shrinkRange?.side === 'before') {
+    shrinkSizeRange(nextColWidths, minimums, shrinkRange, applied);
   } else {
     nextColWidths[lastIndex] -= applied;
   }
@@ -581,12 +569,7 @@ const applyOuterRightWidthDelta = (
   return -applied;
 };
 
-const applyOuterLeftWidthDelta = (
-  shell: HTMLElement,
-  delta: number,
-  shrinkRange?: BoundaryShrinkRange,
-  minimumStopRange?: BoundaryShrinkRange
-) => {
+const applyOuterLeftWidthDelta = (shell: HTMLElement, delta: number, shrinkRange?: BoundaryShrinkRange) => {
   const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
   const colWidths = readTableColWidths(table);
   const rowHeights = readTableRowHeights(table);
@@ -606,14 +589,13 @@ const applyOuterLeftWidthDelta = (
 
   if (delta >= 0) {
     const nextColWidths = [...colWidths];
-    const effectiveShrinkRange = minimumStopRange || shrinkRange;
     const shrinkable =
-      effectiveShrinkRange?.side === 'after'
-        ? getRangeShrinkCapacity(nextColWidths, minimums, effectiveShrinkRange)
+      shrinkRange?.side === 'after'
+        ? getRangeShrinkCapacity(nextColWidths, minimums, shrinkRange)
         : Math.max(0, nextColWidths[firstIndex] - getWritableTableSize(minimums[firstIndex] || 0));
     const applied = Math.min(delta, shrinkable);
-    if (effectiveShrinkRange?.side === 'after') {
-      shrinkSizeRange(nextColWidths, minimums, effectiveShrinkRange, applied);
+    if (shrinkRange?.side === 'after') {
+      shrinkSizeRange(nextColWidths, minimums, shrinkRange, applied);
     } else {
       nextColWidths[firstIndex] -= applied;
     }
@@ -691,8 +673,7 @@ const getWidthDeltaCapacity = (
   shell: HTMLElement,
   mode: 'left' | 'right' | 'boundary-left' | 'boundary-right',
   boundaryIndex = 0,
-  shrinkRange?: BoundaryShrinkRange,
-  minimumStopRange?: BoundaryShrinkRange
+  shrinkRange?: BoundaryShrinkRange
 ) => {
   const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
   const colWidths = readTableColWidths(table);
@@ -704,18 +685,16 @@ const getWidthDeltaCapacity = (
   }
 
   if (mode === 'left') {
-    const effectiveShrinkRange = minimumStopRange || shrinkRange;
-    if (effectiveShrinkRange?.side === 'after') {
-      return getRangeShrinkCapacity(colWidths, minimums, effectiveShrinkRange);
+    if (shrinkRange?.side === 'after') {
+      return getRangeShrinkCapacity(colWidths, minimums, shrinkRange);
     }
 
     return Math.max(0, (colWidths[0] || 0) - getWritableTableSize(minimums[0] || 0));
   }
 
   if (mode === 'right') {
-    const effectiveShrinkRange = minimumStopRange || shrinkRange;
-    if (effectiveShrinkRange?.side === 'before') {
-      return getRangeShrinkCapacity(colWidths, minimums, effectiveShrinkRange);
+    if (shrinkRange?.side === 'before') {
+      return getRangeShrinkCapacity(colWidths, minimums, shrinkRange);
     }
 
     return Math.max(
@@ -757,76 +736,6 @@ const hasTrailingScaffoldColumns = (context: ReturnType<typeof buildFrameResizeC
   const minimums = readTableColMinimums(context.table, context.colWidths);
   const trailingMinimums = minimums.slice(context.endColIndex);
   return trailingMinimums.length > 0 && trailingMinimums.every((width) => width <= FRAME_SCAFFOLD_TRACK_THRESHOLD_PX);
-};
-
-const readTableCellColBoundarySpans = (table: HTMLTableElement, colBoundaries: number[]) => {
-  const tableRect = table.getBoundingClientRect();
-  const borderLeft = parseFramePx(getComputedStyle(table).borderLeftWidth);
-
-  return Array.from(table.querySelectorAll<HTMLTableCellElement>('td,th')).map((cell) => {
-    const cellRect = cell.getBoundingClientRect();
-    const relativeLeft = cellRect.left - tableRect.left - borderLeft;
-    const startIndex = findClosestBoundaryIndex(colBoundaries, relativeLeft);
-    const endIndex = Math.max(startIndex + 1, Math.min(colBoundaries.length - 1, startIndex + Math.max(1, cell.colSpan)));
-
-    return {
-      startIndex,
-      endIndex,
-    };
-  });
-};
-
-const resolveOuterWidthMinimumStopRange = (
-  shell: HTMLElement,
-  edge: 'left' | 'right'
-): BoundaryShrinkRange | undefined => {
-  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
-  const colWidths = readTableColWidths(table);
-
-  if (!table || colWidths.length <= 1) {
-    return undefined;
-  }
-
-  const colBoundaries = buildBoundaries(colWidths);
-  const cellSpans = readTableCellColBoundarySpans(table, colBoundaries);
-
-  if (edge === 'right') {
-    const alignedStartIndex = cellSpans.reduce((maxStartIndex, span) => {
-      if (span.endIndex !== colWidths.length) {
-        return maxStartIndex;
-      }
-
-      return Math.max(maxStartIndex, span.startIndex);
-    }, -1);
-
-    if (alignedStartIndex < 0) {
-      return undefined;
-    }
-
-    return {
-      startIndex: alignedStartIndex,
-      endIndex: colWidths.length - 1,
-      side: 'before',
-    };
-  }
-
-  const alignedEndIndex = cellSpans.reduce((minEndIndex, span) => {
-    if (span.startIndex !== 0) {
-      return minEndIndex;
-    }
-
-    return minEndIndex < 0 ? span.endIndex : Math.min(minEndIndex, span.endIndex);
-  }, -1);
-
-  if (alignedEndIndex <= 0) {
-    return undefined;
-  }
-
-  return {
-    startIndex: 0,
-    endIndex: Math.max(0, alignedEndIndex - 1),
-    side: 'after',
-  };
 };
 
 const shiftShellsBelowBoundary = (
@@ -993,7 +902,6 @@ const collectWidthResizeInstructions = (
       nextInstructions.push({
         kind: 'outer-left',
         shell,
-        minimumStopRange: resolveOuterWidthMinimumStopRange(shell, 'left'),
         shrinkRange:
           shell === context.shell
             ? {
@@ -1009,7 +917,6 @@ const collectWidthResizeInstructions = (
       nextInstructions.push({
         kind: 'outer-right',
         shell,
-        minimumStopRange: resolveOuterWidthMinimumStopRange(shell, 'right'),
         shrinkRange:
           shell === context.shell
             ? {
@@ -1184,13 +1091,7 @@ const applyFrameResizeWidthDelta = (
         }
 
         if (instruction.kind === 'outer-left') {
-          return getWidthDeltaCapacity(
-            instruction.shell,
-            'left',
-            0,
-            instruction.shrinkRange,
-            instruction.minimumStopRange
-          );
+          return getWidthDeltaCapacity(instruction.shell, 'left', 0, instruction.shrinkRange);
         }
 
         return Number.POSITIVE_INFINITY;
@@ -1213,13 +1114,7 @@ const applyFrameResizeWidthDelta = (
         }
 
         if (instruction.kind === 'outer-right') {
-          return getWidthDeltaCapacity(
-            instruction.shell,
-            'right',
-            0,
-            instruction.shrinkRange,
-            instruction.minimumStopRange
-          );
+          return getWidthDeltaCapacity(instruction.shell, 'right', 0, instruction.shrinkRange);
         }
 
         return Number.POSITIVE_INFINITY;
@@ -1247,21 +1142,11 @@ const applyFrameResizeWidthDelta = (
     }
 
     if (instruction.kind === 'outer-left') {
-      applyOuterLeftWidthDelta(
-        instruction.shell,
-        appliedDelta,
-        instruction.shrinkRange,
-        instruction.minimumStopRange
-      );
+      applyOuterLeftWidthDelta(instruction.shell, appliedDelta, instruction.shrinkRange);
       return;
     }
 
-    applyOuterRightWidthDelta(
-      instruction.shell,
-      appliedDelta,
-      instruction.shrinkRange,
-      instruction.minimumStopRange
-    );
+    applyOuterRightWidthDelta(instruction.shell, appliedDelta, instruction.shrinkRange);
   });
 
   return appliedDelta;

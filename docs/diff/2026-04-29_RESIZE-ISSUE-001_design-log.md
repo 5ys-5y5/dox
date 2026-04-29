@@ -42,3 +42,13 @@
 
 - 이번 턴은 설계 문서만 작성한다.
 - `src/components/template/TemplateEditWorkspace.tsx` 는 기존 작업 트리 변경이 존재하지만, 이번 턴 신규 설계 요청 범위에서는 수정하지 않는다.
+
+## 후속 구현 로그
+
+- `2026-04-29_RESIZE-ISSUE-105_TemplateEditWorkspace.before.tsx`
+  - 체크리스트: `CHK-IMPL-005`, `CHK-IMPL-006`
+  - 목적: outer width 축소에서 trailing/leading edge minimum stop range 분리 전 백업
+  - 구현 결과:
+    - `minimumStopRange` 개념 추가
+    - outer-left / outer-right 축소는 same table의 가장 바깥쪽 정렬 셀 구간을 최소 차단 기준으로 사용
+    - 브라우저에서 `status-history-1 width=200` 적용 시 `286px`에서 멈추고 `band-5-cell-6`는 `14px`에서 멈추는 것을 확인
