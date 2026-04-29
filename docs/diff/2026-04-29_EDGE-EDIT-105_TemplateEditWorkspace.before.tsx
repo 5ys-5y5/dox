@@ -74,23 +74,6 @@ type ResizeState = {
   rect: FrameNodeRect;
   widthInstructions?: FrameWidthResizeInstruction[];
   edgeResizeTargets?: EdgeResizeTarget[];
-  appliedEdgeDeltaX?: number;
-  appliedEdgeDeltaY?: number;
-};
-
-type EdgePressState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  scale: number;
-  pageInner: HTMLElement;
-  node: HTMLElement;
-  direction: TemplateFrameResizeDirection;
-  side: TemplateEdgeSide;
-  clickedEdgeId: string;
-  snapshot: TemplateEdgeTopologySnapshotDto;
-  currentSelection: TemplateEdgeSelectionStateDto;
-  withShift: boolean;
 };
 
 type BoundaryShrinkRange = {
@@ -128,7 +111,6 @@ const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
 const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
-const EDGE_DRAG_START_THRESHOLD_PX = 4;
 
 const defaultSelectionStyleDraft: SelectionStyleDraft = {
   width: '',
@@ -1427,12 +1409,6 @@ const edgeSelectionStatesEqual = (
   right: TemplateEdgeSelectionStateDto
 ) => JSON.stringify(normalizeEdgeSelectionState(left)) === JSON.stringify(normalizeEdgeSelectionState(right));
 
-const frameSelectionIdsEqual = (left: string[], right: string[]) =>
-  left.length === right.length && left.every((value, index) => value === right[index]);
-
-const edgeSelectionContainsEdge = (state: TemplateEdgeSelectionStateDto, edgeId: string) =>
-  state.tokens.some((token) => token.memberEdgeIds.includes(edgeId));
-
 const clampFrameNodeRect = (
   rect: FrameNodeRect,
   bounds: { width: number; height: number },
@@ -1836,7 +1812,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const activePointerOwnerRef = React.useRef<HTMLDivElement | null>(null);
   const dragStateRef = React.useRef<DragState | null>(null);
   const resizeStateRef = React.useRef<ResizeState | null>(null);
-  const edgePressStateRef = React.useRef<EdgePressState | null>(null);
 
   const templateOptions = React.useMemo<TemplateOption[]>(
     () =>
@@ -1942,27 +1917,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
     },
     [buildLiveEdgeTopologySnapshot]
-  );
-
-  const applyRuntimeSelectionUi = React.useCallback(
-    (nextSelectedFrameGroupIds: string[], nextEdgeSelectionState: TemplateEdgeSelectionStateDto) => {
-      selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
-      edgeSelectionStateRef.current = nextEdgeSelectionState;
-      const root = previewRef.current;
-
-      if (!root) {
-        return;
-      }
-
-      applyPreviewEditPermissions(root);
-      applyFrameSelectionUi(
-        root,
-        nextSelectedFrameGroupIds,
-        reconcileLiveEdgeSelection(root, nextEdgeSelectionState),
-        buildLiveEdgeTopologySnapshot(root)
-      );
-    },
-    [buildLiveEdgeTopologySnapshot, reconcileLiveEdgeSelection]
   );
 
   const loadTemplates = React.useCallback(async () => {
@@ -2326,26 +2280,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     []
   );
 
-  const resolveEdgeSelectionForResizeStart = React.useCallback(
-    (
-      snapshot: TemplateEdgeTopologySnapshotDto,
-      currentSelection: TemplateEdgeSelectionStateDto,
-      clickedEdgeId: string
-    ) => {
-      if (edgeSelectionContainsEdge(currentSelection, clickedEdgeId)) {
-        return currentSelection;
-      }
-
-      return TemplateEdgeSelectionService.resolveClick({
-        snapshot,
-        currentSelection: TemplateEdgeSelectionService.createEmptyState(),
-        clickedEdgeId,
-        withShift: false,
-      });
-    },
-    []
-  );
-
   const saveTemplate = React.useCallback(async () => {
     const normalizedTemplateId = selectedTemplateId.trim() || templateDetail?.template.id || '';
     const currentHtml = previewRef.current ? syncDraftPreviewHtmlRef() : draftPreviewHtmlRef.current.trim();
@@ -2429,27 +2363,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       activePointerOwnerRef.current = null;
       dragStateRef.current = null;
       resizeStateRef.current = null;
-      edgePressStateRef.current = null;
       syncDraftPreviewHtmlRef();
-      if (!frameSelectionIdsEqual(selectedFrameGroupIds, selectedFrameGroupIdsRef.current)) {
-        setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current);
-      }
       const nextEdgeSelection = reconcileLiveEdgeSelection(previewRef.current, edgeSelectionStateRef.current);
-      edgeSelectionStateRef.current = nextEdgeSelection;
-      if (!edgeSelectionStatesEqual(nextEdgeSelection, edgeSelectionState)) {
+      if (!edgeSelectionStatesEqual(nextEdgeSelection, edgeSelectionStateRef.current)) {
         setEdgeSelectionState(nextEdgeSelection);
       }
       syncSelectionStyleDraft();
       requestPreviewTextFit();
     },
-    [
-      edgeSelectionState,
-      reconcileLiveEdgeSelection,
-      requestPreviewTextFit,
-      selectedFrameGroupIds,
-      syncDraftPreviewHtmlRef,
-      syncSelectionStyleDraft,
-    ]
+    [reconcileLiveEdgeSelection, requestPreviewTextFit, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
   );
 
   const clearFrameSelection = React.useCallback(() => {
@@ -2521,22 +2443,39 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           currentSelection: edgeSelectionStateRef.current,
         });
         const clickedEdgeId = `${frameGroupId}:${explicitEdgeSide}`;
+        const nextEdgeSelection = TemplateEdgeSelectionService.resolveClick({
+          snapshot,
+          currentSelection,
+          clickedEdgeId,
+          withShift: Boolean(event.shiftKey),
+        });
+
+        setEdgeSelectionState(nextEdgeSelection);
+        setSelectedFrameGroupIds([]);
+
+        if (event.shiftKey) {
+          event.preventDefault();
+          return;
+        }
+
+        const resizeTargets = collectEdgeResizeTargets(root, snapshot, nextEdgeSelection, explicitEdgeSide);
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         activePointerOwnerRef.current = event.currentTarget;
-        edgePressStateRef.current = {
+        resizeStateRef.current = {
           pointerId: event.pointerId,
           startX: event.clientX,
           startY: event.clientY,
           scale: previewZoom / 100,
           pageInner,
-          node: frameNode,
           direction: explicitEdgeDirection,
-          side: explicitEdgeSide,
-          clickedEdgeId,
-          snapshot,
-          currentSelection,
-          withShift: Boolean(event.shiftKey),
+          node: frameNode,
+          rect: readFrameNodeRect(frameNode),
+          widthInstructions:
+            explicitEdgeDirection === 'e' || explicitEdgeDirection === 'w'
+              ? resizeTargets[0]?.widthInstructions
+              : undefined,
+          edgeResizeTargets: resizeTargets,
         };
         return;
       }
@@ -2614,7 +2553,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const handlePreviewPointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const dragState = dragStateRef.current;
-    let resizeState = resizeStateRef.current;
+    const resizeState = resizeStateRef.current;
 
     if (dragState && event.pointerId === dragState.pointerId) {
       event.preventDefault();
@@ -2672,56 +2611,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    const edgePressState = edgePressStateRef.current;
-
-    if (!resizeState && edgePressState && event.pointerId === edgePressState.pointerId) {
-      event.preventDefault();
-
-      if (edgePressState.withShift) {
-        return;
-      }
-
-      const rawDeltaX = event.clientX - edgePressState.startX;
-      const rawDeltaY = event.clientY - edgePressState.startY;
-
-      if (Math.abs(rawDeltaX) < EDGE_DRAG_START_THRESHOLD_PX && Math.abs(rawDeltaY) < EDGE_DRAG_START_THRESHOLD_PX) {
-        return;
-      }
-
-      const nextEdgeSelection = resolveEdgeSelectionForResizeStart(
-        edgePressState.snapshot,
-        edgePressState.currentSelection,
-        edgePressState.clickedEdgeId
-      );
-      const resizeTargets = collectEdgeResizeTargets(
-        previewRef.current || event.currentTarget,
-        edgePressState.snapshot,
-        nextEdgeSelection,
-        edgePressState.side
-      );
-
-      applyRuntimeSelectionUi([], nextEdgeSelection);
-      resizeStateRef.current = {
-        pointerId: edgePressState.pointerId,
-        startX: edgePressState.startX,
-        startY: edgePressState.startY,
-        scale: edgePressState.scale,
-        pageInner: edgePressState.pageInner,
-        direction: edgePressState.direction,
-        node: edgePressState.node,
-        rect: readFrameNodeRect(edgePressState.node),
-        widthInstructions:
-          edgePressState.direction === 'e' || edgePressState.direction === 'w'
-            ? resizeTargets[0]?.widthInstructions
-            : undefined,
-        edgeResizeTargets: resizeTargets,
-        appliedEdgeDeltaX: 0,
-        appliedEdgeDeltaY: 0,
-      };
-      edgePressStateRef.current = null;
-      resizeState = resizeStateRef.current;
-    }
-
     if (resizeState && event.pointerId === resizeState.pointerId) {
       event.preventDefault();
       const pageBounds = {
@@ -2758,17 +2647,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       const siblingRects = filterResizeSnapRects(
         getFrameNodes(resizeState.pageInner)
-          .filter((node) => {
-            if (node === resizeState.node) {
-              return false;
-            }
-
-            if (!resizeState.edgeResizeTargets?.length) {
-              return true;
-            }
-
-            return !resizeState.edgeResizeTargets.some((target) => target.node === node);
-          })
+          .filter((node) => node !== resizeState.node)
           .map((node) => readFrameNodeRect(node)),
         resizeState.rect,
         resizeState.direction
@@ -2782,57 +2661,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const resolvedRect =
         snapResult.ok && snapResult.value ? snapResult.value : clampFrameNodeRect(nextRect, pageBounds);
       if (resizeState.edgeResizeTargets && resizeState.edgeResizeTargets.length > 0) {
-        const totalAppliedDeltaX = resizeState.direction.includes('w')
+        const appliedDeltaX = resizeState.direction.includes('w')
           ? resolvedRect.left - resizeState.rect.left
           : resizeState.direction.includes('e')
             ? resolvedRect.width - resizeState.rect.width
             : 0;
-        const totalAppliedDeltaY = resizeState.direction.includes('n')
+        const appliedDeltaY = resizeState.direction.includes('n')
           ? resolvedRect.top - resizeState.rect.top
           : resizeState.direction.includes('s')
             ? resolvedRect.height - resizeState.rect.height
             : 0;
-        const nextDeltaX = totalAppliedDeltaX - (resizeState.appliedEdgeDeltaX || 0);
-        const nextDeltaY = totalAppliedDeltaY - (resizeState.appliedEdgeDeltaY || 0);
-        let recordedAppliedDeltaX = 0;
-        let recordedAppliedDeltaY = 0;
 
         resizeState.edgeResizeTargets.forEach((target) => {
-          if ((target.side === 'left' || target.side === 'right') && Math.abs(nextDeltaX) >= 0.5) {
-            const actualDelta = applyFrameResizeWidthDelta(target.node, nextDeltaX, target.widthInstructions);
-            if (
-              Math.abs(actualDelta) >= 0.5 &&
-              (Math.abs(recordedAppliedDeltaX) < 0.5 || Math.abs(actualDelta) < Math.abs(recordedAppliedDeltaX))
-            ) {
-              recordedAppliedDeltaX = actualDelta;
-            }
+          if ((target.side === 'left' || target.side === 'right') && Math.abs(appliedDeltaX) >= 0.5) {
+            applyFrameResizeWidthDelta(target.node, appliedDeltaX, target.widthInstructions);
             return;
           }
 
-          if (target.side === 'top' && Math.abs(nextDeltaY) >= 0.5) {
-            const actualDelta = applyFrameResizeTopDelta(target.node, nextDeltaY);
-            if (
-              Math.abs(actualDelta) >= 0.5 &&
-              (Math.abs(recordedAppliedDeltaY) < 0.5 || Math.abs(actualDelta) < Math.abs(recordedAppliedDeltaY))
-            ) {
-              recordedAppliedDeltaY = actualDelta;
-            }
+          if (target.side === 'top' && Math.abs(appliedDeltaY) >= 0.5) {
+            applyFrameResizeTopDelta(target.node, appliedDeltaY);
             return;
           }
 
-          if (target.side === 'bottom' && Math.abs(nextDeltaY) >= 0.5) {
-            const actualDelta = applyFrameResizeHeightDelta(target.node, nextDeltaY);
-            if (
-              Math.abs(actualDelta) >= 0.5 &&
-              (Math.abs(recordedAppliedDeltaY) < 0.5 || Math.abs(actualDelta) < Math.abs(recordedAppliedDeltaY))
-            ) {
-              recordedAppliedDeltaY = actualDelta;
-            }
+          if (target.side === 'bottom' && Math.abs(appliedDeltaY) >= 0.5) {
+            applyFrameResizeHeightDelta(target.node, appliedDeltaY);
           }
         });
-
-        resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + recordedAppliedDeltaX;
-        resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + recordedAppliedDeltaY;
       } else {
         applyFrameResizeWithDirection(
           resizeState.node,
@@ -2842,39 +2696,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         );
       }
     }
-  }, [applyRuntimeSelectionUi, getFrameNodes, resolveEdgeSelectionForResizeStart, collectEdgeResizeTargets]);
+  }, [getFrameNodes]);
 
   const handlePreviewPointerUp = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      const edgePressState = edgePressStateRef.current;
-
-      if (edgePressState?.pointerId === event.pointerId) {
-        event.preventDefault();
-        const root = previewRef.current;
-        const snapshot = root ? buildLiveEdgeTopologySnapshot(root) : edgePressState.snapshot;
-        const currentSelection = TemplateEdgeSelectionService.reconcileSelectionState({
-          snapshot,
-          currentSelection: edgeSelectionStateRef.current,
-        });
-        const nextEdgeSelection = TemplateEdgeSelectionService.resolveClick({
-          snapshot,
-          currentSelection,
-          clickedEdgeId: edgePressState.clickedEdgeId,
-          withShift: edgePressState.withShift,
-        });
-        const owner = activePointerOwnerRef.current;
-
-        if (owner?.hasPointerCapture(event.pointerId)) {
-          owner.releasePointerCapture(event.pointerId);
-        }
-
-        activePointerOwnerRef.current = null;
-        edgePressStateRef.current = null;
-        setSelectedFrameGroupIds([]);
-        setEdgeSelectionState(nextEdgeSelection);
-        return;
-      }
-
       if (
         dragStateRef.current?.pointerId === event.pointerId ||
         resizeStateRef.current?.pointerId === event.pointerId
@@ -2882,16 +2707,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-    [buildLiveEdgeTopologySnapshot, stopPointerInteraction]
+    [stopPointerInteraction]
   );
 
   const handlePreviewPointerCancel = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (edgePressStateRef.current?.pointerId === event.pointerId) {
-        stopPointerInteraction(event.pointerId);
-        return;
-      }
-
       if (
         dragStateRef.current?.pointerId === event.pointerId ||
         resizeStateRef.current?.pointerId === event.pointerId

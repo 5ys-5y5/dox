@@ -74,8 +74,6 @@ type ResizeState = {
   rect: FrameNodeRect;
   widthInstructions?: FrameWidthResizeInstruction[];
   edgeResizeTargets?: EdgeResizeTarget[];
-  appliedEdgeDeltaX?: number;
-  appliedEdgeDeltaY?: number;
 };
 
 type EdgePressState = {
@@ -2715,8 +2713,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ? resizeTargets[0]?.widthInstructions
             : undefined,
         edgeResizeTargets: resizeTargets,
-        appliedEdgeDeltaX: 0,
-        appliedEdgeDeltaY: 0,
       };
       edgePressStateRef.current = null;
       resizeState = resizeStateRef.current;
@@ -2782,57 +2778,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const resolvedRect =
         snapResult.ok && snapResult.value ? snapResult.value : clampFrameNodeRect(nextRect, pageBounds);
       if (resizeState.edgeResizeTargets && resizeState.edgeResizeTargets.length > 0) {
-        const totalAppliedDeltaX = resizeState.direction.includes('w')
+        const appliedDeltaX = resizeState.direction.includes('w')
           ? resolvedRect.left - resizeState.rect.left
           : resizeState.direction.includes('e')
             ? resolvedRect.width - resizeState.rect.width
             : 0;
-        const totalAppliedDeltaY = resizeState.direction.includes('n')
+        const appliedDeltaY = resizeState.direction.includes('n')
           ? resolvedRect.top - resizeState.rect.top
           : resizeState.direction.includes('s')
             ? resolvedRect.height - resizeState.rect.height
             : 0;
-        const nextDeltaX = totalAppliedDeltaX - (resizeState.appliedEdgeDeltaX || 0);
-        const nextDeltaY = totalAppliedDeltaY - (resizeState.appliedEdgeDeltaY || 0);
-        let recordedAppliedDeltaX = 0;
-        let recordedAppliedDeltaY = 0;
 
         resizeState.edgeResizeTargets.forEach((target) => {
-          if ((target.side === 'left' || target.side === 'right') && Math.abs(nextDeltaX) >= 0.5) {
-            const actualDelta = applyFrameResizeWidthDelta(target.node, nextDeltaX, target.widthInstructions);
-            if (
-              Math.abs(actualDelta) >= 0.5 &&
-              (Math.abs(recordedAppliedDeltaX) < 0.5 || Math.abs(actualDelta) < Math.abs(recordedAppliedDeltaX))
-            ) {
-              recordedAppliedDeltaX = actualDelta;
-            }
+          if ((target.side === 'left' || target.side === 'right') && Math.abs(appliedDeltaX) >= 0.5) {
+            applyFrameResizeWidthDelta(target.node, appliedDeltaX, target.widthInstructions);
             return;
           }
 
-          if (target.side === 'top' && Math.abs(nextDeltaY) >= 0.5) {
-            const actualDelta = applyFrameResizeTopDelta(target.node, nextDeltaY);
-            if (
-              Math.abs(actualDelta) >= 0.5 &&
-              (Math.abs(recordedAppliedDeltaY) < 0.5 || Math.abs(actualDelta) < Math.abs(recordedAppliedDeltaY))
-            ) {
-              recordedAppliedDeltaY = actualDelta;
-            }
+          if (target.side === 'top' && Math.abs(appliedDeltaY) >= 0.5) {
+            applyFrameResizeTopDelta(target.node, appliedDeltaY);
             return;
           }
 
-          if (target.side === 'bottom' && Math.abs(nextDeltaY) >= 0.5) {
-            const actualDelta = applyFrameResizeHeightDelta(target.node, nextDeltaY);
-            if (
-              Math.abs(actualDelta) >= 0.5 &&
-              (Math.abs(recordedAppliedDeltaY) < 0.5 || Math.abs(actualDelta) < Math.abs(recordedAppliedDeltaY))
-            ) {
-              recordedAppliedDeltaY = actualDelta;
-            }
+          if (target.side === 'bottom' && Math.abs(appliedDeltaY) >= 0.5) {
+            applyFrameResizeHeightDelta(target.node, appliedDeltaY);
           }
         });
-
-        resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + recordedAppliedDeltaX;
-        resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + recordedAppliedDeltaY;
       } else {
         applyFrameResizeWithDirection(
           resizeState.node,
