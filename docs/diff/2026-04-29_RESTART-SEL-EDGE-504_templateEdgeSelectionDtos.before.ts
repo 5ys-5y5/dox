@@ -87,10 +87,10 @@ export type TemplateEdgeActivationResultDto = {
 };
 
 export type TemplateEdgeResizeIntentDto = {
-  clickSelectionState: TemplateEdgeSelectionStateDto;
-  dragSelectionState: TemplateEdgeSelectionStateDto;
+  selectionState: TemplateEdgeSelectionStateDto;
+  activatedTokenId: string | null;
   targetEdgeIds: string[];
-  dragMode: TemplateEdgeSelectionMode | null;
+  mode: TemplateEdgeSelectionMode | null;
   side: TemplateEdgeSide | null;
 };
 

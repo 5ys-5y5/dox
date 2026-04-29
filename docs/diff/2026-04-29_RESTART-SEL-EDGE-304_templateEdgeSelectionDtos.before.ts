@@ -42,21 +42,9 @@ export type TemplateEdgeCohortDto = {
   edgeIds: string[];
 };
 
-export type TemplateEdgeAdjacencyRelation = 'touching-endpoint';
-
-export type TemplateEdgeDirectAdjacencyDto = {
-  fromEdgeId: string;
-  toEdgeId: string;
-  orientation: TemplateEdgeOrientation;
-  side: TemplateEdgeSide;
-  sharedCoordinate: number;
-  relation: TemplateEdgeAdjacencyRelation;
-};
-
 export type TemplateEdgeTopologySnapshotDto = {
   edges: TemplateEdgeDescriptorDto[];
   cohorts: TemplateEdgeCohortDto[];
-  adjacencies: TemplateEdgeDirectAdjacencyDto[];
 };
 
 export type TemplateEdgeSelectionTokenDto = {
@@ -77,21 +65,6 @@ export type TemplateEdgeSelectionClickDto = {
   currentSelection: TemplateEdgeSelectionStateDto;
   clickedEdgeId: string;
   withShift: boolean;
-};
-
-export type TemplateEdgeActivationResultDto = {
-  selectionState: TemplateEdgeSelectionStateDto;
-  activatedTokenId: string | null;
-  effectiveEdgeIds: string[];
-  mode: TemplateEdgeSelectionMode | null;
-};
-
-export type TemplateEdgeResizeIntentDto = {
-  clickSelectionState: TemplateEdgeSelectionStateDto;
-  dragSelectionState: TemplateEdgeSelectionStateDto;
-  targetEdgeIds: string[];
-  dragMode: TemplateEdgeSelectionMode | null;
-  side: TemplateEdgeSide | null;
 };
 
 export type TemplateEdgeTopologySourceDto = {

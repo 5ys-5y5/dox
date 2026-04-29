@@ -4,6 +4,8 @@ export type TemplateEdgeSide = 'left' | 'right' | 'top' | 'bottom';
 
 export type TemplateEdgeSelectionMode = 'connected' | 'isolated';
 
+export type TemplateEdgeAdjacencyRelation = 'touching-endpoint';
+
 export type TemplateEdgeRectDto = {
   left: number;
   top: number;
@@ -31,6 +33,15 @@ export type TemplateEdgeDescriptorDto = {
   cohortId: string | null;
 };
 
+export type TemplateEdgeAdjacencyDto = {
+  fromEdgeId: string;
+  toEdgeId: string;
+  orientation: TemplateEdgeOrientation;
+  side: TemplateEdgeSide;
+  sharedCoordinate: number;
+  relation: TemplateEdgeAdjacencyRelation;
+};
+
 export type TemplateEdgeCohortDto = {
   cohortId: string;
   pageId: string;
@@ -42,21 +53,10 @@ export type TemplateEdgeCohortDto = {
   edgeIds: string[];
 };
 
-export type TemplateEdgeAdjacencyRelation = 'touching-endpoint';
-
-export type TemplateEdgeDirectAdjacencyDto = {
-  fromEdgeId: string;
-  toEdgeId: string;
-  orientation: TemplateEdgeOrientation;
-  side: TemplateEdgeSide;
-  sharedCoordinate: number;
-  relation: TemplateEdgeAdjacencyRelation;
-};
-
 export type TemplateEdgeTopologySnapshotDto = {
   edges: TemplateEdgeDescriptorDto[];
+  adjacencies: TemplateEdgeAdjacencyDto[];
   cohorts: TemplateEdgeCohortDto[];
-  adjacencies: TemplateEdgeDirectAdjacencyDto[];
 };
 
 export type TemplateEdgeSelectionTokenDto = {
@@ -79,19 +79,44 @@ export type TemplateEdgeSelectionClickDto = {
   withShift: boolean;
 };
 
-export type TemplateEdgeActivationResultDto = {
-  selectionState: TemplateEdgeSelectionStateDto;
-  activatedTokenId: string | null;
+export type TemplateSelectedEdgeActivationReason =
+  | 'new-connected'
+  | 'toggle-isolated'
+  | 'toggle-connected'
+  | 'append-connected'
+  | 'replace-incompatible';
+
+export type TemplateSelectedEdgeActivationRequestDto = TemplateEdgeSelectionClickDto;
+
+export type TemplateSelectedEdgeActivationResultDto = {
+  nextSelectionState: TemplateEdgeSelectionStateDto;
+  activatedMode: TemplateEdgeSelectionMode | null;
   effectiveEdgeIds: string[];
-  mode: TemplateEdgeSelectionMode | null;
+  activationReason: TemplateSelectedEdgeActivationReason;
 };
 
+export type TemplateEdgeMutationOperationDto = {
+  edgeId: string;
+  frameGroupId: string;
+  side: TemplateEdgeSide;
+};
+
+export type TemplateEdgeResizeIntentRequestDto = {
+  snapshot: TemplateEdgeTopologySnapshotDto;
+  activationResult: TemplateSelectedEdgeActivationResultDto;
+  clickedEdgeId: string;
+  side: TemplateEdgeSide;
+  pointerDeltaPx: number;
+};
+
+export type TemplateEdgeResizeIntentBlockedReason = 'none' | 'missing-edge' | 'incompatible-side';
+
 export type TemplateEdgeResizeIntentDto = {
-  clickSelectionState: TemplateEdgeSelectionStateDto;
-  dragSelectionState: TemplateEdgeSelectionStateDto;
+  effectiveSelectionState: TemplateEdgeSelectionStateDto;
   targetEdgeIds: string[];
-  dragMode: TemplateEdgeSelectionMode | null;
-  side: TemplateEdgeSide | null;
+  targetOperations: TemplateEdgeMutationOperationDto[];
+  activatedMode: TemplateEdgeSelectionMode | null;
+  blockedReason: TemplateEdgeResizeIntentBlockedReason;
 };
 
 export type TemplateEdgeTopologySourceDto = {

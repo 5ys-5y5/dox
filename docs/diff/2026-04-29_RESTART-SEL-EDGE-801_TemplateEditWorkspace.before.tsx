@@ -92,6 +92,7 @@ type EdgePressState = {
   pageInner: HTMLElement;
   node: HTMLElement;
   direction: TemplateFrameResizeDirection;
+  side: TemplateEdgeSide;
   clickedEdgeId: string;
   snapshot: TemplateEdgeTopologySnapshotDto;
   clickSelection: TemplateEdgeSelectionStateDto;
@@ -119,15 +120,9 @@ type FrameWidthResizeInstruction =
 
 type EdgeResizeTarget = {
   handleId: string;
-  edgeId: string;
   node: HTMLElement;
   shell: HTMLElement;
-  orientation: TemplateEdgeDescriptorDto['orientation'];
   side: TemplateEdgeSide;
-  lineCoordinate: number;
-  spanStart: number;
-  spanEnd: number;
-  hasOppositePeer: boolean;
   boundaryIndex: number | null;
   widthInstructions?: FrameWidthResizeInstruction[];
 };
@@ -158,9 +153,8 @@ type NormalizedBandGeometry = {
 };
 
 type VerticalResizeDependency =
-  | { kind: 'shift-top'; shell: HTMLElement }
-  | { kind: 'grow-row'; shell: HTMLElement; rowIndex: number }
-  | { kind: 'redistribute'; shell: HTMLElement; boundaryIndex: number };
+  | { kind: 'grow-bottom'; shell: HTMLElement; node: HTMLElement }
+  | { kind: 'move-top'; shell: HTMLElement; node: HTMLElement };
 
 type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
@@ -253,8 +247,6 @@ const parseFramePx = (value: string | null | undefined) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
-const toFrameCssPx = (value: number) => `${Number(value.toFixed(3))}px`;
 
 const resolveFrameLayoutShell = (node: HTMLElement) => node.closest<HTMLElement>('.v102-frame-band') || node;
 
@@ -729,24 +721,19 @@ const buildNormalizedFrameBandShell = (
   const top = Math.min(...cellRects.map((rect) => rect.top));
   const right = Math.max(...cellRects.map((rect) => rect.left + rect.width));
   const bottom = Math.max(...cellRects.map((rect) => rect.top + rect.height));
-  const sourceKey =
-    shell.getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR) ||
-    shell.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR)?.getAttribute('data-template-frame-group') ||
-    `source:${shell.style.left}:${shell.style.top}:${shell.style.width}:${shell.style.height}`;
   const nextShell = shell.cloneNode(false) as HTMLElement;
   nextShell.setAttribute(NORMALIZED_FRAME_BAND_ATTR, 'true');
   nextShell.setAttribute(NORMALIZED_FRAME_BAND_ROW_RANGE_ATTR, `${group.rowStart}:${group.rowEnd}`);
   nextShell.setAttribute(NORMALIZED_FRAME_BAND_COL_RANGE_ATTR, `${group.colStart}:${group.colEnd}`);
-  nextShell.setAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR, sourceKey);
   nextShell.setAttribute('data-v106-band-group-key', group.groupKey);
-  nextShell.style.left = toFrameCssPx(left);
-  nextShell.style.top = toFrameCssPx(top);
-  nextShell.style.width = toFrameCssPx(right - left);
-  nextShell.style.height = toFrameCssPx(bottom - top);
+  nextShell.style.left = `${Math.round(left)}px`;
+  nextShell.style.top = `${Math.round(top)}px`;
+  nextShell.style.width = `${Math.round(right - left)}px`;
+  nextShell.style.height = `${Math.round(bottom - top)}px`;
 
   const nextTable = table.cloneNode(false) as HTMLTableElement;
-  nextTable.style.width = toFrameCssPx(right - left);
-  nextTable.style.height = toFrameCssPx(bottom - top);
+  nextTable.style.width = `${Math.round(right - left)}px`;
+  nextTable.style.height = `${Math.round(bottom - top)}px`;
 
   const colgroup = document.createElement('colgroup');
   colWidths.slice(group.colStart, group.colEnd).forEach((width) => {
@@ -884,19 +871,6 @@ const normalizedBandRangesOverlap = (
   rightStart: number,
   rightEnd: number
 ) => leftStart < rightEnd && rightStart < leftEnd;
-
-const areOppositeBoundarySides = (leftSide: TemplateEdgeSide, rightSide: TemplateEdgeSide) =>
-  (leftSide === 'left' && rightSide === 'right') ||
-  (leftSide === 'right' && rightSide === 'left') ||
-  (leftSide === 'top' && rightSide === 'bottom') ||
-  (leftSide === 'bottom' && rightSide === 'top');
-
-const targetsSharePhysicalBoundary = (left: EdgeResizeTarget, right: EdgeResizeTarget) =>
-  left.edgeId !== right.edgeId &&
-  left.orientation === right.orientation &&
-  areOppositeBoundarySides(left.side, right.side) &&
-  Math.abs(left.lineCoordinate - right.lineCoordinate) <= FRAME_RESIZE_TOLERANCE_PX &&
-  normalizedBandRangesOverlap(left.spanStart, left.spanEnd, right.spanStart, right.spanEnd);
 
 const applyOuterRightWidthDelta = (
   shell: HTMLElement,
@@ -3047,14 +3021,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     (
       root: HTMLElement,
       snapshot: TemplateEdgeTopologySnapshotDto,
-      targetEdgeIds: string[]
+      targetEdgeIds: string[],
+      side: TemplateEdgeSide
     ) => {
       const targets: EdgeResizeTarget[] = [];
 
       Array.from(new Set(targetEdgeIds)).forEach((edgeId) => {
         const edge = TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId);
 
-        if (!edge) {
+        if (!edge || edge.side !== side) {
           return;
         }
 
@@ -3068,33 +3043,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         const context = buildFrameResizeContext(node);
         const boundaryIndex =
-          edge.side === 'left'
+          side === 'left'
             ? context.startColIndex
-            : edge.side === 'right'
+            : side === 'right'
               ? context.endColIndex
-              : edge.side === 'top'
+              : side === 'top'
                 ? context.startRowIndex
                 : context.endRowIndex;
         const target = {
-          handleId: buildEdgeResizeHandleId(
-            node,
-            context.shell,
-            edge.side,
-            context.singleCellBand ? null : boundaryIndex
-          ),
-          edgeId: edge.edgeId,
+          handleId: buildEdgeResizeHandleId(node, context.shell, side, context.singleCellBand ? null : boundaryIndex),
           node,
           shell: context.shell,
-          orientation: edge.orientation,
-          side: edge.side,
-          lineCoordinate: edge.lineCoordinate,
-          spanStart: edge.spanStart,
-          spanEnd: edge.spanEnd,
-          hasOppositePeer: false,
+          side,
           boundaryIndex: context.singleCellBand ? null : boundaryIndex,
           widthInstructions:
-            edge.side === 'left' || edge.side === 'right'
-              ? [buildSelfWidthResizeInstruction(context, edge.side) as FrameWidthResizeInstruction].filter(Boolean)
+            side === 'left' || side === 'right'
+              ? [buildSelfWidthResizeInstruction(context, side) as FrameWidthResizeInstruction].filter(Boolean)
               : undefined,
         };
         const alreadyTracked = targets.some((candidate) => candidate.handleId === target.handleId);
@@ -3104,10 +3068,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
       });
 
-      return targets.map((target) => ({
-        ...target,
-        hasOppositePeer: targets.some((candidate) => targetsSharePhysicalBoundary(target, candidate)),
-      }));
+      return targets;
     },
     [buildEdgeResizeHandleId]
   );
@@ -3304,6 +3265,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           pageInner,
           node: frameNode,
           direction: explicitEdgeDirection,
+          side: explicitEdgeSide,
           clickedEdgeId,
           snapshot,
           clickSelection: resizeIntent.clickSelectionState,
@@ -3464,7 +3426,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const resizeTargets = collectEdgeResizeTargets(
         previewRef.current || event.currentTarget,
         edgePressState.snapshot,
-        edgePressState.targetEdgeIds
+        edgePressState.targetEdgeIds,
+        edgePressState.side
       );
 
       applyRuntimeSelectionUi([], edgePressState.dragSelection);
@@ -3525,6 +3488,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (resizeState.edgeResizeTargets && resizeState.edgeResizeTargets.length > 0) {
         const boundedEdgeRect = clampFrameNodeRect(nextRect, pageBounds);
+        const edgeSide = resizeState.edgeResizeTargets[0]?.side || null;
         const totalRequestedDeltaX = resizeState.direction.includes('w')
           ? boundedEdgeRect.left - resizeState.rect.left
           : resizeState.direction.includes('e')
@@ -3537,6 +3501,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             : 0;
         const nextDeltaX = totalRequestedDeltaX - (resizeState.appliedEdgeDeltaX || 0);
         const nextDeltaY = totalRequestedDeltaY - (resizeState.appliedEdgeDeltaY || 0);
+        const verticalDependencies =
+          edgeSide === 'top' || edgeSide === 'bottom'
+            ? buildEdgeVerticalResizeDependencies(
+                resizeState.pageInner,
+                edgeSide,
+                resizeState.edgeResizeTargets
+              )
+            : [];
         const constrainedDeltaX = resolveSharedEdgeResizeDelta(
           nextDeltaX,
           resizeState.edgeResizeTargets
@@ -3554,12 +3526,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 }
 
                 if (target.side === 'bottom') {
-                return resolveFrameResizeBottomDelta(target.node, nextDeltaY);
-              }
+                  return resolveFrameResizeBottomDelta(target.node, nextDeltaY);
+                }
 
-              return 0;
-            })
+                return 0;
+              })
               .filter((candidateDelta) => Math.abs(candidateDelta) >= 0.5),
+            ...resolveEdgeVerticalResizeDependencyDeltas(verticalDependencies, nextDeltaY),
           ]
         );
 
@@ -3575,14 +3548,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           }
 
           if (target.side === 'bottom' && Math.abs(constrainedDeltaY) >= 0.5) {
-            if (target.hasOppositePeer) {
-              applyFrameResizeHeightDeltaLocal(target.node, constrainedDeltaY);
-              return;
-            }
-
-            applyFrameResizeHeightDelta(target.node, constrainedDeltaY);
+            applyFrameResizeHeightDeltaLocal(target.node, constrainedDeltaY);
           }
         });
+
+        if (
+          (edgeSide === 'top' || edgeSide === 'bottom') &&
+          Math.abs(constrainedDeltaY) >= 0.5 &&
+          verticalDependencies.length > 0
+        ) {
+          applyEdgeVerticalResizeDependencies(
+            resizeState.pageInner,
+            verticalDependencies,
+            constrainedDeltaY
+          );
+          updatePageInnerMinHeight(resizeState.pageInner);
+        }
 
         resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + constrainedDeltaX;
         resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + constrainedDeltaY;

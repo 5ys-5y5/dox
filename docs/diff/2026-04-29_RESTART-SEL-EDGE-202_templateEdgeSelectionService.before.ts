@@ -1,9 +1,11 @@
 import type {
-  TemplateEdgeActivationResultDto,
   TemplateEdgeSelectionClickDto,
   TemplateEdgeSelectionMode,
   TemplateEdgeSelectionStateDto,
   TemplateEdgeSelectionTokenDto,
+  TemplateSelectedEdgeActivationReason,
+  TemplateSelectedEdgeActivationRequestDto,
+  TemplateSelectedEdgeActivationResultDto,
   TemplateEdgeTopologySnapshotDto,
 } from '../lib/templateEdgeSelectionDtos';
 import { TemplateEdgeTopologyService } from './templateEdgeTopologyService';
@@ -51,6 +53,9 @@ const createEmptyState = (): TemplateEdgeSelectionStateDto => ({
   primaryTokenId: null,
 });
 
+const getEffectiveEdgeIds = (token: TemplateEdgeSelectionTokenDto) =>
+  token.mode === 'isolated' ? [token.anchorEdgeId] : token.memberEdgeIds;
+
 const reconcileSelectionState = (input: {
   snapshot: TemplateEdgeTopologySnapshotDto;
   currentSelection: TemplateEdgeSelectionStateDto;
@@ -78,7 +83,27 @@ const tokensAreCompatible = (
   return primaryEdge.orientation === clickedEdge.orientation && primaryEdge.side === clickedEdge.side;
 };
 
-const resolveNextSelectionState = (input: TemplateEdgeSelectionClickDto): TemplateEdgeSelectionStateDto => {
+const buildActivationResult = (
+  nextSelectionState: TemplateEdgeSelectionStateDto,
+  clickedEdgeId: string,
+  activationReason: TemplateSelectedEdgeActivationReason
+): TemplateSelectedEdgeActivationResultDto => {
+  const activatedToken =
+    nextSelectionState.tokens.find((token) => token.anchorEdgeId === clickedEdgeId) ||
+    nextSelectionState.tokens.find((token) => token.memberEdgeIds.includes(clickedEdgeId)) ||
+    null;
+
+  return {
+    nextSelectionState,
+    activatedMode: activatedToken?.mode || null,
+    effectiveEdgeIds: activatedToken ? getEffectiveEdgeIds(activatedToken) : [],
+    activationReason,
+  };
+};
+
+const resolveActivation = (
+  input: TemplateSelectedEdgeActivationRequestDto
+): TemplateSelectedEdgeActivationResultDto => {
   const currentSelection = reconcileSelectionState({
     snapshot: input.snapshot,
     currentSelection: input.currentSelection,
@@ -91,16 +116,23 @@ const resolveNextSelectionState = (input: TemplateEdgeSelectionClickDto): Templa
     if (currentPrimaryToken?.anchorEdgeId === input.clickedEdgeId) {
       const nextMode = currentPrimaryToken.mode === 'connected' ? 'isolated' : 'connected';
       const nextToken = createToken(input.snapshot, input.clickedEdgeId, nextMode, 1);
-      return nextToken ? normalizeState([nextToken]) : createEmptyState();
+      const nextSelectionState = nextToken ? normalizeState([nextToken]) : createEmptyState();
+      return buildActivationResult(
+        nextSelectionState,
+        input.clickedEdgeId,
+        nextMode === 'isolated' ? 'toggle-isolated' : 'toggle-connected'
+      );
     }
 
     const nextToken = createToken(input.snapshot, input.clickedEdgeId, 'connected', 1);
-    return nextToken ? normalizeState([nextToken]) : createEmptyState();
+    const nextSelectionState = nextToken ? normalizeState([nextToken]) : createEmptyState();
+    return buildActivationResult(nextSelectionState, input.clickedEdgeId, 'new-connected');
   }
 
   if (!tokensAreCompatible(input.snapshot, currentSelection, input.clickedEdgeId)) {
     const nextToken = createToken(input.snapshot, input.clickedEdgeId, 'connected', 1);
-    return nextToken ? normalizeState([nextToken]) : createEmptyState();
+    const nextSelectionState = nextToken ? normalizeState([nextToken]) : createEmptyState();
+    return buildActivationResult(nextSelectionState, input.clickedEdgeId, 'replace-incompatible');
   }
 
   if (existingTokenIndex >= 0) {
@@ -109,11 +141,16 @@ const resolveNextSelectionState = (input: TemplateEdgeSelectionClickDto): Templa
     const nextToken = createToken(input.snapshot, input.clickedEdgeId, nextMode, existingToken.selectionOrder);
 
     if (!nextToken) {
-      return currentSelection;
+      return buildActivationResult(currentSelection, input.clickedEdgeId, 'toggle-connected');
     }
 
-    return normalizeState(
+    const nextSelectionState = normalizeState(
       currentSelection.tokens.map((token, index) => (index === existingTokenIndex ? nextToken : token))
+    );
+    return buildActivationResult(
+      nextSelectionState,
+      input.clickedEdgeId,
+      nextMode === 'isolated' ? 'toggle-isolated' : 'toggle-connected'
     );
   }
 
@@ -124,51 +161,17 @@ const resolveNextSelectionState = (input: TemplateEdgeSelectionClickDto): Templa
     currentSelection.tokens.length + 1
   );
 
-  return nextToken ? normalizeState([...currentSelection.tokens, nextToken]) : currentSelection;
+  const nextSelectionState = nextToken ? normalizeState([...currentSelection.tokens, nextToken]) : currentSelection;
+  return buildActivationResult(nextSelectionState, input.clickedEdgeId, 'append-connected');
 };
 
-const resolveActivation = (input: TemplateEdgeSelectionClickDto): TemplateEdgeActivationResultDto => {
-  const selectionState = resolveNextSelectionState(input);
-  const activatedToken =
-    selectionState.tokens.find((token) => token.anchorEdgeId === input.clickedEdgeId) ||
-    selectionState.tokens.find((token) => token.memberEdgeIds.includes(input.clickedEdgeId)) ||
-    null;
-
-  return {
-    selectionState,
-    activatedTokenId: activatedToken?.tokenId || null,
-    effectiveEdgeIds: activatedToken ? activatedToken.memberEdgeIds.slice() : [],
-    mode: activatedToken?.mode || null,
-  };
+const resolveClick = (input: TemplateEdgeSelectionClickDto): TemplateEdgeSelectionStateDto => {
+  return resolveActivation(input).nextSelectionState;
 };
-
-const resolveDragActivation = (input: TemplateEdgeSelectionClickDto): TemplateEdgeActivationResultDto => {
-  const currentSelection = reconcileSelectionState({
-    snapshot: input.snapshot,
-    currentSelection: input.currentSelection,
-  });
-  const existingToken =
-    currentSelection.tokens.find((token) => token.memberEdgeIds.includes(input.clickedEdgeId)) || null;
-
-  if (!existingToken) {
-    return resolveActivation(input);
-  }
-
-  return {
-    selectionState: currentSelection,
-    activatedTokenId: existingToken.tokenId,
-    effectiveEdgeIds: existingToken.memberEdgeIds.slice(),
-    mode: existingToken.mode,
-  };
-};
-
-const resolveClick = (input: TemplateEdgeSelectionClickDto): TemplateEdgeSelectionStateDto =>
-  resolveActivation(input).selectionState;
 
 export const TemplateEdgeSelectionService = {
   createEmptyState,
   reconcileSelectionState,
   resolveActivation,
-  resolveDragActivation,
   resolveClick,
 };

@@ -92,10 +92,10 @@ type EdgePressState = {
   pageInner: HTMLElement;
   node: HTMLElement;
   direction: TemplateFrameResizeDirection;
+  side: TemplateEdgeSide;
   clickedEdgeId: string;
   snapshot: TemplateEdgeTopologySnapshotDto;
-  clickSelection: TemplateEdgeSelectionStateDto;
-  dragSelection: TemplateEdgeSelectionStateDto;
+  predictedSelection: TemplateEdgeSelectionStateDto;
   targetEdgeIds: string[];
   withShift: boolean;
 };
@@ -119,48 +119,12 @@ type FrameWidthResizeInstruction =
 
 type EdgeResizeTarget = {
   handleId: string;
-  edgeId: string;
   node: HTMLElement;
   shell: HTMLElement;
-  orientation: TemplateEdgeDescriptorDto['orientation'];
   side: TemplateEdgeSide;
-  lineCoordinate: number;
-  spanStart: number;
-  spanEnd: number;
-  hasOppositePeer: boolean;
   boundaryIndex: number | null;
   widthInstructions?: FrameWidthResizeInstruction[];
 };
-
-type TableCellLayoutPosition = {
-  cell: HTMLTableCellElement;
-  rowStart: number;
-  rowEnd: number;
-  colStart: number;
-  colEnd: number;
-};
-
-type SplitFrameBandGroup = {
-  groupKey: string;
-  rowStart: number;
-  rowEnd: number;
-  colStart: number;
-  colEnd: number;
-  entries: TableCellLayoutPosition[];
-};
-
-type NormalizedBandGeometry = {
-  shell: HTMLElement;
-  rowStart: number;
-  rowEnd: number;
-  colStart: number;
-  colEnd: number;
-};
-
-type VerticalResizeDependency =
-  | { kind: 'shift-top'; shell: HTMLElement }
-  | { kind: 'grow-row'; shell: HTMLElement; rowIndex: number }
-  | { kind: 'redistribute'; shell: HTMLElement; boundaryIndex: number };
 
 type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
@@ -244,17 +208,11 @@ const MIN_TABLE_COLUMN_WIDTH_PX = MIN_FRAME_SIZE_PX;
 const MIN_TABLE_ROW_HEIGHT_PX = 12;
 const MIN_WRITABLE_TABLE_SIZE_PX = 1;
 const FRAME_SCAFFOLD_TRACK_THRESHOLD_PX = 4;
-const NORMALIZED_FRAME_BAND_ATTR = 'data-v106-normalized-band';
-const NORMALIZED_FRAME_BAND_ROW_RANGE_ATTR = 'data-v106-band-range';
-const NORMALIZED_FRAME_BAND_COL_RANGE_ATTR = 'data-v106-band-col-range';
-const NORMALIZED_FRAME_BAND_SOURCE_ATTR = 'data-v106-band-source';
 
 const parseFramePx = (value: string | null | undefined) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
-const toFrameCssPx = (value: number) => `${Number(value.toFixed(3))}px`;
 
 const resolveFrameLayoutShell = (node: HTMLElement) => node.closest<HTMLElement>('.v102-frame-band') || node;
 
@@ -616,287 +574,6 @@ const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
   }, baseMinHeight);
   pageInner.style.minHeight = `${Math.max(baseMinHeight, Math.ceil(maxBottom))}px`;
 };
-
-const buildTableCellLayoutPositions = (table: HTMLTableElement): TableCellLayoutPosition[] => {
-  const positions: TableCellLayoutPosition[] = [];
-  const occupiedUntilByColumn: number[] = [];
-
-  Array.from(table.rows).forEach((row, rowIndex) => {
-    let nextColumnIndex = 0;
-    const advanceToOpenColumn = () => {
-      while ((occupiedUntilByColumn[nextColumnIndex] || 0) > rowIndex) {
-        nextColumnIndex += 1;
-      }
-    };
-
-    advanceToOpenColumn();
-
-    Array.from(row.cells).forEach((cell) => {
-      advanceToOpenColumn();
-
-      const colSpan = Math.max(1, cell.colSpan || 1);
-      const rowSpan = Math.max(1, cell.rowSpan || 1);
-      positions.push({
-        cell,
-        rowStart: rowIndex,
-        rowEnd: rowIndex + rowSpan,
-        colStart: nextColumnIndex,
-        colEnd: nextColumnIndex + colSpan,
-      });
-
-      for (let offset = 0; offset < colSpan; offset += 1) {
-        occupiedUntilByColumn[nextColumnIndex + offset] = Math.max(
-          occupiedUntilByColumn[nextColumnIndex + offset] || 0,
-          rowIndex + rowSpan
-        );
-      }
-
-      nextColumnIndex += colSpan;
-    });
-  });
-
-  return positions;
-};
-
-const buildFallbackTableColWidths = (
-  positions: TableCellLayoutPosition[],
-  pageInner: HTMLElement,
-  columnCount: number
-) => {
-  const fallbackWidths = Array.from({ length: columnCount }, () => MIN_TABLE_COLUMN_WIDTH_PX);
-
-  positions.forEach((position) => {
-    const cellRect = readFrameElementRect(position.cell, pageInner);
-    const widthPerColumn = Math.max(
-      MIN_TABLE_COLUMN_WIDTH_PX,
-      Math.round(cellRect.width / Math.max(1, position.colEnd - position.colStart))
-    );
-
-    for (let columnIndex = position.colStart; columnIndex < position.colEnd; columnIndex += 1) {
-      fallbackWidths[columnIndex] = Math.max(fallbackWidths[columnIndex] || 0, widthPerColumn);
-    }
-  });
-
-  return fallbackWidths;
-};
-
-const buildSplitFrameBandGroups = (positions: TableCellLayoutPosition[]): SplitFrameBandGroup[] => {
-  return positions
-    .filter((position) => position.cell.matches(RAW_FRAME_NODE_SELECTOR))
-    .map((position, index) => ({
-      groupKey:
-        position.cell.getAttribute('data-template-frame-group')?.trim() ||
-        `normalized-cell-${index}:${position.rowStart}:${position.rowEnd}:${position.colStart}:${position.colEnd}`,
-      rowStart: position.rowStart,
-      rowEnd: position.rowEnd,
-      colStart: position.colStart,
-      colEnd: position.colEnd,
-      entries: [position],
-    }))
-    .sort(
-    (left, right) => left.rowStart - right.rowStart || left.colStart - right.colStart
-  );
-};
-
-const stripTransientFrameEditorUi = (root: ParentNode) => {
-  root.querySelectorAll<HTMLElement>('[data-frame-editor-ui]').forEach((element) => {
-    element.remove();
-  });
-  root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
-    element.removeAttribute('data-template-selected');
-    element.removeAttribute('data-template-primary-selected');
-    element.removeAttribute('data-template-selection-order');
-  });
-  root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
-    element.removeAttribute('data-template-edge-visual');
-    element.removeAttribute('data-template-edge-anchor-node');
-  });
-  root.querySelectorAll<HTMLElement>('[data-template-edit-enabled]').forEach((element) => {
-    element.removeAttribute('data-template-edit-enabled');
-  });
-};
-
-const buildNormalizedFrameBandShell = (
-  shell: HTMLElement,
-  table: HTMLTableElement,
-  pageInner: HTMLElement,
-  group: SplitFrameBandGroup,
-  colWidths: number[],
-  rowHeights: number[]
-) => {
-  const cellRects = group.entries.map((entry) => readFrameElementRect(entry.cell, pageInner));
-  const left = Math.min(...cellRects.map((rect) => rect.left));
-  const top = Math.min(...cellRects.map((rect) => rect.top));
-  const right = Math.max(...cellRects.map((rect) => rect.left + rect.width));
-  const bottom = Math.max(...cellRects.map((rect) => rect.top + rect.height));
-  const sourceKey =
-    shell.getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR) ||
-    shell.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR)?.getAttribute('data-template-frame-group') ||
-    `source:${shell.style.left}:${shell.style.top}:${shell.style.width}:${shell.style.height}`;
-  const nextShell = shell.cloneNode(false) as HTMLElement;
-  nextShell.setAttribute(NORMALIZED_FRAME_BAND_ATTR, 'true');
-  nextShell.setAttribute(NORMALIZED_FRAME_BAND_ROW_RANGE_ATTR, `${group.rowStart}:${group.rowEnd}`);
-  nextShell.setAttribute(NORMALIZED_FRAME_BAND_COL_RANGE_ATTR, `${group.colStart}:${group.colEnd}`);
-  nextShell.setAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR, sourceKey);
-  nextShell.setAttribute('data-v106-band-group-key', group.groupKey);
-  nextShell.style.left = toFrameCssPx(left);
-  nextShell.style.top = toFrameCssPx(top);
-  nextShell.style.width = toFrameCssPx(right - left);
-  nextShell.style.height = toFrameCssPx(bottom - top);
-
-  const nextTable = table.cloneNode(false) as HTMLTableElement;
-  nextTable.style.width = toFrameCssPx(right - left);
-  nextTable.style.height = toFrameCssPx(bottom - top);
-
-  const colgroup = document.createElement('colgroup');
-  colWidths.slice(group.colStart, group.colEnd).forEach((width) => {
-    const col = document.createElement('col');
-    col.style.width = `${Math.max(MIN_TABLE_COLUMN_WIDTH_PX, Math.round(width))}px`;
-    colgroup.appendChild(col);
-  });
-  nextTable.appendChild(colgroup);
-
-  const tbody = document.createElement('tbody');
-  for (let rowIndex = group.rowStart; rowIndex < group.rowEnd; rowIndex += 1) {
-    const sourceRow = table.rows.item(rowIndex);
-    const nextRow = (sourceRow?.cloneNode(false) as HTMLTableRowElement | undefined) || document.createElement('tr');
-    nextRow.style.height = `${Math.max(MIN_TABLE_ROW_HEIGHT_PX, Math.round(rowHeights[rowIndex] || MIN_TABLE_ROW_HEIGHT_PX))}px`;
-    tbody.appendChild(nextRow);
-  }
-
-  group.entries
-    .slice()
-    .sort((leftEntry, rightEntry) => leftEntry.colStart - rightEntry.colStart)
-    .forEach((entry) => {
-      const nextCell = entry.cell.cloneNode(true) as HTMLTableCellElement;
-      nextCell.colSpan = Math.max(1, entry.colEnd - entry.colStart);
-      nextCell.rowSpan = Math.max(1, entry.rowEnd - entry.rowStart);
-      tbody.rows[entry.rowStart - group.rowStart]?.appendChild(nextCell);
-    });
-
-  nextTable.appendChild(tbody);
-  nextShell.appendChild(nextTable);
-  stripTransientFrameEditorUi(nextShell);
-  TemplateFrameEditHtmlService.stripEditorUiState(nextShell);
-  return nextShell;
-};
-
-const normalizeFrameBandTableLayout = (shell: HTMLElement) => {
-  if (shell.getAttribute(NORMALIZED_FRAME_BAND_ATTR) === 'true') {
-    return false;
-  }
-
-  const pageInner = shell.closest<HTMLElement>('.page-inner');
-  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
-
-  if (!pageInner || !table || table.rows.length <= 1) {
-    return false;
-  }
-
-  const positions = buildTableCellLayoutPositions(table);
-  const groups = buildSplitFrameBandGroups(positions);
-
-  if (groups.length <= 1) {
-    return false;
-  }
-
-  const columnCount = positions.reduce((maxColumnCount, position) => Math.max(maxColumnCount, position.colEnd), 0);
-  const colWidthsFromTable = readTableColWidths(table);
-  const colWidths =
-    colWidthsFromTable.length >= columnCount
-      ? colWidthsFromTable
-      : buildFallbackTableColWidths(positions, pageInner, columnCount);
-  const rowHeightsFromTable = readTableRowHeights(table);
-  const rowHeights =
-    rowHeightsFromTable.length >= table.rows.length
-      ? rowHeightsFromTable
-      : Array.from(table.rows).map((row, rowIndex) => {
-          const fallbackHeight = parseFramePx(getComputedStyle(row).height) || row.getBoundingClientRect().height;
-          return Math.max(
-            MIN_TABLE_ROW_HEIGHT_PX,
-            Math.round(rowHeightsFromTable[rowIndex] || fallbackHeight || MIN_TABLE_ROW_HEIGHT_PX)
-          );
-        });
-
-  const nextShells = groups.map((group) =>
-    buildNormalizedFrameBandShell(shell, table, pageInner, group, colWidths, rowHeights)
-  );
-
-  shell.replaceWith(...nextShells);
-  return true;
-};
-
-const ensurePreviewFrameBandNormalization = (root: ParentNode) => {
-  let normalized = false;
-
-  root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
-    Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
-      normalized = normalizeFrameBandTableLayout(shell) || normalized;
-    });
-
-    if (normalized) {
-      updatePageInnerMinHeight(pageInner);
-    }
-  });
-
-  return normalized;
-};
-
-const parseNormalizedBandRange = (value: string | null | undefined) => {
-  const [startValue, endValue] = String(value || '')
-    .split(':')
-    .map((entry) => Number.parseInt(entry, 10));
-
-  if (!Number.isFinite(startValue) || !Number.isFinite(endValue) || endValue <= startValue) {
-    return null;
-  }
-
-  return {
-    start: startValue,
-    end: endValue,
-  };
-};
-
-const readNormalizedBandGeometry = (shell: HTMLElement): NormalizedBandGeometry | null => {
-  if (shell.getAttribute(NORMALIZED_FRAME_BAND_ATTR) !== 'true') {
-    return null;
-  }
-
-  const rowRange = parseNormalizedBandRange(shell.getAttribute(NORMALIZED_FRAME_BAND_ROW_RANGE_ATTR));
-  const colRange = parseNormalizedBandRange(shell.getAttribute(NORMALIZED_FRAME_BAND_COL_RANGE_ATTR));
-
-  if (!rowRange || !colRange) {
-    return null;
-  }
-
-  return {
-    shell,
-    rowStart: rowRange.start,
-    rowEnd: rowRange.end,
-    colStart: colRange.start,
-    colEnd: colRange.end,
-  };
-};
-
-const normalizedBandRangesOverlap = (
-  leftStart: number,
-  leftEnd: number,
-  rightStart: number,
-  rightEnd: number
-) => leftStart < rightEnd && rightStart < leftEnd;
-
-const areOppositeBoundarySides = (leftSide: TemplateEdgeSide, rightSide: TemplateEdgeSide) =>
-  (leftSide === 'left' && rightSide === 'right') ||
-  (leftSide === 'right' && rightSide === 'left') ||
-  (leftSide === 'top' && rightSide === 'bottom') ||
-  (leftSide === 'bottom' && rightSide === 'top');
-
-const targetsSharePhysicalBoundary = (left: EdgeResizeTarget, right: EdgeResizeTarget) =>
-  left.edgeId !== right.edgeId &&
-  left.orientation === right.orientation &&
-  areOppositeBoundarySides(left.side, right.side) &&
-  Math.abs(left.lineCoordinate - right.lineCoordinate) <= FRAME_RESIZE_TOLERANCE_PX &&
-  normalizedBandRangesOverlap(left.spanStart, left.spanEnd, right.spanStart, right.spanEnd);
 
 const applyOuterRightWidthDelta = (
   shell: HTMLElement,
@@ -1269,249 +946,6 @@ const buildSelfWidthResizeInstruction = (
   };
 };
 
-const resolveNormalizedRowGrowthDelta = (shell: HTMLElement, rowIndex: number, delta: number) => {
-  if (Math.abs(delta) < 0.5) {
-    return 0;
-  }
-
-  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
-  const rowHeights = readTableRowHeights(table);
-
-  if (!table || rowHeights.length === 0 || rowIndex < 0 || rowIndex >= rowHeights.length) {
-    if (delta >= 0) {
-      return delta;
-    }
-
-    const shellRect = readFrameElementRect(shell);
-    return -Math.min(Math.abs(delta), Math.max(0, shellRect.height - MIN_FRAME_SIZE_PX));
-  }
-
-  if (delta >= 0) {
-    return delta;
-  }
-
-  const minimums = readTableRowMinimums(table, rowHeights);
-  const shrinkable = Math.max(0, (rowHeights[rowIndex] || 0) - getWritableTableSize(minimums[rowIndex] || 0));
-  return -Math.min(Math.abs(delta), shrinkable);
-};
-
-const applyNormalizedRowGrowthDelta = (shell: HTMLElement, rowIndex: number, delta: number) => {
-  const appliedDelta = resolveNormalizedRowGrowthDelta(shell, rowIndex, delta);
-
-  if (Math.abs(appliedDelta) < 0.5) {
-    return 0;
-  }
-
-  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
-  const colWidths = readTableColWidths(table);
-  const rowHeights = readTableRowHeights(table);
-
-  if (!table || rowHeights.length === 0 || rowIndex < 0 || rowIndex >= rowHeights.length) {
-    const shellRect = readFrameElementRect(shell);
-    const nextHeight = Math.max(MIN_FRAME_SIZE_PX, Math.round(shellRect.height + appliedDelta));
-    shell.style.height = `${nextHeight}px`;
-    if (table) {
-      table.style.height = `${nextHeight}px`;
-    }
-    return nextHeight - shellRect.height;
-  }
-
-  const nextRowHeights = [...rowHeights];
-  nextRowHeights[rowIndex] += appliedDelta;
-  setTableRowHeights(table, nextRowHeights);
-  syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
-  return appliedDelta;
-};
-
-const resolveNormalizedBoundaryRedistributionDelta = (
-  shell: HTMLElement,
-  boundaryIndex: number,
-  delta: number
-) => {
-  if (Math.abs(delta) < 0.5) {
-    return 0;
-  }
-
-  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
-  const rowHeights = readTableRowHeights(table);
-
-  if (!table || rowHeights.length === 0 || boundaryIndex <= 0 || boundaryIndex >= rowHeights.length) {
-    return 0;
-  }
-
-  const minimums = readTableRowMinimums(table, rowHeights);
-  const upperIndex = boundaryIndex - 1;
-  const lowerIndex = boundaryIndex;
-
-  if (delta >= 0) {
-    const shrinkable = Math.max(0, (rowHeights[lowerIndex] || 0) - getWritableTableSize(minimums[lowerIndex] || 0));
-    return Math.min(delta, shrinkable);
-  }
-
-  const shrinkable = Math.max(0, (rowHeights[upperIndex] || 0) - getWritableTableSize(minimums[upperIndex] || 0));
-  return -Math.min(Math.abs(delta), shrinkable);
-};
-
-const buildEdgeVerticalResizeDependencies = (
-  pageInner: HTMLElement,
-  side: TemplateEdgeSide,
-  targets: EdgeResizeTarget[]
-) => {
-  if (side !== 'top' && side !== 'bottom') {
-    return [];
-  }
-
-  const normalizedTargets = targets
-    .map((target) => {
-      const geometry = readNormalizedBandGeometry(target.shell);
-
-      if (!geometry) {
-        return null;
-      }
-
-      return {
-        shell: target.shell,
-        geometry,
-        boundaryRowIndex: side === 'top' ? geometry.rowStart : geometry.rowEnd,
-      };
-    })
-    .filter((entry): entry is { shell: HTMLElement; geometry: NormalizedBandGeometry; boundaryRowIndex: number } =>
-      Boolean(entry)
-    );
-
-  if (normalizedTargets.length === 0) {
-    return [];
-  }
-
-  const boundaryRowIndex = normalizedTargets[0]?.boundaryRowIndex ?? null;
-
-  if (boundaryRowIndex === null) {
-    return [];
-  }
-
-  const selectedShells = new Set(normalizedTargets.map((entry) => entry.shell));
-  const selectedRanges = normalizedTargets.map((entry) => ({
-    colStart: entry.geometry.colStart,
-    colEnd: entry.geometry.colEnd,
-  }));
-  const dependencies: VerticalResizeDependency[] = [];
-  const seen = new Set<string>();
-
-  Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
-    if (selectedShells.has(shell)) {
-      return;
-    }
-
-    const geometry = readNormalizedBandGeometry(shell);
-
-    if (!geometry) {
-      return;
-    }
-
-    const overlapsSelectedRange = selectedRanges.some((selectedRange) =>
-      normalizedBandRangesOverlap(geometry.colStart, geometry.colEnd, selectedRange.colStart, selectedRange.colEnd)
-    );
-
-    if (!overlapsSelectedRange) {
-      return;
-    }
-
-    if (side === 'bottom') {
-      if (geometry.rowStart === boundaryRowIndex) {
-        const key = `${geometry.rowStart}:${geometry.rowEnd}:${geometry.colStart}:${geometry.colEnd}:shift`;
-
-        if (!seen.has(key)) {
-          seen.add(key);
-          dependencies.push({ kind: 'shift-top', shell });
-        }
-        return;
-      }
-
-      if (geometry.rowStart < boundaryRowIndex && geometry.rowEnd > boundaryRowIndex) {
-        const rowIndex = boundaryRowIndex - geometry.rowStart - 1;
-        const key = `${geometry.rowStart}:${geometry.rowEnd}:${geometry.colStart}:${geometry.colEnd}:grow:${rowIndex}`;
-
-        if (!seen.has(key)) {
-          seen.add(key);
-          dependencies.push({ kind: 'grow-row', shell, rowIndex });
-        }
-      }
-
-      return;
-    }
-
-    if (geometry.rowEnd === boundaryRowIndex) {
-      const rowIndex = geometry.rowEnd - geometry.rowStart - 1;
-      const key = `${geometry.rowStart}:${geometry.rowEnd}:${geometry.colStart}:${geometry.colEnd}:grow:${rowIndex}`;
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        dependencies.push({ kind: 'grow-row', shell, rowIndex });
-      }
-      return;
-    }
-
-    if (geometry.rowStart < boundaryRowIndex && geometry.rowEnd > boundaryRowIndex) {
-      const localBoundaryIndex = boundaryRowIndex - geometry.rowStart;
-      const key = `${geometry.rowStart}:${geometry.rowEnd}:${geometry.colStart}:${geometry.colEnd}:redistribute:${localBoundaryIndex}`;
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        dependencies.push({ kind: 'redistribute', shell, boundaryIndex: localBoundaryIndex });
-      }
-    }
-  });
-
-  return dependencies;
-};
-
-const resolveEdgeVerticalResizeDependencyDeltas = (
-  dependencies: VerticalResizeDependency[],
-  requestedDelta: number
-) =>
-  dependencies
-    .map((dependency) => {
-      if (dependency.kind === 'shift-top') {
-        return requestedDelta;
-      }
-
-      if (dependency.kind === 'grow-row') {
-        return resolveNormalizedRowGrowthDelta(dependency.shell, dependency.rowIndex, requestedDelta);
-      }
-
-      return resolveNormalizedBoundaryRedistributionDelta(
-        dependency.shell,
-        dependency.boundaryIndex,
-        requestedDelta
-      );
-    })
-    .filter((candidateDelta) => Math.abs(candidateDelta) >= 0.5);
-
-const applyEdgeVerticalResizeDependencies = (
-  pageInner: HTMLElement,
-  dependencies: VerticalResizeDependency[],
-  delta: number
-) => {
-  if (Math.abs(delta) < 0.5) {
-    return;
-  }
-
-  dependencies.forEach((dependency) => {
-    if (dependency.kind === 'shift-top') {
-      const shellRect = readFrameElementRect(dependency.shell, pageInner);
-      dependency.shell.style.top = `${Math.round(shellRect.top + delta)}px`;
-      return;
-    }
-
-    if (dependency.kind === 'grow-row') {
-      applyNormalizedRowGrowthDelta(dependency.shell, dependency.rowIndex, delta);
-      return;
-    }
-
-    applyTableBoundaryHeightDelta(dependency.shell, dependency.boundaryIndex, delta);
-  });
-};
-
 const shiftShellsBelowBoundary = (
   pageInner: HTMLElement,
   boundaryY: number,
@@ -1575,37 +1009,6 @@ const applyOuterBottomHeightDelta = (shell: HTMLElement, delta: number, shrinkRa
   return -applied;
 };
 
-const applyFrameResizeHeightDeltaLocal = (node: HTMLElement, delta: number) => {
-  const context = buildFrameResizeContext(node);
-
-  if (Math.abs(delta) < 0.5) {
-    return 0;
-  }
-
-  const resizesOuterBottom = context.singleCellBand || context.rowHeights.length <= context.endRowIndex;
-  let appliedDelta = 0;
-
-  if (resizesOuterBottom) {
-    appliedDelta = applyOuterBottomHeightDelta(context.shell, delta, {
-      startIndex: context.startRowIndex,
-      endIndex: context.endRowIndex - 1,
-      side: 'before',
-    });
-  } else if (context.table) {
-    appliedDelta = applyTableBoundaryHeightDelta(context.shell, context.endRowIndex, delta, {
-      startIndex: context.startRowIndex,
-      endIndex: context.endRowIndex - 1,
-      side: 'before',
-    });
-  }
-
-  if (Math.abs(appliedDelta) > 0.5) {
-    stabilizeFrameContentHeight(node);
-  }
-
-  return appliedDelta;
-};
-
 const applyFrameResizeHeightDelta = (node: HTMLElement, delta: number) => {
   const context = buildFrameResizeContext(node);
 
@@ -1649,12 +1052,6 @@ const collectWidthResizeInstructions = (
   edge: 'left' | 'right' = 'right'
 ): FrameWidthResizeInstruction[] => {
   const pageInner = context.pageInner;
-  const normalizedGeometry = readNormalizedBandGeometry(context.shell);
-
-  if (normalizedGeometry) {
-    const selfInstruction = buildSelfWidthResizeInstruction(context, edge);
-    return selfInstruction ? [selfInstruction] : [];
-  }
 
   if (!pageInner) {
     return [];
@@ -1871,122 +1268,6 @@ const applyFrameResizeTopDelta = (node: HTMLElement, delta: number) => {
   return appliedDelta;
 };
 
-const applyFrameResizeWidthDelta = (
-  node: HTMLElement,
-  delta: number,
-  lockedInstructions?: FrameWidthResizeInstruction[]
-) => {
-  const context = buildFrameResizeContext(node);
-  const pageInner = context.pageInner;
-
-  if (!pageInner || Math.abs(delta) < 0.5) {
-    return 0;
-  }
-
-  const instructions = lockedInstructions && lockedInstructions.length > 0 ? lockedInstructions : collectWidthResizeInstructions(context);
-
-  if (!instructions.length) {
-    return 0;
-  }
-
-  let appliedDelta = delta;
-
-  if (delta > 0) {
-    const positiveCapacities = instructions
-      .map((instruction) => {
-        if (instruction.kind === 'boundary') {
-          return getWidthDeltaCapacity(
-            instruction.shell,
-            'boundary-right',
-            instruction.boundaryIndex,
-            instruction.shrinkRange
-          );
-        }
-
-        if (instruction.kind === 'outer-left') {
-          return getWidthDeltaCapacity(
-            instruction.shell,
-            'left',
-            0,
-            instruction.shrinkRange,
-            instruction.minimumStopRange
-          );
-        }
-
-        return Number.POSITIVE_INFINITY;
-      })
-      .filter((value) => Number.isFinite(value));
-
-    if (positiveCapacities.length > 0) {
-      appliedDelta = Math.min(delta, ...positiveCapacities);
-    }
-  } else {
-    const negativeCapacities = instructions
-      .map((instruction) => {
-        if (instruction.kind === 'boundary') {
-          return getWidthDeltaCapacity(
-            instruction.shell,
-            'boundary-left',
-            instruction.boundaryIndex,
-            instruction.shrinkRange
-          );
-        }
-
-        if (instruction.kind === 'outer-right') {
-          return getWidthDeltaCapacity(
-            instruction.shell,
-            'right',
-            0,
-            instruction.shrinkRange,
-            instruction.minimumStopRange
-          );
-        }
-
-        return Number.POSITIVE_INFINITY;
-      })
-      .filter((value) => Number.isFinite(value));
-
-    if (negativeCapacities.length > 0) {
-      appliedDelta = -Math.min(Math.abs(delta), ...negativeCapacities);
-    }
-  }
-
-  if (Math.abs(appliedDelta) < 0.5) {
-    return 0;
-  }
-
-  instructions.forEach((instruction) => {
-    if (instruction.kind === 'boundary') {
-      applyTableBoundaryWidthDelta(
-        instruction.shell,
-        instruction.boundaryIndex,
-        appliedDelta,
-        instruction.shrinkRange
-      );
-      return;
-    }
-
-    if (instruction.kind === 'outer-left') {
-      applyOuterLeftWidthDelta(
-        instruction.shell,
-        appliedDelta,
-        instruction.shrinkRange,
-        instruction.minimumStopRange
-      );
-      return;
-    }
-
-    applyOuterRightWidthDelta(
-      instruction.shell,
-      appliedDelta,
-      instruction.shrinkRange,
-      instruction.minimumStopRange
-    );
-  });
-
-  return appliedDelta;
-};
-
 const resolveWidthInstructionDelta = (instructions: FrameWidthResizeInstruction[], delta: number) => {
   let appliedDelta = delta;
 
@@ -2051,6 +1332,62 @@ const resolveWidthInstructionDelta = (instructions: FrameWidthResizeInstruction[
   }
 
   return Math.abs(appliedDelta) >= 0.5 ? appliedDelta : 0;
+};
+
+const applyFrameResizeWidthDelta = (
+  node: HTMLElement,
+  delta: number,
+  lockedInstructions?: FrameWidthResizeInstruction[]
+) => {
+  const context = buildFrameResizeContext(node);
+  const pageInner = context.pageInner;
+
+  if (!pageInner || Math.abs(delta) < 0.5) {
+    return 0;
+  }
+
+  const instructions = lockedInstructions && lockedInstructions.length > 0 ? lockedInstructions : collectWidthResizeInstructions(context);
+
+  if (!instructions.length) {
+    return 0;
+  }
+
+  const appliedDelta = resolveWidthInstructionDelta(instructions, delta);
+
+  if (Math.abs(appliedDelta) < 0.5) {
+    return 0;
+  }
+
+  instructions.forEach((instruction) => {
+    if (instruction.kind === 'boundary') {
+      applyTableBoundaryWidthDelta(
+        instruction.shell,
+        instruction.boundaryIndex,
+        appliedDelta,
+        instruction.shrinkRange
+      );
+      return;
+    }
+
+    if (instruction.kind === 'outer-left') {
+      applyOuterLeftWidthDelta(
+        instruction.shell,
+        appliedDelta,
+        instruction.shrinkRange,
+        instruction.minimumStopRange
+      );
+      return;
+    }
+
+    applyOuterRightWidthDelta(
+      instruction.shell,
+      appliedDelta,
+      instruction.shrinkRange,
+      instruction.minimumStopRange
+    );
+  });
+
+  return appliedDelta;
 };
 
 const resolveFrameResizeTopDelta = (node: HTMLElement, delta: number) => {
@@ -2635,7 +1972,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const buildLiveEdgeTopologySnapshot = React.useCallback((root: HTMLElement): TemplateEdgeTopologySnapshotDto => {
-    ensurePreviewFrameBandNormalization(root);
     const pages = Array.from(root.querySelectorAll<HTMLElement>('section.page'));
     const frames: TemplateEdgeFrameDto[] = getFrameNodes(root).map((node) => {
       const pageElement = node.closest<HTMLElement>('section.page');
@@ -2784,62 +2120,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!root || !renderedPreviewHtml || typeof window === 'undefined') {
+    if (!root || !renderedPreviewHtml) {
       return;
     }
 
     draftPreviewHtmlRef.current = renderedPreviewHtml;
     let cancelled = false;
-    let frameId = 0;
-
-    const scheduleEditorState = () => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        if (cancelled) {
-          return;
-        }
-
-        const normalized = ensurePreviewFrameBandNormalization(root);
-
-        if (normalized) {
-          const normalizedHtml = extractEditorHtml(root);
-          draftPreviewHtmlRef.current = normalizedHtml;
-
-          if (normalizedHtml && normalizedHtml !== renderedPreviewHtml) {
-            setPreviewHtml(normalizedHtml);
-            return;
-          }
-        }
-
-        applyPreviewEditPermissions(root);
-        applyFrameSelectionUi(
-          root,
-          selectedFrameGroupIdsRef.current,
-          reconcileLiveEdgeSelection(root, edgeSelectionStateRef.current),
-          buildLiveEdgeTopologySnapshot(root)
-        );
-        requestPreviewTextFit();
-      });
-    };
-
-    const pageInnerObservers = Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).map((pageInner) => {
-      const observer = new MutationObserver(() => {
-        if (cancelled) {
-          return;
-        }
-
-        const hasNormalizedShell = pageInner.querySelector(`[${NORMALIZED_FRAME_BAND_ATTR}="true"]`);
-        const hasMultiRowShell = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).some(
-          (shell) => (shell.querySelectorAll('tr').length || 0) > 1
-        );
-
-        if (!hasNormalizedShell && hasMultiRowShell) {
-          scheduleEditorState();
-        }
-      });
-      observer.observe(pageInner, { childList: true });
-      return observer;
-    });
 
     const applyEditorState = async () => {
       await document.fonts?.ready?.catch(() => undefined);
@@ -2848,15 +2134,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      scheduleEditorState();
+      applyPreviewEditPermissions(root);
+      applyFrameSelectionUi(
+        root,
+        selectedFrameGroupIdsRef.current,
+        reconcileLiveEdgeSelection(root, edgeSelectionStateRef.current),
+        buildLiveEdgeTopologySnapshot(root)
+      );
+      requestPreviewTextFit();
     };
 
     void applyEditorState();
 
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(frameId);
-      pageInnerObservers.forEach((observer) => observer.disconnect());
     };
   }, [renderedPreviewHtml, requestPreviewTextFit]);
 
@@ -2867,7 +2158,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    ensurePreviewFrameBandNormalization(root);
     applyPreviewEditPermissions(root);
     applyFrameSelectionUi(
       root,
@@ -3047,14 +2337,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     (
       root: HTMLElement,
       snapshot: TemplateEdgeTopologySnapshotDto,
-      targetEdgeIds: string[]
+      targetEdgeIds: string[],
+      side: TemplateEdgeSide
     ) => {
       const targets: EdgeResizeTarget[] = [];
 
       Array.from(new Set(targetEdgeIds)).forEach((edgeId) => {
         const edge = TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId);
 
-        if (!edge) {
+        if (!edge || edge.side !== side) {
           return;
         }
 
@@ -3068,33 +2359,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         const context = buildFrameResizeContext(node);
         const boundaryIndex =
-          edge.side === 'left'
+          side === 'left'
             ? context.startColIndex
-            : edge.side === 'right'
+            : side === 'right'
               ? context.endColIndex
-              : edge.side === 'top'
+              : side === 'top'
                 ? context.startRowIndex
                 : context.endRowIndex;
         const target = {
-          handleId: buildEdgeResizeHandleId(
-            node,
-            context.shell,
-            edge.side,
-            context.singleCellBand ? null : boundaryIndex
-          ),
-          edgeId: edge.edgeId,
+          handleId: buildEdgeResizeHandleId(node, context.shell, side, context.singleCellBand ? null : boundaryIndex),
           node,
           shell: context.shell,
-          orientation: edge.orientation,
-          side: edge.side,
-          lineCoordinate: edge.lineCoordinate,
-          spanStart: edge.spanStart,
-          spanEnd: edge.spanEnd,
-          hasOppositePeer: false,
+          side,
           boundaryIndex: context.singleCellBand ? null : boundaryIndex,
           widthInstructions:
-            edge.side === 'left' || edge.side === 'right'
-              ? [buildSelfWidthResizeInstruction(context, edge.side) as FrameWidthResizeInstruction].filter(Boolean)
+            side === 'left' || side === 'right'
+              ? [buildSelfWidthResizeInstruction(context, side) as FrameWidthResizeInstruction].filter(Boolean)
               : undefined,
         };
         const alreadyTracked = targets.some((candidate) => candidate.handleId === target.handleId);
@@ -3104,10 +2384,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
       });
 
-      return targets.map((target) => ({
-        ...target,
-        hasOppositePeer: targets.some((candidate) => targetsSharePhysicalBoundary(target, candidate)),
-      }));
+      return targets;
     },
     [buildEdgeResizeHandleId]
   );
@@ -3304,10 +2581,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           pageInner,
           node: frameNode,
           direction: explicitEdgeDirection,
+          side: explicitEdgeSide,
           clickedEdgeId,
           snapshot,
-          clickSelection: resizeIntent.clickSelectionState,
-          dragSelection: resizeIntent.dragSelectionState,
+          predictedSelection: resizeIntent.selectionState,
           targetEdgeIds: resizeIntent.targetEdgeIds,
           withShift: Boolean(event.shiftKey),
         };
@@ -3464,10 +2741,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const resizeTargets = collectEdgeResizeTargets(
         previewRef.current || event.currentTarget,
         edgePressState.snapshot,
-        edgePressState.targetEdgeIds
+        edgePressState.targetEdgeIds,
+        edgePressState.side
       );
 
-      applyRuntimeSelectionUi([], edgePressState.dragSelection);
+      applyRuntimeSelectionUi([], edgePressState.predictedSelection);
+      setSelectedFrameGroupIds([]);
+      setEdgeSelectionState(edgePressState.predictedSelection);
       resizeStateRef.current = {
         pointerId: edgePressState.pointerId,
         startX: edgePressState.startX,
@@ -3546,21 +2826,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         );
         const constrainedDeltaY = resolveSharedEdgeResizeDelta(
           nextDeltaY,
-          [
-            ...resizeState.edgeResizeTargets
-              .map((target) => {
-                if (target.side === 'top') {
-                  return resolveFrameResizeTopDelta(target.node, nextDeltaY);
-                }
+          resizeState.edgeResizeTargets
+            .map((target) => {
+              if (target.side === 'top') {
+                return resolveFrameResizeTopDelta(target.node, nextDeltaY);
+              }
 
-                if (target.side === 'bottom') {
+              if (target.side === 'bottom') {
                 return resolveFrameResizeBottomDelta(target.node, nextDeltaY);
               }
 
               return 0;
             })
-              .filter((candidateDelta) => Math.abs(candidateDelta) >= 0.5),
-          ]
+            .filter((candidateDelta) => Math.abs(candidateDelta) >= 0.5)
         );
 
         resizeState.edgeResizeTargets.forEach((target) => {
@@ -3575,11 +2853,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           }
 
           if (target.side === 'bottom' && Math.abs(constrainedDeltaY) >= 0.5) {
-            if (target.hasOppositePeer) {
-              applyFrameResizeHeightDeltaLocal(target.node, constrainedDeltaY);
-              return;
-            }
-
             applyFrameResizeHeightDelta(target.node, constrainedDeltaY);
           }
         });
@@ -3610,7 +2883,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         );
       }
     }
-  }, [applyRuntimeSelectionUi, collectEdgeResizeTargets, getFrameNodes]);
+  }, [applyRuntimeSelectionUi, getFrameNodes, collectEdgeResizeTargets]);
 
   const handlePreviewPointerUp = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3626,10 +2899,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         activePointerOwnerRef.current = null;
         edgePressStateRef.current = null;
-        selectedFrameGroupIdsRef.current = [];
-        edgeSelectionStateRef.current = edgePressState.clickSelection;
+        applyRuntimeSelectionUi([], edgePressState.predictedSelection);
         setSelectedFrameGroupIds([]);
-        setEdgeSelectionState(edgePressState.clickSelection);
+        setEdgeSelectionState(edgePressState.predictedSelection);
         return;
       }
 
@@ -3640,7 +2912,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-    [buildLiveEdgeTopologySnapshot, stopPointerInteraction]
+    [applyRuntimeSelectionUi, stopPointerInteraction]
   );
 
   const handlePreviewPointerCancel = React.useCallback(

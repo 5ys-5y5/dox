@@ -142,26 +142,6 @@ const resolveActivation = (input: TemplateEdgeSelectionClickDto): TemplateEdgeAc
   };
 };
 
-const resolveDragActivation = (input: TemplateEdgeSelectionClickDto): TemplateEdgeActivationResultDto => {
-  const currentSelection = reconcileSelectionState({
-    snapshot: input.snapshot,
-    currentSelection: input.currentSelection,
-  });
-  const existingToken =
-    currentSelection.tokens.find((token) => token.memberEdgeIds.includes(input.clickedEdgeId)) || null;
-
-  if (!existingToken) {
-    return resolveActivation(input);
-  }
-
-  return {
-    selectionState: currentSelection,
-    activatedTokenId: existingToken.tokenId,
-    effectiveEdgeIds: existingToken.memberEdgeIds.slice(),
-    mode: existingToken.mode,
-  };
-};
-
 const resolveClick = (input: TemplateEdgeSelectionClickDto): TemplateEdgeSelectionStateDto =>
   resolveActivation(input).selectionState;
 
@@ -169,6 +149,5 @@ export const TemplateEdgeSelectionService = {
   createEmptyState,
   reconcileSelectionState,
   resolveActivation,
-  resolveDragActivation,
   resolveClick,
 };

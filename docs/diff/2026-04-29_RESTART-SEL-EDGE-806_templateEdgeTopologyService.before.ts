@@ -266,33 +266,6 @@ const buildCohorts = (
   return cohorts;
 };
 
-const resolveOppositeBoundarySide = (side: TemplateEdgeSide): TemplateEdgeSide => {
-  if (side === 'left') {
-    return 'right';
-  }
-
-  if (side === 'right') {
-    return 'left';
-  }
-
-  if (side === 'top') {
-    return 'bottom';
-  }
-
-  return 'top';
-};
-
-const spansSharePhysicalBoundary = (
-  sourceEdge: TemplateEdgeDescriptorDto,
-  candidateEdge: TemplateEdgeDescriptorDto,
-  tolerancePx: number
-) => {
-  const overlapStart = Math.max(sourceEdge.spanStart, candidateEdge.spanStart);
-  const overlapEnd = Math.min(sourceEdge.spanEnd, candidateEdge.spanEnd);
-
-  return overlapEnd - overlapStart > tolerancePx;
-};
-
 const createSnapshot = (input: TemplateEdgeTopologySourceDto): TemplateEdgeTopologySnapshotDto => {
   const edges = buildEdgeDescriptors(input.frames);
   const adjacencies = buildDirectAdjacencies(edges, input.tolerancePx);
@@ -318,41 +291,8 @@ const getCohortByEdgeId = (snapshot: TemplateEdgeTopologySnapshotDto, edgeId: st
   return snapshot.cohorts.find((cohort) => cohort.cohortId === edge.cohortId) || null;
 };
 
-const getPhysicalPeerEdgeIds = (
-  snapshot: TemplateEdgeTopologySnapshotDto,
-  edgeId: string,
-  tolerancePx = 0.5
-) => {
-  const edge = getEdgeById(snapshot, edgeId);
-
-  if (!edge) {
-    return [];
-  }
-
-  const oppositeSide = resolveOppositeBoundarySide(edge.side);
-
-  return snapshot.edges
-    .filter((candidate) => {
-      if (candidate.edgeId === edge.edgeId) {
-        return false;
-      }
-
-      if (candidate.pageId !== edge.pageId || candidate.orientation !== edge.orientation || candidate.side !== oppositeSide) {
-        return false;
-      }
-
-      if (Math.abs(candidate.lineCoordinate - edge.lineCoordinate) > tolerancePx) {
-        return false;
-      }
-
-      return spansSharePhysicalBoundary(edge, candidate, tolerancePx);
-    })
-    .map((candidate) => candidate.edgeId);
-};
-
 export const TemplateEdgeTopologyService = {
   createSnapshot,
   getEdgeById,
   getCohortByEdgeId,
-  getPhysicalPeerEdgeIds,
 };
