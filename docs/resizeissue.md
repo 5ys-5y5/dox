@@ -549,6 +549,10 @@ type ResizeApplicationPlan = {
    - shell outer-right 경계를 쓰는 셀임을 확인
    - span 전체 shrink capacity가 `403px`로 계산되는 것을 확인
    - 이 값은 기존 “마지막 2px 열만 보고 0px”이던 경로가 제거되었음을 의미
+8. 구현 후 `status-history-1`의 trailing scaffold column 케이스 재확인
+   - 기존: `width 300` 적용 시 실제 shell width는 `688px`로 유지되고, 마지막 2px scaffold column이 `113px`까지 커져 오른쪽 빈 영역이 남음
+   - 수정 후: 같은 입력에서 shell width가 `577px`로 같이 줄고, trailing scaffold column은 `2px`로 유지됨
+   - 결과: 선택 outline만 줄어드는 상태가 아니라 실제 출력 표 외곽도 함께 줄어듦
 
 ### 11.2 supabase MCP
 

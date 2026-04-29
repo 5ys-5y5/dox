@@ -159,7 +159,6 @@ const MIN_FRAME_SIZE_PX = 12;
 const MIN_TABLE_COLUMN_WIDTH_PX = MIN_FRAME_SIZE_PX;
 const MIN_TABLE_ROW_HEIGHT_PX = 12;
 const MIN_WRITABLE_TABLE_SIZE_PX = 1;
-const FRAME_SCAFFOLD_TRACK_THRESHOLD_PX = 4;
 
 const parseFramePx = (value: string | null | undefined) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
@@ -696,26 +695,6 @@ const getWidthDeltaCapacity = (
   return Math.max(0, (colWidths[boundaryIndex] || 0) - getWritableTableSize(minimums[boundaryIndex] || 0));
 };
 
-const hasLeadingScaffoldColumns = (context: ReturnType<typeof buildFrameResizeContext>) => {
-  if (!context.table || context.startColIndex <= 0 || context.cell.previousElementSibling) {
-    return false;
-  }
-
-  const minimums = readTableColMinimums(context.table, context.colWidths);
-  const leadingMinimums = minimums.slice(0, context.startColIndex);
-  return leadingMinimums.length > 0 && leadingMinimums.every((width) => width <= FRAME_SCAFFOLD_TRACK_THRESHOLD_PX);
-};
-
-const hasTrailingScaffoldColumns = (context: ReturnType<typeof buildFrameResizeContext>) => {
-  if (!context.table || context.endColIndex >= context.colWidths.length || context.cell.nextElementSibling) {
-    return false;
-  }
-
-  const minimums = readTableColMinimums(context.table, context.colWidths);
-  const trailingMinimums = minimums.slice(context.endColIndex);
-  return trailingMinimums.length > 0 && trailingMinimums.every((width) => width <= FRAME_SCAFFOLD_TRACK_THRESHOLD_PX);
-};
-
 const shiftShellsBelowBoundary = (
   pageInner: HTMLElement,
   boundaryY: number,
@@ -827,16 +806,7 @@ const collectWidthResizeInstructions = (
     return [];
   }
 
-  const selectedBoundaryUsesOuterLeft = edge === 'left' && hasLeadingScaffoldColumns(context);
-  const selectedBoundaryUsesOuterRight = edge === 'right' && hasTrailingScaffoldColumns(context);
-  const boundaryX =
-    edge === 'left'
-      ? selectedBoundaryUsesOuterLeft
-        ? context.shellRect.left
-        : context.cellRect.left
-      : selectedBoundaryUsesOuterRight
-        ? context.shellRect.left + context.shellRect.width
-        : context.cellRect.left + context.cellRect.width;
+  const boundaryX = edge === 'left' ? context.cellRect.left : context.cellRect.left + context.cellRect.width;
   const pageShells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'));
 
   return pageShells.flatMap((shell) => {
@@ -855,11 +825,8 @@ const collectWidthResizeInstructions = (
         : -1;
 
     const nextInstructions: FrameWidthResizeInstruction[] = [];
-    const skipSelectedInternalBoundary =
-      shell === context.shell &&
-      ((edge === 'left' && selectedBoundaryUsesOuterLeft) || (edge === 'right' && selectedBoundaryUsesOuterRight));
 
-    if (internalBoundaryIndex > 0 && !skipSelectedInternalBoundary) {
+    if (internalBoundaryIndex > 0) {
       nextInstructions.push({
         kind: 'boundary',
         shell,
