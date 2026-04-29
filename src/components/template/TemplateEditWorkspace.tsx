@@ -150,7 +150,7 @@ const presetStylePatches: Record<
 
 const FRAME_RESIZE_TOLERANCE_PX = 2;
 const MIN_FRAME_SIZE_PX = 12;
-const MIN_TABLE_COLUMN_WIDTH_PX = 1;
+const MIN_TABLE_COLUMN_WIDTH_PX = MIN_FRAME_SIZE_PX;
 const MIN_TABLE_ROW_HEIGHT_PX = 12;
 
 const parseFramePx = (value: string | null | undefined) => {
@@ -256,27 +256,33 @@ const syncShellSizeFromTable = (
   shell: HTMLElement,
   table: HTMLTableElement | null,
   colWidths: number[],
-  rowHeights: number[]
+  rowHeights: number[],
+  axes: {
+    width?: boolean;
+    height?: boolean;
+  } = {}
 ) => {
+  const syncWidth = axes.width ?? true;
+  const syncHeight = axes.height ?? true;
   const totalWidth =
     colWidths.length > 0 ? colWidths.reduce((sum, width) => sum + Math.max(MIN_TABLE_COLUMN_WIDTH_PX, width), 0) : 0;
   const totalHeight =
     rowHeights.length > 0 ? rowHeights.reduce((sum, height) => sum + Math.max(MIN_TABLE_ROW_HEIGHT_PX, height), 0) : 0;
 
-  if (totalWidth > 0) {
+  if (syncWidth && totalWidth > 0) {
     shell.style.width = `${Math.round(totalWidth)}px`;
   }
 
-  if (totalHeight > 0) {
+  if (syncHeight && totalHeight > 0) {
     shell.style.height = `${Math.round(totalHeight)}px`;
   }
 
   if (table) {
-    if (totalWidth > 0) {
+    if (syncWidth && totalWidth > 0) {
       table.style.width = `${Math.round(totalWidth)}px`;
     }
 
-    if (totalHeight > 0) {
+    if (syncHeight && totalHeight > 0) {
       table.style.height = `${Math.round(totalHeight)}px`;
     }
   }
@@ -308,14 +314,17 @@ const buildFrameResizeContext = (node: HTMLElement) => {
   const domRowSpan = cell instanceof HTMLTableCellElement ? Math.max(1, cell.rowSpan) : 1;
   const startColIndex = findClosestBoundaryIndex(colBoundaries, relativeLeft);
   const startRowIndex = findClosestBoundaryIndex(rowBoundaries, relativeTop);
-  const endColIndex = Math.max(
-    startColIndex + 1,
-    Math.min(colBoundaries.length - 1, startColIndex + domColSpan, findClosestBoundaryIndex(colBoundaries, relativeLeft + cellRect.width))
-  );
-  const endRowIndex = Math.max(
-    startRowIndex + 1,
-    Math.min(rowBoundaries.length - 1, startRowIndex + domRowSpan, findClosestBoundaryIndex(rowBoundaries, relativeTop + cellRect.height))
-  );
+  const endColIndex = Math.max(startColIndex + 1, Math.min(colBoundaries.length - 1, startColIndex + domColSpan));
+  const endRowIndex = Math.max(startRowIndex + 1, Math.min(rowBoundaries.length - 1, startRowIndex + domRowSpan));
+  const layoutCellRect =
+    colBoundaries.length > 1 && rowBoundaries.length > 1
+      ? {
+          left: shellRect.left + borderLeft + (colBoundaries[startColIndex] || 0),
+          top: shellRect.top + borderTop + (rowBoundaries[startRowIndex] || 0),
+          width: Math.max(1, (colBoundaries[endColIndex] || 0) - (colBoundaries[startColIndex] || 0)),
+          height: Math.max(1, (rowBoundaries[endRowIndex] || 0) - (rowBoundaries[startRowIndex] || 0)),
+        }
+      : cellRect;
 
   return {
     pageInner,
@@ -323,7 +332,7 @@ const buildFrameResizeContext = (node: HTMLElement) => {
     table,
     cell,
     shellRect,
-    cellRect,
+    cellRect: layoutCellRect,
     colWidths,
     rowHeights,
     colBoundaries,
@@ -339,6 +348,17 @@ const buildFrameResizeContext = (node: HTMLElement) => {
 const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
   const context = buildFrameResizeContext(node);
   return context.singleCellBand ? context.shellRect : context.cellRect;
+};
+
+const stabilizeFrameContentHeight = (node: HTMLElement) => {
+  const contentTarget = resolveFrameContentTarget(node);
+  node.style.overflow = 'hidden';
+
+  if (contentTarget && contentTarget !== node) {
+    contentTarget.style.height = '100%';
+    contentTarget.style.maxHeight = '100%';
+    contentTarget.style.overflow = 'hidden';
+  }
 };
 
 const ensurePageInnerBaseMinHeight = (pageInner: HTMLElement) => {
@@ -361,32 +381,6 @@ const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
   pageInner.style.minHeight = `${Math.max(baseMinHeight, Math.ceil(maxBottom))}px`;
 };
 
-const adjustShrinkableSizes = (
-  sizes: number[],
-  indexes: number[],
-  amount: number,
-  minSize: number
-) => {
-  const nextSizes = [...sizes];
-  let remaining = Math.max(0, amount);
-
-  indexes.forEach((index) => {
-    if (remaining <= 0 || index < 0 || index >= nextSizes.length) {
-      return;
-    }
-
-    const shrinkable = Math.max(0, nextSizes[index] - minSize);
-    const consumed = Math.min(remaining, shrinkable);
-    nextSizes[index] -= consumed;
-    remaining -= consumed;
-  });
-
-  return {
-    sizes: nextSizes,
-    applied: Math.max(0, amount - remaining),
-  };
-};
-
 const applyOuterRightWidthDelta = (shell: HTMLElement, delta: number) => {
   const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
   const colWidths = readTableColWidths(table);
@@ -400,23 +394,21 @@ const applyOuterRightWidthDelta = (shell: HTMLElement, delta: number) => {
   }
 
   const nextColWidths = [...colWidths];
+  const lastIndex = nextColWidths.length - 1;
 
   if (delta >= 0) {
-    nextColWidths[nextColWidths.length - 1] += delta;
+    nextColWidths[lastIndex] += delta;
     setTableColWidths(table, nextColWidths);
-    syncShellSizeFromTable(shell, table, nextColWidths, rowHeights);
+    syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
     return delta;
   }
 
-  const shrinkResult = adjustShrinkableSizes(
-    nextColWidths,
-    Array.from({ length: nextColWidths.length }, (_, index) => nextColWidths.length - index - 1),
-    Math.abs(delta),
-    MIN_TABLE_COLUMN_WIDTH_PX
-  );
-  setTableColWidths(table, shrinkResult.sizes);
-  syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
-  return -shrinkResult.applied;
+  const shrinkable = Math.max(0, nextColWidths[lastIndex] - MIN_TABLE_COLUMN_WIDTH_PX);
+  const applied = Math.min(Math.abs(delta), shrinkable);
+  nextColWidths[lastIndex] -= applied;
+  setTableColWidths(table, nextColWidths);
+  syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
+  return -applied;
 };
 
 const applyOuterLeftWidthDelta = (shell: HTMLElement, delta: number) => {
@@ -434,24 +426,24 @@ const applyOuterLeftWidthDelta = (shell: HTMLElement, delta: number) => {
     return appliedDelta;
   }
 
+  const firstIndex = 0;
+
   if (delta >= 0) {
-    const shrinkResult = adjustShrinkableSizes(
-      colWidths,
-      Array.from({ length: colWidths.length }, (_, index) => index),
-      delta,
-      MIN_TABLE_COLUMN_WIDTH_PX
-    );
-    shell.style.left = `${Math.round(currentLeft + shrinkResult.applied)}px`;
-    setTableColWidths(table, shrinkResult.sizes);
-    syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
-    return shrinkResult.applied;
+    const nextColWidths = [...colWidths];
+    const shrinkable = Math.max(0, nextColWidths[firstIndex] - MIN_TABLE_COLUMN_WIDTH_PX);
+    const applied = Math.min(delta, shrinkable);
+    nextColWidths[firstIndex] -= applied;
+    shell.style.left = `${Math.round(currentLeft + applied)}px`;
+    setTableColWidths(table, nextColWidths);
+    syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
+    return applied;
   }
 
   const nextColWidths = [...colWidths];
-  nextColWidths[0] += Math.abs(delta);
+  nextColWidths[firstIndex] += Math.abs(delta);
   shell.style.left = `${Math.round(currentLeft + delta)}px`;
   setTableColWidths(table, nextColWidths);
-  syncShellSizeFromTable(shell, table, nextColWidths, rowHeights);
+  syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
   return delta;
 };
 
@@ -465,42 +457,35 @@ const applyTableBoundaryWidthDelta = (shell: HTMLElement, boundaryIndex: number,
   }
 
   const nextColWidths = [...colWidths];
+  const leftIndex = boundaryIndex - 1;
+  const rightIndex = boundaryIndex;
 
   if (delta >= 0) {
-    nextColWidths[boundaryIndex - 1] += delta;
-    const shrinkResult = adjustShrinkableSizes(
-      nextColWidths,
-      Array.from({ length: nextColWidths.length - boundaryIndex }, (_, index) => boundaryIndex + index),
-      delta,
-      MIN_TABLE_COLUMN_WIDTH_PX
-    );
-    if (shrinkResult.applied < delta) {
-      nextColWidths[boundaryIndex - 1] -= delta - shrinkResult.applied;
-    }
-    setTableColWidths(table, shrinkResult.sizes);
-    syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
-    return shrinkResult.applied;
+    const shrinkable = Math.max(0, nextColWidths[rightIndex] - MIN_TABLE_COLUMN_WIDTH_PX);
+    const applied = Math.min(delta, shrinkable);
+    nextColWidths[leftIndex] += applied;
+    nextColWidths[rightIndex] -= applied;
+    setTableColWidths(table, nextColWidths);
+    syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
+    return applied;
   }
 
-  const shrinkResult = adjustShrinkableSizes(
-    nextColWidths,
-    Array.from({ length: boundaryIndex }, (_, index) => boundaryIndex - index - 1),
-    Math.abs(delta),
-    MIN_TABLE_COLUMN_WIDTH_PX
-  );
-  if (boundaryIndex < nextColWidths.length) {
-    shrinkResult.sizes[boundaryIndex] += shrinkResult.applied;
-  }
-  setTableColWidths(table, shrinkResult.sizes);
-  syncShellSizeFromTable(shell, table, shrinkResult.sizes, rowHeights);
-  return -shrinkResult.applied;
+  const shrinkable = Math.max(0, nextColWidths[leftIndex] - MIN_TABLE_COLUMN_WIDTH_PX);
+  const applied = Math.min(Math.abs(delta), shrinkable);
+  nextColWidths[leftIndex] -= applied;
+  nextColWidths[rightIndex] += applied;
+  setTableColWidths(table, nextColWidths);
+  syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
+  return -applied;
 };
 
-const getWidthDeltaCapacity = (shell: HTMLElement, mode: 'left' | 'right' | 'boundary', boundaryIndex = 0) => {
+const getWidthDeltaCapacity = (
+  shell: HTMLElement,
+  mode: 'left' | 'right' | 'boundary-left' | 'boundary-right',
+  boundaryIndex = 0
+) => {
   const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
   const colWidths = readTableColWidths(table);
-  const shrinkable = (indexes: number[]) =>
-    indexes.reduce((sum, index) => sum + Math.max(0, (colWidths[index] || 0) - MIN_TABLE_COLUMN_WIDTH_PX), 0);
 
   if (colWidths.length === 0) {
     const shellRect = readFrameElementRect(shell);
@@ -508,14 +493,18 @@ const getWidthDeltaCapacity = (shell: HTMLElement, mode: 'left' | 'right' | 'bou
   }
 
   if (mode === 'left') {
-    return shrinkable(Array.from({ length: colWidths.length }, (_, index) => index));
+    return Math.max(0, (colWidths[0] || 0) - MIN_TABLE_COLUMN_WIDTH_PX);
   }
 
   if (mode === 'right') {
-    return shrinkable(Array.from({ length: colWidths.length }, (_, index) => colWidths.length - index - 1));
+    return Math.max(0, (colWidths[colWidths.length - 1] || 0) - MIN_TABLE_COLUMN_WIDTH_PX);
   }
 
-  return shrinkable(Array.from({ length: colWidths.length - boundaryIndex }, (_, index) => boundaryIndex + index));
+  if (mode === 'boundary-left') {
+    return Math.max(0, (colWidths[boundaryIndex - 1] || 0) - MIN_TABLE_COLUMN_WIDTH_PX);
+  }
+
+  return Math.max(0, (colWidths[boundaryIndex] || 0) - MIN_TABLE_COLUMN_WIDTH_PX);
 };
 
 const shiftShellsBelowBoundary = (
@@ -556,23 +545,21 @@ const applyOuterBottomHeightDelta = (shell: HTMLElement, delta: number) => {
   }
 
   const nextRowHeights = [...rowHeights];
+  const lastIndex = nextRowHeights.length - 1;
 
   if (delta >= 0) {
-    nextRowHeights[nextRowHeights.length - 1] += delta;
+    nextRowHeights[lastIndex] += delta;
     setTableRowHeights(table, nextRowHeights);
-    syncShellSizeFromTable(shell, table, colWidths, nextRowHeights);
+    syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
     return delta;
   }
 
-  const shrinkResult = adjustShrinkableSizes(
-    nextRowHeights,
-    Array.from({ length: nextRowHeights.length }, (_, index) => nextRowHeights.length - index - 1),
-    Math.abs(delta),
-    MIN_TABLE_ROW_HEIGHT_PX
-  );
-  setTableRowHeights(table, shrinkResult.sizes);
-  syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
-  return -shrinkResult.applied;
+  const shrinkable = Math.max(0, nextRowHeights[lastIndex] - MIN_TABLE_ROW_HEIGHT_PX);
+  const applied = Math.min(Math.abs(delta), shrinkable);
+  nextRowHeights[lastIndex] -= applied;
+  setTableRowHeights(table, nextRowHeights);
+  syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
+  return -applied;
 };
 
 const applyFrameResizeHeightDelta = (node: HTMLElement, delta: number) => {
@@ -585,34 +572,21 @@ const applyFrameResizeHeightDelta = (node: HTMLElement, delta: number) => {
   const boundaryY = context.cellRect.top + context.cellRect.height;
   let appliedDelta = 0;
 
-  if (context.singleCellBand || context.rowHeights.length <= context.endRowIndex) {
+  const resizesOuterBottom = context.singleCellBand || context.rowHeights.length <= context.endRowIndex;
+
+  if (resizesOuterBottom) {
     appliedDelta = applyOuterBottomHeightDelta(context.shell, delta);
   } else if (context.table) {
-    const nextRowHeights = [...context.rowHeights];
+    appliedDelta = applyTableBoundaryHeightDelta(context.shell, context.endRowIndex, delta);
+  }
 
-    if (delta >= 0) {
-      nextRowHeights[context.endRowIndex - 1] += delta;
-      appliedDelta = delta;
-    } else {
-      const shrinkResult = adjustShrinkableSizes(
-        nextRowHeights,
-        Array.from({ length: context.endRowIndex - context.startRowIndex }, (_, index) => context.endRowIndex - index - 1),
-        Math.abs(delta),
-        MIN_TABLE_ROW_HEIGHT_PX
-      );
-      appliedDelta = -shrinkResult.applied;
-      shrinkResult.sizes.forEach((size, index) => {
-        nextRowHeights[index] = size;
-      });
-    }
-
-    setTableRowHeights(context.table, nextRowHeights);
-    syncShellSizeFromTable(context.shell, context.table, context.colWidths, nextRowHeights);
+  if (resizesOuterBottom && Math.abs(appliedDelta) > 0.5) {
+    shiftShellsBelowBoundary(context.pageInner, boundaryY, appliedDelta, [context.shell]);
+    updatePageInnerMinHeight(context.pageInner);
   }
 
   if (Math.abs(appliedDelta) > 0.5) {
-    shiftShellsBelowBoundary(context.pageInner, boundaryY, appliedDelta, [context.shell]);
-    updatePageInnerMinHeight(context.pageInner);
+    stabilizeFrameContentHeight(node);
   }
 
   return appliedDelta;
@@ -679,24 +653,24 @@ const applyOuterTopHeightDelta = (shell: HTMLElement, delta: number) => {
     return appliedDelta;
   }
 
+  const firstIndex = 0;
+
   if (delta >= 0) {
-    const shrinkResult = adjustShrinkableSizes(
-      rowHeights,
-      Array.from({ length: rowHeights.length }, (_, index) => index),
-      delta,
-      MIN_TABLE_ROW_HEIGHT_PX
-    );
-    shell.style.top = `${Math.round(currentTop + shrinkResult.applied)}px`;
-    setTableRowHeights(table, shrinkResult.sizes);
-    syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
-    return shrinkResult.applied;
+    const nextRowHeights = [...rowHeights];
+    const shrinkable = Math.max(0, nextRowHeights[firstIndex] - MIN_TABLE_ROW_HEIGHT_PX);
+    const applied = Math.min(delta, shrinkable);
+    nextRowHeights[firstIndex] -= applied;
+    shell.style.top = `${Math.round(currentTop + applied)}px`;
+    setTableRowHeights(table, nextRowHeights);
+    syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
+    return applied;
   }
 
   const nextRowHeights = [...rowHeights];
-  nextRowHeights[0] += Math.abs(delta);
+  nextRowHeights[firstIndex] += Math.abs(delta);
   shell.style.top = `${Math.round(currentTop + delta)}px`;
   setTableRowHeights(table, nextRowHeights);
-  syncShellSizeFromTable(shell, table, colWidths, nextRowHeights);
+  syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
   return delta;
 };
 
@@ -710,35 +684,26 @@ const applyTableBoundaryHeightDelta = (shell: HTMLElement, boundaryIndex: number
   }
 
   const nextRowHeights = [...rowHeights];
+  const upperIndex = boundaryIndex - 1;
+  const lowerIndex = boundaryIndex;
 
   if (delta >= 0) {
-    nextRowHeights[boundaryIndex - 1] += delta;
-    const shrinkResult = adjustShrinkableSizes(
-      nextRowHeights,
-      Array.from({ length: nextRowHeights.length - boundaryIndex }, (_, index) => boundaryIndex + index),
-      delta,
-      MIN_TABLE_ROW_HEIGHT_PX
-    );
-    if (shrinkResult.applied < delta) {
-      nextRowHeights[boundaryIndex - 1] -= delta - shrinkResult.applied;
-    }
-    setTableRowHeights(table, shrinkResult.sizes);
-    syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
-    return shrinkResult.applied;
+    const shrinkable = Math.max(0, nextRowHeights[lowerIndex] - MIN_TABLE_ROW_HEIGHT_PX);
+    const applied = Math.min(delta, shrinkable);
+    nextRowHeights[upperIndex] += applied;
+    nextRowHeights[lowerIndex] -= applied;
+    setTableRowHeights(table, nextRowHeights);
+    syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
+    return applied;
   }
 
-  const shrinkResult = adjustShrinkableSizes(
-    nextRowHeights,
-    Array.from({ length: boundaryIndex }, (_, index) => boundaryIndex - index - 1),
-    Math.abs(delta),
-    MIN_TABLE_ROW_HEIGHT_PX
-  );
-  if (boundaryIndex < nextRowHeights.length) {
-    shrinkResult.sizes[boundaryIndex] += shrinkResult.applied;
-  }
-  setTableRowHeights(table, shrinkResult.sizes);
-  syncShellSizeFromTable(shell, table, colWidths, shrinkResult.sizes);
-  return -shrinkResult.applied;
+  const shrinkable = Math.max(0, nextRowHeights[upperIndex] - MIN_TABLE_ROW_HEIGHT_PX);
+  const applied = Math.min(Math.abs(delta), shrinkable);
+  nextRowHeights[upperIndex] -= applied;
+  nextRowHeights[lowerIndex] += applied;
+  setTableRowHeights(table, nextRowHeights);
+  syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
+  return -applied;
 };
 
 const applyFrameResizeTopDelta = (node: HTMLElement, delta: number) => {
@@ -749,10 +714,18 @@ const applyFrameResizeTopDelta = (node: HTMLElement, delta: number) => {
   }
 
   if (context.singleCellBand || context.startRowIndex === 0) {
-    return applyOuterTopHeightDelta(context.shell, delta);
+    const appliedDelta = applyOuterTopHeightDelta(context.shell, delta);
+    if (Math.abs(appliedDelta) > 0.5) {
+      stabilizeFrameContentHeight(node);
+    }
+    return appliedDelta;
   }
 
-  return applyTableBoundaryHeightDelta(context.shell, context.startRowIndex, delta);
+  const appliedDelta = applyTableBoundaryHeightDelta(context.shell, context.startRowIndex, delta);
+  if (Math.abs(appliedDelta) > 0.5) {
+    stabilizeFrameContentHeight(node);
+  }
+  return appliedDelta;
 };
 
 const applyFrameResizeWidthDelta = (
@@ -779,7 +752,7 @@ const applyFrameResizeWidthDelta = (
     const positiveCapacities = instructions
       .map((instruction) => {
         if (instruction.kind === 'boundary') {
-          return getWidthDeltaCapacity(instruction.shell, 'boundary', instruction.boundaryIndex);
+          return getWidthDeltaCapacity(instruction.shell, 'boundary-right', instruction.boundaryIndex);
         }
 
         if (instruction.kind === 'outer-left') {
@@ -797,7 +770,7 @@ const applyFrameResizeWidthDelta = (
     const negativeCapacities = instructions
       .map((instruction) => {
         if (instruction.kind === 'boundary') {
-          return getWidthDeltaCapacity(instruction.shell, 'right', instruction.boundaryIndex);
+          return getWidthDeltaCapacity(instruction.shell, 'boundary-left', instruction.boundaryIndex);
         }
 
         if (instruction.kind === 'outer-right') {
