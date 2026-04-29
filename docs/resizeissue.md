@@ -553,6 +553,10 @@ type ResizeApplicationPlan = {
    - 기존: `width 300` 적용 시 실제 shell width는 `688px`로 유지되고, 마지막 2px scaffold column이 `113px`까지 커져 오른쪽 빈 영역이 남음
    - 수정 후: 같은 입력에서 shell width가 `577px`로 같이 줄고, trailing scaffold column은 `2px`로 유지됨
    - 결과: 선택 outline만 줄어드는 상태가 아니라 실제 출력 표 외곽도 함께 줄어듦
+9. 구현 후 `status-history-1` east handle 드래그 재확인
+   - 기존: scaffold column만 확장되어 current rect가 갱신되지 않아 드래그 이동량보다 큰 폭으로 누적 확대됨
+   - 수정 후: `e` handle을 `20px` 드래그했을 때 실제 셀 width가 `411 -> 431`로 정확히 `20px`만 증가
+   - 결과: 선택 활성 박스와 실제 출력 셀이 동일한 폭으로 함께 확장됨
 
 ### 11.2 supabase MCP
 

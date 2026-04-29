@@ -278,6 +278,20 @@ const getRangeShrinkCapacity = (sizes: number[], minimums: number[], range: Boun
   return capacity;
 };
 
+const growSizeRangeEdge = (sizes: number[], range: BoundaryShrinkRange, amount: number) => {
+  if (amount <= 0) {
+    return 0;
+  }
+
+  if (range.side === 'before') {
+    sizes[range.endIndex] = getWritableTableSize(sizes[range.endIndex] || 0) + amount;
+    return amount;
+  }
+
+  sizes[range.startIndex] = getWritableTableSize(sizes[range.startIndex] || 0) + amount;
+  return amount;
+};
+
 const shrinkSizeRange = (sizes: number[], minimums: number[], range: BoundaryShrinkRange, amount: number) => {
   if (amount <= 0) {
     return 0;
@@ -530,7 +544,11 @@ const applyOuterRightWidthDelta = (shell: HTMLElement, delta: number, shrinkRang
   const lastIndex = nextColWidths.length - 1;
 
   if (delta >= 0) {
-    nextColWidths[lastIndex] += delta;
+    if (shrinkRange?.side === 'before') {
+      growSizeRangeEdge(nextColWidths, shrinkRange, delta);
+    } else {
+      nextColWidths[lastIndex] += delta;
+    }
     setTableColWidths(table, nextColWidths);
     syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
     return delta;
@@ -588,7 +606,11 @@ const applyOuterLeftWidthDelta = (shell: HTMLElement, delta: number, shrinkRange
   }
 
   const nextColWidths = [...colWidths];
-  nextColWidths[firstIndex] += Math.abs(delta);
+  if (shrinkRange?.side === 'after') {
+    growSizeRangeEdge(nextColWidths, shrinkRange, Math.abs(delta));
+  } else {
+    nextColWidths[firstIndex] += Math.abs(delta);
+  }
   shell.style.left = `${Math.round(currentLeft + delta)}px`;
   setTableColWidths(table, nextColWidths);
   syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
