@@ -678,41 +678,6 @@ runtime state 는 `TemplateEditWorkspace` 가 소유한다.
    - `src/components/template/TemplateEditWorkspace.tsx`
    - `docs/edgeedit.md`
 
-### 9.42 2026-05-01 active vertical cluster baseline lock
-
-#### 현상
-
-1. `status-history-1:left`, `band-3-cell-2:right`, `band-4-cell-2:right` 를 drag 할 때 `band-5-cell-3:left` 근처에서 active vertical line 이 현재 pointer delta 보다 과도하게 이동하며 `band-3-cell-2`, `band-4-cell-2` 가 최소 폭으로 접힐 수 있었다.
-2. 이 문제는 특정 edge 예외가 아니라, width drag 중 live DOM refresh 이후 active vertical cluster 가 drag 시작 기준선에서 벗어나 다른 boundary 해석으로 갈아타는 구조 문제였다.
-
-#### 구현
-
-1. `src/components/template/TemplateEditWorkspace.tsx`
-   - `stabilizeLiveVerticalEdgeTargetsToAppliedDelta(...)` 를 실제 `handlePreviewPointerMove(...)` width drag 경로에 연결했다.
-   - width delta 적용 직후 `selected_edge_clicked`, `selected_edge_auto_multi`, `peer_edge` 로 잠긴 active vertical edge 들을 `baseline line coordinate + appliedEdgeDeltaX` 로 다시 맞춘다.
-   - 이 보정은 target edge 집합을 새로 바꾸지 않고, drag 시작 시 잠긴 active vertical cluster 의 live node/shell/instruction 만 다시 읽어 적용한다.
-   - 그 뒤 기존 `realignLiveVerticalEdgeTargets(...)` 를 실행해 같은 cluster 내부의 subpixel 차만 정리한다.
-
-#### 브라우저 확인 기준
-
-1. 페이지
-   - `http://localhost:3001/templates/edit?templateId=9ed2caf1-edc4-4d62-bfe0-95ff40c5a7be`
-2. 확인 대상
-   - `status-history-1:left`
-   - `band-3-cell-2:right`
-   - `band-4-cell-2:right`
-3. 기대 결과
-   - `band-5-cell-3:left` 근처로 drag 해도 active vertical cluster 는 `baseline + applied delta` 를 벗어나 minimum width collapse 로 점프하면 안 된다.
-
-#### 체크리스트
-
-1. `CHK-EDGE-DRAG-031`
-   - active vertical cluster 는 drag move 중 `baseline + applied delta` 를 유지해야 한다.
-   - 상태: 구현 완료
-2. `CHK-EDGE-DRAG-032`
-   - 다른 row/box boundary 근처를 지날 때 active vertical cluster 가 minimum width collapse 로 갈아타면 안 된다.
-   - 상태: 브라우저 재확인 필요
-
 ## 9.39 2026-05-01 edge autosnap endpoint-touch forced jump
 
 ### 재현

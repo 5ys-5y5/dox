@@ -678,41 +678,6 @@ runtime state 는 `TemplateEditWorkspace` 가 소유한다.
    - `src/components/template/TemplateEditWorkspace.tsx`
    - `docs/edgeedit.md`
 
-### 9.42 2026-05-01 active vertical cluster baseline lock
-
-#### 현상
-
-1. `status-history-1:left`, `band-3-cell-2:right`, `band-4-cell-2:right` 를 drag 할 때 `band-5-cell-3:left` 근처에서 active vertical line 이 현재 pointer delta 보다 과도하게 이동하며 `band-3-cell-2`, `band-4-cell-2` 가 최소 폭으로 접힐 수 있었다.
-2. 이 문제는 특정 edge 예외가 아니라, width drag 중 live DOM refresh 이후 active vertical cluster 가 drag 시작 기준선에서 벗어나 다른 boundary 해석으로 갈아타는 구조 문제였다.
-
-#### 구현
-
-1. `src/components/template/TemplateEditWorkspace.tsx`
-   - `stabilizeLiveVerticalEdgeTargetsToAppliedDelta(...)` 를 실제 `handlePreviewPointerMove(...)` width drag 경로에 연결했다.
-   - width delta 적용 직후 `selected_edge_clicked`, `selected_edge_auto_multi`, `peer_edge` 로 잠긴 active vertical edge 들을 `baseline line coordinate + appliedEdgeDeltaX` 로 다시 맞춘다.
-   - 이 보정은 target edge 집합을 새로 바꾸지 않고, drag 시작 시 잠긴 active vertical cluster 의 live node/shell/instruction 만 다시 읽어 적용한다.
-   - 그 뒤 기존 `realignLiveVerticalEdgeTargets(...)` 를 실행해 같은 cluster 내부의 subpixel 차만 정리한다.
-
-#### 브라우저 확인 기준
-
-1. 페이지
-   - `http://localhost:3001/templates/edit?templateId=9ed2caf1-edc4-4d62-bfe0-95ff40c5a7be`
-2. 확인 대상
-   - `status-history-1:left`
-   - `band-3-cell-2:right`
-   - `band-4-cell-2:right`
-3. 기대 결과
-   - `band-5-cell-3:left` 근처로 drag 해도 active vertical cluster 는 `baseline + applied delta` 를 벗어나 minimum width collapse 로 점프하면 안 된다.
-
-#### 체크리스트
-
-1. `CHK-EDGE-DRAG-031`
-   - active vertical cluster 는 drag move 중 `baseline + applied delta` 를 유지해야 한다.
-   - 상태: 구현 완료
-2. `CHK-EDGE-DRAG-032`
-   - 다른 row/box boundary 근처를 지날 때 active vertical cluster 가 minimum width collapse 로 갈아타면 안 된다.
-   - 상태: 브라우저 재확인 필요
-
 ## 9.39 2026-05-01 edge autosnap endpoint-touch forced jump
 
 ### 재현
@@ -767,38 +732,6 @@ runtime state 는 `TemplateEditWorkspace` 가 소유한다.
 
 1. `CHK-VERTICAL-NORMALIZE-001`
    - edge drag release 직후 active cluster 밖의 vertical line 이 현재 drag 결과를 다시 끌어오면 안 된다.
-   - 상태: 진행 중
-
-## 9.41 2026-05-01 per-move edge delta safety cap
-
-### 재현
-
-1. `status-history-1:left`
-2. `band-3-cell-2:right`
-3. `band-4-cell-2:right`
-4. 실제/합성 drag 모두에서 작은 `-8px` 수준의 포인터 이동이 특정 구간에서 곧바로 `band-3-cell-2`, `band-4-cell-2` 폭 전체 shrink capacity 로 확장될 수 있었다.
-5. 재현 계측에서는 `status-history-1:left` 에 `-8px` 요청을 넣었을 때 `left 452.5 -> 304.5`, `band-3/4-cell-2.width 184 -> 36` 으로 한 번에 최소 폭까지 접혔다.
-
-### 원인 해석
-
-1. pointermove 당 최종 `finalDeltaX / finalDeltaY` 는 본래 포인터 이동량 또는 autosnap 허용 오차 범위 안에서만 움직여야 한다.
-2. 그런데 일부 경로에서 내부 constraint / normalize 결과가 pointermove 1회 요청량을 크게 초과하는 delta 로 전개될 수 있었다.
-3. 이런 경우는 autosnap 의 정상 보정이 아니라 비정상 과적용으로 취급해야 한다.
-
-### 수정
-
-1. `clampResolvedEdgeDragDeltaToPointerRequest(...)` 추가
-2. pointermove 최종 적용 직전에:
-   - `safeFinalDeltaX`
-   - `safeFinalDeltaY`
-   로 다시 자른다.
-3. 허용 범위는 `abs(requestedDelta) + EDGE_DRAG_AUTOSNAP_THRESHOLD_PX` 이다.
-4. 즉 autosnap 때문에 `5px` 이내 추가 보정은 허용하지만, 그보다 큰 jump 는 pointermove 한 번에서 적용되지 못한다.
-
-### 체크리스트
-
-1. `CHK-EDGE-DELTA-SAFETY-001`
-   - edge drag 1회 move 는 포인터 이동량 + autosnap 허용치를 넘는 과대 delta 를 적용하면 안 된다.
    - 상태: 진행 중
 
 ### 9.37 2026-04-30 status-history-1:left drag target hopping fix

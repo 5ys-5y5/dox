@@ -274,7 +274,6 @@ const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const EDGE_DRAG_START_THRESHOLD_PX = 4;
 const EDGE_DRAG_AUTOSNAP_THRESHOLD_PX = 5;
-const EDGE_DRAG_AUTOSNAP_SPAN_TOUCH_TOLERANCE_PX = 1;
 const FRAME_MARQUEE_DRAG_THRESHOLD_PX = 4;
 const DEFAULT_RELATIVE_PAGE_ANCHORS: Record<string, TemplateFrameRelativeAnchorConfig> = {
   'band-0-header': {
@@ -1375,24 +1374,144 @@ const stabilizeFrameContentHeight = (node: HTMLElement) => {
     return;
   }
 
+  const lineCount = Math.max(1, contentTarget.value.split(/\r?\n/).length);
+
+  const removeRichTextPreview = () => {
+    const shell = resolveFrameLayoutShell(node);
+    shell.querySelectorAll<HTMLElement>(`.${FRAME_RICHTEXT_PREVIEW_CLASS}`).forEach((element) => element.remove());
+    contentTarget.removeAttribute(TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR);
+  };
+
+  if (lineCount <= 1) {
+    removeRichTextPreview();
+    return;
+  }
+
+  const currentRect = readFrameNodeRect(node);
+  const computedStyle = getComputedStyle(contentTarget);
+  let baseHeight =
+    parseFramePx(contentTarget.getAttribute(TEMPLATE_FRAME_BASE_HEIGHT_ATTR) || '') || currentRect.height;
+  let baseFontSize =
+    parseFramePx(contentTarget.getAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR) || '') ||
+    parseFramePx(computedStyle.fontSize) ||
+    16;
+  let baseLineHeight =
+    parseFramePx(contentTarget.getAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR) || '') ||
+    parseFramePx(computedStyle.lineHeight) ||
+    baseFontSize * 1.2;
+
+  if (!contentTarget.hasAttribute(TEMPLATE_FRAME_BASE_HEIGHT_ATTR)) {
+    contentTarget.setAttribute(TEMPLATE_FRAME_BASE_HEIGHT_ATTR, String(Number(baseHeight.toFixed(3))));
+  }
+
+  if (!contentTarget.hasAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR)) {
+    contentTarget.setAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR, String(Number(baseFontSize.toFixed(3))));
+  }
+
+  if (!contentTarget.hasAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR)) {
+    contentTarget.setAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR, String(Number(baseLineHeight.toFixed(3))));
+  }
+
+  if (Math.abs(currentRect.height - baseHeight) <= 0.5) {
+    baseFontSize = parseFramePx(computedStyle.fontSize) || baseFontSize;
+    baseLineHeight = parseFramePx(computedStyle.lineHeight) || baseLineHeight;
+    contentTarget.setAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR, String(Number(baseFontSize.toFixed(3))));
+    contentTarget.setAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR, String(Number(baseLineHeight.toFixed(3))));
+  }
+
+  const heightScale = Math.max(0.35, currentRect.height / Math.max(1, baseHeight));
+  const nextFontSize = Math.max(8, baseFontSize * heightScale);
+  const nextLineHeight = Math.max(nextFontSize * 1.05, baseLineHeight * heightScale);
+
+  contentTarget.style.fontSize = toFrameCssPx(nextFontSize);
+  contentTarget.style.lineHeight = toFrameCssPx(nextLineHeight);
+
   const shell = resolveFrameLayoutShell(node);
-  shell.querySelectorAll<HTMLElement>(`.${FRAME_RICHTEXT_PREVIEW_CLASS}`).forEach((element) => element.remove());
-  contentTarget.removeAttribute(TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR);
-  contentTarget.removeAttribute(TEMPLATE_FRAME_BASE_HEIGHT_ATTR);
-  contentTarget.removeAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR);
-  contentTarget.removeAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR);
+  const shellRect = shell.getBoundingClientRect();
+  const contentRect = contentTarget.getBoundingClientRect();
+  const relativeLeft = contentRect.left - shellRect.left;
+  const relativeTop = contentRect.top - shellRect.top;
+  const previewLayer =
+    shell.querySelector<HTMLElement>(`.${FRAME_RICHTEXT_PREVIEW_CLASS}`) || document.createElement('div');
+  const richTextLines = contentTarget.value.split(/\r?\n/);
+
+  if (!previewLayer.parentElement) {
+    previewLayer.className = FRAME_RICHTEXT_PREVIEW_CLASS;
+    shell.appendChild(previewLayer);
+  }
+
+  previewLayer.setAttribute(TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR, 'true');
+  previewLayer.style.position = 'absolute';
+  previewLayer.style.left = toFrameCssPx(relativeLeft);
+  previewLayer.style.top = toFrameCssPx(relativeTop);
+  previewLayer.style.width = toFrameCssPx(contentRect.width);
+  previewLayer.style.height = toFrameCssPx(contentRect.height);
+  previewLayer.style.pointerEvents = 'none';
+  previewLayer.style.zIndex = '23';
+  previewLayer.style.display = 'flex';
+  previewLayer.style.flexDirection = 'column';
+  previewLayer.style.justifyContent = richTextLines.length > 1 ? 'space-between' : 'flex-start';
+  previewLayer.style.boxSizing = 'border-box';
+  previewLayer.style.paddingTop = computedStyle.paddingTop;
+  previewLayer.style.paddingRight = computedStyle.paddingRight;
+  previewLayer.style.paddingBottom = computedStyle.paddingBottom;
+  previewLayer.style.paddingLeft = computedStyle.paddingLeft;
+  previewLayer.style.fontFamily = computedStyle.fontFamily;
+  previewLayer.style.fontSize = contentTarget.style.fontSize || computedStyle.fontSize;
+  previewLayer.style.lineHeight = contentTarget.style.lineHeight || computedStyle.lineHeight;
+  previewLayer.style.fontWeight = computedStyle.fontWeight;
+  previewLayer.style.fontStyle = computedStyle.fontStyle;
+  previewLayer.style.letterSpacing = computedStyle.letterSpacing;
+  previewLayer.style.color = computedStyle.color;
+  previewLayer.style.textAlign = computedStyle.textAlign;
+  previewLayer.style.whiteSpace = 'pre-wrap';
+  previewLayer.style.wordBreak = 'break-word';
+  previewLayer.style.overflowWrap = 'anywhere';
+  previewLayer.style.overflow = 'hidden';
+
+  previewLayer.innerHTML = '';
+  richTextLines.forEach((lineValue) => {
+    const line = document.createElement('div');
+    line.style.flex = '0 1 auto';
+    line.style.minHeight = '0';
+    line.style.lineHeight = 'inherit';
+    line.style.whiteSpace = 'pre-wrap';
+    line.style.wordBreak = 'break-word';
+    line.style.overflowWrap = 'anywhere';
+    line.textContent = lineValue || ' ';
+    previewLayer.appendChild(line);
+  });
+  contentTarget.setAttribute(TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR, 'true');
 };
 
 const primeFrameContentScaleMetrics = (root: ParentNode) => {
-  root
-    .querySelectorAll<HTMLElement>(
-      `[${TEMPLATE_FRAME_BASE_HEIGHT_ATTR}], [${TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR}], [${TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR}]`
-    )
-    .forEach((element) => {
-      element.removeAttribute(TEMPLATE_FRAME_BASE_HEIGHT_ATTR);
-      element.removeAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR);
-      element.removeAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR);
-    });
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const contentTarget = resolveFrameContentTarget(node);
+
+    if (!(contentTarget instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    const lineCount = Math.max(1, contentTarget.value.split(/\r?\n/).length);
+
+    if (lineCount <= 1) {
+      return;
+    }
+
+    const computedStyle = getComputedStyle(contentTarget);
+    const currentRect = readFrameNodeRect(node);
+    const baseFontSize = parseFramePx(computedStyle.fontSize) || 16;
+    const baseLineHeight = parseFramePx(computedStyle.lineHeight) || baseFontSize * 1.2;
+    if (!contentTarget.hasAttribute(TEMPLATE_FRAME_BASE_HEIGHT_ATTR)) {
+      contentTarget.setAttribute(TEMPLATE_FRAME_BASE_HEIGHT_ATTR, String(Number(currentRect.height.toFixed(3))));
+    }
+    if (!contentTarget.hasAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR)) {
+      contentTarget.setAttribute(TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR, String(Number(baseFontSize.toFixed(3))));
+    }
+    if (!contentTarget.hasAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR)) {
+      contentTarget.setAttribute(TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR, String(Number(baseLineHeight.toFixed(3))));
+    }
+  });
 };
 
 const ensurePageInnerBaseMinHeight = (pageInner: HTMLElement) => {
@@ -2964,16 +3083,11 @@ const resolveSharedEdgeResizeDelta = (requestedDelta: number, candidateDeltas: n
 
 // Autosnap only participates in live edge drag. The width/height controls in the
 // "선택 상태" panel continue to write explicit values without this proximity rule.
-const readEdgeSpanOverlapLength = (
-  left: Pick<EdgeResizeTargetMember, 'spanStart' | 'spanEnd'>,
-  right: Pick<TemplateEdgeDescriptorDto, 'spanStart' | 'spanEnd'>
-) => Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
-
 const readEdgeEndpointGapLength = (
   left: Pick<EdgeResizeTargetMember, 'spanStart' | 'spanEnd'>,
   right: Pick<TemplateEdgeDescriptorDto, 'spanStart' | 'spanEnd'>
 ) => {
-  const overlap = readEdgeSpanOverlapLength(left, right);
+  const overlap = Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
 
   if (overlap >= 0) {
     return 0;
@@ -3004,8 +3118,6 @@ const resolveEdgeDragAutosnapDelta = ({
     | {
         adjustment: number;
         sidePriority: number;
-        spanPriority: number;
-        spanMagnitude: number;
         endpointGap: number;
       }
     | null = null;
@@ -3036,45 +3148,19 @@ const resolveEdgeDragAutosnapDelta = ({
       }
 
       const sidePriority = candidateEdge.side === member.side ? 0 : 1;
-      const spanOverlap = readEdgeSpanOverlapLength(member, candidateEdge);
       const endpointGap = readEdgeEndpointGapLength(member, candidateEdge);
-      const isEndpointTouchCandidate =
-        Math.abs(spanOverlap) <= EDGE_DRAG_AUTOSNAP_SPAN_TOUCH_TOLERANCE_PX &&
-        endpointGap <= EDGE_DRAG_AUTOSNAP_SPAN_TOUCH_TOLERANCE_PX;
-
-      if (isEndpointTouchCandidate) {
-        return;
-      }
-
-      const spanPriority = spanOverlap > EDGE_DRAG_AUTOSNAP_SPAN_TOUCH_TOLERANCE_PX ? 0 : 1;
-      const spanMagnitude =
-        spanOverlap > EDGE_DRAG_AUTOSNAP_SPAN_TOUCH_TOLERANCE_PX ? spanOverlap : endpointGap;
 
       if (
         !bestMatch ||
         sidePriority < bestMatch.sidePriority ||
-        (sidePriority === bestMatch.sidePriority && spanPriority < bestMatch.spanPriority) ||
+        (sidePriority === bestMatch.sidePriority && Math.abs(adjustment) < Math.abs(bestMatch.adjustment)) ||
         (sidePriority === bestMatch.sidePriority &&
-          spanPriority === bestMatch.spanPriority &&
-          spanPriority === 0 &&
-          spanMagnitude > bestMatch.spanMagnitude) ||
-        (sidePriority === bestMatch.sidePriority &&
-          spanPriority === bestMatch.spanPriority &&
-          spanPriority === 1 &&
-          spanMagnitude < bestMatch.spanMagnitude) ||
-        (sidePriority === bestMatch.sidePriority &&
-          spanPriority === bestMatch.spanPriority &&
-          Math.abs(adjustment) < Math.abs(bestMatch.adjustment)) ||
-        (sidePriority === bestMatch.sidePriority &&
-          spanPriority === bestMatch.spanPriority &&
           Math.abs(adjustment) === Math.abs(bestMatch.adjustment) &&
           endpointGap < bestMatch.endpointGap)
       ) {
         bestMatch = {
           adjustment,
           sidePriority,
-          spanPriority,
-          spanMagnitude,
           endpointGap,
         };
       }
@@ -3082,29 +3168,6 @@ const resolveEdgeDragAutosnapDelta = ({
   });
 
   return bestMatch === null ? requestedDelta : requestedDelta + bestMatch.adjustment;
-};
-
-const clampResolvedEdgeDragDeltaToPointerRequest = (
-  requestedDelta: number,
-  resolvedDelta: number,
-  overshootTolerancePx = EDGE_DRAG_AUTOSNAP_THRESHOLD_PX
-) => {
-  if (Math.abs(resolvedDelta) < 0.5) {
-    return 0;
-  }
-
-  if (Math.abs(requestedDelta) < 0.5) {
-    return resolvedDelta;
-  }
-
-  const maxAllowedMagnitude = Math.abs(requestedDelta) + overshootTolerancePx;
-
-  if (Math.abs(resolvedDelta) <= maxAllowedMagnitude) {
-    return resolvedDelta;
-  }
-
-  const directionSign = Math.sign(resolvedDelta) || Math.sign(requestedDelta);
-  return directionSign * maxAllowedMagnitude;
 };
 
 const pickHeightResizeTargetMember = (
@@ -5687,98 +5750,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [buildEdgeResizeHandleId, buildWidthInstructionKey, getFrameNodes]
   );
 
-  const resolveLiveEdgeResizeTargets = React.useCallback(
-    (root: HTMLElement, snapshot: TemplateEdgeTopologySnapshotDto, mutationEdgeIds: string[]) => {
-      const directRoleResizeTargets = collectDirectRoleResizeTargets(root, snapshot, mutationEdgeIds);
-
-      if (directRoleResizeTargets.length > 0) {
-        return directRoleResizeTargets;
-      }
-
-      return collectEdgeResizeTargets(root, snapshot, mutationEdgeIds);
-    },
-    [collectDirectRoleResizeTargets, collectEdgeResizeTargets]
-  );
-
-  const refreshLockedEdgeResizeTargets = React.useCallback(
-    (root: HTMLElement, snapshot: TemplateEdgeTopologySnapshotDto, lockedTargets: EdgeResizeTarget[]) => {
-      const liveNodes = getFrameNodes(root);
-
-      return lockedTargets
-        .map((lockedTarget) => {
-          const refreshMember = (member: EdgeResizeTargetMember): EdgeResizeTargetMember | null => {
-            const liveEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, member.edgeId);
-
-            if (!liveEdge) {
-              return null;
-            }
-
-            const node =
-              liveNodes.find((candidate) => getFrameGroupId(candidate) === liveEdge.frameGroupId) || member.node;
-            const context = buildFrameResizeContext(node);
-            const boundaryIndex =
-              liveEdge.side === 'left'
-                ? context.startColIndex
-                : liveEdge.side === 'right'
-                  ? context.endColIndex
-                  : liveEdge.side === 'top'
-                    ? context.startRowIndex
-                    : context.endRowIndex;
-            const widthInstruction =
-              liveEdge.side === 'left' || liveEdge.side === 'right'
-                ? buildSelfWidthResizeInstruction(context, liveEdge.side)
-                : null;
-
-            return {
-              ...member,
-              node,
-              shell: context.shell,
-              lineCoordinate: liveEdge.lineCoordinate,
-              spanStart: liveEdge.spanStart,
-              spanEnd: liveEdge.spanEnd,
-              boundaryIndex: context.singleCellBand ? null : boundaryIndex,
-              widthInstructions: widthInstruction ? [widthInstruction] : undefined,
-            };
-          };
-
-          const members = lockedTarget.members
-            .map((member) => refreshMember(member))
-            .filter((member): member is EdgeResizeTargetMember => Boolean(member));
-          const physicalPeerMembers = lockedTarget.physicalPeerMembers
-            .map((member) => refreshMember(member))
-            .filter((member): member is EdgeResizeTargetMember => Boolean(member));
-
-          if (members.length === 0) {
-            return null;
-          }
-
-          const uniqueInstructions = new Map<string, FrameWidthResizeInstruction>();
-          members
-            .flatMap((member) => member.widthInstructions || [])
-            .forEach((instruction) => {
-              uniqueInstructions.set(buildWidthInstructionKey(instruction, members[0]?.node || lockedTarget.node), instruction);
-            });
-
-          return {
-            ...lockedTarget,
-            node: members[0]?.node || lockedTarget.node,
-            shell: members[0]?.shell || lockedTarget.shell,
-            boundaryIndex: members[0]?.boundaryIndex ?? lockedTarget.boundaryIndex,
-            widthInstructions: Array.from(uniqueInstructions.values()),
-            members,
-            physicalPeerMembers,
-            hasOppositePeer:
-              lockedTarget.hasOppositePeer ||
-              members.some((member) =>
-                physicalPeerMembers.some((peerMember) => targetsSharePhysicalBoundary(member, peerMember))
-              ),
-          };
-        })
-        .filter(Boolean) as EdgeResizeTarget[];
-    },
-    [buildWidthInstructionKey, getFrameNodes]
-  );
-
   const realignLiveVerticalEdgeTargets = React.useCallback(
     (root: HTMLElement, resizeState: ResizeState) => {
       if (!resizeState.edgeResizeTargets?.length) {
@@ -5846,69 +5817,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
     },
     [buildLiveEdgeTopologySnapshot]
-  );
-
-  const stabilizeLiveVerticalEdgeTargetsToAppliedDelta = React.useCallback(
-    (root: HTMLElement, resizeState: ResizeState, nextAppliedDeltaX: number) => {
-      if (!resizeState.edgeResizeTargets?.length || Math.abs(nextAppliedDeltaX) < 0.5) {
-        return;
-      }
-
-      const expectedEdgeIds = (Object.keys(resizeState.edgeRoleById || {}).length > 0
-        ? Object.keys(resizeState.edgeRoleById || {})
-        : resizeState.mutationEdgeIds || []
-      ).filter((edgeId) => resizeState.edgeLineCoordinateBaseline?.[edgeId] !== undefined);
-
-      if (expectedEdgeIds.length === 0) {
-        return;
-      }
-
-      for (let pass = 0; pass < 4; pass += 1) {
-        const liveSnapshot = buildLiveEdgeTopologySnapshot(root);
-        let corrected = false;
-
-        expectedEdgeIds.forEach((edgeId) => {
-          const baselineLineCoordinate = resizeState.edgeLineCoordinateBaseline?.[edgeId];
-          const liveEdge = TemplateEdgeTopologyService.getEdgeById(liveSnapshot, edgeId);
-
-          if (
-            !liveEdge ||
-            typeof baselineLineCoordinate !== 'number' ||
-            (liveEdge.side !== 'left' && liveEdge.side !== 'right')
-          ) {
-            return;
-          }
-
-          const targetLineCoordinate = baselineLineCoordinate + nextAppliedDeltaX;
-          const correctionDelta = targetLineCoordinate - liveEdge.lineCoordinate;
-
-          if (Math.abs(correctionDelta) <= 0.05) {
-            return;
-          }
-
-          const node =
-            getFrameNodes(root).find((candidate) => getFrameGroupId(candidate) === liveEdge.frameGroupId) || null;
-
-          if (!node) {
-            return;
-          }
-
-          const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), liveEdge.side);
-
-          if (!widthInstruction) {
-            return;
-          }
-
-          applyFrameResizeWidthDelta(node, correctionDelta, [widthInstruction]);
-          corrected = true;
-        });
-
-        if (!corrected) {
-          break;
-        }
-      }
-    },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes]
   );
 
   const finalizeLiveVerticalEdgeTargets = React.useCallback(
@@ -5994,12 +5902,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         edgeIds: expectedEdgeIds,
         preferredEdgeRoleById: resizeState.edgeRoleById,
       });
-      normalizeLiveVerticalPhysicalPeers(root, {
-        edgeIds: expectedEdgeIds,
-        preferredEdgeRoleById: resizeState.edgeRoleById,
-      });
     },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes, normalizeLiveVerticalCohorts, normalizeLiveVerticalPhysicalPeers]
+    [buildLiveEdgeTopologySnapshot, getFrameNodes, normalizeLiveVerticalCohorts]
   );
 
   const saveTemplate = React.useCallback(async () => {
@@ -6103,30 +6007,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           realignLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
           finalizeLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
         }
-        const liveSnapshot = buildLiveEdgeTopologySnapshot(previewRef.current);
-        const restrictedVerticalEdgeIds =
-          currentResizeState?.edgeResizeTargets?.length
-            ? (Object.keys(currentResizeState.edgeRoleById || {}).length > 0
-                ? Object.keys(currentResizeState.edgeRoleById || {})
-                : currentResizeState.mutationEdgeIds || []
-              ).filter(
-                (edgeId) => TemplateEdgeTopologyService.getEdgeById(liveSnapshot, edgeId)?.orientation === 'vertical'
-              )
-            : [];
-
-        if (restrictedVerticalEdgeIds.length > 0) {
-          normalizeLiveVerticalCohorts(previewRef.current, {
-            edgeIds: restrictedVerticalEdgeIds,
-            preferredEdgeRoleById: currentResizeState?.edgeRoleById,
-          });
-          normalizeLiveVerticalPhysicalPeers(previewRef.current, {
-            edgeIds: restrictedVerticalEdgeIds,
-            preferredEdgeRoleById: currentResizeState?.edgeRoleById,
-          });
-        } else {
-          normalizeLiveVerticalCohorts(previewRef.current);
-          normalizeLiveVerticalPhysicalPeers(previewRef.current);
-        }
+        normalizeLiveVerticalCohorts(previewRef.current);
+        normalizeLiveVerticalPhysicalPeers(previewRef.current);
       }
       syncDraftPreviewHtmlRef();
       if (!frameSelectionIdsEqual(selectedFrameGroupIds, selectedFrameGroupIdsRef.current)) {
@@ -6568,11 +6450,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const resizeTargets = resolveLiveEdgeResizeTargets(
+      const directRoleResizeTargets = collectDirectRoleResizeTargets(
         previewRef.current || event.currentTarget,
         edgePressState.snapshot,
         edgePressState.mutationEdgeIds
       );
+      const resizeTargets =
+        directRoleResizeTargets.length > 0
+          ? directRoleResizeTargets
+          : collectEdgeResizeTargets(
+              previewRef.current || event.currentTarget,
+              edgePressState.snapshot,
+              edgePressState.mutationEdgeIds
+            );
 
       applyRuntimeSelectionUi([], edgePressState.dragSelection);
       edgeSelectionStateRef.current = edgePressState.dragSelection;
@@ -6650,23 +6540,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextRect.height = resizeState.rect.height + delta.y;
       }
 
-      let activeEdgeResizeTargets = resizeState.edgeResizeTargets || [];
-
-      if (activeEdgeResizeTargets.length > 0) {
-        const liveResizeRoot = previewRef.current || resizeState.pageInner;
-        const liveResizeSnapshot = liveResizeRoot ? buildLiveEdgeTopologySnapshot(liveResizeRoot) : null;
-
-        if (liveResizeRoot && liveResizeSnapshot) {
-          const liveResizeTargets = refreshLockedEdgeResizeTargets(
-            liveResizeRoot,
-            liveResizeSnapshot,
-            resizeState.edgeResizeTargets || []
-          );
-
-          if (liveResizeTargets.length > 0) {
-            activeEdgeResizeTargets = liveResizeTargets;
-          }
-        }
+      if (resizeState.edgeResizeTargets && resizeState.edgeResizeTargets.length > 0) {
         const boundedEdgeRect = clampFrameNodeRect(nextRect, pageBounds);
         const totalRequestedDeltaX = resizeState.direction.includes('w')
           ? boundedEdgeRect.left - resizeState.rect.left
@@ -6680,7 +6554,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             : 0;
         const nextDeltaX = totalRequestedDeltaX - (resizeState.appliedEdgeDeltaX || 0);
         const nextDeltaY = totalRequestedDeltaY - (resizeState.appliedEdgeDeltaY || 0);
-        const widthResizeTargets = activeEdgeResizeTargets.filter(
+        const widthResizeTargets = resizeState.edgeResizeTargets.filter(
           (edgeTarget) => edgeTarget.orientation === 'vertical' && (edgeTarget.widthInstructions?.length || 0) > 0
         );
         const widthConstraintTargets = widthResizeTargets.reduce<
@@ -6730,7 +6604,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           matchedGroup.instructions = Array.from(uniqueInstructions.values());
           return groups;
         }, []);
-        const heightResizeTargets = activeEdgeResizeTargets
+        const heightResizeTargets = resizeState.edgeResizeTargets
           .map((edgeTarget) => ({
             edgeTarget,
             member: pickHeightResizeTargetMember(edgeTarget, resizeState.direction),
@@ -6820,50 +6694,38 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           Math.abs(snappedDeltaX - constrainedDeltaX) >= 0.5 ? resolveWidthDragDelta(snappedDeltaX) : constrainedDeltaX;
         const finalDeltaY =
           Math.abs(snappedDeltaY - constrainedDeltaY) >= 0.5 ? resolveHeightDragDelta(snappedDeltaY) : constrainedDeltaY;
-        const safeFinalDeltaX = clampResolvedEdgeDragDeltaToPointerRequest(nextDeltaX, finalDeltaX);
-        const safeFinalDeltaY = clampResolvedEdgeDragDeltaToPointerRequest(nextDeltaY, finalDeltaY);
-
-        const nextAppliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + safeFinalDeltaX;
-        const nextAppliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + safeFinalDeltaY;
 
         widthResizeTargets.forEach((edgeTarget) => {
-          if (Math.abs(safeFinalDeltaX) >= 0.5) {
-            applyFrameResizeWidthDelta(edgeTarget.node, safeFinalDeltaX, edgeTarget.widthInstructions);
+          if (Math.abs(finalDeltaX) >= 0.5) {
+            applyFrameResizeWidthDelta(edgeTarget.node, finalDeltaX, edgeTarget.widthInstructions);
           }
         });
 
         heightResizeTargets.forEach(({ edgeTarget, member }) => {
-          if (Math.abs(safeFinalDeltaY) < 0.5) {
+          if (Math.abs(finalDeltaY) < 0.5) {
             return;
           }
 
           if (member.side === 'top') {
-            applyFrameResizeTopDelta(member.node, safeFinalDeltaY);
+            applyFrameResizeTopDelta(member.node, finalDeltaY);
             return;
           }
 
           if (member.side === 'bottom') {
             if (edgeTarget.hasOppositePeer) {
-              applyFrameResizeHeightDeltaLocal(member.node, safeFinalDeltaY);
+              applyFrameResizeHeightDeltaLocal(member.node, finalDeltaY);
               return;
             }
 
-            applyFrameResizeHeightDelta(member.node, safeFinalDeltaY);
+            applyFrameResizeHeightDelta(member.node, finalDeltaY);
           }
         });
 
-        resizeState.appliedEdgeDeltaX = nextAppliedEdgeDeltaX;
-        resizeState.appliedEdgeDeltaY = nextAppliedEdgeDeltaY;
+        resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + finalDeltaX;
+        resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + finalDeltaY;
         if (previewRef.current) {
-          if (widthResizeTargets.length > 0) {
-            stabilizeLiveVerticalEdgeTargetsToAppliedDelta(
-              previewRef.current,
-              resizeState,
-              nextAppliedEdgeDeltaX
-            );
-          }
           realignLiveVerticalEdgeTargets(previewRef.current, resizeState);
-          if (Math.abs(safeFinalDeltaY) >= 0.5) {
+          if (Math.abs(finalDeltaY) >= 0.5) {
             normalizeLiveVerticalPhysicalPeers(previewRef.current, {
               preferredEdgeRoleById: resizeState.edgeRoleById,
             });
@@ -6894,12 +6756,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       ensureRelativeAnchorConfigs(resizeState.pageInner);
-        applyRelativeAnchoredFrameRects(
-          resizeState.pageInner,
-          activeEdgeResizeTargets.length
-            ? Array.from(
+      applyRelativeAnchoredFrameRects(
+        resizeState.pageInner,
+        resizeState.edgeResizeTargets?.length
+          ? Array.from(
               new Set(
-                activeEdgeResizeTargets.flatMap((edgeTarget) =>
+                resizeState.edgeResizeTargets.flatMap((edgeTarget) =>
                   [...edgeTarget.members, ...edgeTarget.physicalPeerMembers]
                     .map((member) => getFrameGroupId(member.node))
                     .filter((frameGroupId) => Boolean(frameGroupId))
@@ -6912,7 +6774,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
   }, [
     applyRuntimeSelectionUi,
-    buildLiveEdgeTopologySnapshot,
     buildWidthInstructionKey,
     collectDirectRoleResizeTargets,
     collectEdgeResizeTargets,
@@ -6921,10 +6782,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     normalizeLiveVerticalCohorts,
     normalizeLiveVerticalPhysicalPeers,
     realignLiveVerticalEdgeTargets,
-    refreshLockedEdgeResizeTargets,
-    resolveLiveEdgeResizeTargets,
     resolveMarqueeSelectionIds,
-    stabilizeLiveVerticalEdgeTargetsToAppliedDelta,
   ]);
 
   const handlePreviewPointerUp = React.useCallback(

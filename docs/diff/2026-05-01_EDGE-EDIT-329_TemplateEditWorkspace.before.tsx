@@ -6823,9 +6823,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const safeFinalDeltaX = clampResolvedEdgeDragDeltaToPointerRequest(nextDeltaX, finalDeltaX);
         const safeFinalDeltaY = clampResolvedEdgeDragDeltaToPointerRequest(nextDeltaY, finalDeltaY);
 
-        const nextAppliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + safeFinalDeltaX;
-        const nextAppliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + safeFinalDeltaY;
-
         widthResizeTargets.forEach((edgeTarget) => {
           if (Math.abs(safeFinalDeltaX) >= 0.5) {
             applyFrameResizeWidthDelta(edgeTarget.node, safeFinalDeltaX, edgeTarget.widthInstructions);
@@ -6852,16 +6849,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           }
         });
 
-        resizeState.appliedEdgeDeltaX = nextAppliedEdgeDeltaX;
-        resizeState.appliedEdgeDeltaY = nextAppliedEdgeDeltaY;
+        resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + safeFinalDeltaX;
+        resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + safeFinalDeltaY;
         if (previewRef.current) {
-          if (widthResizeTargets.length > 0) {
-            stabilizeLiveVerticalEdgeTargetsToAppliedDelta(
-              previewRef.current,
-              resizeState,
-              nextAppliedEdgeDeltaX
-            );
-          }
           realignLiveVerticalEdgeTargets(previewRef.current, resizeState);
           if (Math.abs(safeFinalDeltaY) >= 0.5) {
             normalizeLiveVerticalPhysicalPeers(previewRef.current, {
@@ -6924,7 +6914,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     refreshLockedEdgeResizeTargets,
     resolveLiveEdgeResizeTargets,
     resolveMarqueeSelectionIds,
-    stabilizeLiveVerticalEdgeTargetsToAppliedDelta,
   ]);
 
   const handlePreviewPointerUp = React.useCallback(

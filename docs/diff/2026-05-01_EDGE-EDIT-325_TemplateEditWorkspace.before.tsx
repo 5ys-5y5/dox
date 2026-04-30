@@ -3084,29 +3084,6 @@ const resolveEdgeDragAutosnapDelta = ({
   return bestMatch === null ? requestedDelta : requestedDelta + bestMatch.adjustment;
 };
 
-const clampResolvedEdgeDragDeltaToPointerRequest = (
-  requestedDelta: number,
-  resolvedDelta: number,
-  overshootTolerancePx = EDGE_DRAG_AUTOSNAP_THRESHOLD_PX
-) => {
-  if (Math.abs(resolvedDelta) < 0.5) {
-    return 0;
-  }
-
-  if (Math.abs(requestedDelta) < 0.5) {
-    return resolvedDelta;
-  }
-
-  const maxAllowedMagnitude = Math.abs(requestedDelta) + overshootTolerancePx;
-
-  if (Math.abs(resolvedDelta) <= maxAllowedMagnitude) {
-    return resolvedDelta;
-  }
-
-  const directionSign = Math.sign(resolvedDelta) || Math.sign(requestedDelta);
-  return directionSign * maxAllowedMagnitude;
-};
-
 const pickHeightResizeTargetMember = (
   target: EdgeResizeTarget,
   direction: TemplateFrameResizeDirection
@@ -5848,69 +5825,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [buildLiveEdgeTopologySnapshot]
   );
 
-  const stabilizeLiveVerticalEdgeTargetsToAppliedDelta = React.useCallback(
-    (root: HTMLElement, resizeState: ResizeState, nextAppliedDeltaX: number) => {
-      if (!resizeState.edgeResizeTargets?.length || Math.abs(nextAppliedDeltaX) < 0.5) {
-        return;
-      }
-
-      const expectedEdgeIds = (Object.keys(resizeState.edgeRoleById || {}).length > 0
-        ? Object.keys(resizeState.edgeRoleById || {})
-        : resizeState.mutationEdgeIds || []
-      ).filter((edgeId) => resizeState.edgeLineCoordinateBaseline?.[edgeId] !== undefined);
-
-      if (expectedEdgeIds.length === 0) {
-        return;
-      }
-
-      for (let pass = 0; pass < 4; pass += 1) {
-        const liveSnapshot = buildLiveEdgeTopologySnapshot(root);
-        let corrected = false;
-
-        expectedEdgeIds.forEach((edgeId) => {
-          const baselineLineCoordinate = resizeState.edgeLineCoordinateBaseline?.[edgeId];
-          const liveEdge = TemplateEdgeTopologyService.getEdgeById(liveSnapshot, edgeId);
-
-          if (
-            !liveEdge ||
-            typeof baselineLineCoordinate !== 'number' ||
-            (liveEdge.side !== 'left' && liveEdge.side !== 'right')
-          ) {
-            return;
-          }
-
-          const targetLineCoordinate = baselineLineCoordinate + nextAppliedDeltaX;
-          const correctionDelta = targetLineCoordinate - liveEdge.lineCoordinate;
-
-          if (Math.abs(correctionDelta) <= 0.05) {
-            return;
-          }
-
-          const node =
-            getFrameNodes(root).find((candidate) => getFrameGroupId(candidate) === liveEdge.frameGroupId) || null;
-
-          if (!node) {
-            return;
-          }
-
-          const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), liveEdge.side);
-
-          if (!widthInstruction) {
-            return;
-          }
-
-          applyFrameResizeWidthDelta(node, correctionDelta, [widthInstruction]);
-          corrected = true;
-        });
-
-        if (!corrected) {
-          break;
-        }
-      }
-    },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes]
-  );
-
   const finalizeLiveVerticalEdgeTargets = React.useCallback(
     (root: HTMLElement, resizeState: ResizeState) => {
       if (!resizeState.edgeResizeTargets?.length) {
@@ -5994,12 +5908,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         edgeIds: expectedEdgeIds,
         preferredEdgeRoleById: resizeState.edgeRoleById,
       });
-      normalizeLiveVerticalPhysicalPeers(root, {
-        edgeIds: expectedEdgeIds,
-        preferredEdgeRoleById: resizeState.edgeRoleById,
-      });
     },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes, normalizeLiveVerticalCohorts, normalizeLiveVerticalPhysicalPeers]
+    [buildLiveEdgeTopologySnapshot, getFrameNodes, normalizeLiveVerticalCohorts]
   );
 
   const saveTemplate = React.useCallback(async () => {
@@ -6103,30 +6013,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           realignLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
           finalizeLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
         }
-        const liveSnapshot = buildLiveEdgeTopologySnapshot(previewRef.current);
-        const restrictedVerticalEdgeIds =
-          currentResizeState?.edgeResizeTargets?.length
-            ? (Object.keys(currentResizeState.edgeRoleById || {}).length > 0
-                ? Object.keys(currentResizeState.edgeRoleById || {})
-                : currentResizeState.mutationEdgeIds || []
-              ).filter(
-                (edgeId) => TemplateEdgeTopologyService.getEdgeById(liveSnapshot, edgeId)?.orientation === 'vertical'
-              )
-            : [];
-
-        if (restrictedVerticalEdgeIds.length > 0) {
-          normalizeLiveVerticalCohorts(previewRef.current, {
-            edgeIds: restrictedVerticalEdgeIds,
-            preferredEdgeRoleById: currentResizeState?.edgeRoleById,
-          });
-          normalizeLiveVerticalPhysicalPeers(previewRef.current, {
-            edgeIds: restrictedVerticalEdgeIds,
-            preferredEdgeRoleById: currentResizeState?.edgeRoleById,
-          });
-        } else {
-          normalizeLiveVerticalCohorts(previewRef.current);
-          normalizeLiveVerticalPhysicalPeers(previewRef.current);
-        }
+        normalizeLiveVerticalCohorts(previewRef.current);
+        normalizeLiveVerticalPhysicalPeers(previewRef.current);
       }
       syncDraftPreviewHtmlRef();
       if (!frameSelectionIdsEqual(selectedFrameGroupIds, selectedFrameGroupIdsRef.current)) {
@@ -6820,50 +6708,38 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           Math.abs(snappedDeltaX - constrainedDeltaX) >= 0.5 ? resolveWidthDragDelta(snappedDeltaX) : constrainedDeltaX;
         const finalDeltaY =
           Math.abs(snappedDeltaY - constrainedDeltaY) >= 0.5 ? resolveHeightDragDelta(snappedDeltaY) : constrainedDeltaY;
-        const safeFinalDeltaX = clampResolvedEdgeDragDeltaToPointerRequest(nextDeltaX, finalDeltaX);
-        const safeFinalDeltaY = clampResolvedEdgeDragDeltaToPointerRequest(nextDeltaY, finalDeltaY);
-
-        const nextAppliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + safeFinalDeltaX;
-        const nextAppliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + safeFinalDeltaY;
 
         widthResizeTargets.forEach((edgeTarget) => {
-          if (Math.abs(safeFinalDeltaX) >= 0.5) {
-            applyFrameResizeWidthDelta(edgeTarget.node, safeFinalDeltaX, edgeTarget.widthInstructions);
+          if (Math.abs(finalDeltaX) >= 0.5) {
+            applyFrameResizeWidthDelta(edgeTarget.node, finalDeltaX, edgeTarget.widthInstructions);
           }
         });
 
         heightResizeTargets.forEach(({ edgeTarget, member }) => {
-          if (Math.abs(safeFinalDeltaY) < 0.5) {
+          if (Math.abs(finalDeltaY) < 0.5) {
             return;
           }
 
           if (member.side === 'top') {
-            applyFrameResizeTopDelta(member.node, safeFinalDeltaY);
+            applyFrameResizeTopDelta(member.node, finalDeltaY);
             return;
           }
 
           if (member.side === 'bottom') {
             if (edgeTarget.hasOppositePeer) {
-              applyFrameResizeHeightDeltaLocal(member.node, safeFinalDeltaY);
+              applyFrameResizeHeightDeltaLocal(member.node, finalDeltaY);
               return;
             }
 
-            applyFrameResizeHeightDelta(member.node, safeFinalDeltaY);
+            applyFrameResizeHeightDelta(member.node, finalDeltaY);
           }
         });
 
-        resizeState.appliedEdgeDeltaX = nextAppliedEdgeDeltaX;
-        resizeState.appliedEdgeDeltaY = nextAppliedEdgeDeltaY;
+        resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + finalDeltaX;
+        resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + finalDeltaY;
         if (previewRef.current) {
-          if (widthResizeTargets.length > 0) {
-            stabilizeLiveVerticalEdgeTargetsToAppliedDelta(
-              previewRef.current,
-              resizeState,
-              nextAppliedEdgeDeltaX
-            );
-          }
           realignLiveVerticalEdgeTargets(previewRef.current, resizeState);
-          if (Math.abs(safeFinalDeltaY) >= 0.5) {
+          if (Math.abs(finalDeltaY) >= 0.5) {
             normalizeLiveVerticalPhysicalPeers(previewRef.current, {
               preferredEdgeRoleById: resizeState.edgeRoleById,
             });
@@ -6924,7 +6800,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     refreshLockedEdgeResizeTargets,
     resolveLiveEdgeResizeTargets,
     resolveMarqueeSelectionIds,
-    stabilizeLiveVerticalEdgeTargetsToAppliedDelta,
   ]);
 
   const handlePreviewPointerUp = React.useCallback(
