@@ -247,9 +247,7 @@ const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
 const FRAME_MARQUEE_GHOST_CLASS = 'v106-frame-marquee';
 const FRAME_CREATION_GHOST_CLASS = 'v106-frame-create-ghost';
-const FRAME_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-outline-overlay';
-const FRAME_SELECTION_FILL_CLASS = 'v106-frame-selection-fill';
-const TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR = 'data-template-native-outline-hidden';
+const NORMALIZED_FRAME_SHELL_BORDER_ATTR = 'data-v106-shell-border';
 const TEMPLATE_FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-mode';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
@@ -1507,6 +1505,9 @@ const stripTransientFrameEditorUi = (root: ParentNode) => {
     .forEach((element) => {
       element.remove();
     });
+  root.querySelectorAll<HTMLElement>(`[${NORMALIZED_FRAME_SHELL_BORDER_ATTR}="true"]`).forEach((element) => {
+    element.remove();
+  });
   root.querySelectorAll<HTMLElement>('[data-frame-editor-ui]').forEach((element) => {
     element.remove();
   });
@@ -1525,6 +1526,79 @@ const stripTransientFrameEditorUi = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>('[data-template-edit-enabled]').forEach((element) => {
     element.removeAttribute('data-template-edit-enabled');
   });
+};
+
+const appendNormalizedShellBorder = (
+  shell: HTMLElement,
+  spec: {
+    side: 'top' | 'right' | 'bottom' | 'left';
+    width: number;
+    style: string;
+    color: string;
+  }
+) => {
+  if (spec.width <= 0 || spec.style === 'none' || spec.color === 'transparent') {
+    return;
+  }
+
+  const border = document.createElement('div');
+  border.setAttribute(NORMALIZED_FRAME_SHELL_BORDER_ATTR, 'true');
+  border.setAttribute('aria-hidden', 'true');
+  border.style.position = 'absolute';
+  border.style.pointerEvents = 'none';
+  border.style.zIndex = '1';
+
+  if (spec.style === 'solid') {
+    border.style.backgroundColor = spec.color;
+
+    if (spec.side === 'top') {
+      border.style.left = '0';
+      border.style.top = '0';
+      border.style.width = '100%';
+      border.style.height = toFrameCssPx(spec.width);
+    } else if (spec.side === 'right') {
+      border.style.top = '0';
+      border.style.right = '0';
+      border.style.width = toFrameCssPx(spec.width);
+      border.style.height = '100%';
+    } else if (spec.side === 'bottom') {
+      border.style.left = '0';
+      border.style.bottom = '0';
+      border.style.width = '100%';
+      border.style.height = toFrameCssPx(spec.width);
+    } else {
+      border.style.top = '0';
+      border.style.left = '0';
+      border.style.width = toFrameCssPx(spec.width);
+      border.style.height = '100%';
+    }
+  } else {
+    border.style.boxSizing = 'border-box';
+
+    if (spec.side === 'top') {
+      border.style.left = '0';
+      border.style.top = '0';
+      border.style.width = '100%';
+      border.style.borderTop = `${spec.width}px ${spec.style} ${spec.color}`;
+    } else if (spec.side === 'right') {
+      border.style.top = '0';
+      border.style.right = '0';
+      border.style.height = '100%';
+      border.style.borderRight = `${spec.width}px ${spec.style} ${spec.color}`;
+    } else if (spec.side === 'bottom') {
+      border.style.left = '0';
+      border.style.bottom = '0';
+      border.style.width = '100%';
+      border.style.borderBottom = `${spec.width}px ${spec.style} ${spec.color}`;
+    } else {
+      border.style.top = '0';
+      border.style.left = '0';
+      border.style.height = '100%';
+      border.style.borderLeft = `${spec.width}px ${spec.style} ${spec.color}`;
+    }
+  }
+
+  shell.appendChild(border);
 };
 
 const buildNormalizedFrameBandShell = (
@@ -1567,21 +1641,48 @@ const buildNormalizedFrameBandShell = (
     Array.from({ length: group.rowEnd - group.rowStart }, (_, offset) => group.rowStart + offset).every(
       (rowIndex) => (rowOccupiedMaxColEnd[rowIndex] || 0) <= group.colEnd
     );
+  const shellBorderSpecs = [
+    {
+      side: 'top' as const,
+      width: preserveTopBorder ? parseFramePx(tableStyle.borderTopWidth) : 0,
+      style: preserveTopBorder ? tableStyle.borderTopStyle : 'none',
+      color: preserveTopBorder ? tableStyle.borderTopColor : 'transparent',
+    },
+    {
+      side: 'right' as const,
+      width: preserveRightBorder ? parseFramePx(tableStyle.borderRightWidth) : 0,
+      style: preserveRightBorder ? tableStyle.borderRightStyle : 'none',
+      color: preserveRightBorder ? tableStyle.borderRightColor : 'transparent',
+    },
+    {
+      side: 'bottom' as const,
+      width: preserveBottomBorder ? parseFramePx(tableStyle.borderBottomWidth) : 0,
+      style: preserveBottomBorder ? tableStyle.borderBottomStyle : 'none',
+      color: preserveBottomBorder ? tableStyle.borderBottomColor : 'transparent',
+    },
+    {
+      side: 'left' as const,
+      width: preserveLeftBorder ? parseFramePx(tableStyle.borderLeftWidth) : 0,
+      style: preserveLeftBorder ? tableStyle.borderLeftStyle : 'none',
+      color: preserveLeftBorder ? tableStyle.borderLeftColor : 'transparent',
+    },
+  ];
+
   const nextTable = table.cloneNode(false) as HTMLTableElement;
   nextTable.style.width = nextShell.style.width;
   nextTable.style.height = nextShell.style.height;
-  nextTable.style.borderTopWidth = preserveTopBorder ? tableStyle.borderTopWidth : '0px';
-  nextTable.style.borderTopStyle = preserveTopBorder ? tableStyle.borderTopStyle : 'none';
-  nextTable.style.borderTopColor = preserveTopBorder ? tableStyle.borderTopColor : 'transparent';
-  nextTable.style.borderRightWidth = preserveRightBorder ? tableStyle.borderRightWidth : '0px';
-  nextTable.style.borderRightStyle = preserveRightBorder ? tableStyle.borderRightStyle : 'none';
-  nextTable.style.borderRightColor = preserveRightBorder ? tableStyle.borderRightColor : 'transparent';
-  nextTable.style.borderBottomWidth = preserveBottomBorder ? tableStyle.borderBottomWidth : '0px';
-  nextTable.style.borderBottomStyle = preserveBottomBorder ? tableStyle.borderBottomStyle : 'none';
-  nextTable.style.borderBottomColor = preserveBottomBorder ? tableStyle.borderBottomColor : 'transparent';
-  nextTable.style.borderLeftWidth = preserveLeftBorder ? tableStyle.borderLeftWidth : '0px';
-  nextTable.style.borderLeftStyle = preserveLeftBorder ? tableStyle.borderLeftStyle : 'none';
-  nextTable.style.borderLeftColor = preserveLeftBorder ? tableStyle.borderLeftColor : 'transparent';
+  nextTable.style.borderTopWidth = '0px';
+  nextTable.style.borderTopStyle = 'none';
+  nextTable.style.borderTopColor = 'transparent';
+  nextTable.style.borderRightWidth = '0px';
+  nextTable.style.borderRightStyle = 'none';
+  nextTable.style.borderRightColor = 'transparent';
+  nextTable.style.borderBottomWidth = '0px';
+  nextTable.style.borderBottomStyle = 'none';
+  nextTable.style.borderBottomColor = 'transparent';
+  nextTable.style.borderLeftWidth = '0px';
+  nextTable.style.borderLeftStyle = 'none';
+  nextTable.style.borderLeftColor = 'transparent';
   nextTable.style.borderSpacing = '0px';
 
   const colgroup = document.createElement('colgroup');
@@ -1621,6 +1722,7 @@ const buildNormalizedFrameBandShell = (
   nextShell.appendChild(nextTable);
   stripTransientFrameEditorUi(nextShell);
   TemplateFrameEditHtmlService.stripEditorUiState(nextShell);
+  shellBorderSpecs.forEach((spec) => appendNormalizedShellBorder(nextShell, spec));
   return nextShell;
 };
 
@@ -3404,9 +3506,6 @@ const stripSelectionAttrs = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>('[data-template-edit-enabled]').forEach((element) => {
     element.removeAttribute('data-template-edit-enabled');
   });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR}="true"]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
-  });
 };
 
 const extractEditorHtml = (root: HTMLElement) => {
@@ -3582,191 +3681,6 @@ const buildEdgeSelectionButton = (
   return button;
 };
 
-const resolveVisibleBorderValue = (
-  primaryStyle: CSSStyleDeclaration | null,
-  fallbackStyle: CSSStyleDeclaration | null,
-  side: 'top' | 'right' | 'bottom' | 'left'
-) => {
-  const borderWidthProperty = `border${side[0].toUpperCase()}${side.slice(1)}Width` as const;
-  const borderProperty = `border${side[0].toUpperCase()}${side.slice(1)}` as const;
-  const primaryWidth = primaryStyle ? parseFramePx(primaryStyle[borderWidthProperty]) : 0;
-
-  if (primaryWidth > 0 && primaryStyle) {
-    return primaryStyle[borderProperty];
-  }
-
-  const fallbackWidth = fallbackStyle ? parseFramePx(fallbackStyle[borderWidthProperty]) : 0;
-  return fallbackWidth > 0 && fallbackStyle ? fallbackStyle[borderProperty] : '';
-};
-
-const parseFrameBorderDefinition = (borderValue: string) => {
-  const match = borderValue.trim().match(/^([0-9.]+)px\s+(\S+)\s+(.+)$/);
-
-  if (!match) {
-    return null;
-  }
-
-  const width = Number.parseFloat(match[1] || '0');
-  const style = match[2] || 'solid';
-  const color = match[3] || 'transparent';
-
-  if (!Number.isFinite(width) || width <= 0 || style === 'none') {
-    return null;
-  }
-
-  return { width, style, color, cssText: borderValue };
-};
-
-const buildFrameBorderCssText = (
-  outlineStyle: string | null | undefined,
-  fallbackColor = 'rgba(15, 23, 42, 0.48)'
-) => {
-  if (outlineStyle === 'dashed') {
-    return '1px dashed rgba(15, 23, 42, 0.34)';
-  }
-
-  return `1px solid ${fallbackColor}`;
-};
-
-const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<TemplateEdgeSide>) => {
-  const shell = resolveFrameLayoutShell(frameNode);
-  const pageInner = shell.closest<HTMLElement>('.page-inner');
-  const table = resolveFrameLayoutTable(frameNode);
-  const frameGroupId = getFrameGroupId(frameNode);
-  const cell =
-    frameNode.matches('td,th')
-      ? frameNode
-      : table?.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`) ||
-        table?.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) ||
-        null;
-  const tableStyle = table ? getComputedStyle(table) : null;
-  const cellStyle = cell ? getComputedStyle(cell) : null;
-  const borderTop = resolveVisibleBorderValue(cellStyle, tableStyle, 'top');
-  const borderRight = resolveVisibleBorderValue(cellStyle, tableStyle, 'right');
-  const borderBottom = resolveVisibleBorderValue(cellStyle, tableStyle, 'bottom');
-  const borderLeft = resolveVisibleBorderValue(cellStyle, tableStyle, 'left');
-  const shellRect = pageInner ? readFrameElementRect(shell, pageInner) : null;
-  const outlineStyle =
-    cell?.getAttribute('data-template-frame-outline-style')?.trim() ||
-    table?.getAttribute('data-template-frame-outline-style')?.trim() ||
-    null;
-
-  if (!pageInner || !shellRect) {
-    return;
-  }
-
-  if (!borderTop && !borderRight && !borderBottom && !borderLeft && !outlineStyle) {
-    return;
-  }
-
-  const horizontalFallbackBorder =
-    parseFrameBorderDefinition(borderTop) ||
-    parseFrameBorderDefinition(borderBottom) ||
-    parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
-  const verticalFallbackBorder =
-    parseFrameBorderDefinition(borderLeft) ||
-    parseFrameBorderDefinition(borderRight) ||
-    parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
-
-  const lineDefinitions = [
-    { side: 'top' as const, border: parseFrameBorderDefinition(borderTop) || horizontalFallbackBorder },
-    { side: 'right' as const, border: parseFrameBorderDefinition(borderRight) || verticalFallbackBorder },
-    { side: 'bottom' as const, border: parseFrameBorderDefinition(borderBottom) || horizontalFallbackBorder },
-    { side: 'left' as const, border: parseFrameBorderDefinition(borderLeft) || verticalFallbackBorder },
-  ].filter((entry) => entry.border);
-
-  if (lineDefinitions.length === 0) {
-    return;
-  }
-
-  const overlay = document.createElement('div');
-  overlay.setAttribute(FRAME_OUTLINE_OVERLAY_ATTR, 'true');
-  overlay.setAttribute('data-frame-editor-ui', 'true');
-  overlay.setAttribute('aria-hidden', 'true');
-  overlay.style.position = 'absolute';
-  overlay.style.left = toFrameCssPx(shellRect.left);
-  overlay.style.top = toFrameCssPx(shellRect.top);
-  overlay.style.width = toFrameCssPx(shellRect.width);
-  overlay.style.height = toFrameCssPx(shellRect.height);
-  overlay.style.pointerEvents = 'none';
-  overlay.style.zIndex = '29';
-  overlay.style.overflow = 'visible';
-
-  lineDefinitions.forEach((entry) => {
-    if (!entry.border) {
-      return;
-    }
-
-    const line = document.createElement('div');
-    line.setAttribute('data-frame-editor-ui', 'true');
-    line.style.position = 'absolute';
-    line.style.pointerEvents = 'none';
-
-    if (entry.side === 'top' || entry.side === 'bottom') {
-      line.style.left = '0';
-      line.style.width = '100%';
-      line.style.height = '0';
-      line.style.borderTop = entry.border.cssText;
-      line.style.top =
-        entry.side === 'top'
-          ? toFrameCssPx(-entry.border.width / 2)
-          : toFrameCssPx(shellRect.height - entry.border.width / 2);
-    } else {
-      line.style.top = '0';
-      line.style.height = '100%';
-      line.style.width = '0';
-      line.style.borderLeft = entry.border.cssText;
-      line.style.left =
-        entry.side === 'left'
-          ? toFrameCssPx(-entry.border.width / 2)
-          : toFrameCssPx(shellRect.width - entry.border.width / 2);
-    }
-
-    overlay.appendChild(line);
-  });
-
-  selectedSides.forEach((side) => {
-    const indicator = document.createElement('div');
-    indicator.setAttribute('data-frame-editor-ui', 'true');
-    indicator.style.position = 'absolute';
-    indicator.style.pointerEvents = 'none';
-
-    if (side === 'top' || side === 'bottom') {
-      indicator.style.left = '5px';
-      indicator.style.width = toFrameCssPx(Math.max(0, shellRect.width - 10));
-      indicator.style.height = '0';
-      indicator.style.borderTop = '3px solid rgba(59, 130, 246, 0.98)';
-      indicator.style.top =
-        side === 'top'
-          ? toFrameCssPx(5 - 1.5)
-          : toFrameCssPx(Math.max(0, shellRect.height - 5 - 1.5));
-    } else {
-      indicator.style.top = '5px';
-      indicator.style.height = toFrameCssPx(Math.max(0, shellRect.height - 10));
-      indicator.style.width = '0';
-      indicator.style.borderLeft = '3px solid rgba(59, 130, 246, 0.98)';
-      indicator.style.left =
-        side === 'left'
-          ? toFrameCssPx(5 - 1.5)
-          : toFrameCssPx(Math.max(0, shellRect.width - 5 - 1.5));
-    }
-
-    overlay.appendChild(indicator);
-  });
-
-  shell.setAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR, 'true');
-  pageInner.appendChild(overlay);
-};
-
-const appendFrameSelectionFill = (frameNode: HTMLElement) => {
-  const shell = resolveFrameLayoutShell(frameNode);
-  const fill = document.createElement('div');
-  fill.className = FRAME_SELECTION_FILL_CLASS;
-  fill.setAttribute('data-frame-editor-ui', 'true');
-  fill.setAttribute('aria-hidden', 'true');
-  shell.appendChild(fill);
-};
-
 const applyFrameSelectionUi = (
   root: HTMLElement,
   selectedIds: string[],
@@ -3802,7 +3716,6 @@ const applyFrameSelectionUi = (
   collectFrameSelectionAnchors(root).forEach((node) => {
     const frameGroupId = getFrameGroupId(node);
     const selectionIndex = selectedIds.indexOf(frameGroupId);
-    const selectedSides = new Set<TemplateEdgeSide>();
 
     node.setAttribute('data-template-edge-host', 'true');
 
@@ -3813,7 +3726,19 @@ const applyFrameSelectionUi = (
       if (selectionIndex === 0) {
         node.setAttribute('data-template-primary-selected', 'true');
       }
-      appendFrameSelectionFill(node);
+
+      const badge = document.createElement('div');
+      badge.className = FRAME_SELECTION_BADGE_CLASS;
+      badge.setAttribute('data-frame-editor-ui', 'true');
+      badge.setAttribute('aria-hidden', 'true');
+      badge.textContent = selectedIds.length > 1 ? `선택 ${selectionIndex + 1}` : '선택';
+      node.appendChild(badge);
+
+      if (selectionIndex === 0) {
+        FRAME_RESIZE_DIRECTIONS.forEach((direction) => {
+          node.appendChild(buildResizeHandle(direction));
+        });
+      }
     }
 
     if (!edgeSnapshot) {
@@ -3832,7 +3757,6 @@ const applyFrameSelectionUi = (
 
       if (edgeMeta) {
         node.setAttribute('data-template-edge-visual', 'true');
-        selectedSides.add(side);
 
         if (edgeMeta.isAnchorEdge) {
           node.setAttribute('data-template-edge-anchor-node', 'true');
@@ -3851,8 +3775,6 @@ const applyFrameSelectionUi = (
         )
       );
     });
-
-    appendFrameOutlineOverlay(node, selectedSides);
   });
 
   renderRelativeAnchorGuides(root, selectedIds);
@@ -5764,11 +5686,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       const edgeButton = target.closest<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR);
       const resizeHandle = target.closest<HTMLElement>(FRAME_RESIZE_HANDLE_SELECTOR);
-      const frameAnchorTarget =
-        edgeButton?.closest<HTMLElement>('.v102-frame-band') ||
-        resizeHandle?.closest<HTMLElement>('.v102-frame-band') ||
-        target.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
-      const frameNode = resolveFrameSelectionAnchor(frameAnchorTarget);
+      const frameNode = resolveFrameSelectionAnchor(target.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR));
       const pageInner =
         target.closest<HTMLElement>('.page-inner') || frameNode?.closest<HTMLElement>('.page-inner') || null;
 
@@ -6619,33 +6537,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-template-selected="true"] {
           position: relative;
           z-index: 20 !important;
-          outline: none !important;
-          box-shadow: none !important;
+          outline: 3px solid #0f766e !important;
+          outline-offset: -1px;
+          box-shadow:
+            0 0 0 4px rgba(20, 184, 166, .18),
+            inset 0 0 0 1px rgba(255, 255, 255, .92) !important;
         }
         .template-edit-preview [data-template-primary-selected="true"] {
-          box-shadow: none !important;
+          outline-color: #0f766e !important;
+          box-shadow:
+            0 0 0 5px rgba(13, 148, 136, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .96) !important;
         }
         .template-edit-preview [data-template-edge-host="true"] {
           position: relative;
           z-index: 21 !important;
         }
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table {
-          border-color: transparent !important;
-        }
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table td,
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table th {
-          border-color: transparent !important;
-        }
         .template-edit-preview [data-template-edge-host="true"] [data-template-frame-input="true"] {
           position: relative;
           z-index: 22;
-        }
-        .template-edit-preview .${FRAME_SELECTION_FILL_CLASS} {
-          position: absolute;
-          inset: 5px;
-          z-index: 19;
-          pointer-events: none;
-          background: rgba(59, 130, 246, .5);
         }
         .template-edit-preview .${FRAME_SELECTION_BADGE_CLASS} {
           position: absolute;
@@ -6729,41 +6639,38 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: absolute;
           z-index: 27;
           border: 0;
-          background-color: transparent;
-          background-image: none;
+          background: rgba(148, 163, 184, .16);
           padding: 0;
-          border-radius: 0;
-          box-shadow: none;
+          border-radius: 999px;
+          box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .28);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-mode="connected"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          background: rgba(13, 148, 136, .72);
+          box-shadow: 0 0 0 2px rgba(255, 255, 255, .92);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-mode="isolated"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          background: rgba(234, 88, 12, .88);
+          box-shadow: 0 0 0 2px rgba(255, 255, 255, .94);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-role="selected_edge_clicked"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, .94),
+            0 0 0 4px rgba(15, 118, 110, .36);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-role="selected_edge_auto_multi"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, .88),
+            0 0 0 4px rgba(8, 145, 178, .26);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-role="peer_edge"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          background: rgba(59, 130, 246, .42);
+          box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .72);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-movement-mismatch="true"] {
-          background-color: transparent !important;
-          background-image: none !important;
-          box-shadow: none !important;
+          background: rgba(220, 38, 38, .92) !important;
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, .94),
+            0 0 0 4px rgba(220, 38, 38, .34) !important;
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-side="left"],
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-side="right"] {

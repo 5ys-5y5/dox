@@ -3617,17 +3617,6 @@ const parseFrameBorderDefinition = (borderValue: string) => {
   return { width, style, color, cssText: borderValue };
 };
 
-const buildFrameBorderCssText = (
-  outlineStyle: string | null | undefined,
-  fallbackColor = 'rgba(15, 23, 42, 0.48)'
-) => {
-  if (outlineStyle === 'dashed') {
-    return '1px dashed rgba(15, 23, 42, 0.34)';
-  }
-
-  return `1px solid ${fallbackColor}`;
-};
-
 const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<TemplateEdgeSide>) => {
   const shell = resolveFrameLayoutShell(frameNode);
   const pageInner = shell.closest<HTMLElement>('.page-inner');
@@ -3646,33 +3635,16 @@ const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<Te
   const borderBottom = resolveVisibleBorderValue(cellStyle, tableStyle, 'bottom');
   const borderLeft = resolveVisibleBorderValue(cellStyle, tableStyle, 'left');
   const shellRect = pageInner ? readFrameElementRect(shell, pageInner) : null;
-  const outlineStyle =
-    cell?.getAttribute('data-template-frame-outline-style')?.trim() ||
-    table?.getAttribute('data-template-frame-outline-style')?.trim() ||
-    null;
 
-  if (!pageInner || !shellRect) {
+  if (!pageInner || !shellRect || (!borderTop && !borderRight && !borderBottom && !borderLeft)) {
     return;
   }
-
-  if (!borderTop && !borderRight && !borderBottom && !borderLeft && !outlineStyle) {
-    return;
-  }
-
-  const horizontalFallbackBorder =
-    parseFrameBorderDefinition(borderTop) ||
-    parseFrameBorderDefinition(borderBottom) ||
-    parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
-  const verticalFallbackBorder =
-    parseFrameBorderDefinition(borderLeft) ||
-    parseFrameBorderDefinition(borderRight) ||
-    parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
 
   const lineDefinitions = [
-    { side: 'top' as const, border: parseFrameBorderDefinition(borderTop) || horizontalFallbackBorder },
-    { side: 'right' as const, border: parseFrameBorderDefinition(borderRight) || verticalFallbackBorder },
-    { side: 'bottom' as const, border: parseFrameBorderDefinition(borderBottom) || horizontalFallbackBorder },
-    { side: 'left' as const, border: parseFrameBorderDefinition(borderLeft) || verticalFallbackBorder },
+    { side: 'top' as const, border: parseFrameBorderDefinition(borderTop) },
+    { side: 'right' as const, border: parseFrameBorderDefinition(borderRight) },
+    { side: 'bottom' as const, border: parseFrameBorderDefinition(borderBottom) },
+    { side: 'left' as const, border: parseFrameBorderDefinition(borderLeft) },
   ].filter((entry) => entry.border);
 
   if (lineDefinitions.length === 0) {
@@ -3701,57 +3673,34 @@ const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<Te
     line.setAttribute('data-frame-editor-ui', 'true');
     line.style.position = 'absolute';
     line.style.pointerEvents = 'none';
+    const selectedBorderWidth = 3;
+    const selectedBorderColor = 'rgba(59, 130, 246, 0.98)';
+    const lineWidth = selectedSides.has(entry.side) ? selectedBorderWidth : entry.border.width;
+    const lineCssText = selectedSides.has(entry.side)
+      ? `${selectedBorderWidth}px solid ${selectedBorderColor}`
+      : entry.border.cssText;
 
     if (entry.side === 'top' || entry.side === 'bottom') {
       line.style.left = '0';
       line.style.width = '100%';
       line.style.height = '0';
-      line.style.borderTop = entry.border.cssText;
+      line.style.borderTop = lineCssText;
       line.style.top =
         entry.side === 'top'
-          ? toFrameCssPx(-entry.border.width / 2)
-          : toFrameCssPx(shellRect.height - entry.border.width / 2);
+          ? toFrameCssPx(-lineWidth / 2)
+          : toFrameCssPx(shellRect.height - lineWidth / 2);
     } else {
       line.style.top = '0';
       line.style.height = '100%';
       line.style.width = '0';
-      line.style.borderLeft = entry.border.cssText;
+      line.style.borderLeft = lineCssText;
       line.style.left =
         entry.side === 'left'
-          ? toFrameCssPx(-entry.border.width / 2)
-          : toFrameCssPx(shellRect.width - entry.border.width / 2);
+          ? toFrameCssPx(-lineWidth / 2)
+          : toFrameCssPx(shellRect.width - lineWidth / 2);
     }
 
     overlay.appendChild(line);
-  });
-
-  selectedSides.forEach((side) => {
-    const indicator = document.createElement('div');
-    indicator.setAttribute('data-frame-editor-ui', 'true');
-    indicator.style.position = 'absolute';
-    indicator.style.pointerEvents = 'none';
-
-    if (side === 'top' || side === 'bottom') {
-      indicator.style.left = '5px';
-      indicator.style.width = toFrameCssPx(Math.max(0, shellRect.width - 10));
-      indicator.style.height = '0';
-      indicator.style.borderTop = '3px solid rgba(59, 130, 246, 0.98)';
-      indicator.style.top =
-        side === 'top'
-          ? toFrameCssPx(5 - 1.5)
-          : toFrameCssPx(Math.max(0, shellRect.height - 5 - 1.5));
-    } else {
-      indicator.style.top = '5px';
-      indicator.style.height = toFrameCssPx(Math.max(0, shellRect.height - 10));
-      indicator.style.width = '0';
-      indicator.style.borderLeft = '3px solid rgba(59, 130, 246, 0.98)';
-      indicator.style.left =
-        side === 'left'
-          ? toFrameCssPx(5 - 1.5)
-          : toFrameCssPx(Math.max(0, shellRect.width - 5 - 1.5));
-    }
-
-    overlay.appendChild(indicator);
   });
 
   shell.setAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR, 'true');
@@ -6629,11 +6578,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
           z-index: 21 !important;
         }
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table {
+        .template-edit-preview [data-template-edge-host="true"][data-template-native-outline-hidden="true"] .v102-frame-band-table {
           border-color: transparent !important;
         }
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table td,
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table th {
+        .template-edit-preview [data-template-edge-host="true"][data-template-native-outline-hidden="true"] .v102-frame-band-table td,
+        .template-edit-preview [data-template-edge-host="true"][data-template-native-outline-hidden="true"] .v102-frame-band-table th {
           border-color: transparent !important;
         }
         .template-edit-preview [data-template-edge-host="true"] [data-template-frame-input="true"] {

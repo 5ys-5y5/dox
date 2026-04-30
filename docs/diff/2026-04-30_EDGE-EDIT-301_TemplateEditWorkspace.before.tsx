@@ -248,8 +248,6 @@ const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
 const FRAME_MARQUEE_GHOST_CLASS = 'v106-frame-marquee';
 const FRAME_CREATION_GHOST_CLASS = 'v106-frame-create-ghost';
 const FRAME_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-outline-overlay';
-const FRAME_SELECTION_FILL_CLASS = 'v106-frame-selection-fill';
-const TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR = 'data-template-native-outline-hidden';
 const TEMPLATE_FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-mode';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
@@ -3404,9 +3402,6 @@ const stripSelectionAttrs = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>('[data-template-edit-enabled]').forEach((element) => {
     element.removeAttribute('data-template-edit-enabled');
   });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR}="true"]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
-  });
 };
 
 const extractEditorHtml = (root: HTMLElement) => {
@@ -3599,38 +3594,8 @@ const resolveVisibleBorderValue = (
   return fallbackWidth > 0 && fallbackStyle ? fallbackStyle[borderProperty] : '';
 };
 
-const parseFrameBorderDefinition = (borderValue: string) => {
-  const match = borderValue.trim().match(/^([0-9.]+)px\s+(\S+)\s+(.+)$/);
-
-  if (!match) {
-    return null;
-  }
-
-  const width = Number.parseFloat(match[1] || '0');
-  const style = match[2] || 'solid';
-  const color = match[3] || 'transparent';
-
-  if (!Number.isFinite(width) || width <= 0 || style === 'none') {
-    return null;
-  }
-
-  return { width, style, color, cssText: borderValue };
-};
-
-const buildFrameBorderCssText = (
-  outlineStyle: string | null | undefined,
-  fallbackColor = 'rgba(15, 23, 42, 0.48)'
-) => {
-  if (outlineStyle === 'dashed') {
-    return '1px dashed rgba(15, 23, 42, 0.34)';
-  }
-
-  return `1px solid ${fallbackColor}`;
-};
-
-const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<TemplateEdgeSide>) => {
+const appendFrameOutlineOverlay = (frameNode: HTMLElement) => {
   const shell = resolveFrameLayoutShell(frameNode);
-  const pageInner = shell.closest<HTMLElement>('.page-inner');
   const table = resolveFrameLayoutTable(frameNode);
   const frameGroupId = getFrameGroupId(frameNode);
   const cell =
@@ -3645,37 +3610,8 @@ const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<Te
   const borderRight = resolveVisibleBorderValue(cellStyle, tableStyle, 'right');
   const borderBottom = resolveVisibleBorderValue(cellStyle, tableStyle, 'bottom');
   const borderLeft = resolveVisibleBorderValue(cellStyle, tableStyle, 'left');
-  const shellRect = pageInner ? readFrameElementRect(shell, pageInner) : null;
-  const outlineStyle =
-    cell?.getAttribute('data-template-frame-outline-style')?.trim() ||
-    table?.getAttribute('data-template-frame-outline-style')?.trim() ||
-    null;
 
-  if (!pageInner || !shellRect) {
-    return;
-  }
-
-  if (!borderTop && !borderRight && !borderBottom && !borderLeft && !outlineStyle) {
-    return;
-  }
-
-  const horizontalFallbackBorder =
-    parseFrameBorderDefinition(borderTop) ||
-    parseFrameBorderDefinition(borderBottom) ||
-    parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
-  const verticalFallbackBorder =
-    parseFrameBorderDefinition(borderLeft) ||
-    parseFrameBorderDefinition(borderRight) ||
-    parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
-
-  const lineDefinitions = [
-    { side: 'top' as const, border: parseFrameBorderDefinition(borderTop) || horizontalFallbackBorder },
-    { side: 'right' as const, border: parseFrameBorderDefinition(borderRight) || verticalFallbackBorder },
-    { side: 'bottom' as const, border: parseFrameBorderDefinition(borderBottom) || horizontalFallbackBorder },
-    { side: 'left' as const, border: parseFrameBorderDefinition(borderLeft) || verticalFallbackBorder },
-  ].filter((entry) => entry.border);
-
-  if (lineDefinitions.length === 0) {
+  if (!borderTop && !borderRight && !borderBottom && !borderLeft) {
     return;
   }
 
@@ -3684,87 +3620,15 @@ const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<Te
   overlay.setAttribute('data-frame-editor-ui', 'true');
   overlay.setAttribute('aria-hidden', 'true');
   overlay.style.position = 'absolute';
-  overlay.style.left = toFrameCssPx(shellRect.left);
-  overlay.style.top = toFrameCssPx(shellRect.top);
-  overlay.style.width = toFrameCssPx(shellRect.width);
-  overlay.style.height = toFrameCssPx(shellRect.height);
+  overlay.style.inset = '0';
   overlay.style.pointerEvents = 'none';
   overlay.style.zIndex = '29';
-  overlay.style.overflow = 'visible';
-
-  lineDefinitions.forEach((entry) => {
-    if (!entry.border) {
-      return;
-    }
-
-    const line = document.createElement('div');
-    line.setAttribute('data-frame-editor-ui', 'true');
-    line.style.position = 'absolute';
-    line.style.pointerEvents = 'none';
-
-    if (entry.side === 'top' || entry.side === 'bottom') {
-      line.style.left = '0';
-      line.style.width = '100%';
-      line.style.height = '0';
-      line.style.borderTop = entry.border.cssText;
-      line.style.top =
-        entry.side === 'top'
-          ? toFrameCssPx(-entry.border.width / 2)
-          : toFrameCssPx(shellRect.height - entry.border.width / 2);
-    } else {
-      line.style.top = '0';
-      line.style.height = '100%';
-      line.style.width = '0';
-      line.style.borderLeft = entry.border.cssText;
-      line.style.left =
-        entry.side === 'left'
-          ? toFrameCssPx(-entry.border.width / 2)
-          : toFrameCssPx(shellRect.width - entry.border.width / 2);
-    }
-
-    overlay.appendChild(line);
-  });
-
-  selectedSides.forEach((side) => {
-    const indicator = document.createElement('div');
-    indicator.setAttribute('data-frame-editor-ui', 'true');
-    indicator.style.position = 'absolute';
-    indicator.style.pointerEvents = 'none';
-
-    if (side === 'top' || side === 'bottom') {
-      indicator.style.left = '5px';
-      indicator.style.width = toFrameCssPx(Math.max(0, shellRect.width - 10));
-      indicator.style.height = '0';
-      indicator.style.borderTop = '3px solid rgba(59, 130, 246, 0.98)';
-      indicator.style.top =
-        side === 'top'
-          ? toFrameCssPx(5 - 1.5)
-          : toFrameCssPx(Math.max(0, shellRect.height - 5 - 1.5));
-    } else {
-      indicator.style.top = '5px';
-      indicator.style.height = toFrameCssPx(Math.max(0, shellRect.height - 10));
-      indicator.style.width = '0';
-      indicator.style.borderLeft = '3px solid rgba(59, 130, 246, 0.98)';
-      indicator.style.left =
-        side === 'left'
-          ? toFrameCssPx(5 - 1.5)
-          : toFrameCssPx(Math.max(0, shellRect.width - 5 - 1.5));
-    }
-
-    overlay.appendChild(indicator);
-  });
-
-  shell.setAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR, 'true');
-  pageInner.appendChild(overlay);
-};
-
-const appendFrameSelectionFill = (frameNode: HTMLElement) => {
-  const shell = resolveFrameLayoutShell(frameNode);
-  const fill = document.createElement('div');
-  fill.className = FRAME_SELECTION_FILL_CLASS;
-  fill.setAttribute('data-frame-editor-ui', 'true');
-  fill.setAttribute('aria-hidden', 'true');
-  shell.appendChild(fill);
+  overlay.style.boxSizing = 'border-box';
+  overlay.style.borderTop = borderTop || '0px solid transparent';
+  overlay.style.borderRight = borderRight || '0px solid transparent';
+  overlay.style.borderBottom = borderBottom || '0px solid transparent';
+  overlay.style.borderLeft = borderLeft || '0px solid transparent';
+  shell.appendChild(overlay);
 };
 
 const applyFrameSelectionUi = (
@@ -3802,7 +3666,6 @@ const applyFrameSelectionUi = (
   collectFrameSelectionAnchors(root).forEach((node) => {
     const frameGroupId = getFrameGroupId(node);
     const selectionIndex = selectedIds.indexOf(frameGroupId);
-    const selectedSides = new Set<TemplateEdgeSide>();
 
     node.setAttribute('data-template-edge-host', 'true');
 
@@ -3813,7 +3676,19 @@ const applyFrameSelectionUi = (
       if (selectionIndex === 0) {
         node.setAttribute('data-template-primary-selected', 'true');
       }
-      appendFrameSelectionFill(node);
+
+      const badge = document.createElement('div');
+      badge.className = FRAME_SELECTION_BADGE_CLASS;
+      badge.setAttribute('data-frame-editor-ui', 'true');
+      badge.setAttribute('aria-hidden', 'true');
+      badge.textContent = selectedIds.length > 1 ? `선택 ${selectionIndex + 1}` : '선택';
+      node.appendChild(badge);
+
+      if (selectionIndex === 0) {
+        FRAME_RESIZE_DIRECTIONS.forEach((direction) => {
+          node.appendChild(buildResizeHandle(direction));
+        });
+      }
     }
 
     if (!edgeSnapshot) {
@@ -3832,7 +3707,6 @@ const applyFrameSelectionUi = (
 
       if (edgeMeta) {
         node.setAttribute('data-template-edge-visual', 'true');
-        selectedSides.add(side);
 
         if (edgeMeta.isAnchorEdge) {
           node.setAttribute('data-template-edge-anchor-node', 'true');
@@ -3852,7 +3726,7 @@ const applyFrameSelectionUi = (
       );
     });
 
-    appendFrameOutlineOverlay(node, selectedSides);
+    appendFrameOutlineOverlay(node);
   });
 
   renderRelativeAnchorGuides(root, selectedIds);
@@ -6619,33 +6493,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-template-selected="true"] {
           position: relative;
           z-index: 20 !important;
-          outline: none !important;
-          box-shadow: none !important;
+          outline: 3px solid #0f766e !important;
+          outline-offset: -1px;
+          box-shadow:
+            0 0 0 4px rgba(20, 184, 166, .18),
+            inset 0 0 0 1px rgba(255, 255, 255, .92) !important;
         }
         .template-edit-preview [data-template-primary-selected="true"] {
-          box-shadow: none !important;
+          outline-color: #0f766e !important;
+          box-shadow:
+            0 0 0 5px rgba(13, 148, 136, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .96) !important;
         }
         .template-edit-preview [data-template-edge-host="true"] {
           position: relative;
           z-index: 21 !important;
         }
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table {
-          border-color: transparent !important;
-        }
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table td,
-        .template-edit-preview [data-template-native-outline-hidden="true"] .v102-frame-band-table th {
-          border-color: transparent !important;
-        }
         .template-edit-preview [data-template-edge-host="true"] [data-template-frame-input="true"] {
           position: relative;
           z-index: 22;
-        }
-        .template-edit-preview .${FRAME_SELECTION_FILL_CLASS} {
-          position: absolute;
-          inset: 5px;
-          z-index: 19;
-          pointer-events: none;
-          background: rgba(59, 130, 246, .5);
         }
         .template-edit-preview .${FRAME_SELECTION_BADGE_CLASS} {
           position: absolute;
@@ -6726,44 +6592,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           box-shadow: 0 1px 2px rgba(15, 23, 42, .25);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR} {
+          --template-edge-line-color: rgba(15, 23, 42, .72);
           position: absolute;
           z-index: 27;
           border: 0;
           background-color: transparent;
-          background-image: none;
+          background-repeat: no-repeat;
           padding: 0;
-          border-radius: 0;
+          border-radius: 999px;
           box-shadow: none;
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-mode="connected"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          --template-edge-line-color: rgba(13, 148, 136, .96);
+          box-shadow: 0 0 0 2px rgba(255, 255, 255, .92);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-mode="isolated"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          --template-edge-line-color: rgba(234, 88, 12, .98);
+          box-shadow: 0 0 0 2px rgba(255, 255, 255, .94);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-role="selected_edge_clicked"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          --template-edge-line-color: rgba(15, 118, 110, .98);
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, .94),
+            0 0 0 4px rgba(15, 118, 110, .36);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-role="selected_edge_auto_multi"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          --template-edge-line-color: rgba(8, 145, 178, .98);
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, .88),
+            0 0 0 4px rgba(8, 145, 178, .26);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-role="peer_edge"] {
-          background-color: transparent;
-          background-image: none;
-          box-shadow: none;
+          --template-edge-line-color: rgba(59, 130, 246, .94);
+          box-shadow: 0 0 0 1px rgba(59, 130, 246, .72);
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-movement-mismatch="true"] {
-          background-color: transparent !important;
-          background-image: none !important;
-          box-shadow: none !important;
+          --template-edge-line-color: rgba(220, 38, 38, 1) !important;
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, .94),
+            0 0 0 4px rgba(220, 38, 38, .34) !important;
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-side="left"],
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-side="right"] {
@@ -6771,6 +6638,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           bottom: 3px;
           width: 6px;
           cursor: ew-resize;
+          background-image:
+            linear-gradient(
+              90deg,
+              transparent 0,
+              transparent calc(50% - .5px),
+              var(--template-edge-line-color) calc(50% - .5px),
+              var(--template-edge-line-color) calc(50% + .5px),
+              transparent calc(50% + .5px),
+              transparent 100%
+            );
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-side="left"] {
           left: -3px;
@@ -6784,6 +6661,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           right: 3px;
           height: 6px;
           cursor: ns-resize;
+          background-image:
+            linear-gradient(
+              180deg,
+              transparent 0,
+              transparent calc(50% - .5px),
+              var(--template-edge-line-color) calc(50% - .5px),
+              var(--template-edge-line-color) calc(50% + .5px),
+              transparent calc(50% + .5px),
+              transparent 100%
+            );
         }
         .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-side="top"] {
           top: -3px;
