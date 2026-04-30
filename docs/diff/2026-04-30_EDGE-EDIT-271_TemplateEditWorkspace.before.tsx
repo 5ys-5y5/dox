@@ -58,28 +58,6 @@ type FrameStylePatch = Omit<Partial<SelectionStyleDraft>, 'width' | 'height'> & 
   height?: number;
 };
 
-type TemplateFramePositionMode = 'relative' | 'absolute';
-
-type TemplateFrameRelativeAnchorKind = 'frame' | 'page-corner';
-
-type TemplateFrameRelativeHorizontalPin = 'left' | 'right';
-
-type TemplateFrameRelativeVerticalPin = 'top' | 'bottom';
-
-type TemplateFrameRelativeAnchorId = 'page-top-left' | 'page-top-right' | 'page-bottom-left' | 'page-bottom-right' | string;
-
-type TemplateFrameRelativeAnchorConfig = {
-  positionMode: TemplateFramePositionMode;
-  anchorKind: TemplateFrameRelativeAnchorKind;
-  anchorId: TemplateFrameRelativeAnchorId;
-  anchorX: TemplateFrameRelativeHorizontalPin;
-  anchorY: TemplateFrameRelativeVerticalPin;
-  offsetX: number;
-  offsetY: number;
-};
-
-type FrameMarqueeSelectionMode = 'contained' | 'intersected';
-
 type DragState = {
   pointerId: number;
   startX: number;
@@ -112,35 +90,6 @@ type ResizeState = {
   appliedEdgeDeltaX?: number;
   appliedEdgeDeltaY?: number;
   passiveShiftedEdgeIds?: string[];
-};
-
-type MarqueeSelectionState = {
-  pointerId: number;
-  scale: number;
-  pageInner: HTMLElement;
-  anchorFrameGroupId: string | null;
-  baseSelectionIds: string[];
-  origin: {
-    x: number;
-    y: number;
-  };
-  ghost: HTMLElement | null;
-  mode: FrameMarqueeSelectionMode;
-  active: boolean;
-};
-
-type CreateBoxState = {
-  pointerId: number;
-  scale: number;
-  pageInner: HTMLElement;
-  positionMode: TemplateFramePositionMode;
-  anchorFrameGroupId: string | null;
-  origin: {
-    x: number;
-    y: number;
-  };
-  ghost: HTMLElement | null;
-  active: boolean;
 };
 
 type EdgePressState = {
@@ -245,18 +194,6 @@ const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
 const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
-const FRAME_MARQUEE_GHOST_CLASS = 'v106-frame-marquee';
-const FRAME_CREATION_GHOST_CLASS = 'v106-frame-create-ghost';
-const TEMPLATE_FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-mode';
-const TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
-const TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
-const TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR = 'data-template-frame-relative-anchor-x';
-const TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR = 'data-template-frame-relative-anchor-y';
-const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR = 'data-template-frame-relative-offset-x';
-const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR = 'data-template-frame-relative-offset-y';
-const FRAME_RELATIVE_ANCHOR_GUIDE_CLASS = 'v106-frame-relative-anchor-guide';
-const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
-const CREATED_FRAME_GROUP_PREFIX = 'user-box';
 const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
   selectedEdgeClickedIds: [],
   selectedEdgeAutoMultiIds: [],
@@ -266,42 +203,6 @@ const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const EDGE_DRAG_START_THRESHOLD_PX = 4;
 const EDGE_DRAG_AUTOSNAP_THRESHOLD_PX = 5;
-const FRAME_MARQUEE_DRAG_THRESHOLD_PX = 4;
-const DEFAULT_RELATIVE_PAGE_ANCHORS: Record<string, TemplateFrameRelativeAnchorConfig> = {
-  'band-0-header': {
-    positionMode: 'relative',
-    anchorKind: 'page-corner',
-    anchorId: 'page-top-left',
-    anchorX: 'left',
-    anchorY: 'top',
-    offsetX: 0,
-    offsetY: 0,
-  },
-  'band-1-header': {
-    positionMode: 'relative',
-    anchorKind: 'page-corner',
-    anchorId: 'page-top-right',
-    anchorX: 'right',
-    anchorY: 'top',
-    offsetX: 0,
-    offsetY: 0,
-  },
-  'band-19-footer': {
-    positionMode: 'relative',
-    anchorKind: 'page-corner',
-    anchorId: 'page-bottom-left',
-    anchorX: 'left',
-    anchorY: 'bottom',
-    offsetX: 0,
-    offsetY: 0,
-  },
-};
-const PAGE_CORNER_ANCHOR_LABELS: Record<string, string> = {
-  'page-top-left': '페이지 좌상단 기준',
-  'page-top-right': '페이지 우상단 기준',
-  'page-bottom-left': '페이지 좌하단 기준',
-  'page-bottom-right': '페이지 우하단 기준',
-};
 
 const defaultSelectionStyleDraft: SelectionStyleDraft = {
   width: '',
@@ -433,435 +334,6 @@ const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | nu
 };
 
 const readFrameMoveRect = (node: HTMLElement): FrameNodeRect => readFrameElementRect(resolveFrameLayoutShell(node));
-
-const isAbsolutePositionedShell = (shell: HTMLElement | null | undefined) =>
-  shell?.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR) === 'absolute';
-
-const readPageInnerPointerPoint = (
-  pageInner: HTMLElement,
-  clientX: number,
-  clientY: number,
-  scale: number
-) => {
-  const rect = pageInner.getBoundingClientRect();
-  const nextX = Math.max(0, Math.min(pageInner.clientWidth, (clientX - rect.left) / Math.max(scale, 0.01)));
-  const nextY = Math.max(0, Math.min(pageInner.clientHeight, (clientY - rect.top) / Math.max(scale, 0.01)));
-
-  return {
-    x: nextX,
-    y: nextY,
-  };
-};
-
-const buildPointerDragRect = (
-  origin: { x: number; y: number },
-  current: { x: number; y: number }
-): FrameNodeRect => ({
-  left: Math.min(origin.x, current.x),
-  top: Math.min(origin.y, current.y),
-  width: Math.abs(current.x - origin.x),
-  height: Math.abs(current.y - origin.y),
-});
-
-const rectContainsRect = (outer: FrameNodeRect, inner: FrameNodeRect) =>
-  inner.left >= outer.left - FRAME_RESIZE_TOLERANCE_PX &&
-  inner.top >= outer.top - FRAME_RESIZE_TOLERANCE_PX &&
-  inner.left + inner.width <= outer.left + outer.width + FRAME_RESIZE_TOLERANCE_PX &&
-  inner.top + inner.height <= outer.top + outer.height + FRAME_RESIZE_TOLERANCE_PX;
-
-const rectIntersectsRect = (left: FrameNodeRect, right: FrameNodeRect) =>
-  left.left < right.left + right.width - FRAME_RESIZE_TOLERANCE_PX &&
-  left.left + left.width > right.left + FRAME_RESIZE_TOLERANCE_PX &&
-  left.top < right.top + right.height - FRAME_RESIZE_TOLERANCE_PX &&
-  left.top + left.height > right.top + FRAME_RESIZE_TOLERANCE_PX;
-
-const createFrameEditorGhost = (
-  className: string,
-  mode?: FrameMarqueeSelectionMode
-) => {
-  const ghost = document.createElement('div');
-  ghost.className = className;
-  ghost.setAttribute('aria-hidden', 'true');
-
-  if (mode) {
-    ghost.setAttribute('data-marquee-mode', mode);
-  }
-
-  return ghost;
-};
-
-const writeFrameEditorGhostRect = (ghost: HTMLElement, rect: FrameNodeRect) => {
-  ghost.style.left = toFrameCssPx(rect.left);
-  ghost.style.top = toFrameCssPx(rect.top);
-  ghost.style.width = toFrameCssPx(rect.width);
-  ghost.style.height = toFrameCssPx(rect.height);
-};
-
-const removeFrameEditorGhost = (ghost: HTMLElement | null | undefined) => {
-  if (ghost?.parentElement) {
-    ghost.parentElement.removeChild(ghost);
-  }
-};
-
-const buildCreatedFrameGroupId = (root: ParentNode) => {
-  const matches = Array.from(root.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR))
-    .map((node) => getFrameGroupId(node))
-    .map((frameGroupId) => frameGroupId.match(new RegExp(`^${CREATED_FRAME_GROUP_PREFIX}-(\\d+)$`)))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => Number.parseInt(match[1], 10))
-    .filter((value) => Number.isFinite(value));
-  const nextIndex = (matches.length ? Math.max(...matches) : 0) + 1;
-  return `${CREATED_FRAME_GROUP_PREFIX}-${nextIndex}`;
-};
-
-const buildCreatedFrameShell = ({
-  pageInner,
-  rect,
-  frameGroupId,
-  positionMode,
-}: {
-  pageInner: HTMLElement;
-  rect: FrameNodeRect;
-  frameGroupId: string;
-  positionMode: TemplateFramePositionMode;
-}) => {
-  const pageId =
-    pageInner.getAttribute('data-page')?.trim() ||
-    pageInner.closest<HTMLElement>('[data-page]')?.getAttribute('data-page')?.trim() ||
-    '1';
-  const shell = document.createElement('div');
-  shell.className = 'v102-frame-band';
-  shell.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
-  shell.style.left = toFrameCssPx(rect.left);
-  shell.style.top = toFrameCssPx(rect.top);
-  shell.style.width = toFrameCssPx(Math.max(MIN_FRAME_SIZE_PX, rect.width));
-  shell.style.height = toFrameCssPx(Math.max(MIN_FRAME_SIZE_PX, rect.height));
-
-  const table = document.createElement('table');
-  table.className = 'v202-table-block v102-frame-band-table';
-  table.style.width = shell.style.width;
-  table.style.height = shell.style.height;
-
-  const colgroup = document.createElement('colgroup');
-  const col = document.createElement('col');
-  col.style.width = shell.style.width;
-  colgroup.appendChild(col);
-  table.appendChild(colgroup);
-
-  const tbody = document.createElement('tbody');
-  const row = document.createElement('tr');
-  row.style.height = shell.style.height;
-  const cell = document.createElement('td');
-  cell.className = 'halign-left valign-top v202-frame-group';
-  cell.setAttribute('data-template-frame-group', frameGroupId);
-  cell.setAttribute('data-template-frame-color-group', frameGroupId);
-  cell.setAttribute('data-template-frame-source-text', '');
-  cell.setAttribute('data-template-frame-outline-style', 'solid');
-  cell.setAttribute('data-template-frame-row-start', '1');
-  cell.setAttribute('data-template-frame-row-end', '2');
-  cell.setAttribute('data-template-frame-col-start', '1');
-  cell.setAttribute('data-template-frame-col-end', '2');
-  cell.setAttribute('data-template-frame-halign', 'left');
-  cell.setAttribute('data-template-frame-valign', 'top');
-  cell.setAttribute('data-template-frame-page', pageId);
-  cell.setAttribute('data-template-frame-extracted-text', '');
-  cell.setAttribute('data-template-frame-display-visible', 'true');
-  cell.setAttribute('data-template-frame-needs-review', 'false');
-  cell.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
-
-  const textarea = document.createElement('textarea');
-  textarea.className = 'v202-frame-group-input';
-  textarea.setAttribute('spellcheck', 'false');
-  textarea.setAttribute('readonly', '');
-  textarea.setAttribute('tabindex', '-1');
-  textarea.setAttribute('data-template-frame-input', 'true');
-  textarea.setAttribute('data-template-frame-group', frameGroupId);
-  textarea.setAttribute('data-template-frame-color-group', frameGroupId);
-  textarea.setAttribute('data-template-frame-source-text', '');
-  textarea.setAttribute('data-template-frame-outline-style', 'solid');
-  textarea.setAttribute('data-template-frame-halign', 'left');
-  textarea.setAttribute('data-template-frame-valign', 'top');
-  textarea.setAttribute('data-template-frame-page', pageId);
-  textarea.setAttribute('data-template-frame-extracted-text', '');
-  textarea.setAttribute('data-template-frame-display-visible', 'true');
-  textarea.setAttribute('data-template-frame-needs-review', 'false');
-  textarea.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
-  textarea.value = '';
-  textarea.textContent = '';
-
-  cell.appendChild(textarea);
-  row.appendChild(cell);
-  tbody.appendChild(row);
-  table.appendChild(tbody);
-  shell.appendChild(table);
-
-  return shell;
-};
-
-const readStoredRelativeAnchorConfig = (element: HTMLElement | null | undefined): TemplateFrameRelativeAnchorConfig | null => {
-  if (!element) {
-    return null;
-  }
-
-  const positionMode = element.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim();
-  const anchorKind = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR)?.trim();
-  const anchorId = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR)?.trim();
-  const anchorX = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR)?.trim();
-  const anchorY = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR)?.trim();
-  const offsetX = Number.parseFloat(element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR) || '');
-  const offsetY = Number.parseFloat(element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR) || '');
-
-  if (
-    positionMode !== 'relative' ||
-    (anchorKind !== 'frame' && anchorKind !== 'page-corner') ||
-    !anchorId ||
-    (anchorX !== 'left' && anchorX !== 'right') ||
-    (anchorY !== 'top' && anchorY !== 'bottom') ||
-    !Number.isFinite(offsetX) ||
-    !Number.isFinite(offsetY)
-  ) {
-    return null;
-  }
-
-  return {
-    positionMode,
-    anchorKind,
-    anchorId,
-    anchorX,
-    anchorY,
-    offsetX,
-    offsetY,
-  };
-};
-
-const getRelativeAnchorAttributeTargets = (frameNode: HTMLElement | null | undefined) => {
-  if (!frameNode) {
-    return [];
-  }
-
-  const shell = resolveFrameLayoutShell(frameNode);
-  const textarea = shell.querySelector<HTMLElement>('[data-template-frame-input="true"]');
-
-  return [shell, frameNode, textarea].filter((element): element is HTMLElement => Boolean(element));
-};
-
-const clearFrameRelativeAnchorAttrs = (frameNode: HTMLElement | null | undefined) => {
-  getRelativeAnchorAttributeTargets(frameNode).forEach((element) => {
-    element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR);
-    element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR);
-    element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR);
-    element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR);
-    element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR);
-    element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR);
-  });
-};
-
-const writeFrameRelativeAnchorAttrs = (
-  frameNode: HTMLElement | null | undefined,
-  config: TemplateFrameRelativeAnchorConfig | null
-) => {
-  if (!frameNode) {
-    return;
-  }
-
-  if (!config || config.positionMode !== 'relative') {
-    clearFrameRelativeAnchorAttrs(frameNode);
-    return;
-  }
-
-  getRelativeAnchorAttributeTargets(frameNode).forEach((element) => {
-    element.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, config.positionMode);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR, config.anchorKind);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR, config.anchorId);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR, config.anchorX);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR, config.anchorY);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR, String(Number(config.offsetX.toFixed(3))));
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR, String(Number(config.offsetY.toFixed(3))));
-  });
-};
-
-const resolvePageCornerAnchorRect = (
-  pageInner: HTMLElement,
-  anchorId: TemplateFrameRelativeAnchorId
-): FrameNodeRect | null => {
-  const width = pageInner.clientWidth;
-  const height = pageInner.clientHeight;
-
-  switch (anchorId) {
-    case 'page-top-left':
-      return { left: 0, top: 0, width: 0, height: 0 };
-    case 'page-top-right':
-      return { left: width, top: 0, width: 0, height: 0 };
-    case 'page-bottom-left':
-      return { left: 0, top: height, width: 0, height: 0 };
-    case 'page-bottom-right':
-      return { left: width, top: height, width: 0, height: 0 };
-    default:
-      return null;
-  }
-};
-
-const resolveRelativeAnchorRect = (
-  pageInner: HTMLElement,
-  config: TemplateFrameRelativeAnchorConfig
-): FrameNodeRect | null => {
-  if (config.anchorKind === 'page-corner') {
-    return resolvePageCornerAnchorRect(pageInner, config.anchorId);
-  }
-
-  const anchorNode = resolveFrameSelectionAnchor(
-    pageInner.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${config.anchorId}"]`)
-  );
-
-  if (!anchorNode) {
-    return null;
-  }
-
-  return readFrameMoveRect(anchorNode);
-};
-
-const buildRelativeAnchorConfigFromRect = ({
-  frameRect,
-  anchorRect,
-  anchorKind,
-  anchorId,
-  preferredAnchorX,
-  preferredAnchorY,
-}: {
-  frameRect: FrameNodeRect;
-  anchorRect: FrameNodeRect;
-  anchorKind: TemplateFrameRelativeAnchorKind;
-  anchorId: TemplateFrameRelativeAnchorId;
-  preferredAnchorX?: TemplateFrameRelativeHorizontalPin;
-  preferredAnchorY?: TemplateFrameRelativeVerticalPin;
-}): TemplateFrameRelativeAnchorConfig => {
-  const anchorLeft = anchorRect.left;
-  const anchorRight = anchorRect.left + anchorRect.width;
-  const anchorTop = anchorRect.top;
-  const anchorBottom = anchorRect.top + anchorRect.height;
-  const anchorX =
-    preferredAnchorX ||
-    (Math.abs(frameRect.left - anchorLeft) <= Math.abs(anchorRight - (frameRect.left + frameRect.width))
-      ? 'left'
-      : 'right');
-  const anchorY =
-    preferredAnchorY ||
-    (Math.abs(frameRect.top - anchorTop) <= Math.abs(anchorBottom - (frameRect.top + frameRect.height))
-      ? 'top'
-      : 'bottom');
-
-  return {
-    positionMode: 'relative',
-    anchorKind,
-    anchorId,
-    anchorX,
-    anchorY,
-    offsetX:
-      anchorX === 'left'
-        ? frameRect.left - anchorLeft
-        : anchorRight - (frameRect.left + frameRect.width),
-    offsetY:
-      anchorY === 'top'
-        ? frameRect.top - anchorTop
-        : anchorBottom - (frameRect.top + frameRect.height),
-  };
-};
-
-const buildFrameRectFromRelativeAnchor = (
-  currentRect: FrameNodeRect,
-  anchorRect: FrameNodeRect,
-  config: TemplateFrameRelativeAnchorConfig
-): FrameNodeRect => {
-  const anchorLeft = anchorRect.left;
-  const anchorRight = anchorRect.left + anchorRect.width;
-  const anchorTop = anchorRect.top;
-  const anchorBottom = anchorRect.top + anchorRect.height;
-  const left =
-    config.anchorX === 'left'
-      ? anchorLeft + config.offsetX
-      : anchorRight - config.offsetX - currentRect.width;
-  const top =
-    config.anchorY === 'top'
-      ? anchorTop + config.offsetY
-      : anchorBottom - config.offsetY - currentRect.height;
-
-  return {
-    left,
-    top,
-    width: currentRect.width,
-    height: currentRect.height,
-  };
-};
-
-const resolveDefaultRelativeAnchorConfig = (
-  frameNode: HTMLElement,
-  pageInner: HTMLElement
-): TemplateFrameRelativeAnchorConfig | null => {
-  const frameGroupId = getFrameGroupId(frameNode);
-  const defaultConfig = DEFAULT_RELATIVE_PAGE_ANCHORS[frameGroupId];
-
-  if (!defaultConfig) {
-    return null;
-  }
-
-  const anchorRect = resolvePageCornerAnchorRect(pageInner, defaultConfig.anchorId);
-
-  if (!anchorRect) {
-    return null;
-  }
-
-  return buildRelativeAnchorConfigFromRect({
-    frameRect: readFrameMoveRect(frameNode),
-    anchorRect,
-    anchorKind: defaultConfig.anchorKind,
-    anchorId: defaultConfig.anchorId,
-    preferredAnchorX: defaultConfig.anchorX,
-    preferredAnchorY: defaultConfig.anchorY,
-  });
-};
-
-const readFrameRelativeAnchorConfig = (
-  frameNode: HTMLElement | null | undefined,
-  pageInner?: HTMLElement | null
-): TemplateFrameRelativeAnchorConfig | null => {
-  if (!frameNode) {
-    return null;
-  }
-
-  const shell = resolveFrameLayoutShell(frameNode);
-  const storedConfig = readStoredRelativeAnchorConfig(frameNode) || readStoredRelativeAnchorConfig(shell);
-
-  if (storedConfig) {
-    return storedConfig;
-  }
-
-  const resolvedPageInner = pageInner || frameNode.closest<HTMLElement>('.page-inner');
-  return resolvedPageInner ? resolveDefaultRelativeAnchorConfig(frameNode, resolvedPageInner) : null;
-};
-
-const ensureFrameRelativeAnchorConfig = (frameNode: HTMLElement | null | undefined, pageInner?: HTMLElement | null) => {
-  const resolvedPageInner = pageInner || frameNode?.closest<HTMLElement>('.page-inner') || null;
-
-  if (!frameNode || !resolvedPageInner) {
-    return null;
-  }
-
-  const config = readFrameRelativeAnchorConfig(frameNode, resolvedPageInner);
-
-  if (config) {
-    writeFrameRelativeAnchorAttrs(frameNode, config);
-  }
-
-  return config;
-};
-
-const readRelativeAnchorTargetLabel = (config: TemplateFrameRelativeAnchorConfig | null) => {
-  if (!config) {
-    return null;
-  }
-
-  return config.anchorKind === 'page-corner' ? PAGE_CORNER_ANCHOR_LABELS[config.anchorId] || config.anchorId : config.anchorId;
-};
 
 const readTableColWidths = (table: HTMLTableElement | null) => {
   if (!table) {
@@ -1012,33 +484,6 @@ const findClosestBoundaryIndex = (boundaries: number[], target: number) => {
   });
 
   return bestIndex;
-};
-
-const clusterItemsByCoordinate = <T,>(items: T[], readCoordinate: (item: T) => number, tolerancePx: number) => {
-  const clusters: T[][] = [];
-
-  items
-    .slice()
-    .sort((left, right) => readCoordinate(left) - readCoordinate(right))
-    .forEach((item) => {
-      const cluster = clusters[clusters.length - 1];
-
-      if (!cluster) {
-        clusters.push([item]);
-        return;
-      }
-
-      const referenceCoordinate = readCoordinate(cluster[cluster.length - 1]);
-
-      if (Math.abs(readCoordinate(item) - referenceCoordinate) <= tolerancePx) {
-        cluster.push(item);
-        return;
-      }
-
-      clusters.push([item]);
-    });
-
-  return clusters;
 };
 
 const setTableColWidths = (table: HTMLTableElement, colWidths: number[]) => {
@@ -1342,11 +787,6 @@ const expandSingleEntryGroupsToTrailingColumns = (
   });
 
 const stripTransientFrameEditorUi = (root: ParentNode) => {
-  root
-    .querySelectorAll<HTMLElement>(`.${FRAME_MARQUEE_GHOST_CLASS}, .${FRAME_CREATION_GHOST_CLASS}`)
-    .forEach((element) => {
-      element.remove();
-    });
   root.querySelectorAll<HTMLElement>('[data-frame-editor-ui]').forEach((element) => {
     element.remove();
   });
@@ -1358,9 +798,6 @@ const stripTransientFrameEditorUi = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
     element.removeAttribute('data-template-edge-visual');
     element.removeAttribute('data-template-edge-anchor-node');
-  });
-  root.querySelectorAll<HTMLElement>('[data-template-relative-anchor-target="true"]').forEach((element) => {
-    element.removeAttribute('data-template-relative-anchor-target');
   });
   root.querySelectorAll<HTMLElement>('[data-template-edit-enabled]').forEach((element) => {
     element.removeAttribute('data-template-edit-enabled');
@@ -2122,10 +1559,6 @@ const shiftShellsBelowBoundary = (
       return;
     }
 
-    if (isAbsolutePositionedShell(shell)) {
-      return;
-    }
-
     const shellRect = readFrameElementRect(shell, pageInner);
 
     if (shellRect.top >= boundaryY - FRAME_RESIZE_TOLERANCE_PX) {
@@ -2229,7 +1662,7 @@ const applyFrameResizeHeightDelta = (node: HTMLElement, delta: number) => {
     });
   }
 
-  if (resizesOuterBottom && Math.abs(appliedDelta) > 0.5 && !isAbsolutePositionedShell(context.shell)) {
+  if (resizesOuterBottom && Math.abs(appliedDelta) > 0.5) {
     shiftShellsBelowBoundary(context.pageInner, boundaryY, appliedDelta, [context.shell]);
     updatePageInnerMinHeight(context.pageInner);
   }
@@ -2251,11 +1684,6 @@ const collectWidthResizeInstructions = (
     return [];
   }
 
-  if (isAbsolutePositionedShell(context.shell)) {
-    const selfInstruction = buildSelfWidthResizeInstruction(context, edge);
-    return selfInstruction ? [selfInstruction] : [];
-  }
-
   const selectedBoundaryUsesOuterLeft = edge === 'left' && hasLeadingScaffoldColumns(context);
   const selectedBoundaryUsesOuterRight = edge === 'right' && hasTrailingScaffoldColumns(context);
   const boundaryX =
@@ -2269,10 +1697,6 @@ const collectWidthResizeInstructions = (
   const pageShells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'));
 
   return pageShells.flatMap((shell) => {
-    if (shell !== context.shell && isAbsolutePositionedShell(shell)) {
-      return [];
-    }
-
     const shellRect = readFrameElementRect(shell, pageInner);
     const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
     const colWidths = readTableColWidths(table);
@@ -2962,219 +2386,6 @@ const collectFrameSelectionAnchors = (scope?: ParentNode | null) => {
   return Array.from(anchorMap.values());
 };
 
-const syncFrameRelativeAnchorOffsetsToCurrentRect = (
-  frameNode: HTMLElement | null | undefined,
-  pageInner?: HTMLElement | null
-) => {
-  const resolvedPageInner = pageInner || frameNode?.closest<HTMLElement>('.page-inner') || null;
-
-  if (!frameNode || !resolvedPageInner) {
-    return null;
-  }
-
-  const currentConfig = ensureFrameRelativeAnchorConfig(frameNode, resolvedPageInner);
-
-  if (!currentConfig) {
-    return null;
-  }
-
-  const anchorRect = resolveRelativeAnchorRect(resolvedPageInner, currentConfig);
-
-  if (!anchorRect) {
-    return null;
-  }
-
-  const nextConfig = buildRelativeAnchorConfigFromRect({
-    frameRect: readFrameMoveRect(frameNode),
-    anchorRect,
-    anchorKind: currentConfig.anchorKind,
-    anchorId: currentConfig.anchorId,
-    preferredAnchorX: currentConfig.anchorX,
-    preferredAnchorY: currentConfig.anchorY,
-  });
-  writeFrameRelativeAnchorAttrs(frameNode, nextConfig);
-  return nextConfig;
-};
-
-const applyRelativeAnchoredFrameRects = (pageInner: HTMLElement, excludedFrameGroupIds: string[] = []) => {
-  const excludedFrameGroupIdSet = new Set(excludedFrameGroupIds);
-  const relativeNodes = collectFrameSelectionAnchors(pageInner).filter((node) =>
-    Boolean(ensureFrameRelativeAnchorConfig(node, pageInner))
-  );
-
-  for (let pass = 0; pass < 3; pass += 1) {
-    relativeNodes.forEach((node) => {
-      const frameGroupId = getFrameGroupId(node);
-
-      if (!frameGroupId || excludedFrameGroupIdSet.has(frameGroupId)) {
-        return;
-      }
-
-      const config = ensureFrameRelativeAnchorConfig(node, pageInner);
-
-      if (!config) {
-        return;
-      }
-
-      const anchorRect = resolveRelativeAnchorRect(pageInner, config);
-
-      if (!anchorRect) {
-        return;
-      }
-
-      const currentRect = readFrameMoveRect(node);
-      const nextRect = buildFrameRectFromRelativeAnchor(currentRect, anchorRect, config);
-
-      if (
-        Math.abs(nextRect.left - currentRect.left) <= 0.5 &&
-        Math.abs(nextRect.top - currentRect.top) <= 0.5
-      ) {
-        return;
-      }
-
-      writeFrameMoveRect(node, nextRect);
-    });
-  }
-};
-
-const ensureRelativeAnchorConfigs = (scope: ParentNode) => {
-  Array.from(scope.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
-    collectFrameSelectionAnchors(pageInner).forEach((node) => {
-      ensureFrameRelativeAnchorConfig(node, pageInner);
-    });
-  });
-};
-
-const applyRelativeAnchoredFrameRectsInRoot = (root: ParentNode, excludedFrameGroupIds: string[] = []) => {
-  Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
-    applyRelativeAnchoredFrameRects(pageInner, excludedFrameGroupIds);
-  });
-};
-
-const appendRelativeAnchorGuideSegment = (
-  pageInner: HTMLElement,
-  rect: FrameNodeRect,
-  orientation: 'horizontal' | 'vertical'
-) => {
-  const guide = document.createElement('div');
-  guide.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
-  guide.setAttribute('data-frame-editor-ui', 'true');
-  guide.setAttribute('data-relative-guide-orientation', orientation);
-  guide.style.left = toFrameCssPx(rect.left);
-  guide.style.top = toFrameCssPx(rect.top);
-  guide.style.width = toFrameCssPx(Math.max(1, rect.width));
-  guide.style.height = toFrameCssPx(Math.max(1, rect.height));
-  pageInner.appendChild(guide);
-};
-
-const appendRelativeAnchorGuideBadge = (
-  host: HTMLElement,
-  point: { x: number; y: number },
-  text: string,
-  role: 'anchor' | 'source'
-) => {
-  const badge = document.createElement('div');
-  badge.className = FRAME_RELATIVE_ANCHOR_BADGE_CLASS;
-  badge.setAttribute('data-frame-editor-ui', 'true');
-  badge.setAttribute('data-relative-anchor-role', role);
-  badge.textContent = text;
-  badge.style.left = toFrameCssPx(point.x);
-  badge.style.top = toFrameCssPx(point.y);
-  host.appendChild(badge);
-};
-
-const renderRelativeAnchorGuides = (root: HTMLElement, selectedIds: string[]) => {
-  const primarySelectedId = selectedIds[0];
-
-  if (!primarySelectedId) {
-    return;
-  }
-
-  const frameNode = resolveFrameSelectionAnchor(
-    root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${primarySelectedId}"]`)
-  );
-  const pageInner = frameNode?.closest<HTMLElement>('.page-inner') || null;
-
-  if (!frameNode || !pageInner) {
-    return;
-  }
-
-  const config = ensureFrameRelativeAnchorConfig(frameNode, pageInner);
-
-  if (!config) {
-    return;
-  }
-
-  const anchorRect = resolveRelativeAnchorRect(pageInner, config);
-
-  if (!anchorRect) {
-    return;
-  }
-
-  const sourceRect = readFrameMoveRect(frameNode);
-  const sourcePoint = {
-    x: config.anchorX === 'left' ? sourceRect.left : sourceRect.left + sourceRect.width,
-    y: config.anchorY === 'top' ? sourceRect.top : sourceRect.top + sourceRect.height,
-  };
-  const anchorPoint = {
-    x: config.anchorX === 'left' ? anchorRect.left : anchorRect.left + anchorRect.width,
-    y: config.anchorY === 'top' ? anchorRect.top : anchorRect.top + anchorRect.height,
-  };
-
-  appendRelativeAnchorGuideSegment(
-    pageInner,
-    {
-      left: Math.min(sourcePoint.x, anchorPoint.x),
-      top: sourcePoint.y,
-      width: Math.abs(anchorPoint.x - sourcePoint.x),
-      height: 1,
-    },
-    'horizontal'
-  );
-  appendRelativeAnchorGuideSegment(
-    pageInner,
-    {
-      left: anchorPoint.x,
-      top: Math.min(sourcePoint.y, anchorPoint.y),
-      width: 1,
-      height: Math.abs(anchorPoint.y - sourcePoint.y),
-    },
-    'vertical'
-  );
-  appendRelativeAnchorGuideBadge(
-    pageInner,
-    {
-      x: sourceRect.left + sourceRect.width / 2,
-      y: sourceRect.top - 8,
-    },
-    `상대 위치: ${readRelativeAnchorTargetLabel(config) || '-'}`,
-    'source'
-  );
-
-  if (config.anchorKind === 'frame') {
-    const anchorNode = resolveFrameSelectionAnchor(
-      pageInner.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${config.anchorId}"]`)
-    );
-
-    if (!anchorNode) {
-      return;
-    }
-
-    anchorNode.setAttribute('data-template-relative-anchor-target', 'true');
-    const anchorBadge = document.createElement('div');
-    anchorBadge.className = FRAME_RELATIVE_ANCHOR_BADGE_CLASS;
-    anchorBadge.setAttribute('data-frame-editor-ui', 'true');
-    anchorBadge.setAttribute('data-relative-anchor-role', 'anchor');
-    anchorBadge.textContent = `기준: ${config.anchorId}`;
-    anchorBadge.style.left = '50%';
-    anchorBadge.style.top = '-4px';
-    anchorNode.appendChild(anchorBadge);
-    return;
-  }
-
-  appendRelativeAnchorGuideBadge(pageInner, anchorPoint, readRelativeAnchorTargetLabel(config) || config.anchorId, 'anchor');
-};
-
 const isInteractiveTarget = (target: HTMLElement | null) =>
   Boolean(
     target?.closest(
@@ -3221,7 +2432,6 @@ const extractEditorHtml = (root: HTMLElement) => {
   container.innerHTML = root.innerHTML;
   syncFormControlMarkup(container);
   denormalizePreviewFrameBands(container);
-  stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   return container.innerHTML.trim();
@@ -3484,8 +2694,6 @@ const applyFrameSelectionUi = (
       );
     });
   });
-
-  renderRelativeAnchorGuides(root, selectedIds);
 };
 
 const applyFrameStylePatch = (
@@ -3554,9 +2762,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [sourceDocumentName, setSourceDocumentName] = React.useState('');
   const [layoutResizeMode, setLayoutResizeMode] = React.useState<TemplateLayoutResizeMode>('grow_height');
   const [previewZoom, setPreviewZoom] = React.useState(100);
-  const [boxCreationMode, setBoxCreationMode] = React.useState(false);
-  const [boxCreationPositionMode, setBoxCreationPositionMode] =
-    React.useState<TemplateFramePositionMode>('relative');
   const [selectedFrameGroupIds, setSelectedFrameGroupIds] = React.useState<string[]>([]);
   const [edgeSelectionState, setEdgeSelectionState] = React.useState<TemplateEdgeSelectionStateDto>(
     TemplateEdgeSelectionService.createEmptyState()
@@ -3578,8 +2783,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const dragStateRef = React.useRef<DragState | null>(null);
   const resizeStateRef = React.useRef<ResizeState | null>(null);
   const edgePressStateRef = React.useRef<EdgePressState | null>(null);
-  const marqueeSelectionStateRef = React.useRef<MarqueeSelectionState | null>(null);
-  const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
   const previewEditorStateRetryCountRef = React.useRef(0);
 
@@ -3608,22 +2811,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectedEdgeClickedCount = edgeRoleDiagnostics.selectedEdgeClickedIds.length;
   const selectedEdgeAutoMultiCount = edgeRoleDiagnostics.selectedEdgeAutoMultiIds.length;
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
-  const primarySelectedFrameGroupId = selectedFrameGroupIds[0] || null;
-  const relativeCreateAnchorFrameGroupId =
-    boxCreationPositionMode === 'relative' && selectedFrameGroupIds.length === 1 ? primarySelectedFrameGroupId : null;
-  const primaryRelativeAnchorLabel = React.useMemo(() => {
-    if (!primarySelectedFrameGroupId || !previewRef.current) {
-      return null;
-    }
-
-    const frameNode = resolveFrameSelectionAnchor(
-      previewRef.current.querySelector<HTMLElement>(
-        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${primarySelectedFrameGroupId}"]`
-      )
-    );
-    const config = readFrameRelativeAnchorConfig(frameNode);
-    return readRelativeAnchorTargetLabel(config);
-  }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
 
   const syncTemplateQuery = React.useCallback((templateId: string) => {
     if (typeof window === 'undefined') {
@@ -3911,8 +3098,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       previewEditorStateRetryCountRef.current = 0;
       const normalized = ensurePreviewFrameBandNormalization(root);
       applyPreviewEditPermissions(root);
-      ensureRelativeAnchorConfigs(root);
-      applyRelativeAnchoredFrameRectsInRoot(root);
       const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
 
       if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
@@ -3984,8 +3169,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       applyPreviewEditPermissions(root);
-      ensureRelativeAnchorConfigs(root);
-      applyRelativeAnchoredFrameRectsInRoot(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
       const snapshot = buildLiveEdgeTopologySnapshot(root);
       const nextEdgeRolePresentation = resolveEdgeRolePresentation(snapshot, reconciledEdgeSelection);
@@ -4004,110 +3187,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
     },
     [buildLiveEdgeTopologySnapshot, reconcileLiveEdgeSelection, resolveEdgeRolePresentation]
-  );
-
-  const clearTransientCanvasOverlays = React.useCallback(() => {
-    removeFrameEditorGhost(marqueeSelectionStateRef.current?.ghost);
-    marqueeSelectionStateRef.current = null;
-    removeFrameEditorGhost(createBoxStateRef.current?.ghost);
-    createBoxStateRef.current = null;
-  }, []);
-
-  const applyFrameBoxSelection = React.useCallback(
-    (nextSelectedFrameGroupIds: string[]) => {
-      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-      selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
-      edgeSelectionStateRef.current = emptyEdgeSelection;
-      setSelectedFrameGroupIds(nextSelectedFrameGroupIds);
-      setEdgeSelectionState(emptyEdgeSelection);
-      setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
-      applyRuntimeSelectionUi(nextSelectedFrameGroupIds, emptyEdgeSelection);
-    },
-    [applyRuntimeSelectionUi]
-  );
-
-  const resolveMarqueeSelectionIds = React.useCallback(
-    (
-      pageInner: HTMLElement,
-      selectionRect: FrameNodeRect,
-      mode: FrameMarqueeSelectionMode,
-      baseSelectionIds: string[]
-    ) => {
-      const hits = getFrameNodes(pageInner)
-        .filter((node) => node.closest<HTMLElement>('.page-inner') === pageInner)
-        .filter((node) => {
-          const rect = readFrameMoveRect(node);
-          return mode === 'contained' ? rectContainsRect(selectionRect, rect) : rectIntersectsRect(selectionRect, rect);
-        })
-        .map((node) => getFrameGroupId(node))
-        .filter((frameGroupId) => Boolean(frameGroupId));
-
-      return Array.from(new Set([...baseSelectionIds, ...hits]));
-    },
-    [getFrameNodes]
-  );
-
-  const commitCreatedFrameShell = React.useCallback(
-    (
-      pageInner: HTMLElement,
-      rect: FrameNodeRect,
-      positionMode: TemplateFramePositionMode,
-      anchorFrameGroupId: string | null
-    ) => {
-      const root = previewRef.current;
-
-      if (!root) {
-        return null;
-      }
-
-      const frameGroupId = buildCreatedFrameGroupId(root);
-      const nextShell = buildCreatedFrameShell({
-        pageInner,
-        rect,
-        frameGroupId,
-        positionMode,
-      });
-
-      pageInner.appendChild(nextShell);
-      const createdFrameNode = resolveFrameSelectionAnchor(
-        nextShell.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
-      );
-
-      if (positionMode === 'relative' && createdFrameNode && anchorFrameGroupId) {
-        const anchorNode = resolveFrameSelectionAnchor(
-          pageInner.querySelector<HTMLElement>(
-            `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${anchorFrameGroupId}"]`
-          )
-        );
-        const anchorRect = anchorNode ? readFrameMoveRect(anchorNode) : null;
-
-        if (anchorRect) {
-          writeFrameRelativeAnchorAttrs(
-            createdFrameNode,
-            buildRelativeAnchorConfigFromRect({
-              frameRect: readFrameMoveRect(createdFrameNode),
-              anchorRect,
-              anchorKind: 'frame',
-              anchorId: anchorFrameGroupId,
-            })
-          );
-        }
-      }
-
-      updatePageInnerMinHeight(pageInner);
-      applyFrameBoxSelection([frameGroupId]);
-      syncDraftPreviewHtmlRef();
-      requestPreviewTextFit();
-
-      if (typeof window !== 'undefined') {
-        window.requestAnimationFrame(() => {
-          schedulePreviewEditorState();
-        });
-      }
-
-      return frameGroupId;
-    },
-    [applyFrameBoxSelection, requestPreviewTextFit, schedulePreviewEditorState, syncDraftPreviewHtmlRef]
   );
 
   const loadTemplates = React.useCallback(async () => {
@@ -4277,26 +3356,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       window.clearInterval(timerId);
     };
   }, [renderedPreviewHtml, schedulePreviewEditorState]);
-
-  React.useEffect(() => {
-    const root = previewRef.current;
-
-    if (!root || !renderedPreviewHtml || typeof window === 'undefined') {
-      return;
-    }
-
-    if (root.querySelector(FRAME_EDGE_BUTTON_SELECTOR)) {
-      return;
-    }
-
-    const timerId = window.setTimeout(() => {
-      schedulePreviewEditorState();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timerId);
-    };
-  }, [boxCreationMode, boxCreationPositionMode, renderedPreviewHtml, schedulePreviewEditorState]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -4877,70 +3936,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [buildEdgeResizeHandleId, buildWidthInstructionKey, getFrameNodes]
   );
 
-  const realignLiveVerticalEdgeTargets = React.useCallback(
-    (root: HTMLElement, resizeState: ResizeState) => {
-      if (!resizeState.edgeResizeTargets?.length) {
-        return;
-      }
-
-      const uniqueMembers = resizeState.edgeResizeTargets
-        .flatMap((edgeTarget) => [...edgeTarget.members, ...edgeTarget.physicalPeerMembers])
-        .filter(
-          (member, memberIndex, members) =>
-            members.findIndex((candidateMember) => candidateMember.edgeId === member.edgeId) === memberIndex
-        )
-        .filter((member) => member.orientation === 'vertical' && (member.widthInstructions?.length || 0) > 0);
-
-      if (uniqueMembers.length === 0) {
-        return;
-      }
-
-      const clusters = clusterItemsByCoordinate(
-        uniqueMembers,
-        (member) => resizeState.edgeLineCoordinateBaseline?.[member.edgeId] ?? member.lineCoordinate,
-        FRAME_RESIZE_TOLERANCE_PX
-      );
-
-      for (let pass = 0; pass < 2; pass += 1) {
-        clusters.forEach((clusterMembers) => {
-          const liveSnapshot = buildLiveEdgeTopologySnapshot(root);
-          const referenceMember =
-            clusterMembers.find(
-              (member) => resizeState.edgeRoleById?.[member.edgeId] === 'selected_edge_clicked'
-            ) || clusterMembers[0];
-
-          if (!referenceMember) {
-            return;
-          }
-
-          const referenceLiveEdge = TemplateEdgeTopologyService.getEdgeById(liveSnapshot, referenceMember.edgeId);
-          const expectedLineCoordinate = referenceLiveEdge?.lineCoordinate;
-
-          if (!Number.isFinite(expectedLineCoordinate)) {
-            return;
-          }
-
-          clusterMembers.forEach((member) => {
-            const liveEdge = TemplateEdgeTopologyService.getEdgeById(liveSnapshot, member.edgeId);
-
-            if (!liveEdge) {
-              return;
-            }
-
-            const correctionDelta = expectedLineCoordinate - liveEdge.lineCoordinate;
-
-            if (Math.abs(correctionDelta) <= 0.25 || !member.widthInstructions?.length) {
-              return;
-            }
-
-            applyFrameResizeWidthDelta(member.node, correctionDelta, member.widthInstructions);
-          });
-        });
-      }
-    },
-    [buildLiveEdgeTopologySnapshot]
-  );
-
   const saveTemplate = React.useCallback(async () => {
     const normalizedTemplateId = selectedTemplateId.trim() || templateDetail?.template.id || '';
     const currentHtml = previewRef.current ? syncDraftPreviewHtmlRef() : draftPreviewHtmlRef.current.trim();
@@ -5026,19 +4021,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       dragStateRef.current = null;
       resizeStateRef.current = null;
       edgePressStateRef.current = null;
-      clearTransientCanvasOverlays();
-      if (previewRef.current) {
-        ensureRelativeAnchorConfigs(previewRef.current);
-        selectedFrameGroupIdsRef.current.forEach((frameGroupId) => {
-          const frameNode = resolveFrameSelectionAnchor(
-            previewRef.current?.querySelector<HTMLElement>(
-              `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`
-            ) || null
-          );
-          syncFrameRelativeAnchorOffsetsToCurrentRect(frameNode);
-        });
-        applyRelativeAnchoredFrameRectsInRoot(previewRef.current);
-      }
       syncDraftPreviewHtmlRef();
       if (!frameSelectionIdsEqual(selectedFrameGroupIds, selectedFrameGroupIdsRef.current)) {
         setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current);
@@ -5079,7 +4061,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [
       buildLiveEdgeTopologySnapshot,
-      clearTransientCanvasOverlays,
       detectEdgeRoleMovementMismatches,
       edgeRoleDiagnostics.mismatchEdgeIds,
       edgeSelectionState,
@@ -5138,54 +4119,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const edgeButton = target.closest<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR);
       const resizeHandle = target.closest<HTMLElement>(FRAME_RESIZE_HANDLE_SELECTOR);
       const frameNode = resolveFrameSelectionAnchor(target.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR));
-      const pageInner =
-        target.closest<HTMLElement>('.page-inner') || frameNode?.closest<HTMLElement>('.page-inner') || null;
-
-      if (boxCreationMode && pageInner) {
-        const anchorFrameGroupId =
-          boxCreationPositionMode === 'relative' && selectedFrameGroupIdsRef.current.length === 1
-            ? selectedFrameGroupIdsRef.current[0]
-            : null;
-
-        if (boxCreationPositionMode === 'relative' && !anchorFrameGroupId) {
-          setMessage('상대 위치 박스 생성 전 기준 박스 1개를 먼저 선택하세요.');
-          return;
-        }
-
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        activePointerOwnerRef.current = event.currentTarget;
-        const origin = readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100);
-        createBoxStateRef.current = {
-          pointerId: event.pointerId,
-          scale: previewZoom / 100,
-          pageInner,
-          positionMode: boxCreationPositionMode,
-          anchorFrameGroupId,
-          origin,
-          ghost: null,
-          active: false,
-        };
-        return;
-      }
-
-      if (event.shiftKey && !edgeButton && !resizeHandle && pageInner) {
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        activePointerOwnerRef.current = event.currentTarget;
-        marqueeSelectionStateRef.current = {
-          pointerId: event.pointerId,
-          scale: previewZoom / 100,
-          pageInner,
-          anchorFrameGroupId: frameNode ? getFrameGroupId(frameNode) : null,
-          baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-          origin: readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100),
-          ghost: null,
-          mode: 'contained',
-          active: false,
-        };
-        return;
-      }
 
       if (!frameNode) {
         return;
@@ -5201,6 +4134,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         resizeHandle?.getAttribute('data-direction') ||
         '') as TemplateFrameResizeDirection;
       const explicitEdgeSide = getCardinalEdgeSideFromDirection(explicitEdgeDirection);
+      const pageInner = frameNode.closest<HTMLElement>('.page-inner');
 
       if (explicitEdgeSide && pageInner) {
         const snapshot = buildLiveEdgeTopologySnapshot(root);
@@ -5234,6 +4168,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           edgeRoleById: resizeIntent.edgeRoleById,
           withShift: Boolean(event.shiftKey),
         };
+        return;
+      }
+
+      const nextSelection = getNextFrameSelection(selectedFrameGroupIds, frameGroupId, Boolean(event.shiftKey));
+
+      if (event.shiftKey) {
+        setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
+        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        setSelectedFrameGroupIds(nextSelection);
         return;
       }
 
@@ -5299,98 +4242,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           : [{ node: frameNode, rect: readFrameMoveRect(frameNode) }],
       };
     },
-    [
-      boxCreationMode,
-      boxCreationPositionMode,
-      buildLiveEdgeTopologySnapshot,
-      getFrameNodes,
-      previewZoom,
-      selectedFrameGroupIds,
-    ]
+    [buildLiveEdgeTopologySnapshot, getFrameNodes, previewZoom, selectedFrameGroupIds]
   );
 
   const handlePreviewPointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const marqueeSelectionState = marqueeSelectionStateRef.current;
-    const createBoxState = createBoxStateRef.current;
     const dragState = dragStateRef.current;
     let resizeState = resizeStateRef.current;
-
-    if (marqueeSelectionState && event.pointerId === marqueeSelectionState.pointerId) {
-      event.preventDefault();
-      const currentPoint = readPageInnerPointerPoint(
-        marqueeSelectionState.pageInner,
-        event.clientX,
-        event.clientY,
-        marqueeSelectionState.scale
-      );
-      const nextRect = buildPointerDragRect(marqueeSelectionState.origin, currentPoint);
-
-      if (
-        !marqueeSelectionState.active &&
-        nextRect.width < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
-        nextRect.height < FRAME_MARQUEE_DRAG_THRESHOLD_PX
-      ) {
-        return;
-      }
-
-      if (!marqueeSelectionState.active) {
-        const nextGhost = createFrameEditorGhost(FRAME_MARQUEE_GHOST_CLASS, marqueeSelectionState.mode);
-        marqueeSelectionState.pageInner.appendChild(nextGhost);
-        marqueeSelectionState.ghost = nextGhost;
-        marqueeSelectionState.active = true;
-      }
-
-      const nextMode: FrameMarqueeSelectionMode =
-        currentPoint.x >= marqueeSelectionState.origin.x ? 'contained' : 'intersected';
-      marqueeSelectionState.mode = nextMode;
-      marqueeSelectionState.ghost?.setAttribute('data-marquee-mode', nextMode);
-      if (marqueeSelectionState.ghost) {
-        writeFrameEditorGhostRect(marqueeSelectionState.ghost, nextRect);
-      }
-
-      const nextSelectionIds = resolveMarqueeSelectionIds(
-        marqueeSelectionState.pageInner,
-        nextRect,
-        nextMode,
-        marqueeSelectionState.baseSelectionIds
-      );
-      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-      selectedFrameGroupIdsRef.current = nextSelectionIds;
-      edgeSelectionStateRef.current = emptyEdgeSelection;
-      applyRuntimeSelectionUi(nextSelectionIds, emptyEdgeSelection);
-      return;
-    }
-
-    if (createBoxState && event.pointerId === createBoxState.pointerId) {
-      event.preventDefault();
-      const currentPoint = readPageInnerPointerPoint(
-        createBoxState.pageInner,
-        event.clientX,
-        event.clientY,
-        createBoxState.scale
-      );
-      const nextRect = buildPointerDragRect(createBoxState.origin, currentPoint);
-
-      if (
-        !createBoxState.active &&
-        nextRect.width < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
-        nextRect.height < FRAME_MARQUEE_DRAG_THRESHOLD_PX
-      ) {
-        return;
-      }
-
-      if (!createBoxState.active) {
-        const nextGhost = createFrameEditorGhost(FRAME_CREATION_GHOST_CLASS);
-        createBoxState.pageInner.appendChild(nextGhost);
-        createBoxState.ghost = nextGhost;
-        createBoxState.active = true;
-      }
-
-      if (createBoxState.ghost) {
-        writeFrameEditorGhostRect(createBoxState.ghost, nextRect);
-      }
-      return;
-    }
 
     if (dragState && event.pointerId === dragState.pointerId) {
       event.preventDefault();
@@ -5445,8 +4302,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           )
         );
       });
-      ensureRelativeAnchorConfigs(dragState.pageInner);
-      applyRelativeAnchoredFrameRects(dragState.pageInner, dragState.nodes.map(({ node }) => getFrameGroupId(node)));
       return;
     }
 
@@ -5695,9 +4550,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + finalDeltaX;
         resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + finalDeltaY;
-        if (previewRef.current) {
-          realignLiveVerticalEdgeTargets(previewRef.current, resizeState);
-        }
       } else {
         const siblingRects = filterResizeSnapRects(
           getFrameNodes(resizeState.pageInner)
@@ -5721,22 +4573,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           resizeState.widthInstructions
         );
       }
-
-      ensureRelativeAnchorConfigs(resizeState.pageInner);
-      applyRelativeAnchoredFrameRects(
-        resizeState.pageInner,
-        resizeState.edgeResizeTargets?.length
-          ? Array.from(
-              new Set(
-                resizeState.edgeResizeTargets.flatMap((edgeTarget) =>
-                  [...edgeTarget.members, ...edgeTarget.physicalPeerMembers]
-                    .map((member) => getFrameGroupId(member.node))
-                    .filter((frameGroupId) => Boolean(frameGroupId))
-                )
-              )
-            )
-          : [getFrameGroupId(resizeState.node)]
-      );
     }
   }, [
     applyRuntimeSelectionUi,
@@ -5744,107 +4580,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     collectEdgeResizeTargets,
     collectPassiveShiftedHorizontalEdgeIds,
     getFrameNodes,
-    realignLiveVerticalEdgeTargets,
-    resolveMarqueeSelectionIds,
   ]);
 
   const handlePreviewPointerUp = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      const createBoxState = createBoxStateRef.current;
-
-      if (createBoxState?.pointerId === event.pointerId) {
-        event.preventDefault();
-        const owner = activePointerOwnerRef.current;
-
-        if (owner?.hasPointerCapture(event.pointerId)) {
-          owner.releasePointerCapture(event.pointerId);
-        }
-
-        const finalPoint = readPageInnerPointerPoint(
-          createBoxState.pageInner,
-          event.clientX,
-          event.clientY,
-          createBoxState.scale
-        );
-        const finalRect = buildPointerDragRect(createBoxState.origin, finalPoint);
-        const shouldCreate =
-          finalRect.width >= MIN_FRAME_SIZE_PX && finalRect.height >= MIN_FRAME_SIZE_PX;
-
-        clearTransientCanvasOverlays();
-        activePointerOwnerRef.current = null;
-
-        if (shouldCreate) {
-          const createdFrameGroupId = commitCreatedFrameShell(
-            createBoxState.pageInner,
-            finalRect,
-            createBoxState.positionMode,
-            createBoxState.anchorFrameGroupId
-          );
-
-          if (createdFrameGroupId) {
-            setBoxCreationMode(false);
-          }
-        }
-
-        return;
-      }
-
-      const marqueeSelectionState = marqueeSelectionStateRef.current;
-
-      if (marqueeSelectionState?.pointerId === event.pointerId) {
-        event.preventDefault();
-        const owner = activePointerOwnerRef.current;
-
-        if (owner?.hasPointerCapture(event.pointerId)) {
-          owner.releasePointerCapture(event.pointerId);
-        }
-
-        const finalPoint = readPageInnerPointerPoint(
-          marqueeSelectionState.pageInner,
-          event.clientX,
-          event.clientY,
-          marqueeSelectionState.scale
-        );
-        const finalRect = buildPointerDragRect(marqueeSelectionState.origin, finalPoint);
-        const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-
-        clearTransientCanvasOverlays();
-        activePointerOwnerRef.current = null;
-
-        if (
-          marqueeSelectionState.active ||
-          finalRect.width >= FRAME_MARQUEE_DRAG_THRESHOLD_PX ||
-          finalRect.height >= FRAME_MARQUEE_DRAG_THRESHOLD_PX
-        ) {
-          const nextMode: FrameMarqueeSelectionMode =
-            finalPoint.x >= marqueeSelectionState.origin.x ? 'contained' : 'intersected';
-          const nextSelectionIds = resolveMarqueeSelectionIds(
-            marqueeSelectionState.pageInner,
-            finalRect,
-            nextMode,
-            marqueeSelectionState.baseSelectionIds
-          );
-          applyFrameBoxSelection(nextSelectionIds);
-          return;
-        }
-
-        if (marqueeSelectionState.anchorFrameGroupId) {
-          applyFrameBoxSelection(
-            getNextFrameSelection(
-              marqueeSelectionState.baseSelectionIds,
-              marqueeSelectionState.anchorFrameGroupId,
-              true
-            )
-          );
-          return;
-        }
-
-        selectedFrameGroupIdsRef.current = marqueeSelectionState.baseSelectionIds;
-        edgeSelectionStateRef.current = emptyEdgeSelection;
-        applyRuntimeSelectionUi(marqueeSelectionState.baseSelectionIds, emptyEdgeSelection);
-        return;
-      }
-
       const edgePressState = edgePressStateRef.current;
 
       if (edgePressState?.pointerId === event.pointerId) {
@@ -5874,49 +4613,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-    [
-      applyFrameBoxSelection,
-      applyRuntimeSelectionUi,
-      clearTransientCanvasOverlays,
-      commitCreatedFrameShell,
-      resolveEdgeRolePresentation,
-      resolveMarqueeSelectionIds,
-      stopPointerInteraction,
-    ]
+    [resolveEdgeRolePresentation, stopPointerInteraction]
   );
 
   const handlePreviewPointerCancel = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      const marqueeSelectionState = marqueeSelectionStateRef.current;
-
-      if (marqueeSelectionState?.pointerId === event.pointerId) {
-        const owner = activePointerOwnerRef.current;
-
-        if (owner?.hasPointerCapture(event.pointerId)) {
-          owner.releasePointerCapture(event.pointerId);
-        }
-
-        const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-        clearTransientCanvasOverlays();
-        activePointerOwnerRef.current = null;
-        selectedFrameGroupIdsRef.current = marqueeSelectionState.baseSelectionIds;
-        edgeSelectionStateRef.current = emptyEdgeSelection;
-        applyRuntimeSelectionUi(marqueeSelectionState.baseSelectionIds, emptyEdgeSelection);
-        return;
-      }
-
-      if (createBoxStateRef.current?.pointerId === event.pointerId) {
-        const owner = activePointerOwnerRef.current;
-
-        if (owner?.hasPointerCapture(event.pointerId)) {
-          owner.releasePointerCapture(event.pointerId);
-        }
-
-        clearTransientCanvasOverlays();
-        activePointerOwnerRef.current = null;
-        return;
-      }
-
       if (edgePressStateRef.current?.pointerId === event.pointerId) {
         stopPointerInteraction(event.pointerId);
         return;
@@ -5929,7 +4630,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-    [applyRuntimeSelectionUi, clearTransientCanvasOverlays, stopPointerInteraction]
+    [stopPointerInteraction]
   );
 
   const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -5977,12 +4678,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview section.page {
           margin: 0 auto 20px;
         }
-        .template-edit-preview[data-frame-create-mode="true"] {
-          cursor: crosshair;
-        }
-        .template-edit-preview[data-frame-create-mode="true"] [data-template-edit-scope][data-template-edit-enabled="true"] {
-          cursor: crosshair;
-        }
         .template-edit-preview [data-template-selected="true"] {
           position: relative;
           z-index: 20 !important;
@@ -6019,60 +4714,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           line-height: 1.2;
           font-weight: 700;
           pointer-events: none;
-        }
-        .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS} {
-          position: absolute;
-          z-index: 30;
-          pointer-events: none;
-          border: 1px dashed rgba(13, 148, 136, .92);
-          background: rgba(20, 184, 166, .12);
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .78);
-        }
-        .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS}[data-marquee-mode="intersected"] {
-          border-color: rgba(2, 132, 199, .96);
-          background: rgba(56, 189, 248, .12);
-        }
-        .template-edit-preview .${FRAME_CREATION_GHOST_CLASS} {
-          position: absolute;
-          z-index: 30;
-          pointer-events: none;
-          border: 1px solid rgba(15, 118, 110, .96);
-          background:
-            linear-gradient(180deg, rgba(15, 118, 110, .08), rgba(13, 148, 136, .12));
-          box-shadow:
-            inset 0 0 0 1px rgba(255, 255, 255, .85),
-            0 0 0 1px rgba(15, 118, 110, .18);
-        }
-        .template-edit-preview .${FRAME_RELATIVE_ANCHOR_GUIDE_CLASS} {
-          position: absolute;
-          z-index: 29;
-          pointer-events: none;
-          background:
-            linear-gradient(90deg, rgba(249, 115, 22, .9), rgba(245, 158, 11, .88));
-          box-shadow: 0 0 0 1px rgba(255, 255, 255, .72);
-        }
-        .template-edit-preview .${FRAME_RELATIVE_ANCHOR_BADGE_CLASS} {
-          position: absolute;
-          z-index: 31;
-          pointer-events: none;
-          transform: translate(-50%, -100%);
-          border-radius: 999px;
-          background: rgba(249, 115, 22, .96);
-          color: white;
-          padding: 2px 8px;
-          font-size: 10px;
-          line-height: 1.2;
-          font-weight: 700;
-          box-shadow: 0 2px 6px rgba(15, 23, 42, .18);
-          white-space: nowrap;
-        }
-        .template-edit-preview .${FRAME_RELATIVE_ANCHOR_BADGE_CLASS}[data-relative-anchor-role="source"] {
-          background: rgba(13, 148, 136, .96);
-        }
-        .template-edit-preview [data-template-relative-anchor-target="true"] {
-          box-shadow:
-            0 0 0 3px rgba(249, 115, 22, .2),
-            inset 0 0 0 1px rgba(249, 115, 22, .7) !important;
         }
         .template-edit-preview ${FRAME_RESIZE_HANDLE_SELECTOR} {
           position: absolute;
@@ -6293,49 +4934,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <CardTitle>박스 편집 캔버스</CardTitle>
               <CardDescription>
                 엣지를 1회 클릭하면 직접 연결된 엣지 cohort 가 선택되고, 같은 엣지를 다시 클릭하면 해당 엣지만 단독 선택됩니다.
-                `Shift + drag` 좌→우는 영역 안에 완전히 들어온 div 박스만, 우→좌는 닿은 div 박스까지 선택합니다.
               </CardDescription>
             </div>
-            <div className="flex flex-col items-start gap-2 md:items-end">
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="text-xs font-medium text-slate-500">줌</label>
-                {[80, 100, 125].map((zoom) => (
-                  <Button
-                    key={zoom}
-                    size="sm"
-                    variant={previewZoom === zoom ? 'default' : 'outline'}
-                    onClick={() => setPreviewZoom(zoom)}
-                  >
-                    {zoom}%
-                  </Button>
-                ))}
-                <div className="mx-1 h-6 w-px bg-slate-200" />
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs font-medium text-slate-500">줌</label>
+              {[80, 100, 125].map((zoom) => (
                 <Button
+                  key={zoom}
                   size="sm"
-                  variant={boxCreationMode ? 'default' : 'outline'}
-                  onClick={() => {
-                    clearTransientCanvasOverlays();
-                    setBoxCreationMode((previous) => !previous);
-                  }}
+                  variant={previewZoom === zoom ? 'default' : 'outline'}
+                  onClick={() => setPreviewZoom(zoom)}
                 >
-                  박스 생성
+                  {zoom}%
                 </Button>
-                <select
-                  value={boxCreationPositionMode}
-                  onChange={(event) => setBoxCreationPositionMode(event.target.value as TemplateFramePositionMode)}
-                  disabled={!boxCreationMode}
-                  className="flex h-9 min-w-[110px] rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="relative">상대 위치</option>
-                  <option value="absolute">절대 위치</option>
-                </select>
-              </div>
-              <p className="text-[11px] text-slate-500">
-                박스 생성 모드에서는 캔버스에서 drag 한 영역만큼 새 div 박스를 만들고, `relative` 는 먼저 선택한 기준 박스 1개를 anchor 로 삼습니다. `absolute` 는 다른 박스 resize 전파에서 제외됩니다.
-              </p>
-              <p className="text-[11px] text-slate-500">
-                현재 상대 기준: {relativeCreateAnchorFrameGroupId || '미선택'}
-              </p>
+              ))}
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -6345,7 +4957,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   <div
                     ref={setPreviewNode}
                     className="template-edit-preview"
-                    data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
                     style={{ ['--template-preview-zoom' as string]: String(previewZoom / 100) }}
                     onPointerDownCapture={handlePreviewPointerDown}
                     onPointerMoveCapture={handlePreviewPointerMove}
@@ -6375,7 +4986,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                 <div>선택 박스 수: {selectedFrameGroupIds.length}</div>
                 <div className="mt-1 break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</div>
-                <div className="mt-1">상대 기준 라벨: {primaryRelativeAnchorLabel || '-'}</div>
                 <div className="mt-1">선택 엣지 토큰 수: {edgeSelectionState.tokens.length}</div>
                 <div className="mt-1">선택 엣지 수: {selectedEdgeMemberCount}</div>
                 <div className="mt-1">선택 엣지 모드: {selectedEdgeMode || '-'}</div>
