@@ -128,35 +128,39 @@ const buildDirectAdjacencies = (edges: TemplateEdgeDescriptorDto[], tolerancePx:
     const lineClusters = clusterByCoordinate(axisEdges, (edge) => edge.lineCoordinate, tolerancePx);
 
     lineClusters.forEach((lineCluster) => {
-      const sortedEdges = lineCluster.slice().sort(sortEdgesBySpan);
+      const oppositeClusters = clusterByCoordinate(lineCluster, (edge) => edge.oppositeCoordinate, tolerancePx);
 
-      for (let index = 0; index < sortedEdges.length - 1; index += 1) {
-        const currentEdge = sortedEdges[index];
-        const nextEdge = sortedEdges[index + 1];
+      oppositeClusters.forEach((oppositeCluster) => {
+        const sortedEdges = oppositeCluster.slice().sort(sortEdgesBySpan);
 
-        if (Math.abs(currentEdge.spanEnd - nextEdge.spanStart) > tolerancePx) {
-          continue;
+        for (let index = 0; index < sortedEdges.length - 1; index += 1) {
+          const currentEdge = sortedEdges[index];
+          const nextEdge = sortedEdges[index + 1];
+
+          if (Math.abs(currentEdge.spanEnd - nextEdge.spanStart) > tolerancePx) {
+            continue;
+          }
+
+          const sharedCoordinate = roundEdgeCoordinate((currentEdge.spanEnd + nextEdge.spanStart) / 2);
+
+          adjacencies.push({
+            fromEdgeId: currentEdge.edgeId,
+            toEdgeId: nextEdge.edgeId,
+            orientation: currentEdge.orientation,
+            side: currentEdge.side,
+            sharedCoordinate,
+            relation: 'touching-endpoint',
+          });
+          adjacencies.push({
+            fromEdgeId: nextEdge.edgeId,
+            toEdgeId: currentEdge.edgeId,
+            orientation: currentEdge.orientation,
+            side: currentEdge.side,
+            sharedCoordinate,
+            relation: 'touching-endpoint',
+          });
         }
-
-        const sharedCoordinate = roundEdgeCoordinate((currentEdge.spanEnd + nextEdge.spanStart) / 2);
-
-        adjacencies.push({
-          fromEdgeId: currentEdge.edgeId,
-          toEdgeId: nextEdge.edgeId,
-          orientation: currentEdge.orientation,
-          side: currentEdge.side,
-          sharedCoordinate,
-          relation: 'touching-endpoint',
-        });
-        adjacencies.push({
-          fromEdgeId: nextEdge.edgeId,
-          toEdgeId: currentEdge.edgeId,
-          orientation: currentEdge.orientation,
-          side: currentEdge.side,
-          sharedCoordinate,
-          relation: 'touching-endpoint',
-        });
-      }
+      });
     });
   });
 
@@ -216,41 +220,45 @@ const buildCohorts = (
     const lineClusters = clusterByCoordinate(axisEdges, (edge) => edge.lineCoordinate, tolerancePx);
 
     lineClusters.forEach((lineCluster, lineClusterIndex) => {
-      const sortedEdges = lineCluster.slice().sort(sortEdgesBySpan);
-      const remainingEdgeIds = new Set(sortedEdges.map((edge) => edge.edgeId));
-      let chainIndex = 0;
+      const oppositeClusters = clusterByCoordinate(lineCluster, (edge) => edge.oppositeCoordinate, tolerancePx);
 
-      sortedEdges.forEach((edge) => {
-        if (!remainingEdgeIds.has(edge.edgeId)) {
-          return;
-        }
+      oppositeClusters.forEach((oppositeCluster, oppositeClusterIndex) => {
+        const sortedEdges = oppositeCluster.slice().sort(sortEdgesBySpan);
+        const remainingEdgeIds = new Set(sortedEdges.map((edge) => edge.edgeId));
+        let chainIndex = 0;
 
-        const componentEdgeIds = Array.from(
-          collectConnectedComponent(edge.edgeId, remainingEdgeIds, adjacencyMap)
-        );
-        const componentEdges = componentEdgeIds
-          .map((edgeId) => sortedEdges.find((candidate) => candidate.edgeId === edgeId) || null)
-          .filter((candidate): candidate is TemplateEdgeDescriptorDto => Boolean(candidate))
-          .sort(sortEdgesBySpan);
-        const cohortId = `${axisKey}:${lineClusterIndex}:${chainIndex}`;
+        sortedEdges.forEach((edge) => {
+          if (!remainingEdgeIds.has(edge.edgeId)) {
+            return;
+          }
 
-        componentEdges.forEach((componentEdge) => {
-          componentEdge.cohortId = cohortId;
-          remainingEdgeIds.delete(componentEdge.edgeId);
+          const componentEdgeIds = Array.from(
+            collectConnectedComponent(edge.edgeId, remainingEdgeIds, adjacencyMap)
+          );
+          const componentEdges = componentEdgeIds
+            .map((edgeId) => sortedEdges.find((candidate) => candidate.edgeId === edgeId) || null)
+            .filter((candidate): candidate is TemplateEdgeDescriptorDto => Boolean(candidate))
+            .sort(sortEdgesBySpan);
+          const cohortId = `${axisKey}:${lineClusterIndex}:${oppositeClusterIndex}:${chainIndex}`;
+
+          componentEdges.forEach((componentEdge) => {
+            componentEdge.cohortId = cohortId;
+            remainingEdgeIds.delete(componentEdge.edgeId);
+          });
+
+          cohorts.push({
+            cohortId,
+            pageId: edge.pageId,
+            orientation: edge.orientation,
+            side: edge.side,
+            lineCoordinate: edge.lineCoordinate,
+            oppositeCoordinate: edge.oppositeCoordinate,
+            chainIndex,
+            edgeIds: componentEdges.map((componentEdge) => componentEdge.edgeId),
+          });
+
+          chainIndex += 1;
         });
-
-        cohorts.push({
-          cohortId,
-          pageId: edge.pageId,
-          orientation: edge.orientation,
-          side: edge.side,
-          lineCoordinate: edge.lineCoordinate,
-          oppositeCoordinate: edge.oppositeCoordinate,
-          chainIndex,
-          edgeIds: componentEdges.map((componentEdge) => componentEdge.edgeId),
-        });
-
-        chainIndex += 1;
       });
     });
   });

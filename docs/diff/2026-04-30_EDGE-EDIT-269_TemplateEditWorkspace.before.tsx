@@ -89,7 +89,6 @@ type ResizeState = {
   edgeLineCoordinateBaseline?: Record<string, number>;
   appliedEdgeDeltaX?: number;
   appliedEdgeDeltaY?: number;
-  passiveShiftedEdgeIds?: string[];
 };
 
 type EdgePressState = {
@@ -761,31 +760,6 @@ const buildRowOccupiedMaxColEnd = (positions: TableCellLayoutPosition[]) => {
   return rowOccupiedMaxColEnd;
 };
 
-const expandSingleEntryGroupsToTrailingColumns = (
-  groups: SplitFrameBandGroup[],
-  rowOccupiedMaxColEnd: number[],
-  columnCount: number
-) =>
-  groups.map((group) => {
-    if (group.entries.length !== 1 || group.colEnd >= columnCount) {
-      return group;
-    }
-
-    const isRightmostOccupiedGroup = Array.from(
-      { length: group.rowEnd - group.rowStart },
-      (_, offset) => group.rowStart + offset
-    ).every((rowIndex) => (rowOccupiedMaxColEnd[rowIndex] || 0) <= group.colEnd);
-
-    if (!isRightmostOccupiedGroup) {
-      return group;
-    }
-
-    return {
-      ...group,
-      colEnd: columnCount,
-    };
-  });
-
 const stripTransientFrameEditorUi = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>('[data-frame-editor-ui]').forEach((element) => {
     element.remove();
@@ -882,15 +856,8 @@ const buildNormalizedFrameBandShell = (
     .sort((leftEntry, rightEntry) => leftEntry.colStart - rightEntry.colStart)
     .forEach((entry) => {
       const nextCell = entry.cell.cloneNode(true) as HTMLTableCellElement;
-      const singleEntryGroup = group.entries.length === 1;
-      nextCell.colSpan = Math.max(
-        1,
-        singleEntryGroup ? group.colEnd - group.colStart : entry.colEnd - entry.colStart
-      );
-      nextCell.rowSpan = Math.max(
-        1,
-        singleEntryGroup ? group.rowEnd - group.rowStart : entry.rowEnd - entry.rowStart
-      );
+      nextCell.colSpan = Math.max(1, entry.colEnd - entry.colStart);
+      nextCell.rowSpan = Math.max(1, entry.rowEnd - entry.rowStart);
       tbody.rows[entry.rowStart - group.rowStart]?.appendChild(nextCell);
     });
 
@@ -938,9 +905,8 @@ const normalizeFrameBandTableLayout = (shell: HTMLElement) => {
           );
         });
   const rowOccupiedMaxColEnd = buildRowOccupiedMaxColEnd(positions);
-  const expandedGroups = expandSingleEntryGroupsToTrailingColumns(groups, rowOccupiedMaxColEnd, colWidths.length);
 
-  const nextShells = expandedGroups.map((group) =>
+  const nextShells = groups.map((group) =>
     buildNormalizedFrameBandShell(shell, table, pageInner, group, colWidths, rowHeights, rowOccupiedMaxColEnd)
   );
 
@@ -2962,47 +2928,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     []
   );
 
-  const collectPassiveShiftedHorizontalEdgeIds = React.useCallback(
-    (
-      pageInner: HTMLElement,
-      node: HTMLElement,
-      direction: TemplateFrameResizeDirection,
-      snapshot: TemplateEdgeTopologySnapshotDto
-    ) => {
-      if (!direction.includes('s')) {
-        return [];
-      }
-
-      const context = buildFrameResizeContext(node);
-      const resizesOuterBottom = context.singleCellBand || context.rowHeights.length <= context.endRowIndex;
-
-      if (!resizesOuterBottom) {
-        return [];
-      }
-
-      const boundaryY = context.cellRect.top + context.cellRect.height;
-      const shiftedFrameGroupIdSet = new Set(
-        getFrameNodes(pageInner)
-          .filter((candidate) => candidate !== node)
-          .filter((candidate) => resolveFrameLayoutShell(candidate) !== context.shell)
-          .filter((candidate) => {
-            const candidateShell = resolveFrameLayoutShell(candidate);
-            const shellRect = readFrameElementRect(candidateShell, pageInner);
-            return shellRect.top >= boundaryY - FRAME_RESIZE_TOLERANCE_PX;
-          })
-          .map((candidate) => getFrameGroupId(candidate))
-          .filter((frameGroupId) => Boolean(frameGroupId))
-      );
-
-      return snapshot.edges
-        .filter(
-          (edge) => edge.orientation === 'horizontal' && shiftedFrameGroupIdSet.has(edge.frameGroupId)
-        )
-        .map((edge) => edge.edgeId);
-    },
-    [getFrameNodes]
-  );
-
   const detectEdgeRoleMovementMismatches = React.useCallback(
     (root: HTMLElement | null, resizeState: ResizeState | null) => {
       if (!root || !resizeState?.mutationEdgeIds?.length || !resizeState.edgeResizeTargets?.length) {
@@ -3014,7 +2939,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const roleEdgeIds = Object.keys(resizeState.edgeRoleById || {});
       const expectedEdgeIds = roleEdgeIds.length > 0 ? roleEdgeIds : resizeState.mutationEdgeIds;
       const expectedEdgeIdSet = new Set(expectedEdgeIds);
-      const passiveShiftedEdgeIdSet = new Set(resizeState.passiveShiftedEdgeIds || []);
       const referenceEdgeId =
         expectedEdgeIds.find((edgeId) => resizeState.edgeRoleById?.[edgeId] === 'selected_edge_clicked') ||
         expectedEdgeIds[0] ||
@@ -3046,21 +2970,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .filter((edge) => edge.orientation === orientation && !expectedEdgeIdSet.has(edge.edgeId))
         .filter((edge) => {
           const baselineLineCoordinate = resizeState.edgeLineCoordinateBaseline?.[edge.edgeId];
-          const appliedDelta = edge.lineCoordinate - (baselineLineCoordinate || 0);
 
           if (!Number.isFinite(baselineLineCoordinate)) {
             return false;
           }
 
-          if (Math.abs(appliedDelta) <= FRAME_RESIZE_TOLERANCE_PX) {
-            return false;
-          }
-
-          if (passiveShiftedEdgeIdSet.has(edge.edgeId)) {
-            return Math.abs(appliedDelta - expectedDelta) > FRAME_RESIZE_TOLERANCE_PX;
-          }
-
-          return true;
+          return Math.abs(edge.lineCoordinate - baselineLineCoordinate) > FRAME_RESIZE_TOLERANCE_PX;
         })
         .map((edge) => edge.edgeId);
 
@@ -4366,12 +4281,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         ),
         appliedEdgeDeltaX: 0,
         appliedEdgeDeltaY: 0,
-        passiveShiftedEdgeIds: collectPassiveShiftedHorizontalEdgeIds(
-          edgePressState.pageInner,
-          edgePressState.node,
-          edgePressState.direction,
-          edgePressState.snapshot
-        ),
       };
       edgePressStateRef.current = null;
       resizeState = resizeStateRef.current;
@@ -4574,13 +4483,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         );
       }
     }
-  }, [
-    applyRuntimeSelectionUi,
-    collectDirectRoleResizeTargets,
-    collectEdgeResizeTargets,
-    collectPassiveShiftedHorizontalEdgeIds,
-    getFrameNodes,
-  ]);
+  }, [applyRuntimeSelectionUi, collectDirectRoleResizeTargets, collectEdgeResizeTargets, getFrameNodes]);
 
   const handlePreviewPointerUp = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
