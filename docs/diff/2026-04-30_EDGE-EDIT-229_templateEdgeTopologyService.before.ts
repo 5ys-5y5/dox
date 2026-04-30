@@ -318,16 +318,6 @@ const getCohortByEdgeId = (snapshot: TemplateEdgeTopologySnapshotDto, edgeId: st
   return snapshot.cohorts.find((cohort) => cohort.cohortId === edge.cohortId) || null;
 };
 
-const getCohortEdgeIds = (snapshot: TemplateEdgeTopologySnapshotDto, edgeId: string) => {
-  const edge = getEdgeById(snapshot, edgeId);
-
-  if (!edge) {
-    return [];
-  }
-
-  return getCohortByEdgeId(snapshot, edgeId)?.edgeIds || [edge.edgeId];
-};
-
 const getPhysicalPeerEdgeIds = (
   snapshot: TemplateEdgeTopologySnapshotDto,
   edgeId: string,
@@ -360,44 +350,9 @@ const getPhysicalPeerEdgeIds = (
     .map((candidate) => candidate.edgeId);
 };
 
-const expandMutationBoundaryEdgeIds = (
-  snapshot: TemplateEdgeTopologySnapshotDto,
-  seedEdgeIds: string[],
-  tolerancePx = 0.5
-) => {
-  const queue = Array.from(new Set(seedEdgeIds));
-  const visited = new Set<string>();
-
-  while (queue.length > 0) {
-    const currentEdgeId = queue.shift();
-
-    if (!currentEdgeId || visited.has(currentEdgeId)) {
-      continue;
-    }
-
-    visited.add(currentEdgeId);
-    const relatedEdgeIds = Array.from(
-      new Set([
-        ...getCohortEdgeIds(snapshot, currentEdgeId),
-        ...getPhysicalPeerEdgeIds(snapshot, currentEdgeId, tolerancePx),
-      ])
-    );
-
-    relatedEdgeIds.forEach((relatedEdgeId) => {
-      if (!visited.has(relatedEdgeId)) {
-        queue.push(relatedEdgeId);
-      }
-    });
-  }
-
-  return Array.from(visited);
-};
-
 export const TemplateEdgeTopologyService = {
   createSnapshot,
   getEdgeById,
   getCohortByEdgeId,
-  getCohortEdgeIds,
   getPhysicalPeerEdgeIds,
-  expandMutationBoundaryEdgeIds,
 };

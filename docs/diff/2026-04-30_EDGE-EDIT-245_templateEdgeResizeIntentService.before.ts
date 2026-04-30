@@ -7,9 +7,6 @@ import type {
 import { TemplateEdgeSelectionService } from './templateEdgeSelectionService';
 import { TemplateEdgeTopologyService } from './templateEdgeTopologyService';
 
-const EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX = 4;
-const EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX = 4;
-
 const resolvePeerSide = (side: 'left' | 'right' | 'top' | 'bottom') => {
   if (side === 'left') {
     return 'right';
@@ -33,11 +30,6 @@ const createEmptyRoleSummary = () => ({
   mutationEdgeIds: [] as string[],
   edgeRoleById: {} as TemplateEdgeRoleMapDto,
 });
-
-const readEdgeOverlapLength = (
-  left: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'spanStart' | 'spanEnd'>,
-  right: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'spanStart' | 'spanEnd'>
-) => Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
 
 const collectPeerConstrainedSameSideEdgeIds = (
   snapshot: TemplateEdgeSelectionClickDto['snapshot'],
@@ -74,64 +66,17 @@ const collectPeerConstrainedSameSideEdgeIds = (
               return false;
             }
 
-            if (
-              Math.abs(candidate.lineCoordinate - referenceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
+            if (Math.abs(candidate.lineCoordinate - referenceEdge.lineCoordinate) > 0.5) {
               return false;
             }
 
-            return readEdgeOverlapLength(peerEdge, candidate) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
+            return Math.min(peerEdge.spanEnd, candidate.spanEnd) - Math.max(peerEdge.spanStart, candidate.spanStart) > 0.5;
           })
           .map((candidate) => candidate.edgeId);
       })
     )
   );
 };
-
-const collectPeerEdgeIds = (
-  snapshot: TemplateEdgeSelectionClickDto['snapshot'],
-  sourceEdgeIds: string[],
-  excludedEdgeIds: string[]
-) =>
-  Array.from(
-    new Set(
-      sourceEdgeIds.flatMap((edgeId) => {
-        const sourceEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId);
-
-        if (!sourceEdge) {
-          return [];
-        }
-
-        const peerSide = resolvePeerSide(sourceEdge.side);
-
-        return snapshot.edges
-          .filter((candidate) => {
-            if (candidate.edgeId === sourceEdge.edgeId || excludedEdgeIds.includes(candidate.edgeId)) {
-              return false;
-            }
-
-            if (
-              candidate.pageId !== sourceEdge.pageId ||
-              candidate.orientation !== sourceEdge.orientation ||
-              candidate.side !== peerSide
-            ) {
-              return false;
-            }
-
-            if (
-              Math.abs(candidate.lineCoordinate - sourceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
-              return false;
-            }
-
-            return readEdgeOverlapLength(sourceEdge, candidate) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
-          })
-          .map((candidate) => candidate.edgeId);
-      })
-    )
-  );
 
 const describeSelectionRoles = (
   snapshot: TemplateEdgeSelectionClickDto['snapshot'],
@@ -164,40 +109,57 @@ const describeSelectionRoles = (
 
   roleSummary.selectedEdgeClickedIds = Array.from(new Set(roleSummary.selectedEdgeClickedIds));
   roleSummary.selectedEdgeAutoMultiIds = Array.from(new Set(roleSummary.selectedEdgeAutoMultiIds));
-  let changed = true;
 
-  while (changed) {
-    const previousSignature = JSON.stringify({
-      selectedEdgeAutoMultiIds: roleSummary.selectedEdgeAutoMultiIds.slice().sort(),
-      peerEdgeIds: roleSummary.peerEdgeIds.slice().sort(),
-    });
-    const selectedRoleEdgeIds = Array.from(
-      new Set([...roleSummary.selectedEdgeClickedIds, ...roleSummary.selectedEdgeAutoMultiIds])
-    );
-    roleSummary.peerEdgeIds = Array.from(
-      new Set([
-        ...roleSummary.peerEdgeIds,
-        ...collectPeerEdgeIds(snapshot, selectedRoleEdgeIds, selectedRoleEdgeIds),
-      ])
-    );
-    roleSummary.selectedEdgeAutoMultiIds = Array.from(
-      new Set([
-        ...roleSummary.selectedEdgeAutoMultiIds,
-        ...collectPeerConstrainedSameSideEdgeIds(
-          snapshot,
-          referenceEdgeId || roleSummary.selectedEdgeClickedIds[0],
-          roleSummary.peerEdgeIds,
-          [...roleSummary.selectedEdgeClickedIds, ...roleSummary.selectedEdgeAutoMultiIds]
-        ),
-      ])
-    );
-    const nextSignature = JSON.stringify({
-      selectedEdgeAutoMultiIds: roleSummary.selectedEdgeAutoMultiIds.slice().sort(),
-      peerEdgeIds: roleSummary.peerEdgeIds.slice().sort(),
-    });
-    changed = previousSignature !== nextSignature;
-  }
+  const selectedRoleEdgeIds = Array.from(
+    new Set([...roleSummary.selectedEdgeClickedIds, ...roleSummary.selectedEdgeAutoMultiIds])
+  );
 
+  roleSummary.peerEdgeIds = Array.from(
+    new Set(
+      selectedRoleEdgeIds.flatMap((edgeId) => {
+        const sourceEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId);
+
+        if (!sourceEdge) {
+          return [];
+        }
+
+        const peerSide = resolvePeerSide(sourceEdge.side);
+
+        return snapshot.edges
+          .filter((candidate) => {
+            if (candidate.edgeId === sourceEdge.edgeId) {
+              return false;
+            }
+
+            if (
+              candidate.pageId !== sourceEdge.pageId ||
+              candidate.orientation !== sourceEdge.orientation ||
+              candidate.side !== peerSide
+            ) {
+              return false;
+            }
+
+            if (Math.abs(candidate.lineCoordinate - sourceEdge.lineCoordinate) > 0.5) {
+              return false;
+            }
+
+            return Math.min(sourceEdge.spanEnd, candidate.spanEnd) - Math.max(sourceEdge.spanStart, candidate.spanStart) > 0.5;
+          })
+          .map((candidate) => candidate.edgeId);
+      })
+    )
+  ).filter((edgeId) => !selectedRoleEdgeIds.includes(edgeId));
+  roleSummary.selectedEdgeAutoMultiIds = Array.from(
+    new Set([
+      ...roleSummary.selectedEdgeAutoMultiIds,
+      ...collectPeerConstrainedSameSideEdgeIds(
+        snapshot,
+        referenceEdgeId || roleSummary.selectedEdgeClickedIds[0],
+        roleSummary.peerEdgeIds,
+        [...roleSummary.selectedEdgeClickedIds, ...roleSummary.selectedEdgeAutoMultiIds]
+      ),
+    ])
+  );
   const resolvedSelectedRoleEdgeIds = Array.from(
     new Set([...roleSummary.selectedEdgeClickedIds, ...roleSummary.selectedEdgeAutoMultiIds])
   );

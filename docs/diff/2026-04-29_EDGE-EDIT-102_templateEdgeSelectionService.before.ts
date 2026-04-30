@@ -51,9 +51,6 @@ const createEmptyState = (): TemplateEdgeSelectionStateDto => ({
   primaryTokenId: null,
 });
 
-const expandSelectedEdgeIds = (selectionState: TemplateEdgeSelectionStateDto) =>
-  Array.from(new Set(selectionState.tokens.flatMap((token) => token.memberEdgeIds)));
-
 const reconcileSelectionState = (input: {
   snapshot: TemplateEdgeTopologySnapshotDto;
   currentSelection: TemplateEdgeSelectionStateDto;
@@ -81,75 +78,53 @@ const tokensAreCompatible = (
   return primaryEdge.orientation === clickedEdge.orientation && primaryEdge.side === clickedEdge.side;
 };
 
-const resolveSingleSelectionState = (
-  snapshot: TemplateEdgeTopologySnapshotDto,
-  currentSelection: TemplateEdgeSelectionStateDto,
-  clickedEdgeId: string
-) => {
-  const currentPrimaryToken = currentSelection.tokens[0];
-
-  if (
-    currentSelection.tokens.length === 1 &&
-    currentPrimaryToken &&
-    currentPrimaryToken.memberEdgeIds.includes(clickedEdgeId)
-  ) {
-    const nextMode =
-      currentPrimaryToken.mode === 'connected' ? 'isolated' : currentPrimaryToken.anchorEdgeId === clickedEdgeId ? 'connected' : 'isolated';
-    const nextToken = createToken(snapshot, clickedEdgeId, nextMode, 1);
-    return nextToken ? normalizeState([nextToken]) : createEmptyState();
-  }
-
-  const nextToken = createToken(snapshot, clickedEdgeId, 'connected', 1);
-  return nextToken ? normalizeState([nextToken]) : createEmptyState();
-};
-
-const resolveShiftSelectionState = (
-  snapshot: TemplateEdgeTopologySnapshotDto,
-  currentSelection: TemplateEdgeSelectionStateDto,
-  clickedEdgeId: string
-) => {
-  const clickedEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, clickedEdgeId);
-
-  if (!clickedEdge) {
-    return currentSelection;
-  }
-
-  const isolatedCompatibleTokens = currentSelection.tokens.filter((token) => {
-    if (token.mode !== 'isolated') {
-      return false;
-    }
-
-    const anchorEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, token.anchorEdgeId);
-    return anchorEdge?.orientation === clickedEdge.orientation && anchorEdge.side === clickedEdge.side;
-  });
-
-  if (!tokensAreCompatible(snapshot, currentSelection, clickedEdgeId) || isolatedCompatibleTokens.length !== currentSelection.tokens.length) {
-    const nextToken = createToken(snapshot, clickedEdgeId, 'isolated', 1);
-    return nextToken ? normalizeState([nextToken]) : createEmptyState();
-  }
-
-  const existingTokenIndex = isolatedCompatibleTokens.findIndex((token) => token.anchorEdgeId === clickedEdgeId);
-
-  if (existingTokenIndex >= 0) {
-    const nextTokens = isolatedCompatibleTokens.filter((token) => token.anchorEdgeId !== clickedEdgeId);
-    return nextTokens.length > 0 ? normalizeState(nextTokens) : createEmptyState();
-  }
-
-  const nextToken = createToken(snapshot, clickedEdgeId, 'isolated', isolatedCompatibleTokens.length + 1);
-  return nextToken ? normalizeState([...isolatedCompatibleTokens, nextToken]) : normalizeState(isolatedCompatibleTokens);
-};
-
 const resolveNextSelectionState = (input: TemplateEdgeSelectionClickDto): TemplateEdgeSelectionStateDto => {
   const currentSelection = reconcileSelectionState({
     snapshot: input.snapshot,
     currentSelection: input.currentSelection,
   });
+  const existingTokenIndex = currentSelection.tokens.findIndex((token) => token.anchorEdgeId === input.clickedEdgeId);
 
-  if (input.withShift) {
-    return resolveShiftSelectionState(input.snapshot, currentSelection, input.clickedEdgeId);
+  if (!input.withShift) {
+    const currentPrimaryToken = currentSelection.tokens[0];
+
+    if (currentPrimaryToken?.anchorEdgeId === input.clickedEdgeId) {
+      const nextMode = currentPrimaryToken.mode === 'connected' ? 'isolated' : 'connected';
+      const nextToken = createToken(input.snapshot, input.clickedEdgeId, nextMode, 1);
+      return nextToken ? normalizeState([nextToken]) : createEmptyState();
+    }
+
+    const nextToken = createToken(input.snapshot, input.clickedEdgeId, 'connected', 1);
+    return nextToken ? normalizeState([nextToken]) : createEmptyState();
   }
 
-  return resolveSingleSelectionState(input.snapshot, currentSelection, input.clickedEdgeId);
+  if (!tokensAreCompatible(input.snapshot, currentSelection, input.clickedEdgeId)) {
+    const nextToken = createToken(input.snapshot, input.clickedEdgeId, 'connected', 1);
+    return nextToken ? normalizeState([nextToken]) : createEmptyState();
+  }
+
+  if (existingTokenIndex >= 0) {
+    const existingToken = currentSelection.tokens[existingTokenIndex];
+    const nextMode = existingToken.mode === 'connected' ? 'isolated' : 'connected';
+    const nextToken = createToken(input.snapshot, input.clickedEdgeId, nextMode, existingToken.selectionOrder);
+
+    if (!nextToken) {
+      return currentSelection;
+    }
+
+    return normalizeState(
+      currentSelection.tokens.map((token, index) => (index === existingTokenIndex ? nextToken : token))
+    );
+  }
+
+  const nextToken = createToken(
+    input.snapshot,
+    input.clickedEdgeId,
+    'connected',
+    currentSelection.tokens.length + 1
+  );
+
+  return nextToken ? normalizeState([...currentSelection.tokens, nextToken]) : currentSelection;
 };
 
 const resolveActivation = (input: TemplateEdgeSelectionClickDto): TemplateEdgeActivationResultDto => {
@@ -182,8 +157,8 @@ const resolveDragActivation = (input: TemplateEdgeSelectionClickDto): TemplateEd
   return {
     selectionState: currentSelection,
     activatedTokenId: existingToken.tokenId,
-    effectiveEdgeIds: expandSelectedEdgeIds(currentSelection),
-    mode: currentSelection.tokens[0]?.mode || existingToken.mode,
+    effectiveEdgeIds: existingToken.memberEdgeIds.slice(),
+    mode: existingToken.mode,
   };
 };
 
@@ -196,5 +171,4 @@ export const TemplateEdgeSelectionService = {
   resolveActivation,
   resolveDragActivation,
   resolveClick,
-  expandSelectedEdgeIds,
 };

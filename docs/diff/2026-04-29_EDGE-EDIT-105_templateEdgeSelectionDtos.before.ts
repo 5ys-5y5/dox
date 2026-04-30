@@ -4,8 +4,6 @@ export type TemplateEdgeSide = 'left' | 'right' | 'top' | 'bottom';
 
 export type TemplateEdgeSelectionMode = 'connected' | 'isolated';
 
-export type TemplateEdgeSelectionRole = 'selected_edge_clicked' | 'selected_edge_auto_multi' | 'peer_edge';
-
 export type TemplateEdgeRectDto = {
   left: number;
   top: number;
@@ -88,16 +86,10 @@ export type TemplateEdgeActivationResultDto = {
   mode: TemplateEdgeSelectionMode | null;
 };
 
-export type TemplateEdgeRoleMapDto = Record<string, TemplateEdgeSelectionRole>;
-
 export type TemplateEdgeResizeIntentDto = {
   clickSelectionState: TemplateEdgeSelectionStateDto;
   dragSelectionState: TemplateEdgeSelectionStateDto;
-  selectedEdgeClickedIds: string[];
-  selectedEdgeAutoMultiIds: string[];
-  peerEdgeIds: string[];
-  mutationEdgeIds: string[];
-  edgeRoleById: TemplateEdgeRoleMapDto;
+  targetEdgeIds: string[];
   dragMode: TemplateEdgeSelectionMode | null;
   side: TemplateEdgeSide | null;
 };

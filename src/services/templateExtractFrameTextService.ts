@@ -1,31 +1,35 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { TemplateExtractReplicaRenderModel } from '../lib/templateExtractDtos';
+import {
+  buildTemplateExtractPythonRuntimeHint,
+  resolveTemplateExtractPythonBinary,
+} from './templateExtractPythonRuntimeService';
 
 const execFileAsync = promisify(execFile);
 
 const PYTHON_SCRIPT_PATH = join(process.cwd(), 'scripts', 'template-extract-frame-text-v112.py');
-const LOCAL_VENV_PYTHON_PATH = join(process.cwd(), '.venv-template-extract-v2', 'bin', 'python');
 const IMAGE_TROCR_MODEL_ID = process.env.TEMPLATE_EXTRACT_IMAGE_TROCR_MODEL_ID?.trim() || 'ddobokki/ko-trocr';
+const FRAME_TEXT_BASE_REQUIRED_PYTHON_MODULES = ['PIL', 'fitz', 'numpy', 'pytesseract'];
+const FRAME_TEXT_TRANSFORMER_REQUIRED_PYTHON_MODULES = ['torch', 'transformers', 'sentencepiece', 'safetensors', 'tokenizers'];
 
 export type ImageFrameTextOcrVersion = 'iv1.00' | 'iv2.00' | 'iv2.01' | 'iv2.02' | 'iv2.03' | 'iv2.04' | 'iv3.00';
 
-const resolvePythonBinary = () => {
-  const configuredPythonBinary = process.env.TEMPLATE_EXTRACT_PYTHON_BIN?.trim();
+const resolveRequiredPythonModules = (options?: {
+  forceOcr?: boolean;
+  imageOcrVersion?: ImageFrameTextOcrVersion;
+}) => {
+  const requiredModules = [...FRAME_TEXT_BASE_REQUIRED_PYTHON_MODULES];
+  const imageOcrVersion = options?.imageOcrVersion || 'iv1.00';
 
-  if (configuredPythonBinary) {
-    return configuredPythonBinary;
+  if (options?.forceOcr && imageOcrVersion !== 'iv1.00') {
+    requiredModules.push(...FRAME_TEXT_TRANSFORMER_REQUIRED_PYTHON_MODULES);
   }
 
-  if (existsSync(LOCAL_VENV_PYTHON_PATH)) {
-    return LOCAL_VENV_PYTHON_PATH;
-  }
-
-  return 'python3';
+  return requiredModules;
 };
 
 const buildDependencyErrorMessage = (
@@ -35,7 +39,7 @@ const buildDependencyErrorMessage = (
   imageOcrVersion: ImageFrameTextOcrVersion
 ) => {
   const diagnostic = `${stderr}\n${errorMessage}`.trim();
-  const runtimeHint = ` 사용 Python: ${pythonBinary}.`;
+  const runtimeHint = buildTemplateExtractPythonRuntimeHint(pythonBinary);
   const versionLabel = imageOcrVersion;
 
   if (/No module named ['"]?fitz|ModuleNotFoundError:.*fitz/i.test(diagnostic)) {
@@ -195,10 +199,10 @@ export const TemplateExtractFrameTextService = {
     const tempDir = await mkdtemp(join(tmpdir(), 'template-extract-frame-text-'));
     const tempPdfPath = join(tempDir, fileName || 'upload.pdf');
     const tempFramePlansPath = join(tempDir, 'frame-plans.json');
+    const pythonBinary = resolveTemplateExtractPythonBinary(resolveRequiredPythonModules(options));
 
     try {
       await writeFile(tempPdfPath, bytes);
-      const pythonBinary = resolvePythonBinary();
       const scriptArgs = [PYTHON_SCRIPT_PATH, '--input-pdf', tempPdfPath];
       const imageOcrVersion = options?.imageOcrVersion || 'iv1.00';
 
@@ -229,7 +233,7 @@ export const TemplateExtractFrameTextService = {
           : '';
 
       throw new Error(
-        buildDependencyErrorMessage(stderr, message, resolvePythonBinary(), options?.imageOcrVersion || 'iv1.00')
+        buildDependencyErrorMessage(stderr, message, pythonBinary, options?.imageOcrVersion || 'iv1.00')
       );
     } finally {
       await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);

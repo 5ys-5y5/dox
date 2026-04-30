@@ -8,7 +8,6 @@ import { TemplateEdgeSelectionService } from './templateEdgeSelectionService';
 import { TemplateEdgeTopologyService } from './templateEdgeTopologyService';
 
 const EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX = 4;
-const EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX = 4;
 
 const resolvePeerSide = (side: 'left' | 'right' | 'top' | 'bottom') => {
   if (side === 'left') {
@@ -74,10 +73,7 @@ const collectPeerConstrainedSameSideEdgeIds = (
               return false;
             }
 
-            if (
-              Math.abs(candidate.lineCoordinate - referenceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
+            if (Math.abs(candidate.lineCoordinate - referenceEdge.lineCoordinate) > 0.5) {
               return false;
             }
 
@@ -119,10 +115,7 @@ const collectPeerEdgeIds = (
               return false;
             }
 
-            if (
-              Math.abs(candidate.lineCoordinate - sourceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
+            if (Math.abs(candidate.lineCoordinate - sourceEdge.lineCoordinate) > 0.5) {
               return false;
             }
 

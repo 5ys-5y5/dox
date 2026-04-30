@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,9 +16,14 @@ import {
   toLegacyTemplateExtractFrameGroupVersion,
   toPublicTemplateExtractFrameGroupVersion,
 } from '../lib/templateExtractDtos';
+import {
+  buildTemplateExtractPythonRuntimeHint,
+  resolveTemplateExtractPythonBinary,
+} from './templateExtractPythonRuntimeService';
 import { TemplateExtractReplicaHtmlNormalizerService } from './templateExtractReplicaHtmlNormalizerService';
 
 const execFileAsync = promisify(execFile);
+const RASTER_FIRST_REQUIRED_PYTHON_MODULES = ['cv2', 'fitz', 'numpy', 'pytesseract'];
 
 type RasterFirstReplicaVersion = Extract<TemplateExtractEngineVersion, '32' | '33' | '34' | '35' | '36' | '42' | '43' | '44' | '45' | '46' | '47'>;
 
@@ -52,7 +56,6 @@ type RasterFirstReplicaResponse = {
 };
 
 const PYTHON_SCRIPT_PATH = join(process.cwd(), 'scripts', 'template-extract-raster-first-replica.py');
-const LOCAL_VENV_PYTHON_PATH = join(process.cwd(), '.venv-template-extract-v2', 'bin', 'python');
 const RASTER_FIRST_VERSION_INFO: Record<
   RasterFirstReplicaVersion,
   {
@@ -108,20 +111,6 @@ const RASTER_FIRST_VERSION_INFO: Record<
 
 const getRasterFirstVersionInfo = (version: RasterFirstReplicaVersion) =>
   RASTER_FIRST_VERSION_INFO[version] || RASTER_FIRST_VERSION_INFO['47'];
-
-const resolvePythonBinary = () => {
-  const configuredPythonBinary = process.env.TEMPLATE_EXTRACT_PYTHON_BIN?.trim();
-
-  if (configuredPythonBinary) {
-    return configuredPythonBinary;
-  }
-
-  if (existsSync(LOCAL_VENV_PYTHON_PATH)) {
-    return LOCAL_VENV_PYTHON_PATH;
-  }
-
-  return 'python3';
-};
 
 const parseRasterFirstResponse = (
   stdout: string,
@@ -184,7 +173,7 @@ const buildDependencyErrorMessage = (
 ) => {
   const diagnostic = `${stderr}\n${errorMessage}`.trim();
   const versionInfo = getRasterFirstVersionInfo(version);
-  const runtimeHint = ` 사용 Python: ${pythonBinary}. 로컬에서는 TEMPLATE_EXTRACT_PYTHON_BIN으로 venv Python을 지정할 수 있습니다.`;
+  const runtimeHint = buildTemplateExtractPythonRuntimeHint(pythonBinary);
 
   if (/No module named ['"]?fitz|ModuleNotFoundError:.*fitz/i.test(diagnostic)) {
     return `템플릿 추출 실패: ${versionInfo.label} 변환기에 필요한 PyMuPDF(fitz)가 설치되어 있지 않습니다.${runtimeHint}`;
@@ -219,6 +208,7 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
     const sourceTitle = fileName.replace(/\.pdf$/i, '').trim() || '업로드 PDF';
     const tempDir = await mkdtemp(join(tmpdir(), 'template-extract-raster-first-'));
     const tempPdfPath = join(tempDir, fileName || 'upload.pdf');
+    const pythonBinary = resolveTemplateExtractPythonBinary(RASTER_FIRST_REQUIRED_PYTHON_MODULES);
     const legacyFrameGroupVersion = String(
       toLegacyTemplateExtractFrameGroupVersion(frameGroupVersion)
     ) as TemplateExtractFrameGroupLegacyVersion;
@@ -226,7 +216,6 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
     try {
       await writeFile(tempPdfPath, bytes);
 
-      const pythonBinary = resolvePythonBinary();
       const { stdout } = await execFileAsync(
         pythonBinary,
         [
@@ -288,7 +277,7 @@ export const TemplateExtractPdfRasterFirstReplicaService = {
         ? String((error as { stderr: string }).stderr)
         : '';
 
-      throw new Error(buildDependencyErrorMessage(stderr, message, resolvePythonBinary(), version));
+      throw new Error(buildDependencyErrorMessage(stderr, message, pythonBinary, version));
     } finally {
       await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }

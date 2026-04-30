@@ -7,9 +7,6 @@ import type {
 import { TemplateEdgeSelectionService } from './templateEdgeSelectionService';
 import { TemplateEdgeTopologyService } from './templateEdgeTopologyService';
 
-const EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX = 4;
-const EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX = 4;
-
 const resolvePeerSide = (side: 'left' | 'right' | 'top' | 'bottom') => {
   if (side === 'left') {
     return 'right';
@@ -33,11 +30,6 @@ const createEmptyRoleSummary = () => ({
   mutationEdgeIds: [] as string[],
   edgeRoleById: {} as TemplateEdgeRoleMapDto,
 });
-
-const readEdgeOverlapLength = (
-  left: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'spanStart' | 'spanEnd'>,
-  right: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'spanStart' | 'spanEnd'>
-) => Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
 
 const collectPeerConstrainedSameSideEdgeIds = (
   snapshot: TemplateEdgeSelectionClickDto['snapshot'],
@@ -74,14 +66,11 @@ const collectPeerConstrainedSameSideEdgeIds = (
               return false;
             }
 
-            if (
-              Math.abs(candidate.lineCoordinate - referenceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
+            if (Math.abs(candidate.lineCoordinate - referenceEdge.lineCoordinate) > 0.5) {
               return false;
             }
 
-            return readEdgeOverlapLength(peerEdge, candidate) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
+            return Math.min(peerEdge.spanEnd, candidate.spanEnd) - Math.max(peerEdge.spanStart, candidate.spanStart) > 0.5;
           })
           .map((candidate) => candidate.edgeId);
       })
@@ -119,14 +108,11 @@ const collectPeerEdgeIds = (
               return false;
             }
 
-            if (
-              Math.abs(candidate.lineCoordinate - sourceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
+            if (Math.abs(candidate.lineCoordinate - sourceEdge.lineCoordinate) > 0.5) {
               return false;
             }
 
-            return readEdgeOverlapLength(sourceEdge, candidate) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
+            return Math.min(sourceEdge.spanEnd, candidate.spanEnd) - Math.max(sourceEdge.spanStart, candidate.spanStart) > 0.5;
           })
           .map((candidate) => candidate.edgeId);
       })

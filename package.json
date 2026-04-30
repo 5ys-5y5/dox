@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "node scripts/check-no-shadow-in-app.mjs && eslint .",
     "check:no-shadow-app": "node scripts/check-no-shadow-in-app.mjs",
-    "template-extract:measure": "node scripts/template-extract-terminal-measure.cjs"
+    "template-extract:measure": "node scripts/template-extract-terminal-measure.cjs",
+    "template-extract:python:bootstrap": "python3 -m venv .venv-template-extract-v2 && .venv-template-extract-v2/bin/pip install -r requirements.txt"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
