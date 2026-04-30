@@ -286,8 +286,16 @@ const DEFAULT_RELATIVE_PAGE_ANCHORS: Record<string, TemplateFrameRelativeAnchorC
     offsetX: 0,
     offsetY: 0,
   },
+  'band-19-footer': {
+    positionMode: 'relative',
+    anchorKind: 'page-corner',
+    anchorId: 'page-bottom-left',
+    anchorX: 'left',
+    anchorY: 'bottom',
+    offsetX: 0,
+    offsetY: 0,
+  },
 };
-const DEFAULT_ABSOLUTE_FRAME_GROUP_IDS = new Set(['band-19-footer']);
 const PAGE_CORNER_ANCHOR_LABELS: Record<string, string> = {
   'page-top-left': '페이지 좌상단 기준',
   'page-top-right': '페이지 우상단 기준',
@@ -637,15 +645,6 @@ const getRelativeAnchorAttributeTargets = (frameNode: HTMLElement | null | undef
   return [shell, frameNode, textarea].filter((element): element is HTMLElement => Boolean(element));
 };
 
-const writeFramePositionModeAttrs = (
-  frameNode: HTMLElement | null | undefined,
-  positionMode: TemplateFramePositionMode
-) => {
-  getRelativeAnchorAttributeTargets(frameNode).forEach((element) => {
-    element.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
-  });
-};
-
 const clearFrameRelativeAnchorAttrs = (frameNode: HTMLElement | null | undefined) => {
   getRelativeAnchorAttributeTargets(frameNode).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR);
@@ -654,68 +653,6 @@ const clearFrameRelativeAnchorAttrs = (frameNode: HTMLElement | null | undefined
     element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR);
     element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR);
     element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR);
-  });
-};
-
-const resolveNearestPageCornerRelativeAnchorConfig = (
-  frameNode: HTMLElement,
-  pageInner: HTMLElement
-): TemplateFrameRelativeAnchorConfig => {
-  const frameRect = readFrameMoveRect(frameNode);
-  const pageRect = {
-    left: 0,
-    top: 0,
-    width: pageInner.clientWidth,
-    height: pageInner.clientHeight,
-  };
-  const candidates: Array<{
-    anchorId: TemplateFrameRelativeAnchorId;
-    anchorX: TemplateFrameRelativeHorizontalPin;
-    anchorY: TemplateFrameRelativeVerticalPin;
-    distance: number;
-  }> = [
-    {
-      anchorId: 'page-top-left',
-      anchorX: 'left',
-      anchorY: 'top',
-      distance: Math.abs(frameRect.left) + Math.abs(frameRect.top),
-    },
-    {
-      anchorId: 'page-top-right',
-      anchorX: 'right',
-      anchorY: 'top',
-      distance: Math.abs(pageRect.width - (frameRect.left + frameRect.width)) + Math.abs(frameRect.top),
-    },
-    {
-      anchorId: 'page-bottom-left',
-      anchorX: 'left',
-      anchorY: 'bottom',
-      distance: Math.abs(frameRect.left) + Math.abs(pageRect.height - (frameRect.top + frameRect.height)),
-    },
-    {
-      anchorId: 'page-bottom-right',
-      anchorX: 'right',
-      anchorY: 'bottom',
-      distance:
-        Math.abs(pageRect.width - (frameRect.left + frameRect.width)) +
-        Math.abs(pageRect.height - (frameRect.top + frameRect.height)),
-    },
-  ].sort((left, right) => left.distance - right.distance);
-  const nearest = candidates[0];
-  const anchorRect = resolvePageCornerAnchorRect(pageInner, nearest.anchorId) || {
-    left: 0,
-    top: 0,
-    width: 0,
-    height: 0,
-  };
-
-  return buildRelativeAnchorConfigFromRect({
-    frameRect,
-    anchorRect,
-    anchorKind: 'page-corner',
-    anchorId: nearest.anchorId,
-    preferredAnchorX: nearest.anchorX,
-    preferredAnchorY: nearest.anchorY,
   });
 };
 
@@ -883,43 +820,11 @@ const resolveDefaultRelativeAnchorConfig = (
   });
 };
 
-const readFramePositionMode = (
-  frameNode: HTMLElement | null | undefined,
-  pageInner?: HTMLElement | null
-): TemplateFramePositionMode => {
-  if (!frameNode) {
-    return 'relative';
-  }
-
-  const shell = resolveFrameLayoutShell(frameNode);
-  const explicitMode =
-    frameNode.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim() ||
-    shell.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim() ||
-    '';
-
-  if (explicitMode === 'absolute' || explicitMode === 'relative') {
-    return explicitMode;
-  }
-
-  const frameGroupId = getFrameGroupId(frameNode);
-
-  if (DEFAULT_ABSOLUTE_FRAME_GROUP_IDS.has(frameGroupId)) {
-    return 'absolute';
-  }
-
-  const resolvedPageInner = pageInner || frameNode.closest<HTMLElement>('.page-inner');
-  return resolvedPageInner && resolveDefaultRelativeAnchorConfig(frameNode, resolvedPageInner) ? 'relative' : 'relative';
-};
-
 const readFrameRelativeAnchorConfig = (
   frameNode: HTMLElement | null | undefined,
   pageInner?: HTMLElement | null
 ): TemplateFrameRelativeAnchorConfig | null => {
   if (!frameNode) {
-    return null;
-  }
-
-  if (readFramePositionMode(frameNode, pageInner) !== 'relative') {
     return null;
   }
 
@@ -941,13 +846,10 @@ const ensureFrameRelativeAnchorConfig = (frameNode: HTMLElement | null | undefin
     return null;
   }
 
-  writeFramePositionModeAttrs(frameNode, readFramePositionMode(frameNode, resolvedPageInner));
   const config = readFrameRelativeAnchorConfig(frameNode, resolvedPageInner);
 
   if (config) {
     writeFrameRelativeAnchorAttrs(frameNode, config);
-  } else {
-    clearFrameRelativeAnchorAttrs(frameNode);
   }
 
   return config;
@@ -959,63 +861,6 @@ const readRelativeAnchorTargetLabel = (config: TemplateFrameRelativeAnchorConfig
   }
 
   return config.anchorKind === 'page-corner' ? PAGE_CORNER_ANCHOR_LABELS[config.anchorId] || config.anchorId : config.anchorId;
-};
-
-const collectRelativeFlowAffectedFrameGroupIds = (
-  frameNode: HTMLElement | null | undefined,
-  pageInner?: HTMLElement | null
-) => {
-  const resolvedPageInner = pageInner || frameNode?.closest<HTMLElement>('.page-inner') || null;
-
-  if (!frameNode || !resolvedPageInner || readFramePositionMode(frameNode, resolvedPageInner) !== 'relative') {
-    return [];
-  }
-
-  const shell = resolveFrameLayoutShell(frameNode);
-  const shellRect = readFrameElementRect(shell, resolvedPageInner);
-  const boundaryY = shellRect.top + shellRect.height;
-
-  return collectFrameSelectionAnchors(resolvedPageInner)
-    .filter((candidate) => candidate !== frameNode)
-    .filter((candidate) => readFramePositionMode(candidate, resolvedPageInner) !== 'absolute')
-    .filter((candidate) => {
-      const candidateRect = readFrameMoveRect(candidate);
-      return candidateRect.top >= boundaryY - FRAME_RESIZE_TOLERANCE_PX;
-    })
-    .map((candidate) => getFrameGroupId(candidate))
-    .filter((frameGroupId) => Boolean(frameGroupId));
-};
-
-const applyFramePositionMode = (
-  frameNode: HTMLElement | null | undefined,
-  nextMode: TemplateFramePositionMode,
-  pageInner?: HTMLElement | null
-) => {
-  const resolvedPageInner = pageInner || frameNode?.closest<HTMLElement>('.page-inner') || null;
-
-  if (!frameNode || !resolvedPageInner) {
-    return;
-  }
-
-  writeFramePositionModeAttrs(frameNode, nextMode);
-
-  if (nextMode === 'absolute') {
-    clearFrameRelativeAnchorAttrs(frameNode);
-    return;
-  }
-
-  const existingConfig = readFrameRelativeAnchorConfig(frameNode, resolvedPageInner);
-
-  if (existingConfig) {
-    writeFrameRelativeAnchorAttrs(frameNode, existingConfig);
-    return;
-  }
-
-  const defaultConfig = resolveDefaultRelativeAnchorConfig(frameNode, resolvedPageInner);
-  writeFrameRelativeAnchorAttrs(
-    frameNode,
-    defaultConfig || resolveNearestPageCornerRelativeAnchorConfig(frameNode, resolvedPageInner)
-  );
 };
 
 const readTableColWidths = (table: HTMLTableElement | null) => {
@@ -3195,7 +3040,6 @@ const applyRelativeAnchoredFrameRects = (pageInner: HTMLElement, excludedFrameGr
 const ensureRelativeAnchorConfigs = (scope: ParentNode) => {
   Array.from(scope.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     collectFrameSelectionAnchors(pageInner).forEach((node) => {
-      writeFramePositionModeAttrs(node, readFramePositionMode(node, pageInner));
       ensureFrameRelativeAnchorConfig(node, pageInner);
     });
   });
@@ -3331,33 +3175,12 @@ const renderRelativeAnchorGuides = (root: HTMLElement, selectedIds: string[]) =>
   appendRelativeAnchorGuideBadge(pageInner, anchorPoint, readRelativeAnchorTargetLabel(config) || config.anchorId, 'anchor');
 };
 
-const isInteractiveTarget = (target: HTMLElement | null) => {
-  const interactive = target?.closest<HTMLElement>(
-    'input, textarea, select, option, button, a, [contenteditable="true"], [data-template-frame-input="true"]'
+const isInteractiveTarget = (target: HTMLElement | null) =>
+  Boolean(
+    target?.closest(
+      'input, textarea, select, option, button, a, [contenteditable="true"], [data-template-frame-input="true"]'
+    )
   );
-
-  if (!interactive) {
-    return false;
-  }
-
-  if (
-    (interactive instanceof HTMLTextAreaElement || interactive instanceof HTMLInputElement) &&
-    (interactive.readOnly || interactive.disabled)
-  ) {
-    return false;
-  }
-
-  if (
-    (interactive instanceof HTMLButtonElement ||
-      interactive instanceof HTMLSelectElement ||
-      interactive instanceof HTMLOptionElement) &&
-    interactive.disabled
-  ) {
-    return false;
-  }
-
-  return true;
-};
 
 const syncFormControlMarkup = (root: ParentNode) => {
   root.querySelectorAll<HTMLTextAreaElement>('textarea').forEach((element) => {
@@ -3733,7 +3556,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [previewZoom, setPreviewZoom] = React.useState(100);
   const [boxCreationMode, setBoxCreationMode] = React.useState(false);
   const [boxCreationPositionMode, setBoxCreationPositionMode] =
-    React.useState<TemplateFramePositionMode>('absolute');
+    React.useState<TemplateFramePositionMode>('relative');
   const [selectedFrameGroupIds, setSelectedFrameGroupIds] = React.useState<string[]>([]);
   const [edgeSelectionState, setEdgeSelectionState] = React.useState<TemplateEdgeSelectionStateDto>(
     TemplateEdgeSelectionService.createEmptyState()
@@ -3786,18 +3609,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectedEdgeAutoMultiCount = edgeRoleDiagnostics.selectedEdgeAutoMultiIds.length;
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
   const primarySelectedFrameGroupId = selectedFrameGroupIds[0] || null;
-  const primarySelectedFramePositionMode = React.useMemo(() => {
-    if (!primarySelectedFrameGroupId || !previewRef.current) {
-      return null;
-    }
-
-    const frameNode = resolveFrameSelectionAnchor(
-      previewRef.current.querySelector<HTMLElement>(
-        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${primarySelectedFrameGroupId}"]`
-      )
-    );
-    return readFramePositionMode(frameNode);
-  }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
   const relativeCreateAnchorFrameGroupId =
     boxCreationPositionMode === 'relative' && selectedFrameGroupIds.length === 1 ? primarySelectedFrameGroupId : null;
   const primaryRelativeAnchorLabel = React.useMemo(() => {
@@ -3812,18 +3623,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
     const config = readFrameRelativeAnchorConfig(frameNode);
     return readRelativeAnchorTargetLabel(config);
-  }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
-  const primaryRelativeAffectedFrameGroupIds = React.useMemo(() => {
-    if (!primarySelectedFrameGroupId || !previewRef.current) {
-      return [];
-    }
-
-    const frameNode = resolveFrameSelectionAnchor(
-      previewRef.current.querySelector<HTMLElement>(
-        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${primarySelectedFrameGroupId}"]`
-      )
-    );
-    return collectRelativeFlowAffectedFrameGroupIds(frameNode);
   }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
 
   const syncTemplateQuery = React.useCallback((templateId: string) => {
@@ -3935,90 +3734,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       tolerancePx: FRAME_RESIZE_TOLERANCE_PX,
     });
   }, [getFrameNodes]);
-
-  const normalizeLiveVerticalCohorts = React.useCallback(
-    (
-      root: HTMLElement,
-      options?: {
-        edgeIds?: string[];
-        preferredEdgeRoleById?: TemplateEdgeRoleMapDto;
-      }
-    ) => {
-      const restrictedEdgeIds = options?.edgeIds?.length ? new Set(options.edgeIds) : null;
-
-      for (let pass = 0; pass < 6; pass += 1) {
-        const snapshot = buildLiveEdgeTopologySnapshot(root);
-        let corrected = false;
-        const verticalEdgeGroups = new Map<string, TemplateEdgeDescriptorDto[]>();
-
-        snapshot.edges
-          .filter((edge) => edge.orientation === 'vertical' && (edge.side === 'left' || edge.side === 'right'))
-          .forEach((edge) => {
-            const groupKey = `${edge.pageId}:${edge.side}`;
-            const current = verticalEdgeGroups.get(groupKey);
-
-            if (current) {
-              current.push(edge);
-              return;
-            }
-
-            verticalEdgeGroups.set(groupKey, [edge]);
-          });
-
-        verticalEdgeGroups.forEach((groupEdges) => {
-          clusterItemsByCoordinate(groupEdges, (edge) => edge.lineCoordinate, FRAME_RESIZE_TOLERANCE_PX)
-            .filter((clusterEdges) => clusterEdges.length > 1)
-            .filter((clusterEdges) => !restrictedEdgeIds || clusterEdges.some((edge) => restrictedEdgeIds.has(edge.edgeId)))
-            .forEach((clusterEdges) => {
-              const coordinates = clusterEdges.map((edge) => edge.lineCoordinate).sort((left, right) => left - right);
-              const spread = coordinates[coordinates.length - 1] - coordinates[0];
-
-              if (spread <= 0.01 || spread > FRAME_RESIZE_TOLERANCE_PX) {
-                return;
-              }
-
-              const preferredEdgeId =
-                clusterEdges.find((edge) => options?.preferredEdgeRoleById?.[edge.edgeId] === 'selected_edge_clicked')
-                  ?.edgeId || null;
-              const preferredLineCoordinate = preferredEdgeId
-                ? TemplateEdgeTopologyService.getEdgeById(snapshot, preferredEdgeId)?.lineCoordinate
-                : null;
-              const targetLineCoordinate =
-                typeof preferredLineCoordinate === 'number'
-                  ? preferredLineCoordinate
-                  : coordinates[Math.floor(coordinates.length / 2)];
-
-              clusterEdges.forEach((edge) => {
-                if (Math.abs(targetLineCoordinate - edge.lineCoordinate) <= 0.01) {
-                  return;
-                }
-
-                const node =
-                  getFrameNodes(root).find((candidate) => getFrameGroupId(candidate) === edge.frameGroupId) || null;
-
-                if (!node) {
-                  return;
-                }
-
-                const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), edge.side);
-
-                if (!widthInstruction) {
-                  return;
-                }
-
-                applyFrameResizeWidthDelta(node, targetLineCoordinate - edge.lineCoordinate, [widthInstruction]);
-                corrected = true;
-              });
-            });
-        });
-
-        if (!corrected) {
-          break;
-        }
-      }
-    },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes]
-  );
 
   const reconcileLiveEdgeSelection = React.useCallback(
     (root?: HTMLElement | null, state?: TemplateEdgeSelectionStateDto) => {
@@ -4596,7 +4311,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     applyPreviewEditPermissions(root);
-    normalizeLiveVerticalCohorts(root);
     const snapshot = buildLiveEdgeTopologySnapshot(root);
     const nextEdgeSelection = TemplateEdgeSelectionService.reconcileSelectionState({
       snapshot,
@@ -4622,14 +4336,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         : nextEdgeRolePresentation.diagnosticsState
     );
   }, [
-      buildLiveEdgeTopologySnapshot,
-      edgeRoleDiagnostics.mismatchEdgeIds,
-      edgeSelectionState,
-      normalizeLiveVerticalCohorts,
-      renderedPreviewHtml,
-      resolveEdgeRolePresentation,
-      schedulePreviewEditorState,
-      selectedFrameGroupIds,
+    buildLiveEdgeTopologySnapshot,
+    edgeRoleDiagnostics.mismatchEdgeIds,
+    edgeSelectionState,
+    renderedPreviewHtml,
+    resolveEdgeRolePresentation,
+    schedulePreviewEditorState,
+    selectedFrameGroupIds,
     selectionStyleDraft,
   ]);
 
@@ -4788,53 +4501,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncDraftPreviewHtmlRef();
     syncSelectionStyleDraft();
   }, [getFrameNodes, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]);
-
-  const applyPrimaryFramePositionMode = React.useCallback(
-    (nextMode: TemplateFramePositionMode) => {
-      const root = previewRef.current;
-      const primaryFrameGroupId = selectedFrameGroupIdsRef.current[0];
-
-      if (!root || !primaryFrameGroupId) {
-        return;
-      }
-
-      const frameNode = resolveFrameSelectionAnchor(
-        root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${primaryFrameGroupId}"]`)
-      );
-      const pageInner = frameNode?.closest<HTMLElement>('.page-inner') || null;
-
-      if (!frameNode || !pageInner) {
-        return;
-      }
-
-      applyFramePositionMode(frameNode, nextMode, pageInner);
-      ensureRelativeAnchorConfigs(root);
-      applyRelativeAnchoredFrameRectsInRoot(root);
-      normalizeLiveVerticalCohorts(root);
-      const snapshot = buildLiveEdgeTopologySnapshot(root);
-      applyFrameSelectionUi(
-        root,
-        selectedFrameGroupIdsRef.current,
-        edgeSelectionStateRef.current,
-        snapshot,
-        resolveEdgeRolePresentation(snapshot, edgeSelectionStateRef.current).edgeRoleById,
-        edgeRoleDiagnostics.mismatchEdgeIds
-      );
-      setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current.slice());
-      syncDraftPreviewHtmlRef();
-      syncSelectionStyleDraft();
-      requestPreviewTextFit();
-    },
-    [
-      buildLiveEdgeTopologySnapshot,
-      edgeRoleDiagnostics.mismatchEdgeIds,
-      normalizeLiveVerticalCohorts,
-      requestPreviewTextFit,
-      resolveEdgeRolePresentation,
-      syncDraftPreviewHtmlRef,
-      syncSelectionStyleDraft,
-    ]
-  );
 
   const getResizeShellAnchorId = React.useCallback((shell: HTMLElement, fallbackNode?: HTMLElement | null) => {
     const shellAnchorNode = shell.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) || fallbackNode || null;
@@ -5235,7 +4901,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         FRAME_RESIZE_TOLERANCE_PX
       );
 
-      for (let pass = 0; pass < 4; pass += 1) {
+      for (let pass = 0; pass < 2; pass += 1) {
         clusters.forEach((clusterMembers) => {
           const liveSnapshot = buildLiveEdgeTopologySnapshot(root);
           const referenceMember =
@@ -5262,109 +4928,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             }
 
             const correctionDelta = expectedLineCoordinate - liveEdge.lineCoordinate;
-            const freshInstruction =
-              member.side === 'left' || member.side === 'right'
-                ? buildSelfWidthResizeInstruction(buildFrameResizeContext(member.node), member.side)
-                : null;
-            const liveWidthInstructions = freshInstruction ? [freshInstruction] : member.widthInstructions || [];
 
-            if (Math.abs(correctionDelta) <= 0.05 || liveWidthInstructions.length === 0) {
+            if (Math.abs(correctionDelta) <= 0.25 || !member.widthInstructions?.length) {
               return;
             }
 
-            applyFrameResizeWidthDelta(member.node, correctionDelta, liveWidthInstructions);
+            applyFrameResizeWidthDelta(member.node, correctionDelta, member.widthInstructions);
           });
         });
       }
     },
     [buildLiveEdgeTopologySnapshot]
-  );
-
-  const finalizeLiveVerticalEdgeTargets = React.useCallback(
-    (root: HTMLElement, resizeState: ResizeState) => {
-      if (!resizeState.edgeResizeTargets?.length) {
-        return;
-      }
-
-      const baselineSnapshot = buildLiveEdgeTopologySnapshot(root);
-      const roleEdgeIds = Object.keys(resizeState.edgeRoleById || {});
-      const expectedEdgeIds = (roleEdgeIds.length > 0 ? roleEdgeIds : resizeState.mutationEdgeIds || []).filter(
-        (edgeId) => TemplateEdgeTopologyService.getEdgeById(baselineSnapshot, edgeId)?.orientation === 'vertical'
-      );
-
-      if (expectedEdgeIds.length === 0) {
-        return;
-      }
-
-      const expectedMembers = expectedEdgeIds
-        .map((edgeId) => TemplateEdgeTopologyService.getEdgeById(baselineSnapshot, edgeId))
-        .filter((edge): edge is TemplateEdgeDescriptorDto => Boolean(edge));
-
-      const clusters = clusterItemsByCoordinate(
-        expectedMembers,
-        (edge) => resizeState.edgeLineCoordinateBaseline?.[edge.edgeId] ?? edge.lineCoordinate,
-        FRAME_RESIZE_TOLERANCE_PX
-      );
-
-      for (let pass = 0; pass < 6; pass += 1) {
-        const liveSnapshot = buildLiveEdgeTopologySnapshot(root);
-        let appliedCorrection = false;
-
-        clusters.forEach((clusterEdges) => {
-          const referenceEdgeId =
-            clusterEdges.find((edge) => resizeState.edgeRoleById?.[edge.edgeId] === 'selected_edge_clicked')?.edgeId ||
-            clusterEdges[0]?.edgeId ||
-            null;
-          const referenceLiveEdge = referenceEdgeId
-            ? TemplateEdgeTopologyService.getEdgeById(liveSnapshot, referenceEdgeId)
-            : null;
-
-          if (!referenceLiveEdge) {
-            return;
-          }
-
-          clusterEdges.forEach((clusterEdge) => {
-            const liveEdge = TemplateEdgeTopologyService.getEdgeById(liveSnapshot, clusterEdge.edgeId);
-
-            if (!liveEdge || (liveEdge.side !== 'left' && liveEdge.side !== 'right')) {
-              return;
-            }
-
-            const node =
-              getFrameNodes(root).find((candidate) => getFrameGroupId(candidate) === liveEdge.frameGroupId) || null;
-
-            if (!node) {
-              return;
-            }
-
-            const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), liveEdge.side);
-
-            if (!widthInstruction) {
-              return;
-            }
-
-            const correctionDelta = referenceLiveEdge.lineCoordinate - liveEdge.lineCoordinate;
-
-            if (Math.abs(correctionDelta) <= 0.01) {
-              return;
-            }
-
-            applyFrameResizeWidthDelta(node, correctionDelta, [widthInstruction]);
-            appliedCorrection = true;
-          });
-        });
-
-        if (!appliedCorrection) {
-          break;
-        }
-      }
-
-      normalizeLiveVerticalCohorts(root, {
-        edgeIds: expectedEdgeIds,
-        preferredEdgeRoleById: resizeState.edgeRoleById,
-      });
-    },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes, normalizeLiveVerticalCohorts]
   );
 
   const saveTemplate = React.useCallback(async () => {
@@ -5464,11 +5038,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           syncFrameRelativeAnchorOffsetsToCurrentRect(frameNode);
         });
         applyRelativeAnchoredFrameRectsInRoot(previewRef.current);
-        if (currentResizeState?.edgeResizeTargets?.length) {
-          realignLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
-          finalizeLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
-        }
-        normalizeLiveVerticalCohorts(previewRef.current);
       }
       syncDraftPreviewHtmlRef();
       if (!frameSelectionIdsEqual(selectedFrameGroupIds, selectedFrameGroupIdsRef.current)) {
@@ -5514,10 +5083,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       detectEdgeRoleMovementMismatches,
       edgeRoleDiagnostics.mismatchEdgeIds,
       edgeSelectionState,
-      finalizeLiveVerticalEdgeTargets,
-      normalizeLiveVerticalCohorts,
       reconcileLiveEdgeSelection,
-      realignLiveVerticalEdgeTargets,
       resolveEdgeRolePresentation,
       requestPreviewTextFit,
       selectedFrameGroupIds,
@@ -5580,12 +5146,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           boxCreationPositionMode === 'relative' && selectedFrameGroupIdsRef.current.length === 1
             ? selectedFrameGroupIdsRef.current[0]
             : null;
-        const resolvedPositionMode =
-          boxCreationPositionMode === 'relative' && !anchorFrameGroupId ? 'absolute' : boxCreationPositionMode;
 
         if (boxCreationPositionMode === 'relative' && !anchorFrameGroupId) {
-          setBoxCreationPositionMode('absolute');
-          setMessage('상대 기준 박스 1개가 없어 이번 생성은 절대 위치 모드로 전환합니다.');
+          setMessage('상대 위치 박스 생성 전 기준 박스 1개를 먼저 선택하세요.');
+          return;
         }
 
         event.preventDefault();
@@ -5596,7 +5160,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           pointerId: event.pointerId,
           scale: previewZoom / 100,
           pageInner,
-          positionMode: resolvedPositionMode,
+          positionMode: boxCreationPositionMode,
           anchorFrameGroupId,
           origin,
           ghost: null,
@@ -6751,14 +6315,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   variant={boxCreationMode ? 'default' : 'outline'}
                   onClick={() => {
                     clearTransientCanvasOverlays();
-                    const nextMode = !boxCreationMode;
-
-                    if (nextMode && boxCreationPositionMode === 'relative' && selectedFrameGroupIdsRef.current.length !== 1) {
-                      setBoxCreationPositionMode('absolute');
-                      setMessage('상대 기준 박스 1개가 없어 박스 생성은 절대 위치 모드로 시작합니다.');
-                    }
-
-                    setBoxCreationMode(nextMode);
+                    setBoxCreationMode((previous) => !previous);
                   }}
                 >
                   박스 생성
@@ -6818,12 +6375,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                 <div>선택 박스 수: {selectedFrameGroupIds.length}</div>
                 <div className="mt-1 break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</div>
-                <div className="mt-1">위치 관계: {primarySelectedFramePositionMode || '-'}</div>
                 <div className="mt-1">상대 기준 라벨: {primaryRelativeAnchorLabel || '-'}</div>
-                <div className="mt-1">위치 영향 대상 수: {primaryRelativeAffectedFrameGroupIds.length}</div>
-                <div className="mt-1 break-all">
-                  위치 영향 대상: {primaryRelativeAffectedFrameGroupIds.join(', ') || '-'}
-                </div>
                 <div className="mt-1">선택 엣지 토큰 수: {edgeSelectionState.tokens.length}</div>
                 <div className="mt-1">선택 엣지 수: {selectedEdgeMemberCount}</div>
                 <div className="mt-1">선택 엣지 모드: {selectedEdgeMode || '-'}</div>
@@ -6857,30 +6409,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   첫 선택 크기 복제
                 </Button>
               </div>
-
-              {selectedFrameGroupIds.length === 1 ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">위치 관계</label>
-                    <select
-                      value={primarySelectedFramePositionMode || 'relative'}
-                      onChange={(event) =>
-                        applyPrimaryFramePositionMode(event.target.value as TemplateFramePositionMode)
-                      }
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      <option value="relative">relative</option>
-                      <option value="absolute">absolute</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">상대 기준</label>
-                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600">
-                      {primaryRelativeAnchorLabel || '-'}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-800">빠른 프리셋</label>
@@ -7050,7 +6578,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <p>엣지를 한 번 클릭하면 동일 수직/수평선상에서 시작과 끝이 직접 연결된 엣지가 함께 선택되고, 같은 엣지를 다시 클릭하면 해당 엣지만 단독 선택됩니다.</p>
               <p>`selected_edge_clicked` 는 직접 클릭한 엣지, `selected_edge_auto_multi` 는 connected 자동 선택 엣지, `peer_edge` 는 같은 물리 경계에 있는 반대편 엣지입니다.</p>
               <p>Shift+클릭은 여러 `selected_edge_clicked` 를 누적 선택하며, 드래그는 현재 역할 정의에 따라 함께 움직여야 할 `peer_edge` 까지 이동시키고 mismatch 를 감지합니다.</p>
-              <p>`relative` 박스는 기준 anchor 와 아래 영향 대상을 가지며, `absolute` 박스는 다른 박스 높이/너비 변경의 영향을 받지 않고 전파도 하지 않습니다.</p>
               <p>오른쪽 패널에서는 여러 박스에 동일한 폰트 크기, 패딩, 정렬, 색상, 크기를 일괄 적용할 수 있습니다.</p>
             </CardContent>
           </Card>

@@ -3331,33 +3331,12 @@ const renderRelativeAnchorGuides = (root: HTMLElement, selectedIds: string[]) =>
   appendRelativeAnchorGuideBadge(pageInner, anchorPoint, readRelativeAnchorTargetLabel(config) || config.anchorId, 'anchor');
 };
 
-const isInteractiveTarget = (target: HTMLElement | null) => {
-  const interactive = target?.closest<HTMLElement>(
-    'input, textarea, select, option, button, a, [contenteditable="true"], [data-template-frame-input="true"]'
+const isInteractiveTarget = (target: HTMLElement | null) =>
+  Boolean(
+    target?.closest(
+      'input, textarea, select, option, button, a, [contenteditable="true"], [data-template-frame-input="true"]'
+    )
   );
-
-  if (!interactive) {
-    return false;
-  }
-
-  if (
-    (interactive instanceof HTMLTextAreaElement || interactive instanceof HTMLInputElement) &&
-    (interactive.readOnly || interactive.disabled)
-  ) {
-    return false;
-  }
-
-  if (
-    (interactive instanceof HTMLButtonElement ||
-      interactive instanceof HTMLSelectElement ||
-      interactive instanceof HTMLOptionElement) &&
-    interactive.disabled
-  ) {
-    return false;
-  }
-
-  return true;
-};
 
 const syncFormControlMarkup = (root: ParentNode) => {
   root.querySelectorAll<HTMLTextAreaElement>('textarea').forEach((element) => {
@@ -3936,90 +3915,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
   }, [getFrameNodes]);
 
-  const normalizeLiveVerticalCohorts = React.useCallback(
-    (
-      root: HTMLElement,
-      options?: {
-        edgeIds?: string[];
-        preferredEdgeRoleById?: TemplateEdgeRoleMapDto;
-      }
-    ) => {
-      const restrictedEdgeIds = options?.edgeIds?.length ? new Set(options.edgeIds) : null;
-
-      for (let pass = 0; pass < 6; pass += 1) {
-        const snapshot = buildLiveEdgeTopologySnapshot(root);
-        let corrected = false;
-        const verticalEdgeGroups = new Map<string, TemplateEdgeDescriptorDto[]>();
-
-        snapshot.edges
-          .filter((edge) => edge.orientation === 'vertical' && (edge.side === 'left' || edge.side === 'right'))
-          .forEach((edge) => {
-            const groupKey = `${edge.pageId}:${edge.side}`;
-            const current = verticalEdgeGroups.get(groupKey);
-
-            if (current) {
-              current.push(edge);
-              return;
-            }
-
-            verticalEdgeGroups.set(groupKey, [edge]);
-          });
-
-        verticalEdgeGroups.forEach((groupEdges) => {
-          clusterItemsByCoordinate(groupEdges, (edge) => edge.lineCoordinate, FRAME_RESIZE_TOLERANCE_PX)
-            .filter((clusterEdges) => clusterEdges.length > 1)
-            .filter((clusterEdges) => !restrictedEdgeIds || clusterEdges.some((edge) => restrictedEdgeIds.has(edge.edgeId)))
-            .forEach((clusterEdges) => {
-              const coordinates = clusterEdges.map((edge) => edge.lineCoordinate).sort((left, right) => left - right);
-              const spread = coordinates[coordinates.length - 1] - coordinates[0];
-
-              if (spread <= 0.01 || spread > FRAME_RESIZE_TOLERANCE_PX) {
-                return;
-              }
-
-              const preferredEdgeId =
-                clusterEdges.find((edge) => options?.preferredEdgeRoleById?.[edge.edgeId] === 'selected_edge_clicked')
-                  ?.edgeId || null;
-              const preferredLineCoordinate = preferredEdgeId
-                ? TemplateEdgeTopologyService.getEdgeById(snapshot, preferredEdgeId)?.lineCoordinate
-                : null;
-              const targetLineCoordinate =
-                typeof preferredLineCoordinate === 'number'
-                  ? preferredLineCoordinate
-                  : coordinates[Math.floor(coordinates.length / 2)];
-
-              clusterEdges.forEach((edge) => {
-                if (Math.abs(targetLineCoordinate - edge.lineCoordinate) <= 0.01) {
-                  return;
-                }
-
-                const node =
-                  getFrameNodes(root).find((candidate) => getFrameGroupId(candidate) === edge.frameGroupId) || null;
-
-                if (!node) {
-                  return;
-                }
-
-                const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), edge.side);
-
-                if (!widthInstruction) {
-                  return;
-                }
-
-                applyFrameResizeWidthDelta(node, targetLineCoordinate - edge.lineCoordinate, [widthInstruction]);
-                corrected = true;
-              });
-            });
-        });
-
-        if (!corrected) {
-          break;
-        }
-      }
-    },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes]
-  );
-
   const reconcileLiveEdgeSelection = React.useCallback(
     (root?: HTMLElement | null, state?: TemplateEdgeSelectionStateDto) => {
       const resolvedRoot = root || previewRef.current;
@@ -4596,7 +4491,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     applyPreviewEditPermissions(root);
-    normalizeLiveVerticalCohorts(root);
     const snapshot = buildLiveEdgeTopologySnapshot(root);
     const nextEdgeSelection = TemplateEdgeSelectionService.reconcileSelectionState({
       snapshot,
@@ -4622,14 +4516,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         : nextEdgeRolePresentation.diagnosticsState
     );
   }, [
-      buildLiveEdgeTopologySnapshot,
-      edgeRoleDiagnostics.mismatchEdgeIds,
-      edgeSelectionState,
-      normalizeLiveVerticalCohorts,
-      renderedPreviewHtml,
-      resolveEdgeRolePresentation,
-      schedulePreviewEditorState,
-      selectedFrameGroupIds,
+    buildLiveEdgeTopologySnapshot,
+    edgeRoleDiagnostics.mismatchEdgeIds,
+    edgeSelectionState,
+    renderedPreviewHtml,
+    resolveEdgeRolePresentation,
+    schedulePreviewEditorState,
+    selectedFrameGroupIds,
     selectionStyleDraft,
   ]);
 
@@ -4810,7 +4703,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyFramePositionMode(frameNode, nextMode, pageInner);
       ensureRelativeAnchorConfigs(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
-      normalizeLiveVerticalCohorts(root);
       const snapshot = buildLiveEdgeTopologySnapshot(root);
       applyFrameSelectionUi(
         root,
@@ -4828,7 +4720,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [
       buildLiveEdgeTopologySnapshot,
       edgeRoleDiagnostics.mismatchEdgeIds,
-      normalizeLiveVerticalCohorts,
       requestPreviewTextFit,
       resolveEdgeRolePresentation,
       syncDraftPreviewHtmlRef,
@@ -5358,13 +5249,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           break;
         }
       }
-
-      normalizeLiveVerticalCohorts(root, {
-        edgeIds: expectedEdgeIds,
-        preferredEdgeRoleById: resizeState.edgeRoleById,
-      });
     },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes, normalizeLiveVerticalCohorts]
+    [buildLiveEdgeTopologySnapshot, getFrameNodes]
   );
 
   const saveTemplate = React.useCallback(async () => {
@@ -5468,7 +5354,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           realignLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
           finalizeLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
         }
-        normalizeLiveVerticalCohorts(previewRef.current);
       }
       syncDraftPreviewHtmlRef();
       if (!frameSelectionIdsEqual(selectedFrameGroupIds, selectedFrameGroupIdsRef.current)) {
@@ -5515,7 +5400,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       edgeRoleDiagnostics.mismatchEdgeIds,
       edgeSelectionState,
       finalizeLiveVerticalEdgeTargets,
-      normalizeLiveVerticalCohorts,
       reconcileLiveEdgeSelection,
       realignLiveVerticalEdgeTargets,
       resolveEdgeRolePresentation,
