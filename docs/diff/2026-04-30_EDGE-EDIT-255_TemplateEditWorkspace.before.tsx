@@ -85,7 +85,6 @@ type ResizeState = {
   edgeSelectionAfterResize?: TemplateEdgeSelectionStateDto;
   edgeRoleById?: TemplateEdgeRoleMapDto;
   mutationEdgeIds?: string[];
-  edgeDragSnapshot?: TemplateEdgeTopologySnapshotDto;
   edgeLineCoordinateBaseline?: Record<string, number>;
   appliedEdgeDeltaX?: number;
   appliedEdgeDeltaY?: number;
@@ -201,7 +200,6 @@ const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
 };
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const EDGE_DRAG_START_THRESHOLD_PX = 4;
-const EDGE_DRAG_AUTOSNAP_THRESHOLD_PX = 5;
 
 const defaultSelectionStyleDraft: SelectionStyleDraft = {
   width: '',
@@ -800,22 +798,11 @@ const buildNormalizedFrameBandShell = (
   const nextTable = table.cloneNode(false) as HTMLTableElement;
   nextTable.style.width = nextShell.style.width;
   nextTable.style.height = nextShell.style.height;
-  const preserveTopBorder = group.rowStart === 0;
-  const preserveBottomBorder = group.rowEnd === rowHeights.length;
-  const preserveLeftBorder = group.colStart === 0;
-  const preserveRightBorder = group.colEnd === colWidths.length;
-  nextTable.style.borderTopWidth = preserveTopBorder ? tableStyle.borderTopWidth : '0px';
-  nextTable.style.borderTopStyle = preserveTopBorder ? tableStyle.borderTopStyle : 'none';
-  nextTable.style.borderTopColor = preserveTopBorder ? tableStyle.borderTopColor : 'transparent';
-  nextTable.style.borderRightWidth = preserveRightBorder ? tableStyle.borderRightWidth : '0px';
-  nextTable.style.borderRightStyle = preserveRightBorder ? tableStyle.borderRightStyle : 'none';
-  nextTable.style.borderRightColor = preserveRightBorder ? tableStyle.borderRightColor : 'transparent';
-  nextTable.style.borderBottomWidth = preserveBottomBorder ? tableStyle.borderBottomWidth : '0px';
-  nextTable.style.borderBottomStyle = preserveBottomBorder ? tableStyle.borderBottomStyle : 'none';
-  nextTable.style.borderBottomColor = preserveBottomBorder ? tableStyle.borderBottomColor : 'transparent';
-  nextTable.style.borderLeftWidth = preserveLeftBorder ? tableStyle.borderLeftWidth : '0px';
-  nextTable.style.borderLeftStyle = preserveLeftBorder ? tableStyle.borderLeftStyle : 'none';
-  nextTable.style.borderLeftColor = preserveLeftBorder ? tableStyle.borderLeftColor : 'transparent';
+  nextTable.style.border = '0px';
+  nextTable.style.borderLeftWidth = '0px';
+  nextTable.style.borderRightWidth = '0px';
+  nextTable.style.borderTopWidth = '0px';
+  nextTable.style.borderBottomWidth = '0px';
   nextTable.style.borderSpacing = '0px';
 
   const colgroup = document.createElement('colgroup');
@@ -2118,95 +2105,6 @@ const resolveSharedEdgeResizeDelta = (requestedDelta: number, candidateDeltas: n
 
   const negativeCandidates = candidateDeltas.map((candidateDelta) => Math.max(0, Math.abs(candidateDelta)));
   return negativeCandidates.length > 0 ? -Math.min(...negativeCandidates) : 0;
-};
-
-// Autosnap only participates in live edge drag. The width/height controls in the
-// "선택 상태" panel continue to write explicit values without this proximity rule.
-const readEdgeEndpointGapLength = (
-  left: Pick<EdgeResizeTargetMember, 'spanStart' | 'spanEnd'>,
-  right: Pick<TemplateEdgeDescriptorDto, 'spanStart' | 'spanEnd'>
-) => {
-  const overlap = Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
-
-  if (overlap >= 0) {
-    return 0;
-  }
-
-  return Math.min(Math.abs(left.spanEnd - right.spanStart), Math.abs(right.spanEnd - left.spanStart));
-};
-
-const resolveEdgeDragAutosnapDelta = ({
-  requestedDelta,
-  orientation,
-  movingMembers,
-  snapshot,
-  currentAppliedDelta,
-}: {
-  requestedDelta: number;
-  orientation: TemplateEdgeDescriptorDto['orientation'];
-  movingMembers: EdgeResizeTargetMember[];
-  snapshot?: TemplateEdgeTopologySnapshotDto;
-  currentAppliedDelta: number;
-}) => {
-  if (!snapshot || Math.abs(requestedDelta) < 0.5 || movingMembers.length === 0) {
-    return requestedDelta;
-  }
-
-  const movingEdgeIdSet = new Set(movingMembers.map((member) => member.edgeId));
-  let bestMatch:
-    | {
-        adjustment: number;
-        sidePriority: number;
-        endpointGap: number;
-      }
-    | null = null;
-
-  movingMembers.forEach((member) => {
-    const movingEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, member.edgeId);
-
-    snapshot.edges.forEach((candidateEdge) => {
-      if (
-        movingEdgeIdSet.has(candidateEdge.edgeId) ||
-        candidateEdge.orientation !== orientation ||
-        (movingEdge && candidateEdge.pageId !== movingEdge.pageId)
-      ) {
-        return;
-      }
-
-      const projectedLineCoordinate = member.lineCoordinate + currentAppliedDelta + requestedDelta;
-      const adjustment = candidateEdge.lineCoordinate - projectedLineCoordinate;
-
-      if (Math.abs(adjustment) >= EDGE_DRAG_AUTOSNAP_THRESHOLD_PX) {
-        return;
-      }
-
-      const snappedDelta = requestedDelta + adjustment;
-
-      if ((requestedDelta > 0 && snappedDelta < 0) || (requestedDelta < 0 && snappedDelta > 0)) {
-        return;
-      }
-
-      const sidePriority = candidateEdge.side === member.side ? 0 : 1;
-      const endpointGap = readEdgeEndpointGapLength(member, candidateEdge);
-
-      if (
-        !bestMatch ||
-        sidePriority < bestMatch.sidePriority ||
-        (sidePriority === bestMatch.sidePriority && Math.abs(adjustment) < Math.abs(bestMatch.adjustment)) ||
-        (sidePriority === bestMatch.sidePriority &&
-          Math.abs(adjustment) === Math.abs(bestMatch.adjustment) &&
-          endpointGap < bestMatch.endpointGap)
-      ) {
-        bestMatch = {
-          adjustment,
-          sidePriority,
-          endpointGap,
-        };
-      }
-    });
-  });
-
-  return bestMatch === null ? requestedDelta : requestedDelta + bestMatch.adjustment;
 };
 
 const pickHeightResizeTargetMember = (
@@ -4254,7 +4152,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         edgeSelectionAfterResize: edgePressState.dragSelection,
         edgeRoleById: edgePressState.edgeRoleById,
         mutationEdgeIds: edgePressState.mutationEdgeIds,
-        edgeDragSnapshot: edgePressState.snapshot,
         edgeLineCoordinateBaseline: Object.fromEntries(
           edgePressState.snapshot.edges.map((edge) => [
             edge.edgeId,
@@ -4332,115 +4229,80 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               member: EdgeResizeTargetMember;
             } => Boolean(value.member)
           );
-        const resolveWidthDragDelta = (requestedDelta: number) =>
-          resolveSharedEdgeResizeDelta(
-            requestedDelta,
-            widthResizeTargets
-              .map((edgeTarget) =>
-                resolveWidthInstructionDelta(
-                  [
-                    ...(edgeTarget.widthInstructions || []),
-                    ...edgeTarget.physicalPeerMembers.flatMap((member) => member.widthInstructions || []),
-                  ],
-                  requestedDelta
-                )
+        const constrainedDeltaX = resolveSharedEdgeResizeDelta(
+          nextDeltaX,
+          widthResizeTargets
+            .map((edgeTarget) =>
+              resolveWidthInstructionDelta(
+                [
+                  ...(edgeTarget.widthInstructions || []),
+                  ...edgeTarget.physicalPeerMembers.flatMap((member) => member.widthInstructions || []),
+                ],
+                nextDeltaX
               )
-              .filter((candidateDelta) => Number.isFinite(candidateDelta))
-          );
-        const resolveHeightDragDelta = (requestedDelta: number) =>
-          resolveSharedEdgeResizeDelta(
-            requestedDelta,
-            heightResizeTargets
-              .map(({ edgeTarget, member }) => {
-                const constraintMembers = [member, ...edgeTarget.members, ...edgeTarget.physicalPeerMembers].filter(
-                  (constraintMember, constraintIndex, members) =>
-                    members.findIndex((candidateMember) => candidateMember.edgeId === constraintMember.edgeId) ===
-                    constraintIndex
-                );
-                const candidateDeltas = constraintMembers
-                  .map((constraintMember) => {
-                    if (constraintMember.side === 'top') {
-                      return resolveFrameResizeTopDelta(constraintMember.node, requestedDelta);
-                    }
+            )
+            .filter((candidateDelta) => Number.isFinite(candidateDelta))
+        );
+        const constrainedDeltaY = resolveSharedEdgeResizeDelta(
+          nextDeltaY,
+          heightResizeTargets
+            .map(({ edgeTarget, member }) => {
+              const constraintMembers = [member, ...edgeTarget.members, ...edgeTarget.physicalPeerMembers].filter(
+                (constraintMember, constraintIndex, members) =>
+                  members.findIndex((candidateMember) => candidateMember.edgeId === constraintMember.edgeId) ===
+                  constraintIndex
+              );
+              const candidateDeltas = constraintMembers
+                .map((constraintMember) => {
+                  if (constraintMember.side === 'top') {
+                    return resolveFrameResizeTopDelta(constraintMember.node, nextDeltaY);
+                  }
 
-                    if (constraintMember.side === 'bottom') {
-                      return resolveFrameResizeBottomDelta(constraintMember.node, requestedDelta);
-                    }
+                  if (constraintMember.side === 'bottom') {
+                    return resolveFrameResizeBottomDelta(constraintMember.node, nextDeltaY);
+                  }
 
-                    return 0;
-                  })
-                  .filter((candidateDelta) => Number.isFinite(candidateDelta));
-
-                if (candidateDeltas.length === 0) {
                   return 0;
-                }
+                })
+                .filter((candidateDelta) => Number.isFinite(candidateDelta));
 
-                return resolveSharedEdgeResizeDelta(requestedDelta, candidateDeltas);
-              })
-              .filter((candidateDelta) => Number.isFinite(candidateDelta))
-          );
-        const constrainedDeltaX = resolveWidthDragDelta(nextDeltaX);
-        const constrainedDeltaY = resolveHeightDragDelta(nextDeltaY);
-        const movingWidthMembers = widthResizeTargets
-          .flatMap((edgeTarget) => [...edgeTarget.members, ...edgeTarget.physicalPeerMembers])
-          .filter(
-            (member, memberIndex, members) =>
-              members.findIndex((candidateMember) => candidateMember.edgeId === member.edgeId) === memberIndex
-          );
-        const movingHeightMembers = heightResizeTargets
-          .flatMap(({ edgeTarget, member }) => [member, ...edgeTarget.members, ...edgeTarget.physicalPeerMembers])
-          .filter(
-            (constraintMember, constraintIndex, members) =>
-              members.findIndex((candidateMember) => candidateMember.edgeId === constraintMember.edgeId) ===
-              constraintIndex
-          );
-        const snappedDeltaX = resolveEdgeDragAutosnapDelta({
-          requestedDelta: constrainedDeltaX,
-          orientation: 'vertical',
-          movingMembers: movingWidthMembers,
-          snapshot: resizeState.edgeDragSnapshot,
-          currentAppliedDelta: resizeState.appliedEdgeDeltaX || 0,
-        });
-        const snappedDeltaY = resolveEdgeDragAutosnapDelta({
-          requestedDelta: constrainedDeltaY,
-          orientation: 'horizontal',
-          movingMembers: movingHeightMembers,
-          snapshot: resizeState.edgeDragSnapshot,
-          currentAppliedDelta: resizeState.appliedEdgeDeltaY || 0,
-        });
-        const finalDeltaX =
-          Math.abs(snappedDeltaX - constrainedDeltaX) >= 0.5 ? resolveWidthDragDelta(snappedDeltaX) : constrainedDeltaX;
-        const finalDeltaY =
-          Math.abs(snappedDeltaY - constrainedDeltaY) >= 0.5 ? resolveHeightDragDelta(snappedDeltaY) : constrainedDeltaY;
+              if (candidateDeltas.length === 0) {
+                return 0;
+              }
+
+              return resolveSharedEdgeResizeDelta(nextDeltaY, candidateDeltas);
+            })
+            .filter((candidateDelta) => Number.isFinite(candidateDelta))
+        );
 
         widthResizeTargets.forEach((edgeTarget) => {
-          if (Math.abs(finalDeltaX) >= 0.5) {
-            applyFrameResizeWidthDelta(edgeTarget.node, finalDeltaX, edgeTarget.widthInstructions);
+          if (Math.abs(constrainedDeltaX) >= 0.5) {
+            applyFrameResizeWidthDelta(edgeTarget.node, constrainedDeltaX, edgeTarget.widthInstructions);
           }
         });
 
         heightResizeTargets.forEach(({ edgeTarget, member }) => {
-          if (Math.abs(finalDeltaY) < 0.5) {
+          if (Math.abs(constrainedDeltaY) < 0.5) {
             return;
           }
 
           if (member.side === 'top') {
-            applyFrameResizeTopDelta(member.node, finalDeltaY);
+            applyFrameResizeTopDelta(member.node, constrainedDeltaY);
             return;
           }
 
           if (member.side === 'bottom') {
             if (edgeTarget.hasOppositePeer) {
-              applyFrameResizeHeightDeltaLocal(member.node, finalDeltaY);
+              applyFrameResizeHeightDeltaLocal(member.node, constrainedDeltaY);
               return;
             }
 
-            applyFrameResizeHeightDelta(member.node, finalDeltaY);
+            applyFrameResizeHeightDelta(member.node, constrainedDeltaY);
           }
         });
 
-        resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + finalDeltaX;
-        resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + finalDeltaY;
+        resizeState.appliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + constrainedDeltaX;
+        resizeState.appliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + constrainedDeltaY;
       } else {
         const siblingRects = filterResizeSnapRects(
           getFrameNodes(resizeState.pageInner)

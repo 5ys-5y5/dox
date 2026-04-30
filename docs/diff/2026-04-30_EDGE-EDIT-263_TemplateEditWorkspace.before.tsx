@@ -2122,19 +2122,6 @@ const resolveSharedEdgeResizeDelta = (requestedDelta: number, candidateDeltas: n
 
 // Autosnap only participates in live edge drag. The width/height controls in the
 // "선택 상태" panel continue to write explicit values without this proximity rule.
-const readEdgeEndpointGapLength = (
-  left: Pick<EdgeResizeTargetMember, 'spanStart' | 'spanEnd'>,
-  right: Pick<TemplateEdgeDescriptorDto, 'spanStart' | 'spanEnd'>
-) => {
-  const overlap = Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
-
-  if (overlap >= 0) {
-    return 0;
-  }
-
-  return Math.min(Math.abs(left.spanEnd - right.spanStart), Math.abs(right.spanEnd - left.spanStart));
-};
-
 const resolveEdgeDragAutosnapDelta = ({
   requestedDelta,
   orientation,
@@ -2153,13 +2140,7 @@ const resolveEdgeDragAutosnapDelta = ({
   }
 
   const movingEdgeIdSet = new Set(movingMembers.map((member) => member.edgeId));
-  let bestMatch:
-    | {
-        adjustment: number;
-        sidePriority: number;
-        endpointGap: number;
-      }
-    | null = null;
+  let bestAdjustment: number | null = null;
 
   movingMembers.forEach((member) => {
     const movingEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, member.edgeId);
@@ -2186,27 +2167,13 @@ const resolveEdgeDragAutosnapDelta = ({
         return;
       }
 
-      const sidePriority = candidateEdge.side === member.side ? 0 : 1;
-      const endpointGap = readEdgeEndpointGapLength(member, candidateEdge);
-
-      if (
-        !bestMatch ||
-        sidePriority < bestMatch.sidePriority ||
-        (sidePriority === bestMatch.sidePriority && Math.abs(adjustment) < Math.abs(bestMatch.adjustment)) ||
-        (sidePriority === bestMatch.sidePriority &&
-          Math.abs(adjustment) === Math.abs(bestMatch.adjustment) &&
-          endpointGap < bestMatch.endpointGap)
-      ) {
-        bestMatch = {
-          adjustment,
-          sidePriority,
-          endpointGap,
-        };
+      if (bestAdjustment === null || Math.abs(adjustment) < Math.abs(bestAdjustment)) {
+        bestAdjustment = adjustment;
       }
     });
   });
 
-  return bestMatch === null ? requestedDelta : requestedDelta + bestMatch.adjustment;
+  return bestAdjustment === null ? requestedDelta : requestedDelta + bestAdjustment;
 };
 
 const pickHeightResizeTargetMember = (
