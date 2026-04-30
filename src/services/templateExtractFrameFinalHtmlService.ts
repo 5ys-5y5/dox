@@ -281,6 +281,17 @@ type FrameRenderCandidateLine = {
   texts: string[];
 };
 
+type FrameTextSelectionPlan = {
+  key: string;
+  frameRect: FrameNodeRect;
+  sourceTextHint: string;
+  valueKey?: string;
+  frameGroup?: string;
+  colorGroup?: string;
+  semanticRole?: ImageFrameTextSemanticRole;
+  fieldType?: ImageFrameTextFieldType;
+};
+
 const mapFrameRenderCandidateItems = (
   page: TemplateExtractReplicaRenderPage,
   frameRect: FrameNodeRect
@@ -379,6 +390,38 @@ const stringifyFrameRenderCandidateLines = (lines: FrameRenderCandidateLine[]) =
 
 const buildFrameTextFromCandidateItems = (candidateItems: FrameRenderCandidateItem[]) =>
   stringifyFrameRenderCandidateLines(groupFrameRenderCandidateLines(candidateItems));
+
+const isHintlessValueFramePlan = (plan: Pick<FrameTextSelectionPlan, 'sourceTextHint' | 'valueKey' | 'semanticRole'>) => {
+  if (normalizeExtractedFrameText(plan.sourceTextHint)) {
+    return false;
+  }
+
+  if (String(plan.semanticRole || '').trim().toLowerCase() === 'value') {
+    return true;
+  }
+
+  return Boolean(String(plan.valueKey || '').trim());
+};
+
+const isStrongHintlessValueFrameCandidate = (item: FrameRenderCandidateItem) =>
+  item.insideStrict ||
+  ((item.distanceX + item.distanceY) <= 1.5 && item.overlapArea > 0 && item.overlapRatio >= 0.6);
+
+const filterFrameRenderCandidatesForPlan = (
+  candidateItems: FrameRenderCandidateItem[],
+  plan: Pick<FrameTextSelectionPlan, 'sourceTextHint' | 'valueKey' | 'semanticRole'>
+) => {
+  if (!isHintlessValueFramePlan(plan)) {
+    return candidateItems;
+  }
+
+  return candidateItems.filter((item) => isStrongHintlessValueFrameCandidate(item));
+};
+
+const isViableFrameRenderCandidateV112 = (item: FrameRenderCandidateItem) =>
+  item.insideStrict ||
+  (item.overlapArea > 0 && item.overlapRatio >= 0.14) ||
+  ((item.hintAffinity || 0) >= 0.5 && item.insideLoose);
 
 const measureFrameTextAffinity = (left: string, right: string) => {
   const compactLeft = compactFrameTextForComparison(left);
@@ -652,7 +695,7 @@ const resolveFrameTextExtractionV112 = (assignedText: string, localText: string,
 
 const extractFrameTextStateFromRenderPageV112 = (
   page: TemplateExtractReplicaRenderPage | null | undefined,
-  framePlans: Array<{ key: string; frameRect: FrameNodeRect; sourceTextHint: string }>
+  framePlans: FrameTextSelectionPlan[]
 ) => {
   if (!page || !framePlans.length) {
     return {} as Record<string, string>;
@@ -663,14 +706,12 @@ const extractFrameTextStateFromRenderPageV112 = (
   const scoredByItemIndex = new Map<number, Array<{ key: string; item: FrameRenderCandidateItem }>>();
 
   framePlans.forEach((plan) => {
-    const candidates = mapFrameRenderCandidateItems(page, plan.frameRect)
-      .map((item) => scoreFrameRenderCandidateItemV112(item, plan.sourceTextHint))
-      .filter(
-        (item) =>
-          item.insideStrict ||
-          (item.overlapArea > 0 && item.overlapRatio >= 0.14) ||
-          ((item.hintAffinity || 0) >= 0.5 && item.insideLoose)
-      )
+    const candidates = filterFrameRenderCandidatesForPlan(
+      mapFrameRenderCandidateItems(page, plan.frameRect)
+        .map((item) => scoreFrameRenderCandidateItemV112(item, plan.sourceTextHint))
+        .filter((item) => isViableFrameRenderCandidateV112(item)),
+      plan
+    )
       .sort((left, right) => {
         if (Math.abs(left.top - right.top) > 3) {
           return left.top - right.top;
@@ -742,22 +783,40 @@ const extractFrameTextFromRenderPage = (
   page: TemplateExtractReplicaRenderPage | null | undefined,
   frameRect: FrameNodeRect,
   version: TemplateExtractNonImageFrameTextVersion,
-  sourceTextHint = ''
+  sourceTextHint = '',
+  metadata?: Pick<FrameTextSelectionPlan, 'valueKey' | 'frameGroup' | 'colorGroup' | 'semanticRole' | 'fieldType'>
 ) => {
   if (!page) {
     return '';
   }
 
+  const selectionPlan = {
+    key: '',
+    frameRect,
+    sourceTextHint,
+    valueKey: metadata?.valueKey,
+    frameGroup: metadata?.frameGroup,
+    colorGroup: metadata?.colorGroup,
+    semanticRole: metadata?.semanticRole,
+    fieldType: metadata?.fieldType,
+  } satisfies FrameTextSelectionPlan;
+
   switch (version) {
     case 'niv1.12': {
-      const candidateItems = selectFrameRenderCandidateItemsV102(page, frameRect, sourceTextHint).map((item) =>
-        scoreFrameRenderCandidateItemV112(item, sourceTextHint)
+      const candidateItems = filterFrameRenderCandidatesForPlan(
+        selectFrameRenderCandidateItemsV102(page, frameRect, sourceTextHint).map((item) =>
+          scoreFrameRenderCandidateItemV112(item, sourceTextHint)
+        ),
+        selectionPlan
       );
       const renderText = selectBestFrameRenderTextWindowV102(candidateItems, sourceTextHint);
       return resolveFrameTextExtractionV112(renderText, renderText, sourceTextHint);
     }
     case 'niv1.02': {
-      const candidateItems = selectFrameRenderCandidateItemsV102(page, frameRect, sourceTextHint);
+      const candidateItems = filterFrameRenderCandidatesForPlan(
+        selectFrameRenderCandidateItemsV102(page, frameRect, sourceTextHint),
+        selectionPlan
+      );
       const renderText = selectBestFrameRenderTextWindowV102(candidateItems, sourceTextHint);
       return resolveFrameTextExtractionV102(renderText, sourceTextHint);
     }
@@ -1303,6 +1362,11 @@ const buildNonImageFrameTextUpdates = (
           key: plan.key,
           frameRect: plan.frameRect,
           sourceTextHint: plan.sourceTextHint,
+          valueKey: plan.valueKey,
+          frameGroup: plan.frameGroup,
+          colorGroup: plan.colorGroup,
+          semanticRole: plan.semanticRole,
+          fieldType: plan.fieldType,
         }))
       );
 
@@ -1328,7 +1392,13 @@ const buildNonImageFrameTextUpdates = (
 
   return plans.map((plan) => {
     const pageModel = pageModelByPageNumber.get(plan.pageNumber) || renderModel.pages[0];
-    const nextText = extractFrameTextFromRenderPage(pageModel, plan.frameRect, version, plan.sourceTextHint);
+    const nextText = extractFrameTextFromRenderPage(pageModel, plan.frameRect, version, plan.sourceTextHint, {
+      valueKey: plan.valueKey,
+      frameGroup: plan.frameGroup,
+      colorGroup: plan.colorGroup,
+      semanticRole: plan.semanticRole,
+      fieldType: plan.fieldType,
+    });
 
     return {
       domIndex: plan.domIndex,

@@ -748,18 +748,6 @@ const buildSplitFrameBandGroups = (positions: TableCellLayoutPosition[]): SplitF
     }))
     .sort((left, right) => left.rowStart - right.rowStart || left.colStart - right.colStart);
 
-const buildRowOccupiedMaxColEnd = (positions: TableCellLayoutPosition[]) => {
-  const rowOccupiedMaxColEnd: number[] = [];
-
-  positions.forEach((position) => {
-    for (let rowIndex = position.rowStart; rowIndex < position.rowEnd; rowIndex += 1) {
-      rowOccupiedMaxColEnd[rowIndex] = Math.max(rowOccupiedMaxColEnd[rowIndex] || 0, position.colEnd);
-    }
-  });
-
-  return rowOccupiedMaxColEnd;
-};
-
 const stripTransientFrameEditorUi = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>('[data-frame-editor-ui]').forEach((element) => {
     element.remove();
@@ -784,8 +772,7 @@ const buildNormalizedFrameBandShell = (
   pageInner: HTMLElement,
   group: SplitFrameBandGroup,
   colWidths: number[],
-  rowHeights: number[],
-  rowOccupiedMaxColEnd: number[]
+  rowHeights: number[]
 ) => {
   const tableRect = readFrameElementRect(table, pageInner);
   const tableStyle = getComputedStyle(table);
@@ -816,11 +803,7 @@ const buildNormalizedFrameBandShell = (
   const preserveTopBorder = group.rowStart === 0;
   const preserveBottomBorder = group.rowEnd === rowHeights.length;
   const preserveLeftBorder = group.colStart === 0;
-  const preserveRightBorder =
-    group.colEnd === colWidths.length ||
-    Array.from({ length: group.rowEnd - group.rowStart }, (_, offset) => group.rowStart + offset).every(
-      (rowIndex) => (rowOccupiedMaxColEnd[rowIndex] || 0) <= group.colEnd
-    );
+  const preserveRightBorder = group.colEnd === colWidths.length;
   nextTable.style.borderTopWidth = preserveTopBorder ? tableStyle.borderTopWidth : '0px';
   nextTable.style.borderTopStyle = preserveTopBorder ? tableStyle.borderTopStyle : 'none';
   nextTable.style.borderTopColor = preserveTopBorder ? tableStyle.borderTopColor : 'transparent';
@@ -904,10 +887,9 @@ const normalizeFrameBandTableLayout = (shell: HTMLElement) => {
             rowHeightsFromTable[rowIndex] || fallbackHeight || MIN_TABLE_ROW_HEIGHT_PX
           );
         });
-  const rowOccupiedMaxColEnd = buildRowOccupiedMaxColEnd(positions);
 
   const nextShells = groups.map((group) =>
-    buildNormalizedFrameBandShell(shell, table, pageInner, group, colWidths, rowHeights, rowOccupiedMaxColEnd)
+    buildNormalizedFrameBandShell(shell, table, pageInner, group, colWidths, rowHeights)
   );
 
   shell.replaceWith(...nextShells);

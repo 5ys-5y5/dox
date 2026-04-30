@@ -2291,8 +2291,7 @@ def v102_resolve_row_frame_specs(
             document_issue_specs = v102_build_document_issue_frame_specs(row_cells, band_index, frame_group_version)
 
         if document_issue_specs:
-            if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
-                v106_apply_frame_spec_semantics(document_issue_specs)
+            v106_apply_frame_spec_semantics(document_issue_specs)
             return document_issue_specs
 
         signature_specs = None
@@ -2301,8 +2300,7 @@ def v102_resolve_row_frame_specs(
             signature_specs = v102_build_signature_frame_specs(row_cells, band_index, frame_group_version)
 
         if signature_specs:
-            if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
-                v106_apply_frame_spec_semantics(signature_specs)
+            v106_apply_frame_spec_semantics(signature_specs)
             return signature_specs
 
     specs = []
@@ -2331,7 +2329,7 @@ def v102_resolve_row_frame_specs(
         if spec is not None:
             specs.append(spec)
 
-    if normalized_frame_group_version in ("v1.06", "v1.07", "v1.08"):
+    if normalized_frame_group_version in ("v1.06", "v1.07", "v1.08", "v1.09", "v1.10", "v1.11"):
         v106_apply_frame_spec_semantics(specs)
 
     return specs
@@ -3814,8 +3812,7 @@ def v105_build_row_local_frame_specs(
             }
         )
 
-    if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
-        v106_apply_frame_spec_semantics(specs)
+    v106_apply_frame_spec_semantics(specs)
 
     return specs
 
@@ -4697,7 +4694,7 @@ def v105_build_certificate_group_mesh_specs(
 
     if normalized_frame_group_version not in ("v1.09", "v1.10", "v1.11"):
         v105_apply_frame_spec_color_links(specs)
-        v106_apply_frame_spec_semantics(specs)
+    v106_apply_frame_spec_semantics(specs)
 
     if normalized_frame_group_version == "v1.08":
         v108_apply_certificate_row_pair_semantics(specs)
