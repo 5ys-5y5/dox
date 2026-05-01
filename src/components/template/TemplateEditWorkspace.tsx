@@ -4319,6 +4319,31 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
   });
 };
 
+const syncPreviewSurfaceCloneAttrs = (root: HTMLElement) => {
+  const source =
+    root.querySelector<HTMLElement>(':scope > .page-inner') ||
+    root.querySelector<HTMLElement>(':scope > section.page > .page-inner') ||
+    root.querySelector<HTMLElement>('.page-inner');
+
+  (
+    [
+      'data-template-extraction-stage',
+      'data-template-frame-group-version',
+      'data-template-clone-id',
+      'data-page',
+    ] as const
+  ).forEach((attrName) => {
+    const nextValue = source?.getAttribute(attrName)?.trim() || '';
+
+    if (nextValue) {
+      root.setAttribute(attrName, nextValue);
+      return;
+    }
+
+    root.removeAttribute(attrName);
+  });
+};
+
 const markTemplateValueElementEdited = (element: HTMLElement) => {
   element.setAttribute('data-template-edited', 'true');
   element
@@ -4835,7 +4860,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const draftPreviewHtmlRef = React.useRef('');
-  const initializedTemplateIdRef = React.useRef('');
   const selectedFrameGroupIdsRef = React.useRef<string[]>([]);
   const edgeSelectionStateRef = React.useRef<TemplateEdgeSelectionStateDto>(TemplateEdgeSelectionService.createEmptyState());
   const syncedFrameMetadataDraftRef = React.useRef<FrameMetadataDraft>(defaultFrameMetadataDraft);
@@ -4876,6 +4900,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
   const primarySelectedFrameGroupId = selectedFrameGroupIds[0] || null;
   const canEditSingleSelection = selectedFrameGroupIds.length === 1;
+  const routeTemplateId = React.useMemo(() => {
+    const normalizedInitialTemplateId = initialTemplateId.trim();
+
+    if (normalizedInitialTemplateId) {
+      return normalizedInitialTemplateId;
+    }
+
+    if (typeof window === 'undefined') {
+      return '';
+    }
+
+    return new URLSearchParams(window.location.search).get('templateId')?.trim() || '';
+  }, [initialTemplateId]);
   const runtimeModeOptions = React.useMemo(
     () => (frameMetadataDraft.boxKind ? getCompatibleRuntimeModes(frameMetadataDraft.boxKind) : getAllRuntimeModes()),
     [frameMetadataDraft.boxKind]
@@ -4971,24 +5008,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const sourceRect = readPreviewSourceRect(root);
     const availableWidth = root.clientWidth;
-    const availableHeight = root.clientHeight;
 
-    if (!sourceRect || !availableWidth || !availableHeight) {
+    if (!sourceRect || !availableWidth) {
       root.removeAttribute('data-template-preview-scaled');
       root.style.removeProperty('--template-preview-scale');
       root.style.removeProperty('--template-preview-source-width');
       root.style.removeProperty('--template-preview-source-height');
+      root.style.removeProperty('--template-preview-scaled-height');
       setPreviewZoom(100);
       return;
     }
 
-    const scale = Math.min(availableWidth / sourceRect.width, availableHeight / sourceRect.height, 1);
+    const scale = Math.min(availableWidth / sourceRect.width, 1);
     const nextZoom = Math.max(20, Number((scale * 100).toFixed(1)));
 
     root.setAttribute('data-template-preview-scaled', 'true');
     root.style.setProperty('--template-preview-scale', String(scale));
     root.style.setProperty('--template-preview-source-width', `${sourceRect.width}px`);
     root.style.setProperty('--template-preview-source-height', `${sourceRect.height}px`);
+    root.style.setProperty('--template-preview-scaled-height', `${sourceRect.height * scale}px`);
     setPreviewZoom((previous) => (Math.abs(previous - nextZoom) <= 0.25 ? previous : nextZoom));
   }, []);
 
@@ -5676,6 +5714,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       previewEditorStateRetryCountRef.current = 0;
       const normalized = ensurePreviewFrameBandNormalization(root);
+      syncPreviewSurfaceCloneAttrs(root);
       applyPreviewEditPermissions(root);
       applyFrameCanvasVisualHints(root);
       ensureRelativeAnchorConfigs(root);
@@ -5737,6 +5776,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       previewRef.current = node;
 
       if (node && renderedPreviewHtml) {
+        syncPreviewSurfaceCloneAttrs(node);
         syncPreviewSurfaceScale(node);
         schedulePreviewEditorState();
       }
@@ -5980,15 +6020,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [loadTemplates]);
 
   React.useEffect(() => {
-    const normalizedInitialTemplateId = initialTemplateId.trim();
-
-    if (!normalizedInitialTemplateId || initializedTemplateIdRef.current === normalizedInitialTemplateId) {
+    if (!routeTemplateId) {
       return;
     }
 
-    initializedTemplateIdRef.current = normalizedInitialTemplateId;
-    void loadTemplate(normalizedInitialTemplateId);
-  }, [initialTemplateId, loadTemplate]);
+    if (selectedTemplateId.trim() !== routeTemplateId) {
+      setSelectedTemplateId(routeTemplateId);
+    }
+
+    if (templateDetail?.template.id === routeTemplateId || loading) {
+      return;
+    }
+
+    void loadTemplate(routeTemplateId);
+  }, [loadTemplate, loading, routeTemplateId, selectedTemplateId, templateDetail?.template.id]);
 
   React.useEffect(() => {
     selectedFrameGroupIdsRef.current = selectedFrameGroupIds;
@@ -6103,19 +6148,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     syncPreviewSurfaceScale(root);
-
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      syncPreviewSurfaceScale(root);
+    const frameId = window.requestAnimationFrame(() => {
+      syncPreviewSurfaceScale(previewRef.current);
     });
+    const handleWindowResize = () => {
+      syncPreviewSurfaceScale(previewRef.current);
+    };
 
-    observer.observe(root);
+    window.addEventListener('resize', handleWindowResize);
 
     return () => {
-      observer.disconnect();
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', handleWindowResize);
     };
   }, [renderedPreviewHtml, syncPreviewSurfaceScale]);
 
@@ -8815,18 +8859,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           box-sizing: border-box;
           width: 100%;
           max-width: none;
-          aspect-ratio: 210 / 297;
+          min-height: 0;
           overflow: hidden;
           border-top: 1px solid rgb(226 232 240);
           border-radius: 0 0 0.75rem 0.75rem;
-          background: white;
+          background: rgb(226 232 240);
           box-shadow: none;
           color: rgb(30 41 59);
+        }
+        .template-edit-preview[data-template-preview-scaled="true"] {
+          height: var(--template-preview-scaled-height, auto);
         }
         .template-edit-preview[data-template-preview-scaled="true"] > .page-inner,
         .template-edit-preview[data-template-preview-scaled="true"] > section.page {
           position: absolute;
-          left: 0;
+          left: calc(50% - (var(--template-preview-source-width, 0px) / 2));
           top: 0;
           width: var(--template-preview-source-width, auto) !important;
           min-height: var(--template-preview-source-height, auto) !important;
@@ -8839,6 +8886,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview > .viewer {
           margin: 0 auto !important;
           padding: 0 !important;
+          background: white !important;
         }
         .template-edit-preview .viewer {
           display: block;
@@ -8850,14 +8898,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
           margin: 0 !important;
           padding: 0 !important;
-          background: transparent !important;
+          background: white !important;
           box-shadow: none !important;
           overflow: visible;
         }
         .template-edit-preview .page-inner {
           margin: 0 !important;
           padding: 0 !important;
-          background: transparent !important;
+          background: white !important;
         }
         .template-edit-preview[data-frame-create-mode="true"] {
           cursor: crosshair;
