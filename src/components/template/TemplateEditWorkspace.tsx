@@ -592,14 +592,52 @@ const isStatusHistoryFrameNode = (node: HTMLElement | null | undefined) => {
   return frameGroupId.startsWith('status-history-') || valueKey === '상태 이력' || colorGroup === '상태 이력';
 };
 
+const resolvePersistedFrameNode = (node: HTMLElement | null | undefined) => {
+  if (!node) {
+    return null;
+  }
+
+  if (node.matches(RAW_FRAME_NODE_SELECTOR)) {
+    return node;
+  }
+
+  const frameGroupId = getFrameGroupId(node);
+  const exactMatch = frameGroupId
+    ? node.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
+    : null;
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  return node.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) || null;
+};
+
+const readFrameMetadataAttr = (node: HTMLElement, attrName: string) => {
+  const directValue = node.getAttribute(attrName)?.trim() || '';
+
+  if (directValue) {
+    return directValue;
+  }
+
+  const persistedFrameNode = resolvePersistedFrameNode(node);
+  const persistedValue = persistedFrameNode?.getAttribute(attrName)?.trim() || '';
+
+  if (persistedValue) {
+    return persistedValue;
+  }
+
+  return node.querySelector<HTMLElement>('[data-template-frame-input="true"]')?.getAttribute(attrName)?.trim() || '';
+};
+
 const readFrameBoxKind = (node: HTMLElement) => {
-  const explicitBoxKind = node.getAttribute(TEMPLATE_FRAME_BOX_KIND_ATTR)?.trim() || '';
+  const explicitBoxKind = readFrameMetadataAttr(node, TEMPLATE_FRAME_BOX_KIND_ATTR);
 
   if (isTemplateFrameBoxKind(explicitBoxKind)) {
     return explicitBoxKind;
   }
 
-  const legacyFieldType = node.getAttribute(TEMPLATE_FRAME_FIELD_TYPE_ATTR)?.trim().toLowerCase() || '';
+  const legacyFieldType = readFrameMetadataAttr(node, TEMPLATE_FRAME_FIELD_TYPE_ATTR).toLowerCase();
 
   if (legacyFieldType === 'signature') {
     return 'signature' as const;
@@ -613,7 +651,7 @@ const readFrameBoxKind = (node: HTMLElement) => {
 };
 
 const readFrameRole = (node: HTMLElement) => {
-  const explicitRole = node.getAttribute(TEMPLATE_FRAME_ROLE_ATTR)?.trim() || '';
+  const explicitRole = readFrameMetadataAttr(node, TEMPLATE_FRAME_ROLE_ATTR);
 
   if (explicitRole === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(explicitRole as TemplateFrameRole)) {
     return explicitRole as TemplateFrameRole | 'group';
@@ -623,18 +661,19 @@ const readFrameRole = (node: HTMLElement) => {
     return 'value' as const;
   }
 
-  const valueKey = normalizeFrameValueKey(node.getAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR) || '');
+  const valueKey = normalizeFrameValueKey(readFrameMetadataAttr(node, TEMPLATE_FRAME_VALUE_KEY_ATTR));
   return valueKey ? ('key_value' as const) : ('key' as const);
 };
 
-const readFrameValueKey = (node: HTMLElement) => normalizeFrameValueKey(node.getAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR) || '');
+const readFrameValueKey = (node: HTMLElement) =>
+  normalizeFrameValueKey(readFrameMetadataAttr(node, TEMPLATE_FRAME_VALUE_KEY_ATTR));
 
-const readFrameParentGroupId = (node: HTMLElement) => node.getAttribute(TEMPLATE_FRAME_PARENT_GROUP_ATTR)?.trim() || '';
+const readFrameParentGroupId = (node: HTMLElement) => readFrameMetadataAttr(node, TEMPLATE_FRAME_PARENT_GROUP_ATTR);
 
 const readFrameRuntimeMode = (node: HTMLElement) => {
   const boxKind = readFrameBoxKind(node);
   const role = readFrameRole(node);
-  const explicitRuntimeMode = node.getAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR)?.trim() || '';
+  const explicitRuntimeMode = readFrameMetadataAttr(node, TEMPLATE_FRAME_RUNTIME_MODE_ATTR);
 
   if (isTemplateFrameRuntimeMode(explicitRuntimeMode) && getCompatibleRuntimeModes(boxKind).includes(explicitRuntimeMode)) {
     return explicitRuntimeMode;
@@ -745,8 +784,12 @@ const hasResolvedFrameParentCycle = (
 };
 
 const applyFrameMetadataPatch = (node: HTMLElement, patch: FrameMetadataPatch) => {
-  const textarea = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
-  const targets = [node, textarea].filter((target): target is HTMLElement => Boolean(target));
+  const persistedFrameNode = resolvePersistedFrameNode(node);
+  const textarea =
+    node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
+    persistedFrameNode?.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
+    null;
+  const targets = Array.from(new Set([node, persistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
 
   targets.forEach((target) => {
     if (patch.boxKind !== undefined) {
@@ -4282,6 +4325,9 @@ const appendFrameRelationBadge = (
   tone: 'key' | 'value'
 ) => {
   const shell = resolveFrameLayoutShell(frameNode);
+  shell.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
+    element.remove();
+  });
   const badge = document.createElement('div');
   badge.className = FRAME_RELATION_BADGE_CLASS;
   badge.setAttribute('data-frame-editor-ui', 'true');
@@ -4541,7 +4587,11 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
   });
 };
 
-const applyFrameRelationSelectionUi = (root: HTMLElement, relationMode: FrameRelationPreviewMode) => {
+const applyFrameRelationSelectionUi = (
+  root: HTMLElement,
+  relationMode: FrameRelationPreviewMode,
+  selectedFrameGroupIds: string[] = []
+) => {
   const frameNodes = collectFrameSelectionAnchors(root);
   root.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
     element.remove();
@@ -4551,9 +4601,59 @@ const applyFrameRelationSelectionUi = (root: HTMLElement, relationMode: FrameRel
     node.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
   });
 
-  if (relationMode.kind === 'idle') {
-    return;
-  }
+  const valueIdsByKeyId = new Map<string, string[]>();
+  const keyIdsByValueId = new Map<string, string>();
+
+  frameNodes.forEach((node) => {
+    const frameGroupId = getFrameGroupId(node);
+    const role = readFrameRole(node);
+    const parentGroupId = readFrameParentGroupId(node);
+
+    if (role === 'value' && parentGroupId) {
+      const current = valueIdsByKeyId.get(parentGroupId) || [];
+      current.push(frameGroupId);
+      valueIdsByKeyId.set(parentGroupId, current);
+      keyIdsByValueId.set(frameGroupId, parentGroupId);
+    }
+  });
+
+  const activeRelationFrameIds = new Set<string>();
+  selectedFrameGroupIds.forEach((frameGroupId) => {
+    const linkedValueIds = valueIdsByKeyId.get(frameGroupId) || [];
+    if (linkedValueIds.length > 0) {
+      activeRelationFrameIds.add(frameGroupId);
+      linkedValueIds.forEach((linkedValueId) => activeRelationFrameIds.add(linkedValueId));
+      return;
+    }
+
+    const parentGroupId = keyIdsByValueId.get(frameGroupId) || '';
+    if (!parentGroupId) {
+      return;
+    }
+
+    activeRelationFrameIds.add(frameGroupId);
+    activeRelationFrameIds.add(parentGroupId);
+    (valueIdsByKeyId.get(parentGroupId) || []).forEach((linkedValueId) => activeRelationFrameIds.add(linkedValueId));
+  });
+
+  frameNodes.forEach((node) => {
+    const frameGroupId = getFrameGroupId(node);
+    const role = readFrameRole(node);
+    const hasLinkedValues = role === 'key' && (valueIdsByKeyId.get(frameGroupId)?.length || 0) > 0;
+    const isLinkedValue = role === 'value' && Boolean(keyIdsByValueId.get(frameGroupId));
+    const isActive = activeRelationFrameIds.has(frameGroupId);
+
+    if (hasLinkedValues) {
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, isActive ? 'linked-key' : 'passive-key');
+      appendFrameRelationBadge(node, 'KEY', 'key');
+      return;
+    }
+
+    if (isLinkedValue) {
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, isActive ? 'linked-value' : 'passive-value');
+      appendFrameRelationBadge(node, 'VALUE', 'value');
+    }
+  });
 
   if (relationMode.kind === 'parent-select' || relationMode.kind === 'parent-linked') {
     const sourceIds = new Set(relationMode.sourceFrameGroupIds);
@@ -5626,6 +5726,7 @@ const applyFrameStylePatch = (
   patch: FrameStylePatch
 ) => {
   const contentTarget = resolveFrameContentTarget(node);
+  const persistedFrameNode = resolvePersistedFrameNode(node);
 
   if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
     applyFrameResizeWidthDelta(node, patch.width - readFrameNodeRect(node).width);
@@ -5663,10 +5764,16 @@ const applyFrameStylePatch = (
 
   if (patch.backgroundColor !== undefined) {
     node.style.backgroundColor = patch.backgroundColor || '';
+    if (persistedFrameNode && persistedFrameNode !== node) {
+      persistedFrameNode.style.backgroundColor = patch.backgroundColor || '';
+    }
   }
 
   if (patch.borderRadius !== undefined) {
     node.style.borderRadius = patch.borderRadius ? `${Number.parseFloat(patch.borderRadius)}px` : '';
+    if (persistedFrameNode && persistedFrameNode !== node) {
+      persistedFrameNode.style.borderRadius = patch.borderRadius ? `${Number.parseFloat(patch.borderRadius)}px` : '';
+    }
   }
 
   if (patch.paddingX !== undefined || patch.paddingY !== undefined) {
@@ -6791,7 +6898,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -6854,7 +6961,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -6887,7 +6994,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
     },
     [buildLiveEdgeTopologySnapshot, reconcileLiveEdgeSelection, resolveEdgeRolePresentation]
   );
@@ -7295,7 +7402,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -7354,7 +7461,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       nextEdgeRolePresentation.edgeRoleById,
       nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
     );
-    applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
+    applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIds);
     setEdgeRoleDiagnostics((previous) =>
       edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
         ? previous
@@ -7391,7 +7498,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    applyFrameRelationSelectionUi(root, frameRelationPreviewMode);
+    applyFrameRelationSelectionUi(root, frameRelationPreviewMode, selectedFrameGroupIds);
   }, [frameRelationPreviewMode, renderedPreviewHtml, selectedFrameGroupIds]);
 
   React.useEffect(() => {
@@ -7446,11 +7553,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const paddingYs = nodes.map((node) =>
       normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).paddingTop)
     );
-    const borderRadii = nodes.map((node) => normalizeNumericStyleValue(getComputedStyle(node).borderRadius));
+    const borderRadii = nodes.map((node) =>
+      normalizeNumericStyleValue(getComputedStyle(resolvePersistedFrameNode(node) || node).borderRadius)
+    );
     const fontWeights = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).fontWeight || '');
     const textAligns = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).textAlign || 'left');
     const colors = nodes.map((node) => colorToHex(getComputedStyle(resolveFrameContentTarget(node)).color || ''));
-    const backgroundColors = nodes.map((node) => colorToHex(getComputedStyle(node).backgroundColor || ''));
+    const backgroundColors = nodes.map((node) =>
+      colorToHex(getComputedStyle(resolvePersistedFrameNode(node) || node).backgroundColor || '')
+    );
 
     const sharedTextAlign = getSharedValue(textAligns);
 
@@ -10556,7 +10667,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
           background-color: rgba(16, 185, 129, .12) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"] {
+          outline: 1px solid rgba(37, 99, 235, .42) !important;
+          outline-offset: -1px;
+          box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .32);
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"] {
+          outline: 1px solid rgba(217, 119, 6, .42) !important;
+          outline-offset: -1px;
+          box-shadow: inset 0 0 0 1px rgba(217, 119, 6, .32);
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
           outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: -1px;
           box-shadow:
@@ -10568,7 +10689,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           outline-offset: -1px;
           background-image: linear-gradient(180deg, rgba(245, 158, 11, .03), rgba(245, 158, 11, .08));
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] {
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] {
           outline: 2px solid rgba(217, 119, 6, .96) !important;
           outline-offset: -1px;
           box-shadow:
@@ -10642,12 +10763,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           font-weight: 700;
           pointer-events: none;
           box-shadow: 0 4px 12px rgba(15, 23, 42, .18);
+          opacity: .5;
+          transition: opacity .12s ease;
         }
         .template-edit-preview .${FRAME_RELATION_BADGE_CLASS}[data-relation-badge-tone="key"] {
           background: rgba(217, 119, 6, .96);
         }
         .template-edit-preview .${FRAME_RELATION_BADGE_CLASS}[data-relation-badge-tone="value"] {
           background: rgba(2, 132, 199, .96);
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] .${FRAME_RELATION_BADGE_CLASS},
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] .${FRAME_RELATION_BADGE_CLASS},
+        .template-edit-preview [data-template-selected="true"] .${FRAME_RELATION_BADGE_CLASS} {
+          opacity: 1;
         }
         .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS} {
           position: absolute;
