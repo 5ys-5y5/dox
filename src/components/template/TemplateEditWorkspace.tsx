@@ -113,6 +113,13 @@ type MetadataRelationSelectionMode =
   | { kind: 'parent'; sourceFrameGroupIds: string[] }
   | { kind: 'value'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
 
+type FrameRelationPreviewMode =
+  | { kind: 'idle' }
+  | { kind: 'parent-select'; sourceFrameGroupIds: string[] }
+  | { kind: 'parent-linked'; sourceFrameGroupIds: string[]; keyFrameGroupId: string }
+  | { kind: 'value-select'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] }
+  | { kind: 'value-linked'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
+
 type SelectionPanelTab = 'summary' | 'create' | 'metadata' | 'style';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
@@ -328,6 +335,7 @@ type TemplateEditPreviewSurfaceProps = {
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
+const FRAME_RELATION_BADGE_CLASS = 'v106-frame-relation-badge';
 const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
 const FRAME_MARQUEE_GHOST_CLASS = 'v106-frame-marquee';
@@ -4258,6 +4266,20 @@ const appendRelativeAnchorGuideBadge = (
   host.appendChild(badge);
 };
 
+const appendFrameRelationBadge = (
+  frameNode: HTMLElement,
+  text: string,
+  tone: 'key' | 'value'
+) => {
+  const shell = resolveFrameLayoutShell(frameNode);
+  const badge = document.createElement('div');
+  badge.className = FRAME_RELATION_BADGE_CLASS;
+  badge.setAttribute('data-frame-editor-ui', 'true');
+  badge.setAttribute('data-relation-badge-tone', tone);
+  badge.textContent = text;
+  shell.appendChild(badge);
+};
+
 const renderRelativeAnchorGuides = (root: HTMLElement, selectedIds: string[]) => {
   const primarySelectedId = selectedIds[0];
 
@@ -4509,8 +4531,11 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
   });
 };
 
-const applyFrameRelationSelectionUi = (root: HTMLElement, relationMode: MetadataRelationSelectionMode) => {
+const applyFrameRelationSelectionUi = (root: HTMLElement, relationMode: FrameRelationPreviewMode) => {
   const frameNodes = collectFrameSelectionAnchors(root);
+  root.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
+    element.remove();
+  });
 
   frameNodes.forEach((node) => {
     node.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
@@ -4520,13 +4545,26 @@ const applyFrameRelationSelectionUi = (root: HTMLElement, relationMode: Metadata
     return;
   }
 
-  if (relationMode.kind === 'parent') {
+  if (relationMode.kind === 'parent-select' || relationMode.kind === 'parent-linked') {
     const sourceIds = new Set(relationMode.sourceFrameGroupIds);
+    const linkedKeyFrameGroupId = relationMode.kind === 'parent-linked' ? relationMode.keyFrameGroupId : '';
     frameNodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
 
+      if (frameGroupId === linkedKeyFrameGroupId) {
+        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-key');
+        appendFrameRelationBadge(node, '현재 KEY', 'key');
+        return;
+      }
+
       if (sourceIds.has(frameGroupId)) {
-        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'parent-source');
+        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-value');
+        appendFrameRelationBadge(node, 'VALUE', 'value');
+        return;
+      }
+
+      if (relationMode.kind === 'parent-select' && readFrameBoxKind(node) === 'text') {
+        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'parent-candidate');
       }
     });
     return;
@@ -4537,12 +4575,14 @@ const applyFrameRelationSelectionUi = (root: HTMLElement, relationMode: Metadata
     const frameGroupId = getFrameGroupId(node);
 
     if (frameGroupId === relationMode.sourceKeyFrameGroupId) {
-      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'value-source');
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-key');
+      appendFrameRelationBadge(node, '현재 KEY', 'key');
       return;
     }
 
     if (targetIds.has(frameGroupId)) {
-      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'value-target');
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-value');
+      appendFrameRelationBadge(node, 'VALUE', 'value');
     }
   });
 };
@@ -5667,6 +5707,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const edgeRoleDiagnosticsRef = React.useRef<EdgeRoleDiagnosticsState>(emptyEdgeRoleDiagnosticsState);
   const syncedFrameMetadataDraftRef = React.useRef<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const metadataRelationSelectionModeRef = React.useRef<MetadataRelationSelectionMode>({ kind: 'idle' });
+  const frameRelationPreviewModeRef = React.useRef<FrameRelationPreviewMode>({ kind: 'idle' });
   const activePointerOwnerRef = React.useRef<HTMLDivElement | null>(null);
   const dragStateRef = React.useRef<DragState | null>(null);
   const resizeStateRef = React.useRef<ResizeState | null>(null);
@@ -5728,20 +5769,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => (frameMetadataDraft.boxKind ? getCompatibleRuntimeModes(frameMetadataDraft.boxKind) : getAllRuntimeModes()),
     [frameMetadataDraft.boxKind]
   );
-  const frameBoxKindHelpText = React.useMemo(() => {
-    if (!frameMetadataDraft.boxKind) {
-      return '여러 박스가 섞여 있거나 아직 변경하지 않는 상태입니다. 텍스트, 첨부파일, 서명 중 어떤 종류의 슬롯인지 정합니다.';
-    }
-
-    return FRAME_BOX_KIND_DESCRIPTIONS[frameMetadataDraft.boxKind];
-  }, [frameMetadataDraft.boxKind]);
-  const frameRoleHelpText = React.useMemo(() => {
-    if (!frameMetadataDraft.role) {
-      return '여러 박스가 섞여 있거나 아직 변경하지 않는 상태입니다. 이 박스가 상위 키인지, 하위 값인지, 독립 값인지 정합니다.';
-    }
-
-    return FRAME_ROLE_DESCRIPTIONS[frameMetadataDraft.role];
-  }, [frameMetadataDraft.role]);
   const frameRuntimeModeHelpText = React.useMemo(() => {
     if (!frameMetadataDraft.runtimeMode) {
       if (frameMetadataDraft.boxKind) {
@@ -6002,6 +6029,56 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       })
       .join(', ');
   }, [renderedPreviewHtml, shownValueBoxFrameGroupIds]);
+  const frameRelationPreviewMode = React.useMemo<FrameRelationPreviewMode>(() => {
+    if (selectionPanelTab !== 'metadata') {
+      return { kind: 'idle' };
+    }
+
+    if (metadataRelationSelectionMode.kind === 'parent') {
+      return {
+        kind: 'parent-select',
+        sourceFrameGroupIds: metadataRelationSelectionMode.sourceFrameGroupIds,
+      };
+    }
+
+    if (metadataRelationSelectionMode.kind === 'value') {
+      return {
+        kind: 'value-select',
+        sourceKeyFrameGroupId: metadataRelationSelectionMode.sourceKeyFrameGroupId,
+        targetFrameGroupIds: metadataRelationSelectionMode.targetFrameGroupIds,
+      };
+    }
+
+    const linkedKeyFrameGroupId = frameMetadataDraft.parentGroupId.trim();
+
+    if (linkedKeyFrameGroupId && selectedFrameGroupIds.length > 0) {
+      return {
+        kind: 'parent-linked',
+        sourceFrameGroupIds: selectedFrameGroupIds,
+        keyFrameGroupId: linkedKeyFrameGroupId,
+      };
+    }
+
+    if (primarySelectedFrameGroupId && shownValueBoxFrameGroupIds.length > 0) {
+      return {
+        kind: 'value-linked',
+        sourceKeyFrameGroupId: primarySelectedFrameGroupId,
+        targetFrameGroupIds: shownValueBoxFrameGroupIds,
+      };
+    }
+
+    return { kind: 'idle' };
+  }, [
+    frameMetadataDraft.parentGroupId,
+    metadataRelationSelectionMode,
+    primarySelectedFrameGroupId,
+    selectedFrameGroupIds,
+    selectionPanelTab,
+    shownValueBoxFrameGroupIds,
+  ]);
+  React.useEffect(() => {
+    frameRelationPreviewModeRef.current = frameRelationPreviewMode;
+  }, [frameRelationPreviewMode]);
 
   const previewHasStableFrameLayout = React.useCallback((root: ParentNode) => {
     const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
@@ -6703,7 +6780,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -6766,7 +6843,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -6799,7 +6876,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
     },
     [buildLiveEdgeTopologySnapshot, reconcileLiveEdgeSelection, resolveEdgeRolePresentation]
   );
@@ -7182,7 +7259,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
-      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -7241,7 +7318,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       nextEdgeRolePresentation.edgeRoleById,
       nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
     );
-    applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
+    applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current);
     setEdgeRoleDiagnostics((previous) =>
       edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
         ? previous
@@ -7278,8 +7355,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    applyFrameRelationSelectionUi(root, metadataRelationSelectionMode);
-  }, [metadataRelationSelectionMode, renderedPreviewHtml, selectedFrameGroupIds]);
+    applyFrameRelationSelectionUi(root, frameRelationPreviewMode);
+  }, [frameRelationPreviewMode, renderedPreviewHtml, selectedFrameGroupIds]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || hasActivePointerInteraction()) {
@@ -10443,15 +10520,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
           background-color: rgba(16, 185, 129, .12) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="parent-source"] {
-          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, .82);
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="value-source"] {
-          box-shadow: inset 0 0 0 2px rgba(217, 119, 6, .82);
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="value-target"] {
-          outline: 2px dashed rgba(14, 165, 233, .96) !important;
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
+          outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: -1px;
+          box-shadow:
+            inset 0 0 0 2px rgba(59, 130, 246, .92),
+            0 0 0 4px rgba(96, 165, 250, .18);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="parent-candidate"] {
+          outline: 2px dashed rgba(217, 119, 6, .8) !important;
+          outline-offset: -1px;
+          background-image: linear-gradient(180deg, rgba(245, 158, 11, .03), rgba(245, 158, 11, .08));
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] {
+          outline: 2px solid rgba(217, 119, 6, .96) !important;
+          outline-offset: -1px;
+          box-shadow:
+            inset 0 0 0 2px rgba(217, 119, 6, .92),
+            0 0 0 4px rgba(251, 191, 36, .18);
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}]::after {
           position: absolute;
@@ -10506,6 +10592,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           line-height: 1.2;
           font-weight: 700;
           pointer-events: none;
+        }
+        .template-edit-preview .${FRAME_RELATION_BADGE_CLASS} {
+          position: absolute;
+          left: 6px;
+          bottom: 6px;
+          z-index: 26;
+          border-radius: 999px;
+          color: #f8fafc;
+          padding: 2px 8px;
+          font-size: 10px;
+          line-height: 1.2;
+          font-weight: 700;
+          pointer-events: none;
+          box-shadow: 0 4px 12px rgba(15, 23, 42, .18);
+        }
+        .template-edit-preview .${FRAME_RELATION_BADGE_CLASS}[data-relation-badge-tone="key"] {
+          background: rgba(217, 119, 6, .96);
+        }
+        .template-edit-preview .${FRAME_RELATION_BADGE_CLASS}[data-relation-badge-tone="value"] {
+          background: rgba(2, 132, 199, .96);
         }
         .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS} {
           position: absolute;
@@ -11037,19 +11143,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                           </option>
                         ))}
                       </select>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
-                        <div className="font-semibold text-slate-900">현재 선택 설명</div>
-                        <div className="mt-1">{frameBoxKindHelpText}</div>
-                        <div className="mt-2 space-y-1">
-                          {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => (
-                            <div key={boxKind}>
-                              <span className="font-medium text-slate-900">{FRAME_BOX_KIND_LABELS[boxKind]}</span>
-                              {' - '}
-                              {FRAME_BOX_KIND_DESCRIPTIONS[boxKind]}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-800">Role</label>
@@ -11071,19 +11164,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                           </option>
                         ))}
                       </select>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
-                        <div className="font-semibold text-slate-900">현재 선택 설명</div>
-                        <div className="mt-1">{frameRoleHelpText}</div>
-                        <div className="mt-2 space-y-1">
-                          {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => (
-                            <div key={role}>
-                              <span className="font-medium text-slate-900">{FRAME_ROLE_LABELS[role]}</span>
-                              {' - '}
-                              {FRAME_ROLE_DESCRIPTIONS[role]}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                     <div className="space-y-2 md:col-span-2">
                       <label className="text-sm font-medium text-slate-800">Key Box</label>
@@ -11329,20 +11409,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   </div>
                 </>
               ) : null}
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>편집 방식</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm leading-6 text-slate-600">
-              <p>박스를 클릭하면 선택되고, Shift+클릭으로 여러 박스를 누적 선택합니다.</p>
-              <p>엣지를 한 번 클릭하면 동일 수직/수평선상에서 시작과 끝이 직접 연결된 엣지가 함께 선택되고, 같은 엣지를 다시 클릭하면 해당 엣지만 단독 선택됩니다.</p>
-              <p>`selected_edge_clicked` 는 직접 클릭한 엣지, `selected_edge_auto_multi` 는 connected 자동 선택 엣지, `peer_edge` 는 같은 물리 경계에 있는 반대편 엣지입니다.</p>
-              <p>Shift+클릭은 여러 `selected_edge_clicked` 를 누적 선택하며, 드래그는 현재 역할 정의에 따라 함께 움직여야 할 `peer_edge` 까지 이동시키고 mismatch 를 감지합니다.</p>
-              <p>`relative` 박스는 기준 anchor 와 아래 영향 대상을 가지며, `absolute` 박스는 다른 박스 높이/너비 변경의 영향을 받지 않고 전파도 하지 않습니다.</p>
-              <p>오른쪽 패널에서는 여러 박스에 동일한 폰트 크기, 패딩, 정렬, 색상, 크기를 일괄 적용할 수 있습니다.</p>
             </CardContent>
           </Card>
         </div>
