@@ -23,6 +23,7 @@ type AuthStatus = 'requested' | 'completed' | 'failed' | 'expired' | 'verified' 
 type SignRequestRow = {
   id: string;
   document_id?: string | null;
+  signature_slot_key?: string | null;
   status: string;
   expiration_date: string | null;
   document_hash: string | null;
@@ -73,6 +74,7 @@ export type VerifiedAuthenticationSummary = {
   id: string;
   requestId: string;
   documentId: string | null;
+  signatureSlotKey: string | null;
   documentTitle: string | null;
   signerName: string | null;
   providerGroup: AuthProviderGroup;
@@ -191,7 +193,7 @@ const resolveSignRequest = async (client: ReturnType<typeof supabase>, requestId
   const { data, error } = await signingSchema(client)
     .from('sign_requests')
     .select(
-      'id, status, expiration_date, document_hash, document_hash_algorithm, document_hash_encoding, document_canonicalization, document_byte_length, signer_info'
+      'id, status, expiration_date, document_hash, document_hash_algorithm, document_hash_encoding, document_canonicalization, document_byte_length, signature_slot_key, signer_info'
     )
     .eq('id', requestId)
     .single();
@@ -247,7 +249,7 @@ const buildVerifiedAuthenticationSummaries = async (
   const requestIds = [...new Set(authentications.map((row) => row.request_id))];
   const { data: requestRowsData, error: requestRowsError } = await signingSchema(client)
     .from('sign_requests')
-    .select('id, document_id, signer_info')
+    .select('id, document_id, signature_slot_key, signer_info')
     .in('id', requestIds);
 
   if (requestRowsError) {
@@ -272,6 +274,7 @@ const buildVerifiedAuthenticationSummaries = async (
       id: row.id,
       requestId: row.request_id,
       documentId,
+      signatureSlotKey: requestRow?.signature_slot_key?.trim() || null,
       documentTitle: documentId ? documentTitleMap.get(documentId) || null : null,
       signerName,
       providerGroup: row.provider_group,

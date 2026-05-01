@@ -75,6 +75,23 @@ create table if not exists documents.document_artifacts (
   created_at timestamptz not null default timezone('utc', now())
 );
 
+create table if not exists documents.document_value_files (
+  id uuid primary key default gen_random_uuid(),
+  document_id uuid not null references documents.document_registry(id) on delete cascade,
+  version_id uuid not null references documents.document_versions(id) on delete cascade,
+  value_key text not null check (btrim(value_key) <> ''),
+  storage_bucket text not null check (btrim(storage_bucket) <> ''),
+  storage_path text not null check (btrim(storage_path) <> ''),
+  original_file_name text not null check (btrim(original_file_name) <> ''),
+  mime_type text null,
+  file_size_bytes bigint null check (file_size_bytes is null or file_size_bytes >= 0),
+  sort_order integer not null default 0 check (sort_order >= 0),
+  uploaded_by text null,
+  uploaded_at timestamptz not null default timezone('utc', now()),
+  metadata jsonb not null default '{}'::jsonb
+    check (jsonb_typeof(metadata) = 'object')
+);
+
 do $$
 begin
   if not exists (
@@ -104,6 +121,9 @@ create index if not exists idx_document_versions_document_id
 create index if not exists idx_document_artifacts_document_id
   on documents.document_artifacts(document_id, created_at desc);
 
+create index if not exists idx_document_value_files_document_version
+  on documents.document_value_files(document_id, version_id, value_key, sort_order, uploaded_at);
+
 create or replace function documents.set_document_registry_updated_at()
 returns trigger
 language plpgsql
@@ -125,3 +145,4 @@ comment on schema documents is 'DOC-CLOUD-01 documents domain schema';
 comment on table documents.document_registry is 'DOC-CLOUD-01 document metadata registry';
 comment on table documents.document_versions is 'DOC-CLOUD-01 and DOC-CLOUD-02 canonical html version store';
 comment on table documents.document_artifacts is 'DOC-CLOUD-02 derived output artifact metadata';
+comment on table documents.document_value_files is 'DIVTYPE-01 document-scoped attachment slot snapshot store';

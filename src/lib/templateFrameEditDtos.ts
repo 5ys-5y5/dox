@@ -1,4 +1,15 @@
 export type TemplateFrameRole = 'group' | 'key' | 'value' | 'key_value';
+export type TemplateFrameBoxKind = 'text' | 'attachment' | 'signature';
+export type TemplateFrameRuntimeMode =
+  | 'static_label'
+  | 'editable_text'
+  | 'file_slot'
+  | 'signature_image'
+  | 'signature_history'
+  | 'signature_signer_name'
+  | 'signature_signed_at'
+  | 'signature_provider'
+  | 'signature_status';
 
 export type TemplateFrameRectDto = {
   pageNumber: number;
@@ -10,6 +21,8 @@ export type TemplateFrameRectDto = {
 
 export type TemplateFrameMetadataDto = {
   role: TemplateFrameRole;
+  boxKind?: TemplateFrameBoxKind | null;
+  runtimeMode?: TemplateFrameRuntimeMode | null;
   outlineStyle: 'solid' | 'dashed' | null;
   valueKey: string | null;
   parentGroupId: string | null;

@@ -18,7 +18,12 @@ import type {
   TemplateEdgeTopologySnapshotDto,
 } from '../../lib/templateEdgeSelectionDtos';
 import type { TemplateDetailResult, TemplateLayoutResizeMode, TemplateRecordDto } from '../../lib/templateDtos';
-import type { TemplateFrameResizeDirection } from '../../lib/templateFrameEditDtos';
+import type {
+  TemplateFrameBoxKind,
+  TemplateFrameResizeDirection,
+  TemplateFrameRole,
+  TemplateFrameRuntimeMode,
+} from '../../lib/templateFrameEditDtos';
 import { TemplateEdgeResizeIntentService } from '../../services/templateEdgeResizeIntentService';
 import { TemplateEdgeSelectionService } from '../../services/templateEdgeSelectionService';
 import { TemplateEdgeTopologyService } from '../../services/templateEdgeTopologyService';
@@ -53,10 +58,36 @@ type SelectionStyleDraft = {
   backgroundColor: string;
 };
 
+type FrameMetadataDraft = {
+  boxKind: TemplateFrameBoxKind | '';
+  role: TemplateFrameRole | '';
+  valueKey: string;
+  parentGroupId: string;
+  runtimeMode: TemplateFrameRuntimeMode | '';
+};
+
 type FrameStylePatch = Omit<Partial<SelectionStyleDraft>, 'width' | 'height'> & {
   width?: number;
   height?: number;
 };
+
+type FrameMetadataPatch = {
+  boxKind?: TemplateFrameBoxKind;
+  role?: TemplateFrameRole;
+  valueKey?: string;
+  parentGroupId?: string;
+  runtimeMode?: TemplateFrameRuntimeMode;
+};
+
+type ResolvedFrameMetadata = {
+  boxKind: TemplateFrameBoxKind;
+  role: TemplateFrameRole | 'group';
+  valueKey: string;
+  parentGroupId: string;
+  runtimeMode: TemplateFrameRuntimeMode;
+};
+
+type SelectionPanelTab = 'summary' | 'metadata' | 'style';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
 
@@ -266,6 +297,16 @@ const TEMPLATE_FRAME_BASE_HEIGHT_ATTR = 'data-template-frame-base-height';
 const TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR = 'data-template-frame-base-font-size';
 const TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR = 'data-template-frame-base-line-height';
 const TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR = 'data-template-frame-richtext-active';
+const TEMPLATE_FRAME_ROLE_ATTR = 'data-template-frame-role';
+const TEMPLATE_FRAME_VALUE_KEY_ATTR = 'data-template-frame-value-key';
+const TEMPLATE_FRAME_PARENT_GROUP_ATTR = 'data-template-frame-parent-group';
+const TEMPLATE_FRAME_BOX_KIND_ATTR = 'data-template-box-kind';
+const TEMPLATE_FRAME_RUNTIME_MODE_ATTR = 'data-template-runtime-mode';
+const TEMPLATE_FRAME_FIELD_TYPE_ATTR = 'data-template-frame-field-type';
+const TEMPLATE_FRAME_COLOR_GROUP_ATTR = 'data-template-frame-color-group';
+const TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR = 'data-template-frame-visual-emphasis';
+const TEMPLATE_FRAME_ROLE_VISUAL_ATTR = 'data-template-frame-role-visual';
+const TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR = 'data-template-frame-box-kind-visual';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR = 'data-template-frame-relative-anchor-x';
@@ -282,6 +323,29 @@ const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
   mismatchEdgeIds: [],
 };
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+const TEMPLATE_FRAME_BOX_KIND_OPTIONS: TemplateFrameBoxKind[] = ['text', 'attachment', 'signature'];
+const TEMPLATE_FRAME_ROLE_OPTIONS: TemplateFrameRole[] = ['key', 'value', 'key_value'];
+const TEXT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['static_label', 'editable_text'];
+const ATTACHMENT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['file_slot'];
+const SIGNATURE_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = [
+  'signature_image',
+  'signature_history',
+  'signature_signer_name',
+  'signature_signed_at',
+  'signature_provider',
+  'signature_status',
+];
+const FRAME_RUNTIME_MODE_LABELS: Record<TemplateFrameRuntimeMode, string> = {
+  static_label: 'static_label',
+  editable_text: 'editable_text',
+  file_slot: 'file_slot',
+  signature_image: 'signature_image',
+  signature_history: 'signature_history',
+  signature_signer_name: 'signature_signer_name',
+  signature_signed_at: 'signature_signed_at',
+  signature_provider: 'signature_provider',
+  signature_status: 'signature_status',
+};
 const EDGE_DRAG_START_THRESHOLD_PX = 4;
 const EDGE_DRAG_AUTOSNAP_THRESHOLD_PX = 5;
 const EDGE_DRAG_AUTOSNAP_RELEASE_THRESHOLD_PX = 8;
@@ -326,7 +390,236 @@ const defaultSelectionStyleDraft: SelectionStyleDraft = {
   fontWeight: '',
   textAlign: 'left',
   color: '#0f172a',
-  backgroundColor: '#ffffff',
+  backgroundColor: 'transparent',
+};
+
+const defaultFrameMetadataDraft: FrameMetadataDraft = {
+  boxKind: 'text',
+  role: 'key_value',
+  valueKey: '',
+  parentGroupId: '',
+  runtimeMode: 'editable_text',
+};
+
+const isTemplateFrameBoxKind = (value: string | null | undefined): value is TemplateFrameBoxKind =>
+  TEMPLATE_FRAME_BOX_KIND_OPTIONS.includes(String(value || '').trim() as TemplateFrameBoxKind);
+
+const isTemplateFrameRole = (value: string | null | undefined): value is TemplateFrameRole =>
+  (['group', ...TEMPLATE_FRAME_ROLE_OPTIONS] as const).includes(String(value || '').trim() as TemplateFrameRole | 'group');
+
+const isTemplateFrameRuntimeMode = (value: string | null | undefined): value is TemplateFrameRuntimeMode =>
+  [...TEXT_RUNTIME_MODE_OPTIONS, ...ATTACHMENT_RUNTIME_MODE_OPTIONS, ...SIGNATURE_RUNTIME_MODE_OPTIONS].includes(
+    String(value || '').trim() as TemplateFrameRuntimeMode
+  );
+
+const normalizeFrameValueKey = (value: string) =>
+  value
+    .split('>')
+    .map((segment) => segment.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' > ');
+
+const getCompatibleRuntimeModes = (boxKind: TemplateFrameBoxKind) => {
+  if (boxKind === 'attachment') {
+    return ATTACHMENT_RUNTIME_MODE_OPTIONS;
+  }
+
+  if (boxKind === 'signature') {
+    return SIGNATURE_RUNTIME_MODE_OPTIONS;
+  }
+
+  return TEXT_RUNTIME_MODE_OPTIONS;
+};
+
+const getAllRuntimeModes = () => [...TEXT_RUNTIME_MODE_OPTIONS, ...ATTACHMENT_RUNTIME_MODE_OPTIONS, ...SIGNATURE_RUNTIME_MODE_OPTIONS];
+
+const getDefaultRuntimeMode = (boxKind: TemplateFrameBoxKind, role: TemplateFrameRole | 'group') => {
+  if (boxKind === 'attachment') {
+    return 'file_slot' as const;
+  }
+
+  if (boxKind === 'signature') {
+    return 'signature_image' as const;
+  }
+
+  return role === 'key' ? ('static_label' as const) : ('editable_text' as const);
+};
+
+const isStatusHistoryFrameNode = (node: HTMLElement | null | undefined) => {
+  if (!node) {
+    return false;
+  }
+
+  const frameGroupId = getFrameGroupId(node);
+  const valueKey = normalizeFrameValueKey(node.getAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR) || '');
+  const colorGroup = node.getAttribute(TEMPLATE_FRAME_COLOR_GROUP_ATTR)?.trim() || '';
+
+  return frameGroupId.startsWith('status-history-') || valueKey === '상태 이력' || colorGroup === '상태 이력';
+};
+
+const readFrameBoxKind = (node: HTMLElement) => {
+  const explicitBoxKind = node.getAttribute(TEMPLATE_FRAME_BOX_KIND_ATTR)?.trim() || '';
+
+  if (isTemplateFrameBoxKind(explicitBoxKind)) {
+    return explicitBoxKind;
+  }
+
+  const legacyFieldType = node.getAttribute(TEMPLATE_FRAME_FIELD_TYPE_ATTR)?.trim().toLowerCase() || '';
+
+  if (legacyFieldType === 'signature') {
+    return 'signature' as const;
+  }
+
+  if (isStatusHistoryFrameNode(node)) {
+    return 'signature' as const;
+  }
+
+  return 'text' as const;
+};
+
+const readFrameRole = (node: HTMLElement) => {
+  const explicitRole = node.getAttribute(TEMPLATE_FRAME_ROLE_ATTR)?.trim() || '';
+
+  if (explicitRole === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(explicitRole as TemplateFrameRole)) {
+    return explicitRole as TemplateFrameRole | 'group';
+  }
+
+  if (isStatusHistoryFrameNode(node) || readFrameBoxKind(node) !== 'text') {
+    return 'value' as const;
+  }
+
+  const valueKey = normalizeFrameValueKey(node.getAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR) || '');
+  return valueKey ? ('key_value' as const) : ('key' as const);
+};
+
+const readFrameValueKey = (node: HTMLElement) => normalizeFrameValueKey(node.getAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR) || '');
+
+const readFrameParentGroupId = (node: HTMLElement) => node.getAttribute(TEMPLATE_FRAME_PARENT_GROUP_ATTR)?.trim() || '';
+
+const readFrameRuntimeMode = (node: HTMLElement) => {
+  const boxKind = readFrameBoxKind(node);
+  const role = readFrameRole(node);
+  const explicitRuntimeMode = node.getAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR)?.trim() || '';
+
+  if (isTemplateFrameRuntimeMode(explicitRuntimeMode) && getCompatibleRuntimeModes(boxKind).includes(explicitRuntimeMode)) {
+    return explicitRuntimeMode;
+  }
+
+  if (isStatusHistoryFrameNode(node)) {
+    return 'signature_history' as const;
+  }
+
+  return getDefaultRuntimeMode(boxKind, role);
+};
+
+const buildFrameMetadataChangePatch = (nextDraft: FrameMetadataDraft, previousDraft: FrameMetadataDraft): FrameMetadataPatch => {
+  const normalizedNextValueKey = normalizeFrameValueKey(nextDraft.valueKey);
+  const normalizedPreviousValueKey = normalizeFrameValueKey(previousDraft.valueKey);
+  const normalizedNextParentGroupId = nextDraft.parentGroupId.trim();
+  const normalizedPreviousParentGroupId = previousDraft.parentGroupId.trim();
+
+  return {
+    boxKind:
+      nextDraft.boxKind !== previousDraft.boxKind && isTemplateFrameBoxKind(nextDraft.boxKind)
+        ? nextDraft.boxKind
+        : undefined,
+    role:
+      nextDraft.role !== previousDraft.role && isTemplateFrameRole(nextDraft.role)
+        ? nextDraft.role
+        : undefined,
+    valueKey: normalizedNextValueKey !== normalizedPreviousValueKey ? normalizedNextValueKey : undefined,
+    parentGroupId:
+      normalizedNextParentGroupId !== normalizedPreviousParentGroupId ? normalizedNextParentGroupId : undefined,
+    runtimeMode:
+      nextDraft.runtimeMode !== previousDraft.runtimeMode && isTemplateFrameRuntimeMode(nextDraft.runtimeMode)
+        ? nextDraft.runtimeMode
+        : undefined,
+  };
+};
+
+const resolveNextFrameMetadata = (node: HTMLElement, patch: FrameMetadataPatch): ResolvedFrameMetadata => {
+  const boxKind = patch.boxKind || readFrameBoxKind(node);
+  const role = patch.role || readFrameRole(node);
+  const valueKey = patch.valueKey !== undefined ? normalizeFrameValueKey(patch.valueKey) : readFrameValueKey(node);
+  const parentGroupId = patch.parentGroupId !== undefined ? patch.parentGroupId.trim() : readFrameParentGroupId(node);
+  const runtimeMode = patch.runtimeMode
+    ? patch.runtimeMode
+    : patch.boxKind || patch.role
+      ? getDefaultRuntimeMode(boxKind, role)
+      : readFrameRuntimeMode(node);
+
+  return {
+    boxKind,
+    role,
+    valueKey,
+    parentGroupId,
+    runtimeMode,
+  };
+};
+
+const hasFrameParentCycle = (
+  frameGroupId: string,
+  requestedParentGroupId: string,
+  frameNodeById: Map<string, HTMLElement>
+) => {
+  let cursor = requestedParentGroupId;
+  const visited = new Set<string>([frameGroupId]);
+
+  while (cursor) {
+    if (visited.has(cursor)) {
+      return true;
+    }
+
+    visited.add(cursor);
+    const parentNode = frameNodeById.get(cursor);
+
+    if (!parentNode || readFrameRole(parentNode) !== 'value') {
+      return false;
+    }
+
+    cursor = readFrameParentGroupId(parentNode);
+  }
+
+  return false;
+};
+
+const applyFrameMetadataPatch = (node: HTMLElement, patch: FrameMetadataPatch) => {
+  const textarea = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
+  const targets = [node, textarea].filter((target): target is HTMLElement => Boolean(target));
+
+  targets.forEach((target) => {
+    if (patch.boxKind !== undefined) {
+      target.setAttribute(TEMPLATE_FRAME_BOX_KIND_ATTR, patch.boxKind);
+    }
+
+    if (patch.role !== undefined) {
+      target.setAttribute(TEMPLATE_FRAME_ROLE_ATTR, patch.role);
+    }
+
+    if (patch.valueKey !== undefined) {
+      const nextValueKey = normalizeFrameValueKey(patch.valueKey);
+
+      if (nextValueKey) {
+        target.setAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR, nextValueKey);
+      } else {
+        target.removeAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR);
+      }
+    }
+
+    if (patch.parentGroupId !== undefined) {
+      const parentGroupId = patch.parentGroupId.trim();
+
+      if (parentGroupId) {
+        target.setAttribute(TEMPLATE_FRAME_PARENT_GROUP_ATTR, parentGroupId);
+      } else {
+        target.removeAttribute(TEMPLATE_FRAME_PARENT_GROUP_ATTR);
+      }
+    }
+
+    if (patch.runtimeMode !== undefined) {
+      target.setAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR, patch.runtimeMode);
+    }
+  });
 };
 
 const normalizeEdgeSelectionState = (state: TemplateEdgeSelectionStateDto): TemplateEdgeSelectionStateDto => ({
@@ -361,7 +654,7 @@ const presetStylePatches: Record<string, FrameStylePatch> = {
     borderRadius: '4',
     textAlign: 'left',
     color: '#0f172a',
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
   },
   input: {
     fontSize: '13',
@@ -372,7 +665,7 @@ const presetStylePatches: Record<string, FrameStylePatch> = {
     borderRadius: '8',
     textAlign: 'left',
     color: '#0f172a',
-    backgroundColor: '#f8fafc',
+    backgroundColor: 'transparent',
   },
   body: {
     fontSize: '14',
@@ -383,7 +676,7 @@ const presetStylePatches: Record<string, FrameStylePatch> = {
     borderRadius: '4',
     textAlign: 'left',
     color: '#1e293b',
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
   },
   focus: {
     fontSize: '14',
@@ -394,7 +687,7 @@ const presetStylePatches: Record<string, FrameStylePatch> = {
     borderRadius: '10',
     textAlign: 'center',
     color: '#0f172a',
-    backgroundColor: '#fef3c7',
+    backgroundColor: 'transparent',
   },
 };
 
@@ -412,6 +705,52 @@ const NORMALIZED_FRAME_BAND_SOURCE_ATTR = 'data-v106-band-source';
 const parseFramePx = (value: string | null | undefined) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const readFirstFiniteFramePx = (...values: Array<string | null | undefined>) => {
+  for (const value of values) {
+    const parsed = parseFramePx(value);
+
+    if (parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return 0;
+};
+
+const readPreviewSourceRect = (root: HTMLElement) => {
+  const primaryPageInner =
+    root.querySelector<HTMLElement>(':scope > .page-inner') || root.querySelector<HTMLElement>('.page-inner');
+  const primaryPage =
+    root.querySelector<HTMLElement>(':scope > section.page') || root.querySelector<HTMLElement>('section.page');
+  const sourceNode = primaryPageInner || primaryPage;
+
+  if (!sourceNode) {
+    return null;
+  }
+
+  const computedStyle = getComputedStyle(sourceNode);
+  const width =
+    readFirstFiniteFramePx(
+      primaryPageInner?.style.width,
+      primaryPage?.style.width,
+      sourceNode.style.width,
+      computedStyle.width
+    ) || Math.max(1, sourceNode.scrollWidth || sourceNode.getBoundingClientRect().width);
+  const height =
+    readFirstFiniteFramePx(
+      primaryPageInner?.style.minHeight,
+      primaryPageInner?.style.height,
+      primaryPage?.style.minHeight,
+      primaryPage?.style.height,
+      sourceNode.style.minHeight,
+      sourceNode.style.height,
+      computedStyle.minHeight,
+      computedStyle.height
+    ) || Math.max(1, sourceNode.scrollHeight || sourceNode.getBoundingClientRect().height);
+
+  return { width, height };
 };
 
 const toFrameCssPx = (value: number) => `${Number(value.toFixed(3))}px`;
@@ -579,6 +918,9 @@ const buildCreatedFrameShell = ({
   cell.setAttribute('data-template-frame-extracted-text', '');
   cell.setAttribute('data-template-frame-display-visible', 'true');
   cell.setAttribute('data-template-frame-needs-review', 'false');
+  cell.setAttribute(TEMPLATE_FRAME_BOX_KIND_ATTR, 'text');
+  cell.setAttribute(TEMPLATE_FRAME_ROLE_ATTR, 'key_value');
+  cell.setAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR, 'editable_text');
   cell.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
 
   const textarea = document.createElement('textarea');
@@ -597,6 +939,9 @@ const buildCreatedFrameShell = ({
   textarea.setAttribute('data-template-frame-extracted-text', '');
   textarea.setAttribute('data-template-frame-display-visible', 'true');
   textarea.setAttribute('data-template-frame-needs-review', 'false');
+  textarea.setAttribute(TEMPLATE_FRAME_BOX_KIND_ATTR, 'text');
+  textarea.setAttribute(TEMPLATE_FRAME_ROLE_ATTR, 'key_value');
+  textarea.setAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR, 'editable_text');
   textarea.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
   textarea.value = '';
   textarea.textContent = '';
@@ -3915,6 +4260,15 @@ const stripSelectionAttrs = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR}="true"]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
   });
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR);
+  });
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR);
+  });
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
+  });
 };
 
 const extractEditorHtml = (root: HTMLElement) => {
@@ -3949,6 +4303,22 @@ const applyPreviewEditPermissions = (root: HTMLElement) => {
   });
 };
 
+const applyFrameCanvasVisualHints = (root: HTMLElement) => {
+  const frameNodes = collectFrameSelectionAnchors(root);
+  const parentGroupIds = new Set(frameNodes.map((node) => readFrameParentGroupId(node)).filter(Boolean));
+
+  frameNodes.forEach((node) => {
+    const boxKind = readFrameBoxKind(node);
+    const role = readFrameRole(node);
+    const frameGroupId = getFrameGroupId(node);
+    const isKeyLike = role === 'key' || role === 'group' || parentGroupIds.has(frameGroupId);
+
+    node.setAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR, isKeyLike ? 'full' : 'muted');
+    node.setAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
+    node.setAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
+  });
+};
+
 const markTemplateValueElementEdited = (element: HTMLElement) => {
   element.setAttribute('data-template-edited', 'true');
   element
@@ -3972,6 +4342,10 @@ const colorToHex = (value: string) => {
     return '';
   }
 
+  if (normalized === 'transparent') {
+    return 'transparent';
+  }
+
   if (normalized.startsWith('#')) {
     if (normalized.length === 4) {
       return `#${normalized[1]}${normalized[1]}${normalized[2]}${normalized[2]}${normalized[3]}${normalized[3]}`.toLowerCase();
@@ -3984,6 +4358,12 @@ const colorToHex = (value: string) => {
 
   if (!rgbMatch) {
     return normalized;
+  }
+
+  const alphaMatch = normalized.match(/rgba\(\d+,\s*\d+,\s*\d+,\s*([0-9.]+)\)/i);
+
+  if (alphaMatch && Number.parseFloat(alphaMatch[1] || '1') <= 0) {
+    return 'transparent';
   }
 
   const [, r, g, b] = rgbMatch;
@@ -4447,6 +4827,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     emptyEdgeRoleDiagnosticsState
   );
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
+  const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
+  const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('summary');
   const [message, setMessage] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -4456,6 +4838,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const initializedTemplateIdRef = React.useRef('');
   const selectedFrameGroupIdsRef = React.useRef<string[]>([]);
   const edgeSelectionStateRef = React.useRef<TemplateEdgeSelectionStateDto>(TemplateEdgeSelectionService.createEmptyState());
+  const syncedFrameMetadataDraftRef = React.useRef<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const activePointerOwnerRef = React.useRef<HTMLDivElement | null>(null);
   const dragStateRef = React.useRef<DragState | null>(null);
   const resizeStateRef = React.useRef<ResizeState | null>(null);
@@ -4492,6 +4875,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectedEdgeAutoMultiCount = edgeRoleDiagnostics.selectedEdgeAutoMultiIds.length;
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
   const primarySelectedFrameGroupId = selectedFrameGroupIds[0] || null;
+  const canEditSingleSelection = selectedFrameGroupIds.length === 1;
+  const runtimeModeOptions = React.useMemo(
+    () => (frameMetadataDraft.boxKind ? getCompatibleRuntimeModes(frameMetadataDraft.boxKind) : getAllRuntimeModes()),
+    [frameMetadataDraft.boxKind]
+  );
   const primarySelectedFramePositionMode = React.useMemo(() => {
     if (!primarySelectedFrameGroupId || !previewRef.current) {
       return null;
@@ -4574,10 +4962,52 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
   }, []);
 
+  const syncPreviewSurfaceScale = React.useCallback((rootArg?: HTMLElement | null) => {
+    const root = rootArg || previewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    const sourceRect = readPreviewSourceRect(root);
+    const availableWidth = root.clientWidth;
+    const availableHeight = root.clientHeight;
+
+    if (!sourceRect || !availableWidth || !availableHeight) {
+      root.removeAttribute('data-template-preview-scaled');
+      root.style.removeProperty('--template-preview-scale');
+      root.style.removeProperty('--template-preview-source-width');
+      root.style.removeProperty('--template-preview-source-height');
+      setPreviewZoom(100);
+      return;
+    }
+
+    const scale = Math.min(availableWidth / sourceRect.width, availableHeight / sourceRect.height, 1);
+    const nextZoom = Math.max(20, Number((scale * 100).toFixed(1)));
+
+    root.setAttribute('data-template-preview-scaled', 'true');
+    root.style.setProperty('--template-preview-scale', String(scale));
+    root.style.setProperty('--template-preview-source-width', `${sourceRect.width}px`);
+    root.style.setProperty('--template-preview-source-height', `${sourceRect.height}px`);
+    setPreviewZoom((previous) => (Math.abs(previous - nextZoom) <= 0.25 ? previous : nextZoom));
+  }, []);
+
   const getFrameNodes = React.useCallback(
     (scope?: ParentNode | null) => collectFrameSelectionAnchors(scope || previewRef.current),
     []
   );
+  const availableFrameGroupIds = React.useMemo(() => {
+    const root = previewRef.current;
+
+    if (!root) {
+      return [];
+    }
+
+    return getFrameNodes(root)
+      .map((node) => getFrameGroupId(node))
+      .filter((frameGroupId) => Boolean(frameGroupId))
+      .sort((left, right) => left.localeCompare(right, 'ko'));
+  }, [getFrameNodes, renderedPreviewHtml, selectedFrameGroupIds]);
 
   const previewHasStableFrameLayout = React.useCallback((root: ParentNode) => {
     const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
@@ -5247,8 +5677,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       previewEditorStateRetryCountRef.current = 0;
       const normalized = ensurePreviewFrameBandNormalization(root);
       applyPreviewEditPermissions(root);
+      applyFrameCanvasVisualHints(root);
       ensureRelativeAnchorConfigs(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
+      syncPreviewSurfaceScale(root);
       const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
 
       if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
@@ -5297,6 +5729,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     renderedPreviewHtml,
     resolveEdgeRolePresentation,
     requestPreviewTextFit,
+    syncPreviewSurfaceScale,
   ]);
 
   const setPreviewNode = React.useCallback(
@@ -5304,10 +5737,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       previewRef.current = node;
 
       if (node && renderedPreviewHtml) {
+        syncPreviewSurfaceScale(node);
         schedulePreviewEditorState();
       }
     },
-    [renderedPreviewHtml, schedulePreviewEditorState]
+    [renderedPreviewHtml, schedulePreviewEditorState, syncPreviewSurfaceScale]
   );
 
   const applyRuntimeSelectionUi = React.useCallback(
@@ -5664,6 +6098,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   React.useLayoutEffect(() => {
     const root = previewRef.current;
 
+    if (!root || typeof window === 'undefined') {
+      return;
+    }
+
+    syncPreviewSurfaceScale(root);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncPreviewSurfaceScale(root);
+    });
+
+    observer.observe(root);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [renderedPreviewHtml, syncPreviewSurfaceScale]);
+
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
     if (!root) {
       return;
     }
@@ -5710,7 +6168,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
       selectedFrameGroupIds,
-    selectionStyleDraft,
   ]);
 
   const syncSelectionStyleDraft = React.useCallback(() => {
@@ -5762,13 +6219,55 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ? sharedTextAlign
           : 'left',
       color: getSharedValue(colors) || '#0f172a',
-      backgroundColor: getSharedValue(backgroundColors) || '#ffffff',
+      backgroundColor: getSharedValue(backgroundColors) || 'transparent',
     });
   }, [getFrameNodes, selectedFrameGroupIds]);
 
   React.useEffect(() => {
     syncSelectionStyleDraft();
   }, [selectedFrameGroupIds, syncSelectionStyleDraft, templateDetail?.template.id]);
+
+  const syncFrameMetadataDraft = React.useCallback(() => {
+    const root = previewRef.current;
+
+    if (!root || selectedFrameGroupIds.length === 0) {
+      syncedFrameMetadataDraftRef.current = defaultFrameMetadataDraft;
+      setFrameMetadataDraft(defaultFrameMetadataDraft);
+      return;
+    }
+
+    const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
+
+    if (!nodes.length) {
+      syncedFrameMetadataDraftRef.current = defaultFrameMetadataDraft;
+      setFrameMetadataDraft(defaultFrameMetadataDraft);
+      return;
+    }
+
+    const sharedBoxKind = getSharedValue(nodes.map((node) => readFrameBoxKind(node)));
+    const sharedRole = getSharedValue(nodes.map((node) => readFrameRole(node)));
+    const sharedValueKey = getSharedValue(nodes.map((node) => readFrameValueKey(node)));
+    const sharedParentGroupId = getSharedValue(nodes.map((node) => readFrameParentGroupId(node)));
+    const sharedRuntimeMode = getSharedValue(nodes.map((node) => readFrameRuntimeMode(node)));
+
+    const nextDraft: FrameMetadataDraft = {
+      boxKind: isTemplateFrameBoxKind(sharedBoxKind) ? sharedBoxKind : '',
+      role:
+        sharedRole === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(sharedRole as TemplateFrameRole)
+          ? (sharedRole as TemplateFrameRole | '')
+          : '',
+      valueKey: sharedValueKey,
+      parentGroupId: sharedParentGroupId,
+      runtimeMode: isTemplateFrameRuntimeMode(sharedRuntimeMode) ? sharedRuntimeMode : '',
+    };
+
+    syncedFrameMetadataDraftRef.current = nextDraft;
+    setFrameMetadataDraft(nextDraft);
+  }, [getFrameNodes, selectedFrameGroupIds]);
+
+  React.useEffect(() => {
+    syncFrameMetadataDraft();
+  }, [selectedFrameGroupIds, syncFrameMetadataDraft, templateDetail?.template.id]);
 
   const applySelectionStylePatch = React.useCallback(
     (patch: FrameStylePatch) => {
@@ -5821,6 +6320,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [selectionStyleDraft]);
 
   const applySelectionStyleDraft = React.useCallback(() => {
+    if (selectedFrameGroupIds.length === 0) {
+      setMessage('스타일을 적용할 박스를 먼저 선택하세요.');
+      return false;
+    }
+
     const nextDraft = readSelectionStyleDraftFromControls();
     const width = Number.parseFloat(nextDraft.width);
     const height = Number.parseFloat(nextDraft.height);
@@ -5840,7 +6344,178 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       color: nextDraft.color,
       backgroundColor: nextDraft.backgroundColor,
     });
-  }, [applySelectionStylePatch, readSelectionStyleDraftFromControls]);
+    return true;
+  }, [applySelectionStylePatch, readSelectionStyleDraftFromControls, selectedFrameGroupIds.length]);
+
+  const readFrameMetadataDraftFromControls = React.useCallback((): FrameMetadataDraft => {
+    const root = stylePanelRef.current;
+
+    if (!root) {
+      return frameMetadataDraft;
+    }
+
+    const readFieldValue = (field: keyof FrameMetadataDraft) => {
+      const element = root.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-metadata-field="${field}"]`);
+      return element?.value ?? frameMetadataDraft[field];
+    };
+
+    return {
+      boxKind: readFieldValue('boxKind') as FrameMetadataDraft['boxKind'],
+      role: readFieldValue('role') as FrameMetadataDraft['role'],
+      valueKey: readFieldValue('valueKey'),
+      parentGroupId: readFieldValue('parentGroupId'),
+      runtimeMode: readFieldValue('runtimeMode') as FrameMetadataDraft['runtimeMode'],
+    };
+  }, [frameMetadataDraft]);
+
+  const applySelectionMetadataDraft = React.useCallback(() => {
+    const root = previewRef.current;
+
+    if (!root || selectedFrameGroupIds.length === 0) {
+      setMessage('메타데이터를 적용할 박스를 먼저 선택하세요.');
+      return false;
+    }
+
+    const nextDraft = readFrameMetadataDraftFromControls();
+    const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
+    const frameNodeById = new Map(
+      getFrameNodes(root)
+        .map((node) => [getFrameGroupId(node), node] as const)
+        .filter(([frameGroupId]) => Boolean(frameGroupId))
+    );
+
+    if (!nodes.length) {
+      return false;
+    }
+
+    const metadataPatch = buildFrameMetadataChangePatch(nextDraft, syncedFrameMetadataDraftRef.current);
+    const requestedParentGroupId = metadataPatch.parentGroupId ?? nextDraft.parentGroupId.trim();
+
+    if (requestedParentGroupId && !availableFrameGroupIds.includes(requestedParentGroupId)) {
+      setMessage(`부모 key 박스 ID ${requestedParentGroupId} 를 찾을 수 없습니다.`);
+      return false;
+    }
+
+    if (requestedParentGroupId && selectedFrameGroupIds.includes(requestedParentGroupId)) {
+      setMessage('선택한 박스 자신을 부모 key 박스로 지정할 수 없습니다.');
+      return false;
+    }
+
+    for (const node of nodes) {
+      const frameGroupId = getFrameGroupId(node);
+      const nextMetadata = resolveNextFrameMetadata(node, metadataPatch);
+      const parentNode = nextMetadata.parentGroupId ? frameNodeById.get(nextMetadata.parentGroupId) || null : null;
+
+      if (nextMetadata.boxKind !== 'text' && nextMetadata.role === 'key') {
+        setMessage(`${frameGroupId} 는 ${nextMetadata.boxKind} 박스라 key 역할을 가질 수 없습니다.`);
+        return false;
+      }
+
+      if (nextMetadata.role === 'value' && !nextMetadata.parentGroupId) {
+        setMessage(`${frameGroupId} 는 value 역할이라 부모 key 박스가 필요합니다.`);
+        return false;
+      }
+
+      if (nextMetadata.parentGroupId === frameGroupId) {
+        setMessage(`${frameGroupId} 는 자기 자신을 부모 key 박스로 가질 수 없습니다.`);
+        return false;
+      }
+
+      if (nextMetadata.role === 'value') {
+        if (!parentNode) {
+          setMessage(`${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`);
+          return false;
+        }
+
+        if (readFrameBoxKind(parentNode) !== 'text' || readFrameRole(parentNode) !== 'key') {
+          setMessage(`${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 는 text key 박스여야 합니다.`);
+          return false;
+        }
+      }
+
+      if (
+        nextMetadata.parentGroupId &&
+        hasFrameParentCycle(frameGroupId, nextMetadata.parentGroupId, frameNodeById)
+      ) {
+        setMessage(`${frameGroupId} 의 부모 key 연결에 순환 참조가 있습니다.`);
+        return false;
+      }
+
+      if (!getCompatibleRuntimeModes(nextMetadata.boxKind).includes(nextMetadata.runtimeMode)) {
+        setMessage(
+          `${frameGroupId} 의 runtime mode ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 박스와 호환되지 않습니다.`
+        );
+        return false;
+      }
+    }
+
+    nodes.forEach((node) => {
+      const nextMetadata = resolveNextFrameMetadata(node, metadataPatch);
+
+      applyFrameMetadataPatch(node, {
+        boxKind: metadataPatch.boxKind,
+        role: metadataPatch.role,
+        valueKey: metadataPatch.valueKey,
+        parentGroupId:
+          metadataPatch.parentGroupId !== undefined || metadataPatch.role !== undefined
+            ? nextMetadata.role === 'value'
+              ? nextMetadata.parentGroupId
+              : ''
+            : undefined,
+        runtimeMode: nextMetadata.runtimeMode,
+      });
+    });
+
+    syncDraftPreviewHtmlRef();
+    syncFrameMetadataDraft();
+    requestPreviewTextFit();
+    return true;
+  }, [
+    availableFrameGroupIds,
+    getFrameNodes,
+    readFrameMetadataDraftFromControls,
+    requestPreviewTextFit,
+    selectedFrameGroupIds,
+    syncDraftPreviewHtmlRef,
+    syncFrameMetadataDraft,
+  ]);
+
+  const applySelectionPanelDrafts = React.useCallback(() => {
+    if (!applySelectionMetadataDraft()) {
+      return;
+    }
+
+    if (!applySelectionStyleDraft()) {
+      return;
+    }
+
+    setMessage(
+      selectedFrameGroupIds.length > 1
+        ? `선택한 ${selectedFrameGroupIds.length}개 박스에 설정을 일괄 반영했습니다.`
+        : '선택 박스 설정을 반영했습니다.'
+    );
+  }, [applySelectionMetadataDraft, applySelectionStyleDraft, selectedFrameGroupIds.length]);
+
+  const stageSelectionStylePreset = React.useCallback((preset: FrameStylePatch) => {
+    setSelectionStyleDraft((previous) => ({
+      ...previous,
+      fontSize: preset.fontSize ?? previous.fontSize,
+      lineHeight: preset.lineHeight ?? previous.lineHeight,
+      paddingX: preset.paddingX ?? previous.paddingX,
+      paddingY: preset.paddingY ?? previous.paddingY,
+      borderRadius: preset.borderRadius ?? previous.borderRadius,
+      fontWeight: preset.fontWeight ?? previous.fontWeight,
+      textAlign:
+        preset.textAlign === 'left' ||
+        preset.textAlign === 'center' ||
+        preset.textAlign === 'right' ||
+        preset.textAlign === 'justify'
+          ? preset.textAlign
+          : previous.textAlign,
+      color: preset.color ?? previous.color,
+      backgroundColor: preset.backgroundColor ?? previous.backgroundColor,
+    }));
+  }, []);
 
   const applyPrimaryFrameSizeToSelection = React.useCallback(() => {
     const root = previewRef.current;
@@ -8135,23 +8810,54 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   return (
     <div className="space-y-6">
       <style>{`
-        .template-edit-preview-shell {
-          background:
-            radial-gradient(circle at top, rgba(191, 219, 254, .2), transparent 42%),
-            linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
-        }
-        .template-edit-preview-scroll {
-          overflow: auto;
-          max-height: calc(100vh - 18rem);
-        }
         .template-edit-preview {
           position: relative;
-          min-height: 100%;
+          box-sizing: border-box;
+          width: 100%;
+          max-width: none;
+          aspect-ratio: 210 / 297;
+          overflow: hidden;
+          border-top: 1px solid rgb(226 232 240);
+          border-radius: 0 0 0.75rem 0.75rem;
+          background: white;
+          box-shadow: none;
+          color: rgb(30 41 59);
+        }
+        .template-edit-preview[data-template-preview-scaled="true"] > .page-inner,
+        .template-edit-preview[data-template-preview-scaled="true"] > section.page {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: var(--template-preview-source-width, auto) !important;
+          min-height: var(--template-preview-source-height, auto) !important;
+          height: var(--template-preview-source-height, auto);
           transform-origin: top left;
-          zoom: var(--template-preview-zoom, 1);
+          transform: scale(var(--template-preview-scale, 1));
+        }
+        .template-edit-preview > .page-inner,
+        .template-edit-preview > section.page,
+        .template-edit-preview > .viewer {
+          margin: 0 auto !important;
+          padding: 0 !important;
+        }
+        .template-edit-preview .viewer {
+          display: block;
+          width: 100%;
+          padding: 0 !important;
+          margin: 0 auto !important;
         }
         .template-edit-preview section.page {
-          margin: 0 auto 20px;
+          position: relative;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: transparent !important;
+          box-shadow: none !important;
+          overflow: visible;
+        }
+        .template-edit-preview .page-inner {
+          margin: 0 !important;
+          padding: 0 !important;
+          background: transparent !important;
         }
         .template-edit-preview[data-frame-create-mode="true"] {
           cursor: crosshair;
@@ -8161,12 +8867,43 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview [data-template-selected="true"] {
           position: relative;
+          overflow: visible !important;
           z-index: 20 !important;
-          outline: none !important;
-          box-shadow: none !important;
+          outline: 2px solid rgba(37, 99, 235, .96) !important;
+          outline-offset: 0;
+          box-shadow:
+            0 0 0 4px rgba(96, 165, 250, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
+        }
+        .template-edit-preview [data-template-selected="true"]::before {
+          content: attr(data-template-selection-order);
+          position: absolute;
+          top: -10px;
+          right: -10px;
+          z-index: 32;
+          min-width: 22px;
+          height: 22px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(37, 99, 235, .98);
+          color: white;
+          box-shadow: 0 4px 12px rgba(37, 99, 235, .28);
+          font-size: 11px;
+          line-height: 1;
+          font-weight: 700;
+          pointer-events: none;
         }
         .template-edit-preview [data-template-primary-selected="true"] {
-          box-shadow: none !important;
+          outline-color: rgba(13, 148, 136, .98) !important;
+          box-shadow:
+            0 0 0 4px rgba(45, 212, 191, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
+        }
+        .template-edit-preview [data-template-primary-selected="true"]::before {
+          background: rgba(13, 148, 136, .98);
+          box-shadow: 0 4px 12px rgba(13, 148, 136, .28);
         }
         .template-edit-preview [data-template-edge-host="true"] {
           position: relative;
@@ -8183,6 +8920,64 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
           z-index: 22;
         }
+        .template-edit-preview ${RAW_FRAME_NODE_SELECTOR} {
+          background-color: transparent;
+        }
+        .template-edit-preview ${RAW_FRAME_NODE_SELECTOR} [data-template-frame-input="true"],
+        .template-edit-preview ${RAW_FRAME_NODE_SELECTOR} [data-template-edit-scope],
+        .template-edit-preview ${RAW_FRAME_NODE_SELECTOR} [data-template-value] {
+          background-color: transparent;
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-frame-input="true"],
+        .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-edit-scope],
+        .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-value] {
+          opacity: .5;
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="full"] [data-template-frame-input="true"],
+        .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="full"] [data-template-edit-scope],
+        .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="full"] [data-template-value] {
+          opacity: 1;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}] {
+          position: relative;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="group"] {
+          background-color: rgba(148, 163, 184, .12) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"] {
+          background-color: rgba(245, 158, 11, .14) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"] {
+          background-color: rgba(59, 130, 246, .12) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
+          background-color: rgba(16, 185, 129, .12) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}]::after {
+          position: absolute;
+          top: 6px;
+          left: 6px;
+          z-index: 24;
+          border-radius: 999px;
+          color: #f8fafc;
+          padding: 2px 8px;
+          font-size: 10px;
+          line-height: 1.2;
+          font-weight: 700;
+          pointer-events: none;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="text"]::after {
+          content: 'TEXT';
+          background: rgba(15, 118, 110, .96);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="attachment"]::after {
+          content: 'FILE';
+          background: rgba(217, 119, 6, .96);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="signature"]::after {
+          content: 'SIGN';
+          background: rgba(225, 29, 72, .96);
+        }
         .template-edit-preview [data-template-frame-input="true"][${TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR}="true"] {
           opacity: 0;
         }
@@ -8195,7 +8990,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           inset: 5px;
           z-index: 19;
           pointer-events: none;
-          background: rgba(59, 130, 246, .5);
+          background: rgba(59, 130, 246, .14);
+          box-shadow: inset 0 0 0 1px rgba(37, 99, 235, .22);
         }
         .template-edit-preview .${FRAME_SELECTION_BADGE_CLASS} {
           position: absolute;
@@ -8482,7 +9278,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr]">
         <Card className="border-slate-200">
-          <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <CardHeader>
             <div className="space-y-1">
               <CardTitle>박스 편집 캔버스</CardTitle>
               <CardDescription>
@@ -8490,20 +9286,39 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 `Shift + drag` 좌→우는 영역 안에 완전히 들어온 div 박스만, 우→좌는 닿은 div 박스까지 선택합니다.
               </CardDescription>
             </div>
-            <div className="flex flex-col items-start gap-2 md:items-end">
+          </CardHeader>
+          {renderedPreviewHtml ? (
+            <CardContent
+              ref={setPreviewNode}
+              className="template-edit-preview template-extract-draft-preview template-extract-preview-surface !p-0 template-clone template-clone--raster-first-v2-structured"
+              data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
+              data-metadata-visual-mode={selectionPanelTab === 'metadata' ? 'true' : 'false'}
+              onPointerDownCapture={handlePreviewPointerDown}
+              onPointerMoveCapture={handlePreviewPointerMove}
+              onPointerUpCapture={handlePreviewPointerUp}
+              onPointerCancelCapture={handlePreviewPointerCancel}
+              onClickCapture={handlePreviewClickCapture}
+              onInput={handlePreviewInput}
+              dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
+            />
+          ) : (
+            <CardContent className="flex min-h-[560px] items-center justify-center !p-0 text-sm text-slate-500">
+              편집할 템플릿을 먼저 불러오세요.
+            </CardContent>
+          )}
+        </Card>
+
+        <div className="space-y-6">
+          <Card className="border-slate-200">
+            <CardHeader>
+              <CardTitle>선택 상태</CardTitle>
+              <CardDescription>엣지는 `selected_edge_clicked`, `selected_edge_auto_multi`, `peer_edge` 역할로 나뉘며 이동 mismatch 를 함께 기록합니다.</CardDescription>
+            </CardHeader>
+            <CardContent ref={stylePanelRef} className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
-                <label className="text-xs font-medium text-slate-500">줌</label>
-                {[80, 100, 125].map((zoom) => (
-                  <Button
-                    key={zoom}
-                    size="sm"
-                    variant={previewZoom === zoom ? 'default' : 'outline'}
-                    onClick={() => setPreviewZoom(zoom)}
-                  >
-                    {zoom}%
-                  </Button>
-                ))}
-                <div className="mx-1 h-6 w-px bg-slate-200" />
+                <Button onClick={applySelectionPanelDrafts} disabled={selectedFrameGroupIds.length === 0}>
+                  선택 항목 저장
+                </Button>
                 <Button
                   size="sm"
                   variant={boxCreationMode ? 'default' : 'outline'}
@@ -8519,7 +9334,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     setBoxCreationMode(nextMode);
                   }}
                 >
-                  박스 생성
+                  {boxCreationMode ? '박스 생성 종료' : '박스 생성'}
                 </Button>
                 <select
                   value={boxCreationPositionMode}
@@ -8530,79 +9345,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   <option value="relative">상대 위치</option>
                   <option value="absolute">절대 위치</option>
                 </select>
-              </div>
-              <p className="text-[11px] text-slate-500">
-                박스 생성 모드에서는 캔버스에서 drag 한 영역만큼 새 div 박스를 만들고, `relative` 는 먼저 선택한 기준 박스 1개를 anchor 로 삼습니다. `absolute` 는 다른 박스 resize 전파에서 제외됩니다.
-              </p>
-              <p className="text-[11px] text-slate-500">
-                현재 상대 기준: {relativeCreateAnchorFrameGroupId || '미선택'}
-              </p>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="template-edit-preview-shell rounded-b-xl p-4">
-              <div className="template-edit-preview-scroll rounded-xl border border-slate-200 bg-white p-4">
-                {renderedPreviewHtml ? (
-                  <div
-                    ref={setPreviewNode}
-                    className="template-edit-preview"
-                    data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
-                    style={{ ['--template-preview-zoom' as string]: String(previewZoom / 100) }}
-                    onPointerDownCapture={handlePreviewPointerDown}
-                    onPointerMoveCapture={handlePreviewPointerMove}
-                    onPointerUpCapture={handlePreviewPointerUp}
-                    onPointerCancelCapture={handlePreviewPointerCancel}
-                    onClickCapture={handlePreviewClickCapture}
-                    onInput={handlePreviewInput}
-                    dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
-                  />
-                ) : (
-                  <div className="flex min-h-[560px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
-                    편집할 템플릿을 먼저 불러오세요.
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-6">
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>선택 상태</CardTitle>
-              <CardDescription>엣지는 `selected_edge_clicked`, `selected_edge_auto_multi`, `peer_edge` 역할로 나뉘며 이동 mismatch 를 함께 기록합니다.</CardDescription>
-            </CardHeader>
-            <CardContent ref={stylePanelRef} className="space-y-4">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                <div>선택 박스 수: {selectedFrameGroupIds.length}</div>
-                <div className="mt-1 break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</div>
-                <div className="mt-1">위치 관계: {primarySelectedFramePositionMode || '-'}</div>
-                <div className="mt-1">상대 기준 라벨: {primaryRelativeAnchorLabel || '-'}</div>
-                <div className="mt-1">위치 영향 대상 수: {primaryRelativeAffectedFrameGroupIds.length}</div>
-                <div className="mt-1 break-all">
-                  위치 영향 대상: {primaryRelativeAffectedFrameGroupIds.join(', ') || '-'}
-                </div>
-                <div className="mt-1">선택 엣지 토큰 수: {edgeSelectionState.tokens.length}</div>
-                <div className="mt-1">선택 엣지 수: {selectedEdgeMemberCount}</div>
-                <div className="mt-1">선택 엣지 모드: {selectedEdgeMode || '-'}</div>
-                <div className="mt-1 break-all">선택 엣지 앵커: {selectedEdgeAnchorIds.join(', ') || '-'}</div>
-                <div className="mt-1">selected_edge_clicked 수: {selectedEdgeClickedCount}</div>
-                <div className="mt-1 break-all">
-                  selected_edge_clicked: {edgeRoleDiagnostics.selectedEdgeClickedIds.join(', ') || '-'}
-                </div>
-                <div className="mt-1">selected_edge_auto_multi 수: {selectedEdgeAutoMultiCount}</div>
-                <div className="mt-1 break-all">
-                  selected_edge_auto_multi: {edgeRoleDiagnostics.selectedEdgeAutoMultiIds.join(', ') || '-'}
-                </div>
-                <div className="mt-1">peer_edge 수: {peerEdgeCount}</div>
-                <div className="mt-1 break-all">peer_edge: {edgeRoleDiagnostics.peerEdgeIds.join(', ') || '-'}</div>
-                <div className="mt-1 break-all">
-                  movement mismatch edge: {edgeRoleDiagnostics.mismatchEdgeIds.join(', ') || '-'}
-                </div>
-                <div className="mt-1">프레임 박스 수: {frameNodesAvailable}</div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={clearFrameSelection}>
                   선택 해제
                 </Button>
@@ -8615,187 +9357,348 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   첫 선택 크기 복제
                 </Button>
               </div>
+              <p className="text-[11px] text-slate-500">
+                박스 생성은 여기서 켜고 캔버스에서 drag 합니다. `relative` 는 먼저 선택한 기준 박스 1개를 anchor 로 삼고,
+                `absolute` 는 다른 박스 resize 전파에서 제외됩니다. 현재 상대 기준: {relativeCreateAnchorFrameGroupId || '미선택'}
+              </p>
+              <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
+                {([
+                  { id: 'summary', label: '요약' },
+                  { id: 'metadata', label: '메타데이터' },
+                  { id: 'style', label: '스타일' },
+                ] as const).map((tab) => (
+                  <Button
+                    key={tab.id}
+                    size="sm"
+                    variant={selectionPanelTab === tab.id ? 'default' : 'outline'}
+                    className="flex-1 md:flex-none"
+                    onClick={() => setSelectionPanelTab(tab.id)}
+                  >
+                    {tab.label}
+                  </Button>
+                ))}
+              </div>
 
-              {selectedFrameGroupIds.length === 1 ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">위치 관계</label>
-                    <select
-                      value={primarySelectedFramePositionMode || 'relative'}
-                      onChange={(event) =>
-                        applyPrimaryFramePositionMode(event.target.value as TemplateFramePositionMode)
-                      }
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      <option value="relative">relative</option>
-                      <option value="absolute">absolute</option>
-                    </select>
+              {selectionPanelTab === 'summary' ? (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                    <div>선택 박스 수: {selectedFrameGroupIds.length}</div>
+                    <div className="mt-1 break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</div>
+                    <div className="mt-1">위치 관계: {primarySelectedFramePositionMode || '-'}</div>
+                    <div className="mt-1">상대 기준 라벨: {primaryRelativeAnchorLabel || '-'}</div>
+                    <div className="mt-1">위치 영향 대상 수: {primaryRelativeAffectedFrameGroupIds.length}</div>
+                    <div className="mt-1 break-all">
+                      위치 영향 대상: {primaryRelativeAffectedFrameGroupIds.join(', ') || '-'}
+                    </div>
+                    <div className="mt-1">선택 엣지 토큰 수: {edgeSelectionState.tokens.length}</div>
+                    <div className="mt-1">선택 엣지 수: {selectedEdgeMemberCount}</div>
+                    <div className="mt-1">선택 엣지 모드: {selectedEdgeMode || '-'}</div>
+                    <div className="mt-1 break-all">선택 엣지 앵커: {selectedEdgeAnchorIds.join(', ') || '-'}</div>
+                    <div className="mt-1">selected_edge_clicked 수: {selectedEdgeClickedCount}</div>
+                    <div className="mt-1 break-all">
+                      selected_edge_clicked: {edgeRoleDiagnostics.selectedEdgeClickedIds.join(', ') || '-'}
+                    </div>
+                    <div className="mt-1">selected_edge_auto_multi 수: {selectedEdgeAutoMultiCount}</div>
+                    <div className="mt-1 break-all">
+                      selected_edge_auto_multi: {edgeRoleDiagnostics.selectedEdgeAutoMultiIds.join(', ') || '-'}
+                    </div>
+                    <div className="mt-1">peer_edge 수: {peerEdgeCount}</div>
+                    <div className="mt-1 break-all">peer_edge: {edgeRoleDiagnostics.peerEdgeIds.join(', ') || '-'}</div>
+                    <div className="mt-1 break-all">
+                      movement mismatch edge: {edgeRoleDiagnostics.mismatchEdgeIds.join(', ') || '-'}
+                    </div>
+                    <div className="mt-1">프레임 박스 수: {frameNodesAvailable}</div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">상대 기준</label>
-                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600">
-                      {primaryRelativeAnchorLabel || '-'}
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">위치 관계</label>
+                      <select
+                        value={primarySelectedFramePositionMode || 'relative'}
+                        disabled={!canEditSingleSelection}
+                        onChange={(event) =>
+                          applyPrimaryFramePositionMode(event.target.value as TemplateFramePositionMode)
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value="relative">relative</option>
+                        <option value="absolute">absolute</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">상대 기준</label>
+                      <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600">
+                        {canEditSingleSelection ? primaryRelativeAnchorLabel || '-' : '단일 선택에서만 편집 가능'}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {selectionPanelTab === 'metadata' ? (
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-slate-800">박스 메타데이터</label>
+                    <p className="text-xs text-slate-500">
+                      템플릿은 슬롯 정의만 저장하고, 실제 파일/서명 값은 템플릿을 사용하는 문서가 소유합니다.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">Box Kind</label>
+                      <select
+                        data-metadata-field="boxKind"
+                        value={frameMetadataDraft.boxKind}
+                        onChange={(event) =>
+                          setFrameMetadataDraft((previous) => ({
+                            ...previous,
+                            boxKind: event.target.value as FrameMetadataDraft['boxKind'],
+                          }))
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value="">혼합 / 변경 안 함</option>
+                        {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => (
+                          <option key={boxKind} value={boxKind}>
+                            {boxKind}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">Role</label>
+                      <select
+                        data-metadata-field="role"
+                        value={frameMetadataDraft.role}
+                        onChange={(event) =>
+                          setFrameMetadataDraft((previous) => ({
+                            ...previous,
+                            role: event.target.value as FrameMetadataDraft['role'],
+                          }))
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value="">혼합 / 변경 안 함</option>
+                        {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">Value Key</label>
+                      <Input
+                        data-metadata-field="valueKey"
+                        value={frameMetadataDraft.valueKey}
+                        disabled={!canEditSingleSelection}
+                        placeholder={canEditSingleSelection ? '예: attachment_list / issuer_signature' : '단일 선택에서만 편집 가능'}
+                        onChange={(event) =>
+                          setFrameMetadataDraft((previous) => ({ ...previous, valueKey: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">Parent Key Box</label>
+                      <Input
+                        data-metadata-field="parentGroupId"
+                        value={frameMetadataDraft.parentGroupId}
+                        disabled={!canEditSingleSelection}
+                        list="template-edit-parent-group-options"
+                        placeholder={canEditSingleSelection ? 'value 역할일 때만 지정' : '단일 선택에서만 편집 가능'}
+                        onChange={(event) =>
+                          setFrameMetadataDraft((previous) => ({ ...previous, parentGroupId: event.target.value }))
+                        }
+                      />
+                      <datalist id="template-edit-parent-group-options">
+                        {availableFrameGroupIds
+                          .filter((frameGroupId) => !selectedFrameGroupIds.includes(frameGroupId))
+                          .map((frameGroupId) => (
+                            <option key={frameGroupId} value={frameGroupId} />
+                          ))}
+                      </datalist>
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium text-slate-800">Runtime Mode</label>
+                      <select
+                        data-metadata-field="runtimeMode"
+                        value={frameMetadataDraft.runtimeMode}
+                        onChange={(event) =>
+                          setFrameMetadataDraft((previous) => ({
+                            ...previous,
+                            runtimeMode: event.target.value as FrameMetadataDraft['runtimeMode'],
+                          }))
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value="">혼합 / 자동 기본값 사용</option>
+                        {runtimeModeOptions.map((runtimeMode) => (
+                          <option key={runtimeMode} value={runtimeMode}>
+                            {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
               ) : null}
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-800">빠른 프리셋</label>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => applySelectionStylePatch(presetStylePatches.label)}>
-                    라벨형
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => applySelectionStylePatch(presetStylePatches.input)}>
-                    입력칸형
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => applySelectionStylePatch(presetStylePatches.body)}>
-                    본문형
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => applySelectionStylePatch(presetStylePatches.focus)}>
-                    강조형
-                  </Button>
-                </div>
-              </div>
+              {selectionPanelTab === 'style' ? (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-800">빠른 프리셋</label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.label)}>
+                        라벨형
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.input)}>
+                        입력칸형
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.body)}>
+                        본문형
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.focus)}>
+                        강조형
+                      </Button>
+                    </div>
+                  </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">너비 (px)</label>
-                  <Input
-                    data-style-field="width"
-                    value={selectionStyleDraft.width}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, width: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">높이 (px)</label>
-                  <Input
-                    data-style-field="height"
-                    value={selectionStyleDraft.height}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, height: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">폰트 크기</label>
-                  <Input
-                    data-style-field="fontSize"
-                    value={selectionStyleDraft.fontSize}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, fontSize: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">줄 간격</label>
-                  <Input
-                    data-style-field="lineHeight"
-                    value={selectionStyleDraft.lineHeight}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, lineHeight: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">좌우 여백</label>
-                  <Input
-                    data-style-field="paddingX"
-                    value={selectionStyleDraft.paddingX}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, paddingX: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">상하 여백</label>
-                  <Input
-                    data-style-field="paddingY"
-                    value={selectionStyleDraft.paddingY}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, paddingY: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">모서리 반경</label>
-                  <Input
-                    data-style-field="borderRadius"
-                    value={selectionStyleDraft.borderRadius}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, borderRadius: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">글자 굵기</label>
-                  <Input
-                    data-style-field="fontWeight"
-                    value={selectionStyleDraft.fontWeight}
-                    placeholder="혼합"
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, fontWeight: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">정렬</label>
-                  <select
-                    data-style-field="textAlign"
-                    value={selectionStyleDraft.textAlign}
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({
-                        ...previous,
-                        textAlign: event.target.value as SelectionStyleDraft['textAlign'],
-                      }))
-                    }
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="left">left</option>
-                    <option value="center">center</option>
-                    <option value="right">right</option>
-                    <option value="justify">justify</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">글자 색</label>
-                  <Input
-                    data-style-field="color"
-                    type="color"
-                    value={selectionStyleDraft.color}
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({ ...previous, color: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <label className="text-sm font-medium text-slate-800">배경 색</label>
-                  <Input
-                    data-style-field="backgroundColor"
-                    type="color"
-                    value={selectionStyleDraft.backgroundColor}
-                    onChange={(event) =>
-                      setSelectionStyleDraft((previous) => ({
-                        ...previous,
-                        backgroundColor: event.target.value,
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <Button className="w-full" onClick={applySelectionStyleDraft} disabled={selectedFrameGroupIds.length === 0}>
-                선택 박스 일괄 적용
-              </Button>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">너비 (px)</label>
+                      <Input
+                        data-style-field="width"
+                        value={selectionStyleDraft.width}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, width: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">높이 (px)</label>
+                      <Input
+                        data-style-field="height"
+                        value={selectionStyleDraft.height}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, height: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">폰트 크기</label>
+                      <Input
+                        data-style-field="fontSize"
+                        value={selectionStyleDraft.fontSize}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, fontSize: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">줄 간격</label>
+                      <Input
+                        data-style-field="lineHeight"
+                        value={selectionStyleDraft.lineHeight}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, lineHeight: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">좌우 여백</label>
+                      <Input
+                        data-style-field="paddingX"
+                        value={selectionStyleDraft.paddingX}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, paddingX: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">상하 여백</label>
+                      <Input
+                        data-style-field="paddingY"
+                        value={selectionStyleDraft.paddingY}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, paddingY: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">모서리 반경</label>
+                      <Input
+                        data-style-field="borderRadius"
+                        value={selectionStyleDraft.borderRadius}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, borderRadius: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">글자 굵기</label>
+                      <Input
+                        data-style-field="fontWeight"
+                        value={selectionStyleDraft.fontWeight}
+                        placeholder="혼합"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, fontWeight: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">정렬</label>
+                      <select
+                        data-style-field="textAlign"
+                        value={selectionStyleDraft.textAlign}
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({
+                            ...previous,
+                            textAlign: event.target.value as SelectionStyleDraft['textAlign'],
+                          }))
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value="left">left</option>
+                        <option value="center">center</option>
+                        <option value="right">right</option>
+                        <option value="justify">justify</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-800">글자 색</label>
+                      <Input
+                        data-style-field="color"
+                        type="color"
+                        value={selectionStyleDraft.color}
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({ ...previous, color: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium text-slate-800">배경 색</label>
+                      <Input
+                        data-style-field="backgroundColor"
+                        value={selectionStyleDraft.backgroundColor}
+                        placeholder="transparent"
+                        onChange={(event) =>
+                          setSelectionStyleDraft((previous) => ({
+                            ...previous,
+                            backgroundColor: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </CardContent>
           </Card>
 

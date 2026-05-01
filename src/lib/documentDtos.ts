@@ -6,6 +6,36 @@ export type DocumentArtifactFormat = 'pdf' | 'docx' | 'hwp' | 'preview';
 
 export type DocumentLabelValues = Record<string, unknown>;
 
+export type DocumentValueFileMetadata = Record<string, unknown>;
+
+export type DocumentValueFileInput = {
+  valueKey: string;
+  storageBucket: string;
+  storagePath: string;
+  originalFileName: string;
+  mimeType?: string | null;
+  fileSizeBytes?: number | null;
+  sortOrder?: number | null;
+  uploadedBy?: string | null;
+  metadata?: DocumentValueFileMetadata;
+};
+
+export type DocumentValueFileDto = {
+  id: string;
+  documentId: string;
+  versionId: string;
+  valueKey: string;
+  storageBucket: string;
+  storagePath: string;
+  originalFileName: string;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
+  sortOrder: number;
+  uploadedBy: string | null;
+  uploadedAt: string;
+  metadata: DocumentValueFileMetadata;
+};
+
 export type DocumentCreateInput = {
   siteId: string;
   documentTypeKey: string;
@@ -13,12 +43,14 @@ export type DocumentCreateInput = {
   templateId?: string | null;
   htmlCanonical: string;
   labelValues: DocumentLabelValues;
+  valueFiles?: DocumentValueFileInput[];
   createdBy?: string | null;
 };
 
 export type DocumentVersionCreateInput = {
   htmlCanonical: string;
   labelValues: DocumentLabelValues;
+  valueFiles?: DocumentValueFileInput[];
   changeReason?: string | null;
   createdBy?: string | null;
 };
@@ -88,6 +120,7 @@ export type DocumentCreateResult = {
   document: DocumentRecordDto;
   latestVersion: DocumentVersionDto;
   artifacts: DocumentArtifactDto[];
+  valueFiles: DocumentValueFileDto[];
 };
 
 export type DocumentDetailResult = {
@@ -95,12 +128,14 @@ export type DocumentDetailResult = {
   latestVersion: DocumentVersionDto | null;
   versions: DocumentVersionDto[];
   artifacts: DocumentArtifactDto[];
+  valueFiles: DocumentValueFileDto[];
   photoEvidence: DocumentPhotoEvidenceSummaryDto;
 };
 
 export type DocumentVersionCreateResult = {
   document: DocumentRecordDto;
   latestVersion: DocumentVersionDto;
+  valueFiles: DocumentValueFileDto[];
 };
 
 export type DocumentListItem = {

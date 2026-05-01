@@ -33,6 +33,7 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA signing TO service_role;
 CREATE TABLE IF NOT EXISTS signing.sign_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     document_id TEXT NOT NULL,
+    signature_slot_key TEXT,
     document_hash TEXT,
     document_hash_algorithm TEXT DEFAULT 'sha256',
     document_hash_encoding TEXT DEFAULT 'hex',
@@ -107,6 +108,7 @@ ALTER TABLE signing.sign_requests ADD COLUMN IF NOT EXISTS document_hash_algorit
 ALTER TABLE signing.sign_requests ADD COLUMN IF NOT EXISTS document_hash_encoding TEXT DEFAULT 'hex';
 ALTER TABLE signing.sign_requests ADD COLUMN IF NOT EXISTS document_canonicalization TEXT DEFAULT 'utf8-string';
 ALTER TABLE signing.sign_requests ADD COLUMN IF NOT EXISTS document_byte_length INTEGER;
+ALTER TABLE signing.sign_requests ADD COLUMN IF NOT EXISTS signature_slot_key TEXT;
 
 ALTER TABLE signing.sign_authentications ADD COLUMN IF NOT EXISTS provider_group TEXT;
 ALTER TABLE signing.sign_authentications ADD COLUMN IF NOT EXISTS provider TEXT;
@@ -172,6 +174,11 @@ ALTER TABLE signing.sign_requests DROP CONSTRAINT IF EXISTS chk_sign_requests_do
 ALTER TABLE signing.sign_requests
     ADD CONSTRAINT chk_sign_requests_document_byte_length
     CHECK (document_byte_length IS NULL OR document_byte_length >= 0);
+
+ALTER TABLE signing.sign_requests DROP CONSTRAINT IF EXISTS chk_sign_requests_signature_slot_key;
+ALTER TABLE signing.sign_requests
+    ADD CONSTRAINT chk_sign_requests_signature_slot_key
+    CHECK (signature_slot_key IS NULL OR btrim(signature_slot_key) <> '');
 
 ALTER TABLE signing.sign_authentications DROP CONSTRAINT IF EXISTS chk_sign_authentications_provider_group;
 ALTER TABLE signing.sign_authentications
@@ -264,6 +271,7 @@ ALTER TABLE signing.signatures
     CHECK (document_byte_length >= 0);
 
 CREATE INDEX IF NOT EXISTS idx_signing_sign_requests_document_id ON signing.sign_requests(document_id);
+CREATE INDEX IF NOT EXISTS idx_signing_sign_requests_document_slot ON signing.sign_requests(document_id, signature_slot_key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signing_sign_requests_document_hash ON signing.sign_requests(document_hash);
 CREATE INDEX IF NOT EXISTS idx_signing_sign_authentications_request_id ON signing.sign_authentications(request_id);
 CREATE INDEX IF NOT EXISTS idx_signing_sign_authentications_auth_status ON signing.sign_authentications(auth_status);

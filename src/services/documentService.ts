@@ -7,6 +7,8 @@ import type {
   DocumentCreateResult,
   DocumentDetailResult,
   DocumentPhotoEvidenceSummaryDto,
+  DocumentValueFileDto,
+  DocumentValueFileInput,
   DocumentListItem,
   DocumentListQuery,
   DocumentRecordDto,
@@ -57,6 +59,22 @@ type DocumentArtifactRow = {
   status: string;
   metadata: Record<string, unknown> | null;
   created_at: string;
+};
+
+type DocumentValueFileRow = {
+  id: string;
+  document_id: string;
+  version_id: string;
+  value_key: string;
+  storage_bucket: string;
+  storage_path: string;
+  original_file_name: string;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  sort_order: number;
+  uploaded_by: string | null;
+  uploaded_at: string;
+  metadata: Record<string, unknown> | null;
 };
 
 const getSupabase = () => {
@@ -139,6 +157,132 @@ const toDocumentArtifactDto = (row: DocumentArtifactRow): DocumentArtifactDto =>
   createdAt: row.created_at,
 });
 
+const toDocumentValueFileDto = (row: DocumentValueFileRow): DocumentValueFileDto => ({
+  id: row.id,
+  documentId: row.document_id,
+  versionId: row.version_id,
+  valueKey: row.value_key,
+  storageBucket: row.storage_bucket,
+  storagePath: row.storage_path,
+  originalFileName: row.original_file_name,
+  mimeType: row.mime_type,
+  fileSizeBytes: row.file_size_bytes,
+  sortOrder: row.sort_order,
+  uploadedBy: row.uploaded_by,
+  uploadedAt: row.uploaded_at,
+  metadata: row.metadata || {},
+});
+
+const sanitizeDocumentValueFiles = (valueFiles?: DocumentValueFileInput[] | null): DocumentValueFileInput[] => {
+  if (valueFiles == null) {
+    return [];
+  }
+
+  if (!Array.isArray(valueFiles)) {
+    throw new Error('문서 저장 실패: valueFiles는 배열 형식이어야 합니다.');
+  }
+
+  return valueFiles.map((valueFile, index) => {
+    if (!valueFile || typeof valueFile !== 'object') {
+      throw new Error(`문서 저장 실패: valueFiles[${index}] 형식이 올바르지 않습니다.`);
+    }
+
+    const valueKey = String(valueFile.valueKey || '').trim();
+    const storageBucket = String(valueFile.storageBucket || '').trim();
+    const storagePath = String(valueFile.storagePath || '').trim();
+    const originalFileName = String(valueFile.originalFileName || '').trim();
+    const sortOrder =
+      valueFile.sortOrder == null ? index : Number.parseInt(String(valueFile.sortOrder), 10);
+    const fileSizeBytes =
+      valueFile.fileSizeBytes == null ? null : Number.parseInt(String(valueFile.fileSizeBytes), 10);
+
+    if (!valueKey) {
+      throw new Error(`문서 저장 실패: valueFiles[${index}].valueKey가 필요합니다.`);
+    }
+
+    if (!storageBucket) {
+      throw new Error(`문서 저장 실패: valueFiles[${index}].storageBucket이 필요합니다.`);
+    }
+
+    if (!storagePath) {
+      throw new Error(`문서 저장 실패: valueFiles[${index}].storagePath가 필요합니다.`);
+    }
+
+    if (!originalFileName) {
+      throw new Error(`문서 저장 실패: valueFiles[${index}].originalFileName이 필요합니다.`);
+    }
+
+    if (!Number.isFinite(sortOrder) || sortOrder < 0) {
+      throw new Error(`문서 저장 실패: valueFiles[${index}].sortOrder는 0 이상의 정수여야 합니다.`);
+    }
+
+    if (fileSizeBytes !== null && (!Number.isFinite(fileSizeBytes) || fileSizeBytes < 0)) {
+      throw new Error(`문서 저장 실패: valueFiles[${index}].fileSizeBytes는 0 이상의 정수여야 합니다.`);
+    }
+
+    const metadata =
+      valueFile.metadata == null
+        ? {}
+        : Array.isArray(valueFile.metadata) || typeof valueFile.metadata !== 'object'
+          ? null
+          : valueFile.metadata;
+
+    if (metadata === null) {
+      throw new Error(`문서 저장 실패: valueFiles[${index}].metadata는 JSON 객체 형식이어야 합니다.`);
+    }
+
+    return {
+      valueKey,
+      storageBucket,
+      storagePath,
+      originalFileName,
+      mimeType: valueFile.mimeType?.trim() || null,
+      fileSizeBytes,
+      sortOrder,
+      uploadedBy: valueFile.uploadedBy?.trim() || null,
+      metadata,
+    };
+  });
+};
+
+const insertDocumentValueFiles = async (params: {
+  documentsClient: ReturnType<typeof documentsSchema>;
+  documentId: string;
+  versionId: string;
+  valueFiles: DocumentValueFileInput[];
+}): Promise<DocumentValueFileDto[]> => {
+  if (params.valueFiles.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await params.documentsClient
+    .from('document_value_files')
+    .insert(
+      params.valueFiles.map((valueFile) => ({
+        document_id: params.documentId,
+        version_id: params.versionId,
+        value_key: valueFile.valueKey,
+        storage_bucket: valueFile.storageBucket,
+        storage_path: valueFile.storagePath,
+        original_file_name: valueFile.originalFileName,
+        mime_type: valueFile.mimeType || null,
+        file_size_bytes: valueFile.fileSizeBytes ?? null,
+        sort_order: valueFile.sortOrder ?? 0,
+        uploaded_by: valueFile.uploadedBy || null,
+        metadata: valueFile.metadata || {},
+      }))
+    )
+    .select('*');
+
+  if (error) {
+    throw new Error(`문서 저장 실패: 첨부파일 슬롯 저장 중 오류가 발생했습니다. (${error.message})`);
+  }
+
+  return ((data || []) as DocumentValueFileRow[])
+    .sort((left, right) => left.sort_order - right.sort_order || left.original_file_name.localeCompare(right.original_file_name, 'ko'))
+    .map(toDocumentValueFileDto);
+};
+
 const buildDocumentPhotoEvidenceSummary = (
   requirements: SitePhotoLabelGapItemDto[]
 ): DocumentPhotoEvidenceSummaryDto => {
@@ -195,6 +339,7 @@ export const DocumentService = {
     const client = getSupabase();
     const documentsClient = documentsSchema(client);
     const labelValues = sanitizeLabelValues(params.labelValues);
+    const valueFiles = sanitizeDocumentValueFiles(params.valueFiles);
     const htmlHashInfo = generateDocumentHashInfo(params.htmlCanonical);
 
     const { data: documentData, error: documentError } = await documentsClient
@@ -244,6 +389,21 @@ export const DocumentService = {
       throw new Error(`문서 저장 실패: 버전 생성 중 오류가 발생했습니다. (${versionError?.message})`);
     }
 
+    let createdValueFiles: DocumentValueFileDto[] = [];
+
+    try {
+      createdValueFiles = await insertDocumentValueFiles({
+        documentsClient,
+        documentId: document.id,
+        versionId: version.id,
+        valueFiles,
+      });
+    } catch (error) {
+      await documentsClient.from('document_versions').delete().eq('id', version.id);
+      await documentsClient.from('document_registry').delete().eq('id', document.id);
+      throw error;
+    }
+
     const { data: updatedDocumentData, error: updateError } = await documentsClient
       .from('document_registry')
       .update({
@@ -264,6 +424,7 @@ export const DocumentService = {
       document: toDocumentRecordDto(updatedDocument),
       latestVersion: toDocumentVersionDto(version),
       artifacts: [],
+      valueFiles: createdValueFiles,
     };
   },
 
@@ -401,12 +562,31 @@ export const DocumentService = {
     const latestVersion = document.current_version_id
       ? versions.find((item) => item.id === document.current_version_id) || versions[0] || null
       : versions[0] || null;
+    const effectiveVersionId = latestVersion?.id || null;
+    let valueFiles: DocumentValueFileDto[] = [];
+
+    if (effectiveVersionId) {
+      const { data: valueFilesData, error: valueFilesError } = await documentsClient
+        .from('document_value_files')
+        .select('*')
+        .eq('document_id', document.id)
+        .eq('version_id', effectiveVersionId)
+        .order('sort_order', { ascending: true })
+        .order('uploaded_at', { ascending: true });
+
+      if (valueFilesError) {
+        throw new Error(`문서 상세 조회 실패: 첨부파일 슬롯 조회 중 오류가 발생했습니다. (${valueFilesError.message})`);
+      }
+
+      valueFiles = ((valueFilesData || []) as DocumentValueFileRow[]).map(toDocumentValueFileDto);
+    }
 
     return {
       document: toDocumentRecordDto(document),
       latestVersion,
       versions,
       artifacts,
+      valueFiles,
       photoEvidence,
     };
   },
@@ -430,6 +610,7 @@ export const DocumentService = {
     const documentsClient = documentsSchema(client);
     const normalizedDocumentId = documentId.trim();
     const labelValues = sanitizeLabelValues(params.labelValues);
+    const valueFiles = sanitizeDocumentValueFiles(params.valueFiles);
     const htmlHashInfo = generateDocumentHashInfo(params.htmlCanonical);
 
     const { document, error: documentError } = await getDocumentRegistryById(normalizedDocumentId);
@@ -466,6 +647,20 @@ export const DocumentService = {
       throw new Error(`문서 버전 생성 실패: ${versionError?.message || '버전을 생성할 수 없습니다.'}`);
     }
 
+    let createdValueFiles: DocumentValueFileDto[] = [];
+
+    try {
+      createdValueFiles = await insertDocumentValueFiles({
+        documentsClient,
+        documentId: normalizedDocumentId,
+        versionId: version.id,
+        valueFiles,
+      });
+    } catch (error) {
+      await documentsClient.from('document_versions').delete().eq('id', version.id);
+      throw error;
+    }
+
     const { data: updatedDocumentData, error: updateError } = await documentsClient
       .from('document_registry')
       .update({
@@ -484,6 +679,7 @@ export const DocumentService = {
     return {
       document: toDocumentRecordDto(updatedDocumentData as DocumentRegistryRow),
       latestVersion: toDocumentVersionDto(version),
+      valueFiles: createdValueFiles,
     };
   },
 };

@@ -16,6 +16,9 @@ type AuditMetadata = Record<string, unknown>;
 
 type SignRequestRow = {
   id: string;
+  document_id?: string | null;
+  signature_slot_key?: string | null;
+  signer_info?: Record<string, unknown> | null;
   status: string;
   expiration_date: string | null;
   document_hash: string | null;
@@ -86,9 +89,20 @@ const normalizeIpAddress = (ipAddress?: string | null) => {
   return firstForwardedIp || null;
 };
 
+const normalizeSignatureSlotKey = (value?: string | null) => {
+  const normalized = String(value || '')
+    .split('>')
+    .map((segment) => segment.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' > ');
+
+  return normalized || null;
+};
+
 export const SignService = {
   async createRequest(params: {
     documentId: string;
+    signatureSlotKey?: string | null;
     documentContent: DocumentHashInput;
     signerInfo: SignerInfo;
     expirationDate?: Date;
@@ -100,6 +114,7 @@ export const SignService = {
     }
 
     const documentHashInfo = generateDocumentHashInfo(params.documentContent);
+    const signatureSlotKey = normalizeSignatureSlotKey(params.signatureSlotKey);
     const signingClient = signingSchema();
 
     const { data: request, error: requestError } = await signingClient
@@ -107,6 +122,7 @@ export const SignService = {
       .insert([
         {
           document_id: params.documentId,
+          signature_slot_key: signatureSlotKey,
           document_hash: documentHashInfo.hash,
           document_hash_algorithm: documentHashInfo.algorithm,
           document_hash_encoding: documentHashInfo.encoding,
@@ -133,6 +149,7 @@ export const SignService = {
         hashEncoding: documentHashInfo.encoding,
         canonicalization: documentHashInfo.canonicalization,
         byteLength: documentHashInfo.byteLength,
+        signatureSlotKey,
       },
     });
 
