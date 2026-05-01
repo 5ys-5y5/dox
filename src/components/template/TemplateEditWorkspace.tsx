@@ -108,7 +108,7 @@ type ResolvedFrameMetadata = {
   runtimeMode: TemplateFrameRuntimeMode;
 };
 
-type SelectionPanelTab = 'summary' | 'metadata' | 'style';
+type SelectionPanelTab = 'summary' | 'create' | 'metadata' | 'style';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
 
@@ -421,16 +421,47 @@ const SIGNATURE_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = [
   'signature_provider',
   'signature_status',
 ];
+const FRAME_BOX_KIND_LABELS: Record<TemplateFrameBoxKind, string> = {
+  text: 'text | 텍스트 박스',
+  attachment: 'attachment | 첨부파일 박스',
+  signature: 'signature | 서명 박스',
+};
+const FRAME_BOX_KIND_DESCRIPTIONS: Record<TemplateFrameBoxKind, string> = {
+  text: '문서마다 텍스트를 직접 입력하거나, 고정 라벨처럼 보여주는 박스입니다.',
+  attachment: '문서마다 파일을 업로드하고 파일명 표시, 파일 열기 동작을 연결하는 박스입니다.',
+  signature: '문서마다 서명 컨텍스트를 연결하고 이미지, 이력, 상태 같은 정보를 출력하는 박스입니다.',
+};
+const FRAME_ROLE_LABELS: Record<TemplateFrameRole, string> = {
+  key: 'key | 상위 키',
+  value: 'value | 하위 값',
+  key_value: 'key_value | 독립 값',
+};
+const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
+  key: '다른 value 박스들을 묶는 기준 박스입니다. 보통 라벨이나 제목 역할을 맡습니다.',
+  value: '어떤 key 박스에 속한 실제 입력값 박스입니다. 부모 key 박스가 필요합니다.',
+  key_value: '상위 key 없이 자기 자신이 하나의 완결된 값이 되는 독립 박스입니다.',
+};
 const FRAME_RUNTIME_MODE_LABELS: Record<TemplateFrameRuntimeMode, string> = {
-  static_label: 'static_label',
-  editable_text: 'editable_text',
-  file_slot: 'file_slot',
-  signature_image: 'signature_image',
-  signature_history: 'signature_history',
-  signature_signer_name: 'signature_signer_name',
-  signature_signed_at: 'signature_signed_at',
-  signature_provider: 'signature_provider',
-  signature_status: 'signature_status',
+  static_label: 'static_label | 고정 라벨',
+  editable_text: 'editable_text | 텍스트 입력',
+  file_slot: 'file_slot | 파일 업로드 슬롯',
+  signature_image: 'signature_image | 서명 이미지',
+  signature_history: 'signature_history | 서명 이력',
+  signature_signer_name: 'signature_signer_name | 서명자 이름',
+  signature_signed_at: 'signature_signed_at | 서명 시각',
+  signature_provider: 'signature_provider | 인증 제공자',
+  signature_status: 'signature_status | 서명 상태',
+};
+const FRAME_RUNTIME_MODE_DESCRIPTIONS: Record<TemplateFrameRuntimeMode, string> = {
+  static_label: '문서에서 수정되지 않는 고정 텍스트 라벨로 사용합니다.',
+  editable_text: '문서마다 사용자가 직접 입력하거나 수정하는 텍스트 값으로 사용합니다.',
+  file_slot: '문서마다 파일을 업로드해 연결하는 슬롯입니다. 업로드 후에는 파일명과 파일 열기 동작을 가집니다.',
+  signature_image: '서명 이미지만 출력하는 박스입니다. 실제 서명 이미지는 문서별 서명 데이터에서 가져옵니다.',
+  signature_history: '서명 요청, 인증, 완료 같은 이력 로그를 출력하는 박스입니다.',
+  signature_signer_name: '서명한 사람의 이름이나 표시명을 출력하는 박스입니다.',
+  signature_signed_at: '실제 서명이 완료된 시각을 출력하는 박스입니다.',
+  signature_provider: '본인확인 또는 서명 인증에 사용된 제공자 정보를 출력하는 박스입니다.',
+  signature_status: '서명 대기, 완료, 실패 같은 현재 상태를 출력하는 박스입니다.',
 };
 const EDGE_DRAG_START_THRESHOLD_PX = 4;
 const EDGE_DRAG_AUTOSNAP_THRESHOLD_PX = 5;
@@ -5589,6 +5620,31 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => (frameMetadataDraft.boxKind ? getCompatibleRuntimeModes(frameMetadataDraft.boxKind) : getAllRuntimeModes()),
     [frameMetadataDraft.boxKind]
   );
+  const frameBoxKindHelpText = React.useMemo(() => {
+    if (!frameMetadataDraft.boxKind) {
+      return '여러 박스가 섞여 있거나 아직 변경하지 않는 상태입니다. 텍스트, 첨부파일, 서명 중 어떤 종류의 슬롯인지 정합니다.';
+    }
+
+    return FRAME_BOX_KIND_DESCRIPTIONS[frameMetadataDraft.boxKind];
+  }, [frameMetadataDraft.boxKind]);
+  const frameRoleHelpText = React.useMemo(() => {
+    if (!frameMetadataDraft.role) {
+      return '여러 박스가 섞여 있거나 아직 변경하지 않는 상태입니다. 이 박스가 상위 키인지, 하위 값인지, 독립 값인지 정합니다.';
+    }
+
+    return FRAME_ROLE_DESCRIPTIONS[frameMetadataDraft.role];
+  }, [frameMetadataDraft.role]);
+  const frameRuntimeModeHelpText = React.useMemo(() => {
+    if (!frameMetadataDraft.runtimeMode) {
+      if (frameMetadataDraft.boxKind) {
+        return `${FRAME_BOX_KIND_LABELS[frameMetadataDraft.boxKind]}에 맞는 동작 방식을 선택하세요.`;
+      }
+
+      return '아직 특정 동작을 고르지 않았습니다. 박스가 문서에서 어떻게 동작하고 무엇을 출력할지 정합니다.';
+    }
+
+    return FRAME_RUNTIME_MODE_DESCRIPTIONS[frameMetadataDraft.runtimeMode];
+  }, [frameMetadataDraft.boxKind, frameMetadataDraft.runtimeMode]);
   const primarySelectedFramePositionMode = React.useMemo(() => {
     if (!primarySelectedFrameGroupId || !previewRef.current) {
       return null;
@@ -7511,33 +7567,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       backgroundColor: preset.backgroundColor ?? previous.backgroundColor,
     }));
   }, []);
-
-  const applyPrimaryFrameSizeToSelection = React.useCallback(() => {
-    const root = previewRef.current;
-
-    if (!root || selectedFrameGroupIds.length < 2) {
-      return;
-    }
-
-    const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
-    const primaryNode = nodes[0];
-
-    if (!primaryNode) {
-      return;
-    }
-
-    const primaryRect = readFrameNodeRect(primaryNode);
-    nodes.slice(1).forEach((node) => {
-      writeFrameNodeRect(node, {
-        ...readFrameNodeRect(node),
-        width: primaryRect.width,
-        height: primaryRect.height,
-      });
-    });
-
-    syncDraftPreviewHtmlRef();
-    syncSelectionStyleDraft();
-  }, [getFrameNodes, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]);
 
   const applyPrimaryFramePositionMode = React.useCallback(
     (nextMode: TemplateFramePositionMode) => {
@@ -10314,43 +10343,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <Button onClick={() => void applySelectionPanelDrafts()} disabled={selectedFrameGroupIds.length === 0 || selectionSaveProgressActive}>
                   {selectionSaveProgressActive ? '반영 중...' : '선택 항목 저장'}
                 </Button>
-                <Button
-                  size="sm"
-                  variant={boxCreationMode ? 'default' : 'outline'}
-                  onClick={() => {
-                    clearTransientCanvasOverlays();
-                    const nextMode = !boxCreationMode;
-
-                    if (nextMode && boxCreationPositionMode === 'relative' && selectedFrameGroupIdsRef.current.length !== 1) {
-                      setBoxCreationPositionMode('absolute');
-                      setMessage('상대 기준 박스 1개가 없어 박스 생성은 절대 위치 모드로 시작합니다.');
-                    }
-
-                    setBoxCreationMode(nextMode);
-                  }}
-                >
-                  {boxCreationMode ? '박스 생성 종료' : '박스 생성'}
-                </Button>
-                <select
-                  value={boxCreationPositionMode}
-                  onChange={(event) => setBoxCreationPositionMode(event.target.value as TemplateFramePositionMode)}
-                  disabled={!boxCreationMode}
-                  className="flex h-9 min-w-[110px] rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="relative">상대 위치</option>
-                  <option value="absolute">절대 위치</option>
-                </select>
-                <Button size="sm" variant="outline" onClick={clearFrameSelection}>
-                  선택 해제
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={selectedFrameGroupIds.length < 2}
-                  onClick={applyPrimaryFrameSizeToSelection}
-                >
-                  첫 선택 크기 복제
-                </Button>
               </div>
               <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -10400,7 +10392,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="mt-3 text-sm font-semibold">{selectionSaveProgress.stage}</div>
                 <div className="mt-1 text-[11px] leading-5 opacity-90">
                   {selectionSaveProgress.phase === 'idle'
-                    ? `박스 생성은 여기서 켜고 캔버스에서 drag 합니다. relative 는 먼저 선택한 기준 박스 1개를 anchor 로 삼고, absolute 는 다른 박스 resize 전파에서 제외됩니다. 현재 상대 기준: ${relativeCreateAnchorFrameGroupId || '미선택'}`
+                    ? '선택 박스의 메타데이터와 스타일을 점검하고, 저장 중에는 진행률과 결과를 이곳에 표시합니다.'
                     : selectionSaveProgress.detail}
                 </div>
                 {selectionValidationIssues.length > 0 ? (
@@ -10419,6 +10411,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
                 {([
                   { id: 'summary', label: '요약' },
+                  { id: 'create', label: '박스 생성' },
                   { id: 'metadata', label: '메타데이터' },
                   { id: 'style', label: '스타일' },
                 ] as const).map((tab) => (
@@ -10433,6 +10426,55 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   </Button>
                 ))}
               </div>
+
+              {selectionPanelTab === 'create' ? (
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-slate-800">박스 생성</label>
+                    <p className="text-xs text-slate-500">
+                      캔버스에서 drag 해서 박스를 추가합니다. `relative` 는 먼저 선택한 박스 1개를 기준 anchor 로 삼고,
+                      `absolute` 는 다른 박스의 resize 전파에서 제외됩니다.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant={boxCreationMode ? 'default' : 'outline'}
+                      onClick={() => {
+                        clearTransientCanvasOverlays();
+                        const nextMode = !boxCreationMode;
+
+                        if (
+                          nextMode &&
+                          boxCreationPositionMode === 'relative' &&
+                          selectedFrameGroupIdsRef.current.length !== 1
+                        ) {
+                          setBoxCreationPositionMode('absolute');
+                          setMessage('상대 기준 박스 1개가 없어 박스 생성은 절대 위치 모드로 시작합니다.');
+                        }
+
+                        setBoxCreationMode(nextMode);
+                      }}
+                    >
+                      {boxCreationMode ? '박스 생성 종료' : '박스 생성'}
+                    </Button>
+                    <select
+                      value={boxCreationPositionMode}
+                      onChange={(event) => setBoxCreationPositionMode(event.target.value as TemplateFramePositionMode)}
+                      disabled={!boxCreationMode}
+                      className="flex h-9 min-w-[120px] rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="relative">상대 위치</option>
+                      <option value="absolute">절대 위치</option>
+                    </select>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+                    <div>현재 생성 모드: {boxCreationMode ? '활성' : '비활성'}</div>
+                    <div className="mt-1">위치 모드: {boxCreationPositionMode}</div>
+                    <div className="mt-1">상대 기준 박스: {relativeCreateAnchorFrameGroupId || '미선택'}</div>
+                  </div>
+                </div>
+              ) : null}
 
               {selectionPanelTab === 'summary' ? (
                 <>
@@ -10515,10 +10557,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         <option value="">혼합 / 변경 안 함</option>
                         {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => (
                           <option key={boxKind} value={boxKind}>
-                            {boxKind}
+                            {FRAME_BOX_KIND_LABELS[boxKind]}
                           </option>
                         ))}
                       </select>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
+                        <div className="font-semibold text-slate-900">현재 선택 설명</div>
+                        <div className="mt-1">{frameBoxKindHelpText}</div>
+                        <div className="mt-2 space-y-1">
+                          {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => (
+                            <div key={boxKind}>
+                              <span className="font-medium text-slate-900">{FRAME_BOX_KIND_LABELS[boxKind]}</span>
+                              {' - '}
+                              {FRAME_BOX_KIND_DESCRIPTIONS[boxKind]}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-800">Role</label>
@@ -10536,10 +10591,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         <option value="">혼합 / 변경 안 함</option>
                         {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => (
                           <option key={role} value={role}>
-                            {role}
+                            {FRAME_ROLE_LABELS[role]}
                           </option>
                         ))}
                       </select>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
+                        <div className="font-semibold text-slate-900">현재 선택 설명</div>
+                        <div className="mt-1">{frameRoleHelpText}</div>
+                        <div className="mt-2 space-y-1">
+                          {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => (
+                            <div key={role}>
+                              <span className="font-medium text-slate-900">{FRAME_ROLE_LABELS[role]}</span>
+                              {' - '}
+                              {FRAME_ROLE_DESCRIPTIONS[role]}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-800">Value Key</label>
@@ -10593,6 +10661,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                           </option>
                         ))}
                       </select>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
+                        <div className="font-semibold text-slate-900">현재 선택 설명</div>
+                        <div className="mt-1">{frameRuntimeModeHelpText}</div>
+                        <div className="mt-2 space-y-1">
+                          {runtimeModeOptions.map((runtimeMode) => (
+                            <div key={runtimeMode}>
+                              <span className="font-medium text-slate-900">{FRAME_RUNTIME_MODE_LABELS[runtimeMode]}</span>
+                              {' - '}
+                              {FRAME_RUNTIME_MODE_DESCRIPTIONS[runtimeMode]}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
