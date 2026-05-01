@@ -2333,57 +2333,6 @@ const groupExactPhysicalBoundaryEdgeIds = (
   return groupedEdgeIds;
 };
 
-const isSimpleExactPhysicalBoundaryVerticalDrag = ({
-  direction,
-  snapshot,
-  edgeRoleById,
-}: {
-  direction: ResizeDirection;
-  snapshot?: TemplateEdgeTopologySnapshotDto | null;
-  edgeRoleById?: TemplateEdgeRoleMapDto;
-}) => {
-  if (!direction.includes('w') && !direction.includes('e')) {
-    return false;
-  }
-
-  if (!snapshot || !edgeRoleById) {
-    return false;
-  }
-
-  const relevantRoleEntries = Object.entries(edgeRoleById).filter(
-    ([, role]) => role === 'selected_edge_clicked' || role === 'peer_edge' || role === 'selected_edge_auto_multi'
-  );
-
-  if (relevantRoleEntries.length === 0) {
-    return false;
-  }
-
-  const clickedEdgeIds = relevantRoleEntries
-    .filter(([, role]) => role === 'selected_edge_clicked')
-    .map(([edgeId]) => edgeId);
-  const autoMultiEdgeIds = relevantRoleEntries
-    .filter(([, role]) => role === 'selected_edge_auto_multi')
-    .map(([edgeId]) => edgeId);
-
-  if (clickedEdgeIds.length !== 1 || autoMultiEdgeIds.length > 0) {
-    return false;
-  }
-
-  const relevantEdgeIds = relevantRoleEntries.map(([edgeId]) => edgeId);
-  const relevantEdges = relevantEdgeIds
-    .map((edgeId) => TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId))
-    .filter((edge): edge is TemplateEdgeDescriptorDto => Boolean(edge));
-
-  if (
-    relevantEdges.length !== relevantEdgeIds.length ||
-    relevantEdges.some((edge) => edge.orientation !== 'vertical' || (edge.side !== 'left' && edge.side !== 'right'))
-  ) {
-    return false;
-  }
-
-  return groupExactPhysicalBoundaryEdgeIds(snapshot, relevantEdgeIds, edgeRoleById).length === 1;
-};
-
 const buildSelfWidthResizeInstruction = (
   context: ReturnType<typeof buildFrameResizeContext>,
   edge: 'left' | 'right'
@@ -6804,13 +6753,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const stopPointerInteraction = React.useCallback(
     (pointerId?: number) => {
       const currentResizeState = resizeStateRef.current;
-      const useSimpleExactBoundaryFinalize = currentResizeState?.edgeResizeTargets?.length
-        ? isSimpleExactPhysicalBoundaryVerticalDrag({
-            direction: currentResizeState.direction,
-            snapshot: currentResizeState.edgeDragSnapshot,
-            edgeRoleById: currentResizeState.edgeRoleById,
-          })
-        : false;
       const owner = activePointerOwnerRef.current;
 
       if (owner && typeof pointerId === 'number') {
@@ -6834,15 +6776,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         });
         applyRelativeAnchoredFrameRectsInRoot(previewRef.current);
         if (currentResizeState?.edgeResizeTargets?.length) {
-          if (useSimpleExactBoundaryFinalize) {
-            normalizeLiveVerticalPhysicalPeers(previewRef.current, {
-              edgeIds: Object.keys(currentResizeState.edgeRoleById || {}),
-              preferredEdgeRoleById: currentResizeState.edgeRoleById,
-            });
-          } else {
-            realignLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
-            finalizeLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
-          }
+          realignLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
+          finalizeLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
         } else {
           normalizeLiveVerticalCohorts(previewRef.current);
           normalizeLiveVerticalPhysicalPeers(previewRef.current);
@@ -7624,13 +7559,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const safeFinalDeltaY = clampResolvedEdgeDragDeltaToPointerRequest(nextDeltaY, finalDeltaY);
         resizeState.edgeAutosnapLockX = snappedResultX.nextLock || null;
         resizeState.edgeAutosnapLockY = snappedResultY.nextLock || null;
-        const useSimpleExactBoundaryWidthCorrections =
-          widthResizeTargets.length > 0 &&
-          isSimpleExactPhysicalBoundaryVerticalDrag({
-            direction: resizeState.direction,
-            snapshot: resizeState.edgeDragSnapshot,
-            edgeRoleById: resizeState.edgeRoleById,
-          });
 
         const nextAppliedEdgeDeltaX = (resizeState.appliedEdgeDeltaX || 0) + safeFinalDeltaX;
         const nextAppliedEdgeDeltaY = (resizeState.appliedEdgeDeltaY || 0) + safeFinalDeltaY;
@@ -7664,21 +7592,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         resizeState.appliedEdgeDeltaX = nextAppliedEdgeDeltaX;
         resizeState.appliedEdgeDeltaY = nextAppliedEdgeDeltaY;
         if (previewRef.current) {
-          if (widthResizeTargets.length > 0 && !useSimpleExactBoundaryWidthCorrections) {
+          if (widthResizeTargets.length > 0) {
             stabilizeLiveVerticalEdgeTargetsToAppliedDelta(
               previewRef.current,
               resizeState,
               nextAppliedEdgeDeltaX
             );
           }
-          if (!useSimpleExactBoundaryWidthCorrections) {
-            realignLiveVerticalEdgeTargets(previewRef.current, resizeState);
-          }
-          if (
-            widthResizeTargets.length > 0 &&
-            !resizeState.edgeAutosnapLockX &&
-            !useSimpleExactBoundaryWidthCorrections
-          ) {
+          realignLiveVerticalEdgeTargets(previewRef.current, resizeState);
+          if (widthResizeTargets.length > 0 && !resizeState.edgeAutosnapLockX) {
             const liveAutosnapSnapshot = buildLiveEdgeTopologySnapshot(previewRef.current);
             const liveMovingWidthMembers = movingWidthMembers
               .map((member) => {
@@ -7720,7 +7642,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               preferredEdgeRoleById: resizeState.edgeRoleById,
             });
           }
-          if (widthResizeTargets.length > 0 && !useSimpleExactBoundaryWidthCorrections) {
+          if (widthResizeTargets.length > 0) {
             stabilizeLiveVerticalEdgeTargetsToAppliedDelta(
               previewRef.current,
               resizeState,
