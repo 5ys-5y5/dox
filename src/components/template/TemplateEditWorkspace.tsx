@@ -1,7 +1,9 @@
 'use client';
 
+import { CircleDot, CornerDownRight, FileText, KeyRound, Paperclip, Signature } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server.browser';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
@@ -323,6 +325,7 @@ type TemplateEditPreviewSurfaceProps = {
   renderedPreviewHtml: string;
   boxCreationMode: boolean;
   metadataVisualMode: boolean;
+  showMetadataIcons: boolean;
   setPreviewNode: (node: HTMLDivElement | null) => void;
   handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   handlePreviewPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -336,6 +339,7 @@ const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
 const FRAME_RELATION_BADGE_CLASS = 'v106-frame-relation-badge';
+const FRAME_KIND_MARKER_CLASS = 'v106-frame-kind-marker';
 const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
 const FRAME_MARQUEE_GHOST_CLASS = 'v106-frame-marquee';
@@ -390,6 +394,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   renderedPreviewHtml,
   boxCreationMode,
   metadataVisualMode,
+  showMetadataIcons,
   setPreviewNode,
   handlePreviewPointerDown,
   handlePreviewPointerMove,
@@ -412,6 +417,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       className="template-edit-preview template-extract-draft-preview template-extract-preview-surface !p-0 template-clone template-clone--raster-first-v2-structured"
       data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
       data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
+      data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
       onPointerDownCapture={handlePreviewPointerDown}
       onPointerMoveCapture={handlePreviewPointerMove}
       onPointerUpCapture={handlePreviewPointerUp}
@@ -440,6 +446,16 @@ const FRAME_BOX_KIND_LABELS: Record<TemplateFrameBoxKind, string> = {
   attachment: 'attachment | 첨부파일 박스',
   signature: 'signature | 서명 박스',
 };
+const FRAME_BOX_KIND_SHORT_LABELS: Record<TemplateFrameBoxKind, string> = {
+  text: '텍스트 박스',
+  attachment: '첨부파일 박스',
+  signature: '서명 박스',
+};
+const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
+  text: '텍스트',
+  attachment: '첨부',
+  signature: '서명',
+};
 const FRAME_BOX_KIND_DESCRIPTIONS: Record<TemplateFrameBoxKind, string> = {
   text: '문서마다 텍스트를 직접 입력하거나, 고정 라벨처럼 보여주는 박스입니다.',
   attachment: '문서마다 파일을 업로드하고 파일명 표시, 파일 열기 동작을 연결하는 박스입니다.',
@@ -450,11 +466,162 @@ const FRAME_ROLE_LABELS: Record<TemplateFrameRole, string> = {
   value: 'value | 하위 값',
   key_value: 'key_value | 독립 값',
 };
+const FRAME_ROLE_SHORT_LABELS: Record<TemplateFrameRole | 'group', string> = {
+  group: '그룹',
+  key: '상위 키',
+  value: '하위 값',
+  key_value: '독립 값',
+};
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
   key: '다른 value 박스들을 묶는 기준 박스입니다. 보통 라벨이나 제목 역할을 맡습니다.',
   value: '어떤 key 박스에 속한 실제 입력값 박스입니다. 연결된 key 박스가 필요합니다.',
   key_value: '상위 key 없이 자기 자신이 하나의 완결된 값이 되는 독립 박스입니다.',
 };
+
+const FrameKindIcon = ({
+  boxKind,
+  className = '',
+  strokeWidth = 2.15,
+}: {
+  boxKind: TemplateFrameBoxKind;
+  className?: string;
+  strokeWidth?: number;
+}) => {
+  const IconComponent =
+    boxKind === 'text' ? FileText : boxKind === 'attachment' ? Paperclip : Signature;
+  return <IconComponent aria-hidden="true" className={className} strokeWidth={strokeWidth} />;
+};
+
+const FrameRoleIcon = ({
+  role,
+  className = '',
+  strokeWidth = 2.15,
+}: {
+  role: TemplateFrameRole | 'group';
+  className?: string;
+  strokeWidth?: number;
+}) => {
+  const IconComponent = role === 'key' ? KeyRound : role === 'value' ? CornerDownRight : CircleDot;
+  return <IconComponent aria-hidden="true" className={className} strokeWidth={strokeWidth} />;
+};
+
+const FrameMetadataMarker = ({
+  boxKind,
+  role,
+  compact = false,
+}: {
+  boxKind: TemplateFrameBoxKind;
+  role: TemplateFrameRole | 'group';
+  compact?: boolean;
+}) => (
+  <span className="v106-frame-kind-marker__stack" aria-hidden="true">
+    <span
+      className="v106-frame-kind-marker__pill"
+      data-marker-pill="kind"
+      data-marker-icon="kind"
+      data-box-kind={boxKind}
+    >
+      <span className="v106-frame-kind-marker__icon">
+        <FrameKindIcon boxKind={boxKind} className="h-3 w-3" />
+      </span>
+      {!compact ? <span className="v106-frame-kind-marker__text">{FRAME_BOX_KIND_MARKER_LABELS[boxKind]}</span> : null}
+    </span>
+    <span
+      className="v106-frame-kind-marker__pill"
+      data-marker-pill="role"
+      data-marker-icon="role"
+      data-frame-role={role}
+    >
+      <span className="v106-frame-kind-marker__icon">
+        <FrameRoleIcon role={role} className="h-3 w-3" />
+      </span>
+      {!compact ? <span className="v106-frame-kind-marker__text">{FRAME_ROLE_SHORT_LABELS[role]}</span> : null}
+    </span>
+  </span>
+);
+
+const renderFrameMetadataMarkerMarkup = (
+  boxKind: TemplateFrameBoxKind,
+  role: TemplateFrameRole | 'group',
+  compact = false
+) => renderToStaticMarkup(<FrameMetadataMarker boxKind={boxKind} role={role} compact={compact} />);
+
+const MetadataCanvasLegend = ({
+  showMetadataIcons,
+  onToggleMetadataIcons,
+}: {
+  showMetadataIcons: boolean;
+  onToggleMetadataIcons: () => void;
+}) => (
+  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">범례</div>
+      <button
+        type="button"
+        onClick={onToggleMetadataIcons}
+        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+      >
+        {showMetadataIcons ? '아이콘 끄기' : '아이콘 켜기'}
+      </button>
+    </div>
+    <div className="mt-2 grid gap-2 lg:grid-cols-3">
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Box Kind</div>
+        <div className="mt-2 space-y-1.5 text-[11px] text-slate-700">
+          <div className="flex items-center gap-2">
+            <FrameKindIcon boxKind="text" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-teal-700" />
+            <span>텍스트 박스</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <FrameKindIcon boxKind="attachment" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-amber-700" />
+            <span>첨부파일 박스</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <FrameKindIcon boxKind="signature" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-rose-700" />
+            <span>서명 박스</span>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Role</div>
+        <div className="mt-2 space-y-1.5 text-[11px] text-slate-700">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+              <FrameRoleIcon role="key" className="h-3.5 w-3.5" />
+            </span>
+            <span>상위 키</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-sky-50 text-sky-700 ring-1 ring-sky-200">
+              <FrameRoleIcon role="value" className="h-3.5 w-3.5" />
+            </span>
+            <span>하위 값</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
+              <FrameRoleIcon role="key_value" className="h-3.5 w-3.5" />
+            </span>
+            <span>독립 값</span>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">관계 강조</div>
+        <div className="mt-2 space-y-1.5 text-[11px] text-slate-700">
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-4 w-4 rounded-sm border border-slate-300 opacity-50" />
+            <span>기본 연결 상태</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-4 w-4 rounded-sm border-2 border-slate-700" />
+            <span>현재 선택 관계군</span>
+          </div>
+          <div className="text-[10px] leading-4 text-slate-500">같은 그룹의 key/value 박스는 선택 시 함께 선명해집니다.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 const FRAME_RUNTIME_MODE_LABELS: Record<TemplateFrameRuntimeMode, string> = {
   static_label: 'static_label | 고정 라벨',
   editable_text: 'editable_text | 텍스트 입력',
@@ -4319,21 +4486,23 @@ const appendRelativeAnchorGuideBadge = (
   host.appendChild(badge);
 };
 
-const appendFrameRelationBadge = (
+const appendFrameKindMarker = (
   frameNode: HTMLElement,
-  text: string,
-  tone: 'key' | 'value'
+  boxKind: TemplateFrameBoxKind,
+  role: TemplateFrameRole | 'group'
 ) => {
   const shell = resolveFrameLayoutShell(frameNode);
-  shell.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
-    element.remove();
-  });
-  const badge = document.createElement('div');
-  badge.className = FRAME_RELATION_BADGE_CLASS;
-  badge.setAttribute('data-frame-editor-ui', 'true');
-  badge.setAttribute('data-relation-badge-tone', tone);
-  badge.textContent = text;
-  shell.appendChild(badge);
+  const hostRect = shell.getBoundingClientRect();
+  const compact = hostRect.width < 72 || hostRect.height < 24;
+  const marker = document.createElement('div');
+  marker.className = FRAME_KIND_MARKER_CLASS;
+  marker.setAttribute('data-box-kind', boxKind);
+  marker.setAttribute('data-frame-role', role);
+  marker.setAttribute('data-compact', compact ? 'true' : 'false');
+  marker.setAttribute('data-tooltip', `${FRAME_BOX_KIND_SHORT_LABELS[boxKind]} · ${FRAME_ROLE_SHORT_LABELS[role]}`);
+  shell.setAttribute('data-template-frame-marker-host', 'true');
+  marker.innerHTML = renderFrameMetadataMarkerMarkup(boxKind, role, compact);
+  shell.appendChild(marker);
 };
 
 const renderRelativeAnchorGuides = (root: HTMLElement, selectedIds: string[]) => {
@@ -4522,6 +4691,15 @@ const clearFrameValidationErrorUi = (root: ParentNode) => {
   });
 };
 
+const stripFrameMetadataMarkers = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`.${FRAME_KIND_MARKER_CLASS}`).forEach((element) => {
+    element.remove();
+  });
+  root.querySelectorAll<HTMLElement>('[data-template-frame-marker-host="true"]').forEach((element) => {
+    element.removeAttribute('data-template-frame-marker-host');
+  });
+};
+
 const applyFrameValidationErrorUi = (root: HTMLElement, frameGroupIds: string[]) => {
   clearFrameValidationErrorUi(root);
 
@@ -4545,6 +4723,7 @@ const extractEditorHtml = (root: HTMLElement) => {
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
   clearFrameValidationErrorUi(container);
+  stripFrameMetadataMarkers(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   return container.innerHTML.trim();
 };
@@ -4574,6 +4753,9 @@ const applyPreviewEditPermissions = (root: HTMLElement) => {
 const applyFrameCanvasVisualHints = (root: HTMLElement) => {
   const frameNodes = collectFrameSelectionAnchors(root);
   const parentGroupIds = new Set(frameNodes.map((node) => readFrameParentGroupId(node)).filter(Boolean));
+  root.querySelectorAll<HTMLElement>(`.${FRAME_KIND_MARKER_CLASS}`).forEach((element) => {
+    element.remove();
+  });
 
   frameNodes.forEach((node) => {
     const boxKind = readFrameBoxKind(node);
@@ -4584,6 +4766,7 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
     node.setAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR, isKeyLike ? 'full' : 'muted');
     node.setAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
     node.setAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
+    appendFrameKindMarker(node, boxKind, role);
   });
 };
 
@@ -4645,13 +4828,11 @@ const applyFrameRelationSelectionUi = (
 
     if (hasLinkedValues) {
       node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, isActive ? 'linked-key' : 'passive-key');
-      appendFrameRelationBadge(node, 'KEY', 'key');
       return;
     }
 
     if (isLinkedValue) {
       node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, isActive ? 'linked-value' : 'passive-value');
-      appendFrameRelationBadge(node, 'VALUE', 'value');
     }
   });
 
@@ -4663,13 +4844,11 @@ const applyFrameRelationSelectionUi = (
 
       if (frameGroupId === linkedKeyFrameGroupId) {
         node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-key');
-        appendFrameRelationBadge(node, '현재 KEY', 'key');
         return;
       }
 
       if (sourceIds.has(frameGroupId)) {
         node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-value');
-        appendFrameRelationBadge(node, 'VALUE', 'value');
         return;
       }
 
@@ -4686,13 +4865,11 @@ const applyFrameRelationSelectionUi = (
 
     if (frameGroupId === relationMode.sourceKeyFrameGroupId) {
       node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-key');
-      appendFrameRelationBadge(node, '현재 KEY', 'key');
       return;
     }
 
     if (targetIds.has(frameGroupId)) {
       node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-value');
-      appendFrameRelationBadge(node, 'VALUE', 'value');
     }
   });
 };
@@ -5807,6 +5984,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('summary');
+  const [showMetadataIcons, setShowMetadataIcons] = React.useState(true);
   const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
     kind: 'idle',
   });
@@ -10656,26 +10834,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="group"] {
-          background-color: rgba(148, 163, 184, .12) !important;
+          background-image: linear-gradient(90deg, rgba(148, 163, 184, .78) 0 4px, transparent 4px) !important;
+          background-color: rgba(148, 163, 184, .03) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"] {
-          background-color: rgba(245, 158, 11, .14) !important;
+          background-image: linear-gradient(90deg, rgba(245, 158, 11, .92) 0 4px, transparent 4px) !important;
+          background-color: rgba(245, 158, 11, .04) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"] {
-          background-color: rgba(59, 130, 246, .12) !important;
+          background-image: linear-gradient(90deg, rgba(59, 130, 246, .92) 0 4px, transparent 4px) !important;
+          background-color: rgba(59, 130, 246, .04) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
-          background-color: rgba(16, 185, 129, .12) !important;
+          background-image: linear-gradient(90deg, rgba(16, 185, 129, .92) 0 4px, transparent 4px) !important;
+          background-color: rgba(16, 185, 129, .04) !important;
         }
         .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"] {
           outline: 1px solid rgba(37, 99, 235, .42) !important;
           outline-offset: -1px;
-          box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .32);
+          box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .24);
         }
         .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"] {
           outline: 1px solid rgba(217, 119, 6, .42) !important;
           outline-offset: -1px;
-          box-shadow: inset 0 0 0 1px rgba(217, 119, 6, .32);
+          box-shadow: inset 0 0 0 1px rgba(217, 119, 6, .24);
         }
         .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
           outline: 2px solid rgba(37, 99, 235, .96) !important;
@@ -10696,30 +10878,116 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             inset 0 0 0 2px rgba(217, 119, 6, .92),
             0 0 0 4px rgba(251, 191, 36, .18);
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}]::after {
+        .template-edit-preview[data-metadata-icon-visual-mode="false"] .${FRAME_KIND_MARKER_CLASS} {
+          display: none;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} {
           position: absolute;
-          top: 6px;
+          top: 4px;
           left: 6px;
-          z-index: 24;
-          border-radius: 999px;
-          color: #f8fafc;
-          padding: 2px 8px;
-          font-size: 10px;
-          line-height: 1.2;
-          font-weight: 700;
+          z-index: 26;
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
           pointer-events: none;
+          opacity: 1;
+          transition: opacity .12s ease, transform .12s ease;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="text"]::after {
-          content: 'TEXT';
-          background: rgba(15, 118, 110, .96);
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] {
+          top: 1px;
+          left: 1px;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="attachment"]::after {
-          content: 'FILE';
-          background: rgba(217, 119, 6, .96);
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__stack {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="signature"]::after {
-          content: 'SIGN';
-          background: rgba(225, 29, 72, .96);
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] .v106-frame-kind-marker__stack {
+          gap: 2px;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__pill {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 16px;
+          min-width: 16px;
+          border-radius: 999px;
+          padding: 2px;
+          border: 1px solid rgba(148, 163, 184, .32);
+          background: rgba(255, 255, 255, .96);
+          color: rgba(15, 23, 42, .92);
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] .v106-frame-kind-marker__pill {
+          min-height: 11px;
+          min-width: 11px;
+          padding: 1px;
+          border-radius: 999px;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 12px;
+          height: 12px;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] .v106-frame-kind-marker__icon {
+          width: 8px;
+          height: 8px;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__text {
+          display: none;
+          margin-left: 3px;
+          font-size: 10px;
+          line-height: 1;
+          font-weight: 700;
+          letter-spacing: -0.01em;
+          white-space: nowrap;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} svg {
+          width: 11px;
+          height: 11px;
+          display: block;
+          stroke: currentColor;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] svg {
+          width: 8px;
+          height: 8px;
+        }
+        .template-edit-preview [data-template-selected="true"] .${FRAME_KIND_MARKER_CLASS}:not([data-compact="true"]) .v106-frame-kind-marker__text,
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] .${FRAME_KIND_MARKER_CLASS}:not([data-compact="true"]) .v106-frame-kind-marker__text,
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] .${FRAME_KIND_MARKER_CLASS}:not([data-compact="true"]) .v106-frame-kind-marker__text {
+          display: inline-block;
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="kind"][data-box-kind="text"] {
+          color: rgba(15, 118, 110, .98);
+          background: rgba(240, 253, 250, .98);
+          border-color: rgba(153, 246, 228, .72);
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="kind"][data-box-kind="attachment"] {
+          color: rgba(217, 119, 6, .98);
+          background: rgba(255, 251, 235, .98);
+          border-color: rgba(253, 230, 138, .76);
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="kind"][data-box-kind="signature"] {
+          color: rgba(225, 29, 72, .98);
+          background: rgba(255, 241, 242, .98);
+          border-color: rgba(253, 164, 175, .76);
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="key"] {
+          color: rgba(217, 119, 6, .98);
+          background: rgba(255, 251, 235, .98);
+          border-color: rgba(253, 230, 138, .76);
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="value"] {
+          color: rgba(37, 99, 235, .98);
+          background: rgba(239, 246, 255, .98);
+          border-color: rgba(147, 197, 253, .76);
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="key_value"],
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="group"] {
+          color: rgba(5, 150, 105, .98);
+          background: rgba(236, 253, 245, .98);
+          border-color: rgba(167, 243, 208, .76);
         }
         .template-edit-preview [data-template-frame-input="true"][${TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR}="true"] {
           opacity: 0;
@@ -10749,33 +11017,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           line-height: 1.2;
           font-weight: 700;
           pointer-events: none;
-        }
-        .template-edit-preview .${FRAME_RELATION_BADGE_CLASS} {
-          position: absolute;
-          left: 6px;
-          bottom: 6px;
-          z-index: 26;
-          border-radius: 999px;
-          color: #f8fafc;
-          padding: 2px 8px;
-          font-size: 10px;
-          line-height: 1.2;
-          font-weight: 700;
-          pointer-events: none;
-          box-shadow: 0 4px 12px rgba(15, 23, 42, .18);
-          opacity: .5;
-          transition: opacity .12s ease;
-        }
-        .template-edit-preview .${FRAME_RELATION_BADGE_CLASS}[data-relation-badge-tone="key"] {
-          background: rgba(217, 119, 6, .96);
-        }
-        .template-edit-preview .${FRAME_RELATION_BADGE_CLASS}[data-relation-badge-tone="value"] {
-          background: rgba(2, 132, 199, .96);
-        }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] .${FRAME_RELATION_BADGE_CLASS},
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] .${FRAME_RELATION_BADGE_CLASS},
-        .template-edit-preview [data-template-selected="true"] .${FRAME_RELATION_BADGE_CLASS} {
-          opacity: 1;
         }
         .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS} {
           position: absolute;
@@ -11049,18 +11290,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr]">
         <Card className="border-slate-200">
           <CardHeader>
-            <div className="space-y-1">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
               <CardTitle>박스 편집 캔버스</CardTitle>
-              <CardDescription>
-                엣지를 1회 클릭하면 직접 연결된 엣지 cohort 가 선택되고, 같은 엣지를 다시 클릭하면 해당 엣지만 단독 선택됩니다.
-                `Shift + drag` 좌→우는 영역 안에 완전히 들어온 div 박스만, 우→좌는 닿은 div 박스까지 선택합니다.
-              </CardDescription>
+              <MetadataCanvasLegend
+                showMetadataIcons={showMetadataIcons}
+                onToggleMetadataIcons={() => setShowMetadataIcons((previous) => !previous)}
+              />
             </div>
           </CardHeader>
           <TemplateEditPreviewSurface
             renderedPreviewHtml={renderedPreviewHtml}
             boxCreationMode={boxCreationMode}
             metadataVisualMode={selectionPanelTab === 'metadata'}
+            showMetadataIcons={showMetadataIcons}
             setPreviewNode={setPreviewNode}
             handlePreviewPointerDown={handlePreviewPointerDown}
             handlePreviewPointerMove={handlePreviewPointerMove}
