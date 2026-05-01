@@ -108,6 +108,11 @@ type ResolvedFrameMetadata = {
   runtimeMode: TemplateFrameRuntimeMode;
 };
 
+type MetadataRelationSelectionMode =
+  | { kind: 'idle' }
+  | { kind: 'parent'; sourceFrameGroupIds: string[] }
+  | { kind: 'value'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
+
 type SelectionPanelTab = 'summary' | 'create' | 'metadata' | 'style';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
@@ -354,6 +359,7 @@ const TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR = 'data-template-frame-relative-anch
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR = 'data-template-frame-relative-anchor-y';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR = 'data-template-frame-relative-offset-x';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR = 'data-template-frame-relative-offset-y';
+const TEMPLATE_FRAME_RELATION_SELECTION_ATTR = 'data-template-frame-relation-selection';
 const FRAME_RELATIVE_ANCHOR_GUIDE_CLASS = 'v106-frame-relative-anchor-guide';
 const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
 const CREATED_FRAME_GROUP_PREFIX = 'user-box';
@@ -438,7 +444,7 @@ const FRAME_ROLE_LABELS: Record<TemplateFrameRole, string> = {
 };
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
   key: '다른 value 박스들을 묶는 기준 박스입니다. 보통 라벨이나 제목 역할을 맡습니다.',
-  value: '어떤 key 박스에 속한 실제 입력값 박스입니다. 부모 key 박스가 필요합니다.',
+  value: '어떤 key 박스에 속한 실제 입력값 박스입니다. 연결된 key 박스가 필요합니다.',
   key_value: '상위 key 없이 자기 자신이 하나의 완결된 값이 되는 독립 박스입니다.',
 };
 const FRAME_RUNTIME_MODE_LABELS: Record<TemplateFrameRuntimeMode, string> = {
@@ -536,6 +542,9 @@ const normalizeFrameValueKey = (value: string) =>
     .map((segment) => segment.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .join(' > ');
+
+const stringArraysEqual = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
 
 const getCompatibleRuntimeModes = (boxKind: TemplateFrameBoxKind) => {
   if (boxKind === 'attachment') {
@@ -4424,6 +4433,9 @@ const stripSelectionAttrs = (
       element.removeAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
     }
   });
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
+  });
 };
 
 const clearFrameValidationErrorUi = (root: ParentNode) => {
@@ -4494,6 +4506,44 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
     node.setAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR, isKeyLike ? 'full' : 'muted');
     node.setAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
     node.setAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
+  });
+};
+
+const applyFrameRelationSelectionUi = (root: HTMLElement, relationMode: MetadataRelationSelectionMode) => {
+  const frameNodes = collectFrameSelectionAnchors(root);
+
+  frameNodes.forEach((node) => {
+    node.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
+  });
+
+  if (relationMode.kind === 'idle') {
+    return;
+  }
+
+  if (relationMode.kind === 'parent') {
+    const sourceIds = new Set(relationMode.sourceFrameGroupIds);
+    frameNodes.forEach((node) => {
+      const frameGroupId = getFrameGroupId(node);
+
+      if (sourceIds.has(frameGroupId)) {
+        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'parent-source');
+      }
+    });
+    return;
+  }
+
+  const targetIds = new Set(relationMode.targetFrameGroupIds);
+  frameNodes.forEach((node) => {
+    const frameGroupId = getFrameGroupId(node);
+
+    if (frameGroupId === relationMode.sourceKeyFrameGroupId) {
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'value-source');
+      return;
+    }
+
+    if (targetIds.has(frameGroupId)) {
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'value-target');
+    }
   });
 };
 
@@ -4596,6 +4646,60 @@ const resolveFrameContentTarget = (node: HTMLElement) => {
     node.querySelector<HTMLElement>('[data-template-edit-scope]') ||
     node
   );
+};
+
+const readFrameDisplayText = (node: HTMLElement | null | undefined) => {
+  if (!node) {
+    return '';
+  }
+
+  const contentTarget = resolveFrameContentTarget(node);
+
+  if (contentTarget instanceof HTMLTextAreaElement) {
+    return String(contentTarget.value || contentTarget.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  return String(contentTarget.textContent || '').replace(/\s+/g, ' ').trim();
+};
+
+const deriveFrameValueKey = (
+  node: HTMLElement,
+  frameNodeById: Map<string, HTMLElement>,
+  resolvedMetadata?: ResolvedFrameMetadata | null
+) => {
+  const metadata = resolvedMetadata || resolveNextFrameMetadata(node, {});
+  const frameGroupId = getFrameGroupId(node);
+
+  if (isStatusHistoryFrameNode(node)) {
+    return '상태 이력';
+  }
+
+  if (metadata.role === 'value' && metadata.parentGroupId) {
+    const parentNode = frameNodeById.get(metadata.parentGroupId) || null;
+    const parentLabel =
+      normalizeFrameValueKey(readFrameDisplayText(parentNode || null)) ||
+      normalizeFrameValueKey(parentNode ? readFrameValueKey(parentNode) : '') ||
+      metadata.parentGroupId;
+    return parentLabel;
+  }
+
+  if (metadata.role === 'key_value') {
+    return normalizeFrameValueKey(readFrameDisplayText(node)) || frameGroupId;
+  }
+
+  return '';
+};
+
+const syncFrameRelationshipValueKeys = (root: HTMLElement, metadataById?: Map<string, ResolvedFrameMetadata>) => {
+  const frameNodes = collectFrameSelectionAnchors(root);
+  const frameNodeById = new Map(frameNodes.map((node) => [getFrameGroupId(node), node] as const));
+
+  frameNodes.forEach((node) => {
+    const nextValueKey = deriveFrameValueKey(node, frameNodeById, metadataById?.get(getFrameGroupId(node)) || null);
+    applyFrameMetadataPatch(node, { valueKey: nextValueKey });
+  });
 };
 
 const buildResizeHandle = (direction: TemplateFrameResizeDirection) => {
@@ -5546,6 +5650,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('summary');
+  const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
+    kind: 'idle',
+  });
   const [selectionSaveProgress, setSelectionSaveProgress] =
     React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
   const [selectionValidationIssues, setSelectionValidationIssues] = React.useState<FrameMetadataValidationIssue[]>([]);
@@ -5559,6 +5666,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const edgeSelectionStateRef = React.useRef<TemplateEdgeSelectionStateDto>(TemplateEdgeSelectionService.createEmptyState());
   const edgeRoleDiagnosticsRef = React.useRef<EdgeRoleDiagnosticsState>(emptyEdgeRoleDiagnosticsState);
   const syncedFrameMetadataDraftRef = React.useRef<FrameMetadataDraft>(defaultFrameMetadataDraft);
+  const metadataRelationSelectionModeRef = React.useRef<MetadataRelationSelectionMode>({ kind: 'idle' });
   const activePointerOwnerRef = React.useRef<HTMLDivElement | null>(null);
   const dragStateRef = React.useRef<DragState | null>(null);
   const resizeStateRef = React.useRef<ResizeState | null>(null);
@@ -5645,6 +5753,55 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return FRAME_RUNTIME_MODE_DESCRIPTIONS[frameMetadataDraft.runtimeMode];
   }, [frameMetadataDraft.boxKind, frameMetadataDraft.runtimeMode]);
+  const primarySelectedResolvedMetadata = React.useMemo(() => {
+    if (!primarySelectedFrameGroupId || !previewRef.current) {
+      return null;
+    }
+
+    const frameNode = resolveFrameSelectionAnchor(
+      previewRef.current.querySelector<HTMLElement>(
+        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${primarySelectedFrameGroupId}"]`
+      )
+    );
+
+    return frameNode ? resolveNextFrameMetadata(frameNode, {}) : null;
+  }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
+  const currentParentKeyBoxLabel = React.useMemo(() => {
+    const parentGroupId = frameMetadataDraft.parentGroupId.trim();
+
+    if (!parentGroupId || !previewRef.current) {
+      return parentGroupId || '-';
+    }
+
+    const parentNode = resolveFrameSelectionAnchor(
+      previewRef.current.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${parentGroupId}"]`)
+    );
+    const parentText = readFrameDisplayText(parentNode);
+
+    return parentText ? `${parentGroupId} | ${parentText}` : parentGroupId;
+  }, [frameMetadataDraft.parentGroupId, renderedPreviewHtml]);
+  const keyBoxSelectionHelpText = React.useMemo(() => {
+    if (metadataRelationSelectionMode.kind === 'parent') {
+      const count = metadataRelationSelectionMode.sourceFrameGroupIds.length;
+
+      return count > 1
+        ? `현재 value 박스 ${count}개가 선택된 상태입니다. 이제 이 값들을 묶는 key 박스를 캔버스에서 1개 선택해주세요.`
+        : '현재 value 박스 1개가 선택된 상태입니다. 이제 이 값의 key 박스를 캔버스에서 1개 선택해주세요.';
+    }
+
+    return '먼저 value로 만들 박스를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 박스들의 key가 될 text 박스 1개를 선택합니다.';
+  }, [metadataRelationSelectionMode]);
+  const valueBoxSelectionHelpText = React.useMemo(() => {
+    if (metadataRelationSelectionMode.kind === 'value') {
+      return '현재 key 박스가 선택된 상태입니다. 이제 이 key에 연결할 value 박스들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.';
+    }
+
+    return '먼저 기준이 될 key 박스 1개를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 key에 연결할 value 박스들을 선택합니다.';
+  }, [metadataRelationSelectionMode]);
+  const canStartValueBoxSelection =
+    canEditSingleSelection &&
+    Boolean(primarySelectedFrameGroupId) &&
+    primarySelectedResolvedMetadata?.boxKind === 'text';
   const primarySelectedFramePositionMode = React.useMemo(() => {
     if (!primarySelectedFrameGroupId || !previewRef.current) {
       return null;
@@ -5684,6 +5841,38 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
     return collectRelativeFlowAffectedFrameGroupIds(frameNode);
   }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
+
+  React.useEffect(() => {
+    metadataRelationSelectionModeRef.current = metadataRelationSelectionMode;
+  }, [metadataRelationSelectionMode]);
+
+  React.useEffect(() => {
+    if (metadataRelationSelectionMode.kind === 'idle') {
+      return;
+    }
+
+    if (
+      metadataRelationSelectionMode.kind === 'parent' &&
+      stringArraysEqual(selectedFrameGroupIds, metadataRelationSelectionMode.sourceFrameGroupIds)
+    ) {
+      return;
+    }
+
+    if (
+      metadataRelationSelectionMode.kind === 'value' &&
+      metadataRelationSelectionMode.sourceKeyFrameGroupId === primarySelectedFrameGroupId
+    ) {
+      return;
+    }
+
+    setMetadataRelationSelectionMode({ kind: 'idle' });
+  }, [metadataRelationSelectionMode, primarySelectedFrameGroupId, selectedFrameGroupIds]);
+
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'metadata' && metadataRelationSelectionModeRef.current.kind !== 'idle') {
+      setMetadataRelationSelectionMode({ kind: 'idle' });
+    }
+  }, [selectionPanelTab]);
 
   const syncTemplateQuery = React.useCallback((templateId: string) => {
     if (typeof window === 'undefined') {
@@ -5774,6 +5963,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .filter((frameGroupId) => Boolean(frameGroupId))
       .sort((left, right) => left.localeCompare(right, 'ko'));
   }, [getFrameNodes, renderedPreviewHtml, selectedFrameGroupIds]);
+  const currentValueBoxFrameGroupIds = React.useMemo(() => {
+    if (!primarySelectedFrameGroupId || !previewRef.current) {
+      return [];
+    }
+
+    return getFrameNodes(previewRef.current)
+      .filter((node) => readFrameParentGroupId(node) === primarySelectedFrameGroupId)
+      .map((node) => getFrameGroupId(node))
+      .filter(Boolean);
+  }, [getFrameNodes, primarySelectedFrameGroupId, renderedPreviewHtml]);
+  const shownValueBoxFrameGroupIds = React.useMemo(() => {
+    if (
+      metadataRelationSelectionMode.kind === 'value' &&
+      metadataRelationSelectionMode.sourceKeyFrameGroupId === primarySelectedFrameGroupId
+    ) {
+      return metadataRelationSelectionMode.targetFrameGroupIds;
+    }
+
+    return currentValueBoxFrameGroupIds;
+  }, [currentValueBoxFrameGroupIds, metadataRelationSelectionMode, primarySelectedFrameGroupId]);
+  const valueBoxPickerSummary = React.useMemo(() => {
+    if (!shownValueBoxFrameGroupIds.length) {
+      return '-';
+    }
+
+    if (!previewRef.current) {
+      return shownValueBoxFrameGroupIds.join(', ');
+    }
+
+    return shownValueBoxFrameGroupIds
+      .map((frameGroupId) => {
+        const node = resolveFrameSelectionAnchor(
+          previewRef.current?.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
+        );
+        const text = readFrameDisplayText(node);
+        return text ? `${frameGroupId} | ${text}` : frameGroupId;
+      })
+      .join(', ');
+  }, [renderedPreviewHtml, shownValueBoxFrameGroupIds]);
 
   const previewHasStableFrameLayout = React.useCallback((root: ParentNode) => {
     const frameNodes = Array.from(root.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
@@ -6475,6 +6703,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
+      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -6537,6 +6766,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
+      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -6569,6 +6799,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
+      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
     },
     [buildLiveEdgeTopologySnapshot, reconcileLiveEdgeSelection, resolveEdgeRolePresentation]
   );
@@ -6951,6 +7182,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextEdgeRolePresentation.edgeRoleById,
         nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
       );
+      applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -7009,6 +7241,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       nextEdgeRolePresentation.edgeRoleById,
       nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
     );
+    applyFrameRelationSelectionUi(root, metadataRelationSelectionModeRef.current);
     setEdgeRoleDiagnostics((previous) =>
       edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
         ? previous
@@ -7037,6 +7270,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
   }, [renderedPreviewHtml, selectionValidationErrorFrameIds, selectedFrameGroupIds, selectionPanelTab]);
+
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    applyFrameRelationSelectionUi(root, metadataRelationSelectionMode);
+  }, [metadataRelationSelectionMode, renderedPreviewHtml, selectedFrameGroupIds]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || hasActivePointerInteraction()) {
@@ -7161,6 +7404,144 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   React.useEffect(() => {
     syncFrameMetadataDraft();
   }, [selectedFrameGroupIds, syncFrameMetadataDraft, templateDetail?.template.id]);
+
+  const startParentKeySelectionMode = React.useCallback(() => {
+    const activeSelectionIds = selectedFrameGroupIdsRef.current;
+
+    if (activeSelectionIds.length === 0) {
+      setMessage('먼저 key로 묶을 value 박스를 선택하세요.');
+      return;
+    }
+
+    clearTransientCanvasOverlays();
+    setMetadataRelationSelectionMode({
+      kind: 'parent',
+      sourceFrameGroupIds: activeSelectionIds.slice(),
+    });
+    setMessage(
+      activeSelectionIds.length > 1
+        ? `현재 value 박스 ${activeSelectionIds.length}개가 선택된 상태입니다. 이제 이 값들을 묶는 key 박스를 캔버스에서 1개 선택해주세요.`
+        : '현재 value 박스 1개가 선택된 상태입니다. 이제 이 값의 key 박스를 캔버스에서 1개 선택해주세요.'
+    );
+  }, [clearTransientCanvasOverlays]);
+
+  const startValueBoxSelectionMode = React.useCallback(() => {
+    const root = previewRef.current;
+    const sourceKeyFrameGroupId = selectedFrameGroupIdsRef.current[0] || '';
+
+    if (!root || selectedFrameGroupIdsRef.current.length !== 1 || !sourceKeyFrameGroupId) {
+      setMessage('먼저 기준이 될 key 박스 1개를 선택하세요.');
+      return;
+    }
+
+    const sourceNode = resolveFrameSelectionAnchor(
+      root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${sourceKeyFrameGroupId}"]`)
+    );
+    const sourceMetadata = sourceNode ? resolveNextFrameMetadata(sourceNode, {}) : null;
+
+    if (!sourceNode || !sourceMetadata || sourceMetadata.boxKind !== 'text') {
+      setMessage('key 박스로 사용할 기준 박스는 text 박스여야 합니다.');
+      return;
+    }
+
+    const existingTargetFrameGroupIds = getFrameNodes(root)
+      .filter((node) => readFrameParentGroupId(node) === sourceKeyFrameGroupId)
+      .map((node) => getFrameGroupId(node))
+      .filter(Boolean);
+
+    clearTransientCanvasOverlays();
+    setFrameMetadataDraft((previous) => ({
+      ...previous,
+      role: 'key',
+      parentGroupId: '',
+      valueKey: '',
+    }));
+    setMetadataRelationSelectionMode({
+      kind: 'value',
+      sourceKeyFrameGroupId,
+      targetFrameGroupIds: existingTargetFrameGroupIds,
+    });
+    setMessage('현재 key 박스가 선택된 상태입니다. 이제 이 key에 연결할 value 박스들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.');
+  }, [clearTransientCanvasOverlays, getFrameNodes]);
+
+  const clearParentKeySelectionDraft = React.useCallback(() => {
+    setFrameMetadataDraft((previous) => ({
+      ...previous,
+      parentGroupId: '',
+      valueKey: '',
+    }));
+    if (metadataRelationSelectionModeRef.current.kind === 'parent') {
+      setMetadataRelationSelectionMode({ kind: 'idle' });
+    }
+    setMessage('연결할 key 박스를 비웠습니다.');
+  }, []);
+
+  const handleMetadataRelationFramePick = React.useCallback(
+    (frameGroupId: string) => {
+      const root = previewRef.current;
+      const relationMode = metadataRelationSelectionModeRef.current;
+
+      if (!root || relationMode.kind === 'idle') {
+        return false;
+      }
+
+      const targetNode = resolveFrameSelectionAnchor(
+        root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
+      );
+
+      if (!targetNode) {
+        return false;
+      }
+
+      if (relationMode.kind === 'parent') {
+        if (relationMode.sourceFrameGroupIds.includes(frameGroupId)) {
+          setMessage('선택된 박스 자신을 key 박스로 지정할 수 없습니다.');
+          return true;
+        }
+
+        const targetMetadata = resolveNextFrameMetadata(targetNode, {});
+
+        if (targetMetadata.boxKind !== 'text') {
+          setMessage('key 박스는 text 박스여야 합니다.');
+          return true;
+        }
+
+        const nextValueKey = normalizeFrameValueKey(readFrameDisplayText(targetNode)) || frameGroupId;
+        setFrameMetadataDraft((previous) => ({
+          ...previous,
+          role: 'value',
+          parentGroupId: frameGroupId,
+          valueKey: nextValueKey,
+        }));
+        setMetadataRelationSelectionMode({ kind: 'idle' });
+        applyRuntimeSelectionVisuals(relationMode.sourceFrameGroupIds, edgeSelectionStateRef.current);
+        setMessage(`key 박스를 ${frameGroupId} 로 지정했습니다. 저장하면 선택된 박스들에 반영됩니다.`);
+        return true;
+      }
+
+      if (frameGroupId === relationMode.sourceKeyFrameGroupId) {
+        setMessage('현재 선택된 key 박스 자신은 value 박스로 선택할 수 없습니다.');
+        return true;
+      }
+
+      const nextTargetFrameGroupIds = relationMode.targetFrameGroupIds.includes(frameGroupId)
+        ? relationMode.targetFrameGroupIds.filter((targetId) => targetId !== frameGroupId)
+        : [...relationMode.targetFrameGroupIds, frameGroupId];
+
+      setMetadataRelationSelectionMode({
+        kind: 'value',
+        sourceKeyFrameGroupId: relationMode.sourceKeyFrameGroupId,
+        targetFrameGroupIds: nextTargetFrameGroupIds,
+      });
+      setMessage(
+        nextTargetFrameGroupIds.length > 0
+          ? `현재 key 박스가 선택된 상태입니다. value 박스 ${nextTargetFrameGroupIds.length}개가 연결 예정입니다. 계속 선택하거나 저장하세요.`
+          : '현재 key 박스가 선택된 상태입니다. 아직 연결 예정인 value 박스가 없습니다.'
+      );
+      return true;
+    },
+    [applyRuntimeSelectionVisuals]
+  );
 
   const waitForNextPaint = React.useCallback(
     () =>
@@ -7289,14 +7670,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const nextDraft = readFrameMetadataDraftFromControls();
-    const nodes = getFrameNodes(root).filter((node) => activeSelectionIds.includes(getFrameGroupId(node)));
     const frameNodeById = new Map(
       getFrameNodes(root)
         .map((node) => [getFrameGroupId(node), node] as const)
         .filter(([frameGroupId]) => Boolean(frameGroupId))
     );
+    const relationMode = metadataRelationSelectionModeRef.current;
 
-    if (!nodes.length) {
+    if (!activeSelectionIds.some((frameGroupId) => frameNodeById.has(frameGroupId))) {
       return {
         ok: false,
         skipped: false,
@@ -7306,8 +7687,49 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const metadataPatch = buildFrameMetadataChangePatch(nextDraft, syncedFrameMetadataDraftRef.current);
     const hasMetadataChanges = Object.values(metadataPatch).some((value) => value !== undefined);
+    const relationPatchByFrameId = new Map<string, FrameMetadataPatch>();
+    let hasRelationChanges = false;
 
-    if (!hasMetadataChanges) {
+    if (relationMode.kind === 'value') {
+      const sourceKeyFrameGroupId = relationMode.sourceKeyFrameGroupId;
+      const desiredTargetFrameGroupIds = Array.from(
+        new Set(relationMode.targetFrameGroupIds.filter((frameGroupId) => frameGroupId && frameGroupId !== sourceKeyFrameGroupId))
+      );
+      const existingTargetFrameGroupIds = Array.from(frameNodeById.entries())
+        .filter(([, node]) => readFrameParentGroupId(node) === sourceKeyFrameGroupId)
+        .map(([frameGroupId]) => frameGroupId);
+      const sourceNode = frameNodeById.get(sourceKeyFrameGroupId) || null;
+      const derivedValueKey =
+        normalizeFrameValueKey(readFrameDisplayText(sourceNode)) ||
+        (sourceNode ? normalizeFrameValueKey(readFrameValueKey(sourceNode)) : '') ||
+        sourceKeyFrameGroupId;
+
+      desiredTargetFrameGroupIds.forEach((frameGroupId) => {
+        relationPatchByFrameId.set(frameGroupId, {
+          role: 'value',
+          parentGroupId: sourceKeyFrameGroupId,
+          valueKey: derivedValueKey,
+        });
+      });
+
+      existingTargetFrameGroupIds
+        .filter((frameGroupId) => !desiredTargetFrameGroupIds.includes(frameGroupId))
+        .forEach((frameGroupId) => {
+          relationPatchByFrameId.set(frameGroupId, {
+            role: 'key_value',
+            parentGroupId: '',
+            valueKey: '',
+          });
+        });
+
+      hasRelationChanges =
+        !stringArraysEqual(
+          existingTargetFrameGroupIds.slice().sort((left, right) => left.localeCompare(right, 'ko')),
+          desiredTargetFrameGroupIds.slice().sort((left, right) => left.localeCompare(right, 'ko'))
+        );
+    }
+
+    if (!hasMetadataChanges && !hasRelationChanges) {
       return {
         ok: true,
         skipped: true,
@@ -7315,11 +7737,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
     }
 
+    const affectedFrameGroupIds = Array.from(new Set([...activeSelectionIds, ...Array.from(relationPatchByFrameId.keys())]));
+    const affectedNodes = affectedFrameGroupIds
+      .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
+      .filter((node): node is HTMLElement => Boolean(node));
     const resolvedMetadataById = new Map<string, ResolvedFrameMetadata>();
     frameNodeById.forEach((node, frameGroupId) => {
-      const nextMetadata = activeSelectionIds.includes(frameGroupId)
-        ? resolveNextFrameMetadata(node, metadataPatch)
-        : resolveNextFrameMetadata(node, {});
+      const nextMetadata = resolveNextFrameMetadata(node, {
+        ...(activeSelectionIds.includes(frameGroupId) ? metadataPatch : {}),
+        ...(relationPatchByFrameId.get(frameGroupId) || {}),
+      });
       const normalizedMetadata =
         nextMetadata.role === 'value'
           ? nextMetadata
@@ -7332,7 +7759,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const issues: FrameMetadataValidationIssue[] = [];
 
-    nodes.forEach((node) => {
+    affectedNodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
       const nextMetadata = resolvedMetadataById.get(frameGroupId);
 
@@ -7350,21 +7777,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (nextMetadata.role === 'value' && !nextMetadata.parentGroupId) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 value 역할이라 부모 key 박스가 필요합니다.`,
+          message: `${frameGroupId} 는 value 역할이라 연결된 key 박스가 필요합니다.`,
         });
       }
 
       if (nextMetadata.parentGroupId && !availableFrameGroupIds.includes(nextMetadata.parentGroupId)) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+          message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
         });
       }
 
       if (nextMetadata.parentGroupId === frameGroupId) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 자기 자신을 부모 key 박스로 가질 수 없습니다.`,
+          message: `${frameGroupId} 는 자기 자신을 key 박스로 가질 수 없습니다.`,
         });
       }
 
@@ -7374,12 +7801,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         if (!parentMetadata) {
           issues.push({
             frameGroupId,
-            message: `${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+            message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
           });
         } else if (parentMetadata.boxKind !== 'text' || parentMetadata.role !== 'key') {
           issues.push({
             frameGroupId,
-            message: `${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 는 text key 박스여야 합니다.`,
+            message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 는 text key 박스여야 합니다.`,
           });
         }
       }
@@ -7390,7 +7817,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       ) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 의 부모 key 연결에 순환 참조가 있습니다.`,
+          message: `${frameGroupId} 의 key 연결에 순환 참조가 있습니다.`,
         });
       }
 
@@ -7410,20 +7837,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
     }
 
-    nodes.forEach((node) => {
+    affectedNodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
       const nextMetadata = resolvedMetadataById.get(frameGroupId);
+      const mergedPatch = {
+        ...(activeSelectionIds.includes(frameGroupId) ? metadataPatch : {}),
+        ...(relationPatchByFrameId.get(frameGroupId) || {}),
+      };
 
       if (!nextMetadata) {
         return;
       }
 
       applyFrameMetadataPatch(node, {
-        boxKind: metadataPatch.boxKind,
-        role: metadataPatch.role,
-        valueKey: metadataPatch.valueKey,
+        boxKind: mergedPatch.boxKind,
+        role: mergedPatch.role,
+        valueKey: nextMetadata.valueKey,
         parentGroupId:
-          metadataPatch.parentGroupId !== undefined || metadataPatch.role !== undefined
+          mergedPatch.parentGroupId !== undefined || mergedPatch.role !== undefined
             ? nextMetadata.role === 'value'
               ? nextMetadata.parentGroupId
               : ''
@@ -7432,8 +7863,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
     });
 
+    syncFrameRelationshipValueKeys(root, resolvedMetadataById);
     syncDraftPreviewHtmlRef();
     syncFrameMetadataDraft();
+    if (relationMode.kind === 'value') {
+      setMetadataRelationSelectionMode({ kind: 'idle' });
+    }
     requestPreviewTextFit();
     return {
       ok: true,
@@ -8766,6 +9201,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const pageInner =
         target.closest<HTMLElement>('.page-inner') || frameNode?.closest<HTMLElement>('.page-inner') || null;
 
+      if (
+        metadataRelationSelectionModeRef.current.kind !== 'idle' &&
+        frameNode &&
+        !edgeButton &&
+        !resizeHandle
+      ) {
+        const relationFrameGroupId = getFrameGroupId(frameNode);
+
+        if (relationFrameGroupId) {
+          event.preventDefault();
+          handleMetadataRelationFramePick(relationFrameGroupId);
+          return;
+        }
+      }
+
       if (boxCreationMode && pageInner) {
         const anchorFrameGroupId =
           boxCreationPositionMode === 'relative' && selectedFrameGroupIdsRef.current.length === 1
@@ -8934,6 +9384,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       buildLiveEdgeTopologySnapshot,
       applyFrameBoxSelection,
       getFrameNodes,
+      handleMetadataRelationFramePick,
       lockPreviewEditorStateDuringInteraction,
       previewZoom,
     ]
@@ -9800,6 +10251,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (metadataRelationSelectionModeRef.current.kind !== 'idle') {
+      event.preventDefault();
+      return;
+    }
+
     const target = event.target instanceof HTMLElement ? event.target : null;
     const choiceButton = target?.closest<HTMLElement>('[role="checkbox"][data-checked]');
 
@@ -9819,6 +10275,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     markTemplateValueElementEdited(target);
+    if (previewRef.current) {
+      syncFrameRelationshipValueKeys(previewRef.current);
+    }
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
   }, [requestPreviewTextFit, syncDraftPreviewHtmlRef]);
@@ -9983,6 +10442,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
           background-color: rgba(16, 185, 129, .12) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="parent-source"] {
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, .82);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="value-source"] {
+          box-shadow: inset 0 0 0 2px rgba(217, 119, 6, .82);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="value-target"] {
+          outline: 2px dashed rgba(14, 165, 233, .96) !important;
+          outline-offset: -1px;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}]::after {
           position: absolute;
@@ -10540,6 +11009,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       템플릿은 슬롯 정의만 저장하고, 실제 파일/서명 값은 템플릿을 사용하는 문서가 소유합니다.
                     </p>
                   </div>
+                  <input type="hidden" data-metadata-field="valueKey" value={frameMetadataDraft.valueKey} readOnly />
+                  <input
+                    type="hidden"
+                    data-metadata-field="parentGroupId"
+                    value={frameMetadataDraft.parentGroupId}
+                    readOnly
+                  />
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-800">Box Kind</label>
@@ -10609,37 +11085,55 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         </div>
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">Value Key</label>
-                      <Input
-                        data-metadata-field="valueKey"
-                        value={frameMetadataDraft.valueKey}
-                        disabled={!canEditSingleSelection}
-                        placeholder={canEditSingleSelection ? '예: attachment_list / issuer_signature' : '단일 선택에서만 편집 가능'}
-                        onChange={(event) =>
-                          setFrameMetadataDraft((previous) => ({ ...previous, valueKey: event.target.value }))
-                        }
-                      />
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium text-slate-800">Key Box</label>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
+                        <div className="font-semibold text-slate-900">현재 연결 예정 / 현재 연결</div>
+                        <div className="mt-1">{currentParentKeyBoxLabel}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant={metadataRelationSelectionMode.kind === 'parent' ? 'default' : 'outline'}
+                            onClick={() =>
+                              metadataRelationSelectionMode.kind === 'parent'
+                                ? setMetadataRelationSelectionMode({ kind: 'idle' })
+                                : startParentKeySelectionMode()
+                            }
+                            disabled={selectedFrameGroupIds.length === 0}
+                          >
+                            {metadataRelationSelectionMode.kind === 'parent' ? '선택 종료' : '선택 모드'}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={clearParentKeySelectionDraft}>
+                            연결 해제
+                          </Button>
+                        </div>
+                        <div className="mt-2">{keyBoxSelectionHelpText}</div>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">Parent Key Box</label>
-                      <Input
-                        data-metadata-field="parentGroupId"
-                        value={frameMetadataDraft.parentGroupId}
-                        disabled={!canEditSingleSelection}
-                        list="template-edit-parent-group-options"
-                        placeholder={canEditSingleSelection ? 'value 역할일 때만 지정' : '단일 선택에서만 편집 가능'}
-                        onChange={(event) =>
-                          setFrameMetadataDraft((previous) => ({ ...previous, parentGroupId: event.target.value }))
-                        }
-                      />
-                      <datalist id="template-edit-parent-group-options">
-                        {availableFrameGroupIds
-                          .filter((frameGroupId) => !selectedFrameGroupIds.includes(frameGroupId))
-                          .map((frameGroupId) => (
-                            <option key={frameGroupId} value={frameGroupId} />
-                          ))}
-                      </datalist>
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium text-slate-800">Value Box</label>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
+                        <div className="font-semibold text-slate-900">현재 연결 예정 / 현재 연결</div>
+                        <div className="mt-1 break-all">{valueBoxPickerSummary}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant={metadataRelationSelectionMode.kind === 'value' ? 'default' : 'outline'}
+                            onClick={() =>
+                              metadataRelationSelectionMode.kind === 'value'
+                                ? setMetadataRelationSelectionMode({ kind: 'idle' })
+                                : startValueBoxSelectionMode()
+                            }
+                            disabled={!canStartValueBoxSelection}
+                          >
+                            {metadataRelationSelectionMode.kind === 'value' ? '선택 종료' : '선택 모드'}
+                          </Button>
+                        </div>
+                        <div className="mt-2">{valueBoxSelectionHelpText}</div>
+                        <div className="mt-2 text-slate-500">
+                          key 박스의 실제 텍스트는 캔버스에서 직접 클릭해 수정합니다. 이 텍스트가 연결된 value box들의 논리 key로 사용됩니다.
+                        </div>
+                      </div>
                     </div>
                     <div className="space-y-2 md:col-span-2">
                       <label className="text-sm font-medium text-slate-800">Runtime Mode</label>
