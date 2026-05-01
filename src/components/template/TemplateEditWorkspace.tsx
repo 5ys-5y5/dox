@@ -66,6 +66,27 @@ type FrameMetadataDraft = {
   runtimeMode: TemplateFrameRuntimeMode | '';
 };
 
+type FrameMetadataValidationIssue = {
+  frameGroupId: string;
+  message: string;
+};
+
+type SelectionSaveProgressPhase = 'idle' | 'running' | 'completed' | 'failed';
+
+type SelectionSaveProgressState = {
+  phase: SelectionSaveProgressPhase;
+  title: string;
+  percent: number;
+  stage: string;
+  detail: string;
+};
+
+type SelectionMetadataApplyResult = {
+  ok: boolean;
+  skipped: boolean;
+  issues: FrameMetadataValidationIssue[];
+};
+
 type FrameStylePatch = Omit<Partial<SelectionStyleDraft>, 'width' | 'height'> & {
   width?: number;
   height?: number;
@@ -214,6 +235,11 @@ type BoundaryShrinkRange = {
   side: 'before' | 'after';
 };
 
+type FrameOutlineAxisRange = {
+  start: number;
+  end: number;
+};
+
 type FrameWidthResizeInstruction =
   | {
       kind: 'boundary';
@@ -281,6 +307,19 @@ type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
 };
 
+type TemplateEditPreviewSurfaceProps = {
+  renderedPreviewHtml: string;
+  boxCreationMode: boolean;
+  metadataVisualMode: boolean;
+  setPreviewNode: (node: HTMLDivElement | null) => void;
+  handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  handlePreviewPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
+  handlePreviewPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
+  handlePreviewPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void;
+  handlePreviewClickCapture: (event: React.MouseEvent<HTMLDivElement>) => void;
+  handlePreviewInput: (event: React.FormEvent<HTMLDivElement>) => void;
+};
+
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
@@ -289,8 +328,10 @@ const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
 const FRAME_MARQUEE_GHOST_CLASS = 'v106-frame-marquee';
 const FRAME_CREATION_GHOST_CLASS = 'v106-frame-create-ghost';
 const FRAME_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-outline-overlay';
+const FRAME_CLUSTER_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-cluster-outline-overlay';
 const FRAME_SELECTION_FILL_CLASS = 'v106-frame-selection-fill';
 const FRAME_RICHTEXT_PREVIEW_CLASS = 'v106-frame-richtext-preview';
+const TEMPLATE_FRAME_VALIDATION_ERROR_ATTR = 'data-template-validation-error';
 const TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR = 'data-template-native-outline-hidden';
 const TEMPLATE_FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-mode';
 const TEMPLATE_FRAME_BASE_HEIGHT_ATTR = 'data-template-frame-base-height';
@@ -322,6 +363,51 @@ const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
   peerEdgeIds: [],
   mismatchEdgeIds: [],
 };
+
+const defaultSelectionSaveProgressState: SelectionSaveProgressState = {
+  phase: 'idle',
+  title: '진행 상태',
+  percent: 0,
+  stage: '작업 대기 중입니다.',
+  detail: '선택한 박스의 메타데이터와 스타일을 저장하면 진행률이 여기에 표시됩니다.',
+};
+
+const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
+  renderedPreviewHtml,
+  boxCreationMode,
+  metadataVisualMode,
+  setPreviewNode,
+  handlePreviewPointerDown,
+  handlePreviewPointerMove,
+  handlePreviewPointerUp,
+  handlePreviewPointerCancel,
+  handlePreviewClickCapture,
+  handlePreviewInput,
+}: TemplateEditPreviewSurfaceProps) {
+  if (!renderedPreviewHtml) {
+    return (
+      <CardContent className="flex min-h-[560px] items-center justify-center !p-0 text-sm text-slate-500">
+        편집할 템플릿을 먼저 불러오세요.
+      </CardContent>
+    );
+  }
+
+  return (
+    <CardContent
+      ref={setPreviewNode}
+      className="template-edit-preview template-extract-draft-preview template-extract-preview-surface !p-0 template-clone template-clone--raster-first-v2-structured"
+      data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
+      data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
+      onPointerDownCapture={handlePreviewPointerDown}
+      onPointerMoveCapture={handlePreviewPointerMove}
+      onPointerUpCapture={handlePreviewPointerUp}
+      onPointerCancelCapture={handlePreviewPointerCancel}
+      onClickCapture={handlePreviewClickCapture}
+      onInput={handlePreviewInput}
+      dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
+    />
+  );
+});
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const TEMPLATE_FRAME_BOX_KIND_OPTIONS: TemplateFrameBoxKind[] = ['text', 'attachment', 'signature'];
 const TEMPLATE_FRAME_ROLE_OPTIONS: TemplateFrameRole[] = ['key', 'value', 'key_value'];
@@ -351,6 +437,7 @@ const EDGE_DRAG_AUTOSNAP_THRESHOLD_PX = 5;
 const EDGE_DRAG_AUTOSNAP_RELEASE_THRESHOLD_PX = 8;
 const EDGE_DRAG_AUTOSNAP_SPAN_TOUCH_TOLERANCE_PX = 1;
 const FRAME_MARQUEE_DRAG_THRESHOLD_PX = 4;
+const FRAME_CLUSTER_TOUCH_TOLERANCE_PX = 1.5;
 const DEFAULT_RELATIVE_PAGE_ANCHORS: Record<string, TemplateFrameRelativeAnchorConfig> = {
   'band-0-header': {
     positionMode: 'relative',
@@ -578,6 +665,32 @@ const hasFrameParentCycle = (
     }
 
     cursor = readFrameParentGroupId(parentNode);
+  }
+
+  return false;
+};
+
+const hasResolvedFrameParentCycle = (
+  frameGroupId: string,
+  requestedParentGroupId: string,
+  metadataById: Map<string, ResolvedFrameMetadata>
+) => {
+  let cursor = requestedParentGroupId;
+  const visited = new Set<string>([frameGroupId]);
+
+  while (cursor) {
+    if (visited.has(cursor)) {
+      return true;
+    }
+
+    visited.add(cursor);
+    const parentMetadata = metadataById.get(cursor);
+
+    if (!parentMetadata || parentMetadata.role !== 'value') {
+      return false;
+    }
+
+    cursor = parentMetadata.parentGroupId;
   }
 
   return false;
@@ -4244,7 +4357,12 @@ const syncFormControlMarkup = (root: ParentNode) => {
   });
 };
 
-const stripSelectionAttrs = (root: ParentNode) => {
+const stripSelectionAttrs = (
+  root: ParentNode,
+  options?: {
+    preserveFrameVisualHints?: boolean;
+  }
+) => {
   root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
     element.removeAttribute('data-template-selected');
     element.removeAttribute('data-template-primary-selected');
@@ -4261,13 +4379,40 @@ const stripSelectionAttrs = (root: ParentNode) => {
     element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
   });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR);
+    if (!options?.preserveFrameVisualHints) {
+      element.removeAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR);
+    }
   });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR);
+    if (!options?.preserveFrameVisualHints) {
+      element.removeAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR);
+    }
   });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
+    if (!options?.preserveFrameVisualHints) {
+      element.removeAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
+    }
+  });
+};
+
+const clearFrameValidationErrorUi = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_VALIDATION_ERROR_ATTR);
+  });
+};
+
+const applyFrameValidationErrorUi = (root: HTMLElement, frameGroupIds: string[]) => {
+  clearFrameValidationErrorUi(root);
+
+  if (frameGroupIds.length === 0) {
+    return;
+  }
+
+  const errorIdSet = new Set(frameGroupIds);
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    if (errorIdSet.has(getFrameGroupId(node))) {
+      node.setAttribute(TEMPLATE_FRAME_VALIDATION_ERROR_ATTR, 'true');
+    }
   });
 };
 
@@ -4278,6 +4423,7 @@ const extractEditorHtml = (root: HTMLElement) => {
   denormalizePreviewFrameBands(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
+  clearFrameValidationErrorUi(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   return container.innerHTML.trim();
 };
@@ -4288,6 +4434,7 @@ const extractPreviewRenderHtml = (root: HTMLElement) => {
   syncFormControlMarkup(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
+  clearFrameValidationErrorUi(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   return container.innerHTML.trim();
 };
@@ -4534,6 +4681,467 @@ const parseFrameBorderDefinition = (borderValue: string) => {
   return { width, style, color, cssText: borderValue };
 };
 
+const isTransparentFrameBorderColor = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (normalized === 'transparent') {
+    return true;
+  }
+
+  if (/rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(normalized)) {
+    return true;
+  }
+
+  if (/hsla\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+};
+
+const parseVisibleFrameBorderDefinition = (borderValue: string) => {
+  const border = parseFrameBorderDefinition(borderValue);
+
+  if (!border || isTransparentFrameBorderColor(border.color)) {
+    return null;
+  }
+
+  return border;
+};
+
+const mergeFrameOutlineAxisRanges = (ranges: FrameOutlineAxisRange[]) => {
+  if (ranges.length === 0) {
+    return [] as FrameOutlineAxisRange[];
+  }
+
+  const sorted = [...ranges]
+    .filter((range) => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+    .sort((left, right) => left.start - right.start);
+
+  if (sorted.length === 0) {
+    return [] as FrameOutlineAxisRange[];
+  }
+
+  const merged: FrameOutlineAxisRange[] = [{ ...sorted[0] }];
+
+  sorted.slice(1).forEach((range) => {
+    const current = merged[merged.length - 1];
+
+    if (range.start <= current.end + FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+      current.end = Math.max(current.end, range.end);
+      return;
+    }
+
+    merged.push({ ...range });
+  });
+
+  return merged;
+};
+
+const resolveFrameExteriorAxisRanges = (
+  frameNode: HTMLElement,
+  shellRect: FrameNodeRect,
+  pageInner: HTMLElement,
+  side: TemplateEdgeSide
+) => {
+  const shell = resolveFrameLayoutShell(frameNode);
+  const maxAxis = side === 'left' || side === 'right' ? shellRect.height : shellRect.width;
+  const coverages: FrameOutlineAxisRange[] = [];
+  const seenShells = new Set<HTMLElement>();
+
+  collectFrameSelectionAnchors(pageInner).forEach((candidateNode) => {
+    const candidateShell = resolveFrameLayoutShell(candidateNode);
+
+    if (candidateShell === shell || seenShells.has(candidateShell)) {
+      return;
+    }
+
+    seenShells.add(candidateShell);
+    const candidateRect = readFrameElementRect(candidateShell, pageInner);
+
+    if (side === 'left' || side === 'right') {
+      const candidateEdge = side === 'left' ? candidateRect.left + candidateRect.width : candidateRect.left;
+      const shellEdge = side === 'left' ? shellRect.left : shellRect.left + shellRect.width;
+
+      if (Math.abs(candidateEdge - shellEdge) > FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+        return;
+      }
+
+      const overlapStart = Math.max(shellRect.top, candidateRect.top);
+      const overlapEnd = Math.min(shellRect.top + shellRect.height, candidateRect.top + candidateRect.height);
+
+      if (overlapEnd - overlapStart <= FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+        return;
+      }
+
+      coverages.push({
+        start: Math.max(0, overlapStart - shellRect.top),
+        end: Math.min(shellRect.height, overlapEnd - shellRect.top),
+      });
+      return;
+    }
+
+    const candidateEdge = side === 'top' ? candidateRect.top + candidateRect.height : candidateRect.top;
+    const shellEdge = side === 'top' ? shellRect.top : shellRect.top + shellRect.height;
+
+    if (Math.abs(candidateEdge - shellEdge) > FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+      return;
+    }
+
+    const overlapStart = Math.max(shellRect.left, candidateRect.left);
+    const overlapEnd = Math.min(shellRect.left + shellRect.width, candidateRect.left + candidateRect.width);
+
+    if (overlapEnd - overlapStart <= FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+      return;
+    }
+
+    coverages.push({
+      start: Math.max(0, overlapStart - shellRect.left),
+      end: Math.min(shellRect.width, overlapEnd - shellRect.left),
+    });
+  });
+
+  const mergedCoverages = mergeFrameOutlineAxisRanges(coverages);
+  const exposed: FrameOutlineAxisRange[] = [];
+  let cursor = 0;
+
+  mergedCoverages.forEach((range) => {
+    if (range.start > cursor + FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+      exposed.push({ start: cursor, end: range.start });
+    }
+
+    cursor = Math.max(cursor, range.end);
+  });
+
+  if (cursor < maxAxis - FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+    exposed.push({ start: cursor, end: maxAxis });
+  }
+
+  return exposed.filter((range) => range.end - range.start > FRAME_CLUSTER_TOUCH_TOLERANCE_PX);
+};
+
+const areFrameRectsTouching = (left: FrameNodeRect, right: FrameNodeRect) => {
+  const horizontalTouch =
+    Math.abs(left.left + left.width - right.left) <= FRAME_CLUSTER_TOUCH_TOLERANCE_PX ||
+    Math.abs(right.left + right.width - left.left) <= FRAME_CLUSTER_TOUCH_TOLERANCE_PX;
+  const verticalOverlap =
+    Math.min(left.top + left.height, right.top + right.height) -
+      Math.max(left.top, right.top) >
+    FRAME_CLUSTER_TOUCH_TOLERANCE_PX;
+
+  if (horizontalTouch && verticalOverlap) {
+    return true;
+  }
+
+  const verticalTouch =
+    Math.abs(left.top + left.height - right.top) <= FRAME_CLUSTER_TOUCH_TOLERANCE_PX ||
+    Math.abs(right.top + right.height - left.top) <= FRAME_CLUSTER_TOUCH_TOLERANCE_PX;
+  const horizontalOverlap =
+    Math.min(left.left + left.width, right.left + right.width) -
+      Math.max(left.left, right.left) >
+    FRAME_CLUSTER_TOUCH_TOLERANCE_PX;
+
+  return verticalTouch && horizontalOverlap;
+};
+
+const buildConnectedFrameShellGroups = (
+  entries: Array<{
+    shell: HTMLElement;
+    rect: FrameNodeRect;
+  }>
+) => {
+  const groups: Array<
+    Array<{
+      shell: HTMLElement;
+      rect: FrameNodeRect;
+    }>
+  > = [];
+  const visited = new Set<number>();
+
+  entries.forEach((entry, index) => {
+    if (visited.has(index)) {
+      return;
+    }
+
+    const queue = [index];
+    const group: Array<{
+      shell: HTMLElement;
+      rect: FrameNodeRect;
+    }> = [];
+    visited.add(index);
+
+    while (queue.length > 0) {
+      const currentIndex = queue.shift();
+
+      if (currentIndex === undefined) {
+        continue;
+      }
+
+      const currentEntry = entries[currentIndex];
+
+      if (!currentEntry) {
+        continue;
+      }
+
+      group.push(currentEntry);
+
+      entries.forEach((candidate, candidateIndex) => {
+        if (visited.has(candidateIndex)) {
+          return;
+        }
+
+        if (!areFrameRectsTouching(currentEntry.rect, candidate.rect)) {
+          return;
+        }
+
+        visited.add(candidateIndex);
+        queue.push(candidateIndex);
+      });
+    }
+
+    groups.push(group);
+  });
+
+  return groups;
+};
+
+const mergeAbsoluteFrameLineSegments = (
+  segments: Array<{
+    orientation: 'horizontal' | 'vertical';
+    line: number;
+    start: number;
+    end: number;
+    border: { width: number; style: string; color: string; cssText: string };
+    hasMissingVisibleBorder: boolean;
+  }>
+) => {
+  const merged: Array<{
+    orientation: 'horizontal' | 'vertical';
+    line: number;
+    start: number;
+    end: number;
+    border: { width: number; style: string; color: string; cssText: string };
+    hasMissingVisibleBorder: boolean;
+  }> = [];
+
+  [...segments]
+    .sort((left, right) => {
+      if (left.orientation !== right.orientation) {
+        return left.orientation.localeCompare(right.orientation);
+      }
+
+      if (Math.abs(left.line - right.line) > FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+        return left.line - right.line;
+      }
+
+      return left.start - right.start;
+    })
+    .forEach((segment) => {
+      const previous = merged[merged.length - 1];
+
+      if (
+        previous &&
+        previous.orientation === segment.orientation &&
+        Math.abs(previous.line - segment.line) <= FRAME_CLUSTER_TOUCH_TOLERANCE_PX &&
+        previous.end >= segment.start - FRAME_CLUSTER_TOUCH_TOLERANCE_PX &&
+        previous.border.cssText === segment.border.cssText
+      ) {
+        previous.end = Math.max(previous.end, segment.end);
+        previous.hasMissingVisibleBorder =
+          previous.hasMissingVisibleBorder || segment.hasMissingVisibleBorder;
+        return;
+      }
+
+      merged.push({ ...segment });
+    });
+
+  return merged;
+};
+
+const appendConnectedFrameClusterOutlines = (root: HTMLElement) => {
+  const pageInnerGroups = new Map<
+    HTMLElement,
+    Array<{
+      shell: HTMLElement;
+      rect: FrameNodeRect;
+      borderBySide: Record<
+        TemplateEdgeSide,
+        { width: number; style: string; color: string; cssText: string } | null
+      >;
+      fallbackBorder: { width: number; style: string; color: string; cssText: string } | null;
+    }>
+  >();
+
+  collectFrameSelectionAnchors(root).forEach((frameNode) => {
+    const shell = resolveFrameLayoutShell(frameNode);
+    const pageInner = shell.closest<HTMLElement>('.page-inner');
+    const table = resolveFrameLayoutTable(frameNode);
+    const frameGroupId = getFrameGroupId(frameNode);
+    const cell =
+      frameNode.matches('td,th')
+        ? frameNode
+        : table?.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`) ||
+          table?.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) ||
+          null;
+    const tableStyle = table ? getComputedStyle(table) : null;
+    const cellStyle = cell ? getComputedStyle(cell) : null;
+    const outlineStyle =
+      cell?.getAttribute('data-template-frame-outline-style')?.trim() ||
+      table?.getAttribute('data-template-frame-outline-style')?.trim() ||
+      null;
+
+    if (!pageInner) {
+      return;
+    }
+
+    const fallbackBorder = parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
+    const entry = {
+      shell,
+      rect: readFrameElementRect(shell, pageInner),
+      borderBySide: {
+        top: parseVisibleFrameBorderDefinition(resolveVisibleBorderValue(cellStyle, tableStyle, 'top')),
+        right: parseVisibleFrameBorderDefinition(resolveVisibleBorderValue(cellStyle, tableStyle, 'right')),
+        bottom: parseVisibleFrameBorderDefinition(resolveVisibleBorderValue(cellStyle, tableStyle, 'bottom')),
+        left: parseVisibleFrameBorderDefinition(resolveVisibleBorderValue(cellStyle, tableStyle, 'left')),
+      } as Record<TemplateEdgeSide, { width: number; style: string; color: string; cssText: string } | null>,
+      fallbackBorder,
+    };
+
+    const current = pageInnerGroups.get(pageInner) || [];
+    current.push(entry);
+    pageInnerGroups.set(pageInner, current);
+  });
+
+  pageInnerGroups.forEach((entries, pageInner) => {
+    buildConnectedFrameShellGroups(entries).forEach((group) => {
+      if (group.length <= 1) {
+        return;
+      }
+
+      const segments = group.flatMap((entry) => {
+        const groupRects = group.map((candidate) => ({
+          shell: candidate.shell,
+          rect: candidate.rect,
+        }));
+
+        return (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).flatMap((side) => {
+          const border = entry.borderBySide[side] || entry.fallbackBorder;
+
+          if (!border) {
+            return [];
+          }
+
+          const exposedRanges = resolveFrameExteriorAxisRanges(
+            entry.shell.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) || entry.shell,
+            entry.rect,
+            pageInner,
+            side
+          ).filter((range) => {
+            const absoluteStart =
+              side === 'left' || side === 'right' ? entry.rect.top + range.start : entry.rect.left + range.start;
+            const absoluteEnd =
+              side === 'left' || side === 'right' ? entry.rect.top + range.end : entry.rect.left + range.end;
+            const line =
+              side === 'left'
+                ? entry.rect.left
+                : side === 'right'
+                  ? entry.rect.left + entry.rect.width
+                  : side === 'top'
+                    ? entry.rect.top
+                    : entry.rect.top + entry.rect.height;
+
+            return !groupRects.some((candidate) => {
+              if (candidate.shell === entry.shell) {
+                return false;
+              }
+
+              const candidateRect = candidate.rect;
+
+              if (side === 'left' || side === 'right') {
+                const candidateLine =
+                  side === 'left' ? candidateRect.left + candidateRect.width : candidateRect.left;
+
+                if (Math.abs(candidateLine - line) > FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+                  return false;
+                }
+
+                const overlapStart = Math.max(absoluteStart, candidateRect.top);
+                const overlapEnd = Math.min(absoluteEnd, candidateRect.top + candidateRect.height);
+                return overlapEnd - overlapStart > FRAME_CLUSTER_TOUCH_TOLERANCE_PX;
+              }
+
+              const candidateLine =
+                side === 'top' ? candidateRect.top + candidateRect.height : candidateRect.top;
+
+              if (Math.abs(candidateLine - line) > FRAME_CLUSTER_TOUCH_TOLERANCE_PX) {
+                return false;
+              }
+
+              const overlapStart = Math.max(absoluteStart, candidateRect.left);
+              const overlapEnd = Math.min(absoluteEnd, candidateRect.left + candidateRect.width);
+              return overlapEnd - overlapStart > FRAME_CLUSTER_TOUCH_TOLERANCE_PX;
+            });
+          });
+
+          return exposedRanges.map((range) => ({
+            orientation: side === 'top' || side === 'bottom' ? ('horizontal' as const) : ('vertical' as const),
+            line:
+              side === 'top'
+                ? entry.rect.top
+                : side === 'bottom'
+                  ? entry.rect.top + entry.rect.height
+                  : side === 'left'
+                    ? entry.rect.left
+                    : entry.rect.left + entry.rect.width,
+            start:
+              side === 'top' || side === 'bottom'
+                ? entry.rect.left + range.start
+                : entry.rect.top + range.start,
+            end:
+              side === 'top' || side === 'bottom'
+                ? entry.rect.left + range.end
+                : entry.rect.top + range.end,
+            border,
+            hasMissingVisibleBorder: !entry.borderBySide[side],
+          }));
+        });
+      });
+
+      mergeAbsoluteFrameLineSegments(segments)
+        .filter((segment) => segment.hasMissingVisibleBorder)
+        .forEach((segment) => {
+          const line = document.createElement('div');
+          line.setAttribute(FRAME_CLUSTER_OUTLINE_OVERLAY_ATTR, 'true');
+          line.setAttribute('data-frame-editor-ui', 'true');
+          line.setAttribute('aria-hidden', 'true');
+          line.style.position = 'absolute';
+          line.style.pointerEvents = 'none';
+          line.style.zIndex = '28';
+
+          if (segment.orientation === 'horizontal') {
+            line.style.left = toFrameCssPx(segment.start);
+            line.style.top = toFrameCssPx(segment.line - segment.border.width / 2);
+            line.style.width = toFrameCssPx(Math.max(0, segment.end - segment.start));
+            line.style.height = '0';
+            line.style.borderTop = segment.border.cssText;
+          } else {
+            line.style.left = toFrameCssPx(segment.line - segment.border.width / 2);
+            line.style.top = toFrameCssPx(segment.start);
+            line.style.width = '0';
+            line.style.height = toFrameCssPx(Math.max(0, segment.end - segment.start));
+            line.style.borderLeft = segment.border.cssText;
+          }
+
+          pageInner.appendChild(line);
+        });
+    });
+  });
+};
+
 const buildFrameBorderCssText = (
   outlineStyle: string | null | undefined,
   fallbackColor = 'rgba(15, 23, 42, 0.48)'
@@ -4567,32 +5175,51 @@ const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<Te
     cell?.getAttribute('data-template-frame-outline-style')?.trim() ||
     table?.getAttribute('data-template-frame-outline-style')?.trim() ||
     null;
+  const visibleBorderTop = parseVisibleFrameBorderDefinition(borderTop);
+  const visibleBorderRight = parseVisibleFrameBorderDefinition(borderRight);
+  const visibleBorderBottom = parseVisibleFrameBorderDefinition(borderBottom);
+  const visibleBorderLeft = parseVisibleFrameBorderDefinition(borderLeft);
 
   if (!pageInner || !shellRect) {
     return;
   }
 
-  if (!borderTop && !borderRight && !borderBottom && !borderLeft && !outlineStyle) {
+  if (!borderTop && !borderRight && !borderBottom && !borderLeft && !outlineStyle && selectedSides.size === 0) {
     return;
   }
 
   const horizontalFallbackBorder =
-    parseFrameBorderDefinition(borderTop) ||
-    parseFrameBorderDefinition(borderBottom) ||
+    visibleBorderTop ||
+    visibleBorderBottom ||
     parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
   const verticalFallbackBorder =
-    parseFrameBorderDefinition(borderLeft) ||
-    parseFrameBorderDefinition(borderRight) ||
+    visibleBorderLeft ||
+    visibleBorderRight ||
     parseFrameBorderDefinition(buildFrameBorderCssText(outlineStyle, 'rgba(15, 23, 42, 0.48)'));
 
   const lineDefinitions = [
-    { side: 'top' as const, border: parseFrameBorderDefinition(borderTop) || horizontalFallbackBorder },
-    { side: 'right' as const, border: parseFrameBorderDefinition(borderRight) || verticalFallbackBorder },
-    { side: 'bottom' as const, border: parseFrameBorderDefinition(borderBottom) || horizontalFallbackBorder },
-    { side: 'left' as const, border: parseFrameBorderDefinition(borderLeft) || verticalFallbackBorder },
+    { side: 'top' as const, border: visibleBorderTop },
+    { side: 'right' as const, border: visibleBorderRight },
+    { side: 'bottom' as const, border: visibleBorderBottom },
+    { side: 'left' as const, border: visibleBorderLeft },
   ].filter((entry) => entry.border);
 
-  if (lineDefinitions.length === 0) {
+  const fallbackSegments = [
+    { side: 'top' as const, border: !visibleBorderTop ? horizontalFallbackBorder : null },
+    { side: 'right' as const, border: !visibleBorderRight ? verticalFallbackBorder : null },
+    { side: 'bottom' as const, border: !visibleBorderBottom ? horizontalFallbackBorder : null },
+    { side: 'left' as const, border: !visibleBorderLeft ? verticalFallbackBorder : null },
+  ].flatMap((entry) =>
+    entry.border
+      ? resolveFrameExteriorAxisRanges(frameNode, shellRect, pageInner, entry.side).map((range) => ({
+          side: entry.side,
+          border: entry.border,
+          range,
+        }))
+      : []
+  );
+
+  if (lineDefinitions.length === 0 && fallbackSegments.length === 0 && selectedSides.size === 0) {
     return;
   }
 
@@ -4631,6 +5258,39 @@ const appendFrameOutlineOverlay = (frameNode: HTMLElement, selectedSides: Set<Te
     } else {
       line.style.top = '0';
       line.style.height = '100%';
+      line.style.width = '0';
+      line.style.borderLeft = entry.border.cssText;
+      line.style.left =
+        entry.side === 'left'
+          ? toFrameCssPx(-entry.border.width / 2)
+          : toFrameCssPx(shellRect.width - entry.border.width / 2);
+    }
+
+    overlay.appendChild(line);
+  });
+
+  fallbackSegments.forEach((entry) => {
+    if (!entry.border) {
+      return;
+    }
+
+    const line = document.createElement('div');
+    line.setAttribute('data-frame-editor-ui', 'true');
+    line.style.position = 'absolute';
+    line.style.pointerEvents = 'none';
+
+    if (entry.side === 'top' || entry.side === 'bottom') {
+      line.style.left = toFrameCssPx(entry.range.start);
+      line.style.width = toFrameCssPx(Math.max(0, entry.range.end - entry.range.start));
+      line.style.height = '0';
+      line.style.borderTop = entry.border.cssText;
+      line.style.top =
+        entry.side === 'top'
+          ? toFrameCssPx(-entry.border.width / 2)
+          : toFrameCssPx(shellRect.height - entry.border.width / 2);
+    } else {
+      line.style.top = toFrameCssPx(entry.range.start);
+      line.style.height = toFrameCssPx(Math.max(0, entry.range.end - entry.range.start));
       line.style.width = '0';
       line.style.borderLeft = entry.border.cssText;
       line.style.left =
@@ -4692,7 +5352,7 @@ const applyFrameSelectionUi = (
   edgeRoleById: TemplateEdgeRoleMapDto,
   edgeMovementMismatchIds: string[]
 ) => {
-  stripSelectionAttrs(root);
+  stripSelectionAttrs(root, { preserveFrameVisualHints: true });
   TemplateFrameEditHtmlService.stripEditorUiState(root);
 
   const edgeMetaMap = new Map<
@@ -4772,6 +5432,7 @@ const applyFrameSelectionUi = (
     appendFrameOutlineOverlay(node, selectedSides);
   });
 
+  appendConnectedFrameClusterOutlines(root);
   renderRelativeAnchorGuides(root, selectedIds);
 };
 
@@ -4854,6 +5515,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('summary');
+  const [selectionSaveProgress, setSelectionSaveProgress] =
+    React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
+  const [selectionValidationIssues, setSelectionValidationIssues] = React.useState<FrameMetadataValidationIssue[]>([]);
   const [message, setMessage] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -4862,6 +5526,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const draftPreviewHtmlRef = React.useRef('');
   const selectedFrameGroupIdsRef = React.useRef<string[]>([]);
   const edgeSelectionStateRef = React.useRef<TemplateEdgeSelectionStateDto>(TemplateEdgeSelectionService.createEmptyState());
+  const edgeRoleDiagnosticsRef = React.useRef<EdgeRoleDiagnosticsState>(emptyEdgeRoleDiagnosticsState);
   const syncedFrameMetadataDraftRef = React.useRef<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const activePointerOwnerRef = React.useRef<HTMLDivElement | null>(null);
   const dragStateRef = React.useRef<DragState | null>(null);
@@ -4900,6 +5565,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
   const primarySelectedFrameGroupId = selectedFrameGroupIds[0] || null;
   const canEditSingleSelection = selectedFrameGroupIds.length === 1;
+  const selectionValidationErrorFrameIds = React.useMemo(
+    () => Array.from(new Set(selectionValidationIssues.map((issue) => issue.frameGroupId).filter(Boolean))),
+    [selectionValidationIssues]
+  );
+  const selectionSaveProgressFailed = selectionSaveProgress.phase === 'failed';
+  const selectionSaveProgressCompleted = selectionSaveProgress.phase === 'completed';
+  const selectionSaveProgressActive = selectionSaveProgress.phase === 'running';
   const routeTemplateId = React.useMemo(() => {
     const normalizedInitialTemplateId = initialTemplateId.trim();
 
@@ -5797,6 +6469,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyPreviewEditPermissions(root);
       ensureRelativeAnchorConfigs(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
+      applyFrameCanvasVisualHints(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
       const snapshot = buildLiveEdgeTopologySnapshot(root);
       const nextEdgeRolePresentation = resolveEdgeRolePresentation(snapshot, reconciledEdgeSelection);
@@ -5828,6 +6501,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       applyPreviewEditPermissions(root);
+      applyFrameCanvasVisualHints(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
       const snapshot = buildLiveEdgeTopologySnapshot(root);
       const nextEdgeRolePresentation = resolveEdgeRolePresentation(snapshot, reconciledEdgeSelection);
@@ -5858,6 +6532,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setSelectedFrameGroupIds(nextSelectedFrameGroupIds);
       setEdgeSelectionState(emptyEdgeSelection);
       setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+      setSelectionValidationIssues([]);
+      setSelectionSaveProgress(defaultSelectionSaveProgressState);
       applyRuntimeSelectionUi(nextSelectedFrameGroupIds, emptyEdgeSelection);
     },
     [applyRuntimeSelectionUi]
@@ -5971,9 +6647,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (!normalizedTemplateId) {
         setTemplateDetail(null);
         setPreviewHtml('');
+        selectedFrameGroupIdsRef.current = [];
+        edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
         setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        setSelectionValidationIssues([]);
+        setSelectionSaveProgress(defaultSelectionSaveProgressState);
         draftPreviewHtmlRef.current = '';
         syncTemplateQuery('');
         return;
@@ -5999,9 +6679,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setSourceDocumentName(detail.template.sourceDocumentName || '');
         setLayoutResizeMode(detail.template.layoutResizeMode);
         setPreviewHtml(detail.template.draftHtml);
+        selectedFrameGroupIdsRef.current = [];
+        edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
         setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        setSelectionValidationIssues([]);
+        setSelectionSaveProgress(defaultSelectionSaveProgressState);
         draftPreviewHtmlRef.current = detail.template.draftHtml;
         syncTemplateQuery(normalizedTemplateId);
         setMessage(`템플릿 ${normalizedTemplateId} 를 편집 모드로 불러왔습니다.`);
@@ -6042,6 +6726,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   React.useEffect(() => {
     edgeSelectionStateRef.current = edgeSelectionState;
   }, [edgeSelectionState]);
+
+  React.useEffect(() => {
+    edgeRoleDiagnosticsRef.current = edgeRoleDiagnostics;
+  }, [edgeRoleDiagnostics]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -6163,6 +6851,71 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
   }, [renderedPreviewHtml, syncPreviewSurfaceScale]);
 
+  const rehydratePreviewEditorStateNow = React.useCallback(
+    (root: HTMLElement) => {
+      const hasPendingRawBands =
+        Boolean(root.querySelector('.v102-frame-band')) &&
+        !root.querySelector(`.v102-frame-band[${NORMALIZED_FRAME_BAND_ATTR}="true"]`);
+
+      if (hasPendingRawBands && !previewHasStableFrameLayout(root)) {
+        return false;
+      }
+
+      const normalized = ensurePreviewFrameBandNormalization(root);
+      syncPreviewSurfaceCloneAttrs(root);
+      applyPreviewEditPermissions(root);
+      applyFrameCanvasVisualHints(root);
+      ensureRelativeAnchorConfigs(root);
+      applyRelativeAnchoredFrameRectsInRoot(root);
+      syncPreviewSurfaceScale(root);
+      const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
+
+      if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
+        setPreviewHtml(nextRenderHtml);
+      }
+
+      normalizeLiveVerticalCohorts(root);
+      normalizeLiveVerticalPhysicalPeers(root);
+      const snapshot = buildLiveEdgeTopologySnapshot(root);
+      const nextEdgeSelection = TemplateEdgeSelectionService.reconcileSelectionState({
+        snapshot,
+        currentSelection: edgeSelectionStateRef.current,
+      });
+      edgeSelectionStateRef.current = nextEdgeSelection;
+      const nextEdgeRolePresentation = resolveEdgeRolePresentation(
+        snapshot,
+        nextEdgeSelection,
+        edgeRoleDiagnostics.mismatchEdgeIds
+      );
+      applyFrameSelectionUi(
+        root,
+        selectedFrameGroupIdsRef.current,
+        nextEdgeSelection,
+        snapshot,
+        nextEdgeRolePresentation.edgeRoleById,
+        nextEdgeRolePresentation.diagnosticsState.mismatchEdgeIds
+      );
+      setEdgeRoleDiagnostics((previous) =>
+        edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
+          ? previous
+          : nextEdgeRolePresentation.diagnosticsState
+      );
+      requestPreviewTextFit();
+      return true;
+    },
+    [
+      buildLiveEdgeTopologySnapshot,
+      edgeRoleDiagnostics.mismatchEdgeIds,
+      normalizeLiveVerticalCohorts,
+      normalizeLiveVerticalPhysicalPeers,
+      previewHasStableFrameLayout,
+      renderedPreviewHtml,
+      requestPreviewTextFit,
+      resolveEdgeRolePresentation,
+      syncPreviewSurfaceScale,
+    ]
+  );
+
   React.useLayoutEffect(() => {
     const root = previewRef.current;
 
@@ -6171,11 +6924,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     if (!root.querySelector(FRAME_EDGE_BUTTON_SELECTOR)) {
-      schedulePreviewEditorState();
+      if (!rehydratePreviewEditorStateNow(root)) {
+        schedulePreviewEditorState();
+      }
       return;
     }
 
     applyPreviewEditPermissions(root);
+    applyFrameCanvasVisualHints(root);
     normalizeLiveVerticalCohorts(root);
     normalizeLiveVerticalPhysicalPeers(root);
     const snapshot = buildLiveEdgeTopologySnapshot(root);
@@ -6208,10 +6964,47 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       edgeSelectionState,
       normalizeLiveVerticalCohorts,
       normalizeLiveVerticalPhysicalPeers,
+      rehydratePreviewEditorStateNow,
       renderedPreviewHtml,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
+      selectionPanelTab,
       selectedFrameGroupIds,
+  ]);
+
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
+  }, [renderedPreviewHtml, selectionValidationErrorFrameIds, selectedFrameGroupIds, selectionPanelTab]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || hasActivePointerInteraction()) {
+      return;
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      schedulePreviewEditorState();
+    });
+    const timerId = window.setTimeout(() => {
+      schedulePreviewEditorState();
+    }, 80);
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(timerId);
+    };
+  }, [
+    edgeSelectionState,
+    hasActivePointerInteraction,
+    renderedPreviewHtml,
+    schedulePreviewEditorState,
+    selectedFrameGroupIds,
+    selectionPanelTab,
   ]);
 
   const syncSelectionStyleDraft = React.useCallback(() => {
@@ -6313,16 +7106,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncFrameMetadataDraft();
   }, [selectedFrameGroupIds, syncFrameMetadataDraft, templateDetail?.template.id]);
 
+  const waitForNextPaint = React.useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        if (typeof window === 'undefined') {
+          resolve();
+          return;
+        }
+
+        window.requestAnimationFrame(() => resolve());
+      }),
+    []
+  );
+
   const applySelectionStylePatch = React.useCallback(
     (patch: FrameStylePatch) => {
       const root = previewRef.current;
+      const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
-      if (!root || selectedFrameGroupIds.length === 0) {
+      if (!root || activeSelectionIds.length === 0) {
         setMessage('편집할 박스를 먼저 선택하세요.');
         return;
       }
 
-      const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
+      const nodes = getFrameNodes(root).filter((node) => activeSelectionIds.includes(getFrameGroupId(node)));
 
       if (!nodes.length) {
         return;
@@ -6333,7 +7140,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       syncSelectionStyleDraft();
       requestPreviewTextFit();
     },
-    [getFrameNodes, requestPreviewTextFit, selectedFrameGroupIds, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
+    [getFrameNodes, requestPreviewTextFit, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
   );
 
   const readSelectionStyleDraftFromControls = React.useCallback((): SelectionStyleDraft => {
@@ -6364,7 +7171,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [selectionStyleDraft]);
 
   const applySelectionStyleDraft = React.useCallback(() => {
-    if (selectedFrameGroupIds.length === 0) {
+    if (selectedFrameGroupIdsRef.current.length === 0) {
       setMessage('스타일을 적용할 박스를 먼저 선택하세요.');
       return false;
     }
@@ -6389,7 +7196,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       backgroundColor: nextDraft.backgroundColor,
     });
     return true;
-  }, [applySelectionStylePatch, readSelectionStyleDraftFromControls, selectedFrameGroupIds.length]);
+  }, [applySelectionStylePatch, readSelectionStyleDraftFromControls]);
 
   const readFrameMetadataDraftFromControls = React.useCallback((): FrameMetadataDraft => {
     const root = stylePanelRef.current;
@@ -6412,16 +7219,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
   }, [frameMetadataDraft]);
 
-  const applySelectionMetadataDraft = React.useCallback(() => {
+  const applySelectionMetadataDraft = React.useCallback((): SelectionMetadataApplyResult => {
     const root = previewRef.current;
+    const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
-    if (!root || selectedFrameGroupIds.length === 0) {
+    if (!root || activeSelectionIds.length === 0) {
       setMessage('메타데이터를 적용할 박스를 먼저 선택하세요.');
-      return false;
+      return {
+        ok: false,
+        skipped: false,
+        issues: [],
+      };
     }
 
     const nextDraft = readFrameMetadataDraftFromControls();
-    const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
+    const nodes = getFrameNodes(root).filter((node) => activeSelectionIds.includes(getFrameGroupId(node)));
     const frameNodeById = new Map(
       getFrameNodes(root)
         .map((node) => [getFrameGroupId(node), node] as const)
@@ -6429,72 +7241,126 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
 
     if (!nodes.length) {
-      return false;
+      return {
+        ok: false,
+        skipped: false,
+        issues: [],
+      };
     }
 
     const metadataPatch = buildFrameMetadataChangePatch(nextDraft, syncedFrameMetadataDraftRef.current);
-    const requestedParentGroupId = metadataPatch.parentGroupId ?? nextDraft.parentGroupId.trim();
+    const hasMetadataChanges = Object.values(metadataPatch).some((value) => value !== undefined);
 
-    if (requestedParentGroupId && !availableFrameGroupIds.includes(requestedParentGroupId)) {
-      setMessage(`부모 key 박스 ID ${requestedParentGroupId} 를 찾을 수 없습니다.`);
-      return false;
+    if (!hasMetadataChanges) {
+      return {
+        ok: true,
+        skipped: true,
+        issues: [],
+      };
     }
 
-    if (requestedParentGroupId && selectedFrameGroupIds.includes(requestedParentGroupId)) {
-      setMessage('선택한 박스 자신을 부모 key 박스로 지정할 수 없습니다.');
-      return false;
-    }
+    const resolvedMetadataById = new Map<string, ResolvedFrameMetadata>();
+    frameNodeById.forEach((node, frameGroupId) => {
+      const nextMetadata = activeSelectionIds.includes(frameGroupId)
+        ? resolveNextFrameMetadata(node, metadataPatch)
+        : resolveNextFrameMetadata(node, {});
+      const normalizedMetadata =
+        nextMetadata.role === 'value'
+          ? nextMetadata
+          : {
+              ...nextMetadata,
+              parentGroupId: '',
+            };
+      resolvedMetadataById.set(frameGroupId, normalizedMetadata);
+    });
 
-    for (const node of nodes) {
+    const issues: FrameMetadataValidationIssue[] = [];
+
+    nodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
-      const nextMetadata = resolveNextFrameMetadata(node, metadataPatch);
-      const parentNode = nextMetadata.parentGroupId ? frameNodeById.get(nextMetadata.parentGroupId) || null : null;
+      const nextMetadata = resolvedMetadataById.get(frameGroupId);
+
+      if (!nextMetadata) {
+        return;
+      }
 
       if (nextMetadata.boxKind !== 'text' && nextMetadata.role === 'key') {
-        setMessage(`${frameGroupId} 는 ${nextMetadata.boxKind} 박스라 key 역할을 가질 수 없습니다.`);
-        return false;
+        issues.push({
+          frameGroupId,
+          message: `${frameGroupId} 는 ${nextMetadata.boxKind} 박스라 key 역할을 가질 수 없습니다.`,
+        });
       }
 
       if (nextMetadata.role === 'value' && !nextMetadata.parentGroupId) {
-        setMessage(`${frameGroupId} 는 value 역할이라 부모 key 박스가 필요합니다.`);
-        return false;
+        issues.push({
+          frameGroupId,
+          message: `${frameGroupId} 는 value 역할이라 부모 key 박스가 필요합니다.`,
+        });
+      }
+
+      if (nextMetadata.parentGroupId && !availableFrameGroupIds.includes(nextMetadata.parentGroupId)) {
+        issues.push({
+          frameGroupId,
+          message: `${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+        });
       }
 
       if (nextMetadata.parentGroupId === frameGroupId) {
-        setMessage(`${frameGroupId} 는 자기 자신을 부모 key 박스로 가질 수 없습니다.`);
-        return false;
+        issues.push({
+          frameGroupId,
+          message: `${frameGroupId} 는 자기 자신을 부모 key 박스로 가질 수 없습니다.`,
+        });
       }
 
-      if (nextMetadata.role === 'value') {
-        if (!parentNode) {
-          setMessage(`${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`);
-          return false;
-        }
+      if (nextMetadata.role === 'value' && nextMetadata.parentGroupId) {
+        const parentMetadata = resolvedMetadataById.get(nextMetadata.parentGroupId) || null;
 
-        if (readFrameBoxKind(parentNode) !== 'text' || readFrameRole(parentNode) !== 'key') {
-          setMessage(`${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 는 text key 박스여야 합니다.`);
-          return false;
+        if (!parentMetadata) {
+          issues.push({
+            frameGroupId,
+            message: `${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+          });
+        } else if (parentMetadata.boxKind !== 'text' || parentMetadata.role !== 'key') {
+          issues.push({
+            frameGroupId,
+            message: `${frameGroupId} 의 부모 key 박스 ${nextMetadata.parentGroupId} 는 text key 박스여야 합니다.`,
+          });
         }
       }
 
       if (
         nextMetadata.parentGroupId &&
-        hasFrameParentCycle(frameGroupId, nextMetadata.parentGroupId, frameNodeById)
+        hasResolvedFrameParentCycle(frameGroupId, nextMetadata.parentGroupId, resolvedMetadataById)
       ) {
-        setMessage(`${frameGroupId} 의 부모 key 연결에 순환 참조가 있습니다.`);
-        return false;
+        issues.push({
+          frameGroupId,
+          message: `${frameGroupId} 의 부모 key 연결에 순환 참조가 있습니다.`,
+        });
       }
 
       if (!getCompatibleRuntimeModes(nextMetadata.boxKind).includes(nextMetadata.runtimeMode)) {
-        setMessage(
-          `${frameGroupId} 의 runtime mode ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 박스와 호환되지 않습니다.`
-        );
-        return false;
+        issues.push({
+          frameGroupId,
+          message: `${frameGroupId} 의 runtime mode ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 박스와 호환되지 않습니다.`,
+        });
       }
+    });
+
+    if (issues.length > 0) {
+      return {
+        ok: false,
+        skipped: false,
+        issues,
+      };
     }
 
     nodes.forEach((node) => {
-      const nextMetadata = resolveNextFrameMetadata(node, metadataPatch);
+      const frameGroupId = getFrameGroupId(node);
+      const nextMetadata = resolvedMetadataById.get(frameGroupId);
+
+      if (!nextMetadata) {
+        return;
+      }
 
       applyFrameMetadataPatch(node, {
         boxKind: metadataPatch.boxKind,
@@ -6513,32 +7379,117 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncDraftPreviewHtmlRef();
     syncFrameMetadataDraft();
     requestPreviewTextFit();
-    return true;
+    return {
+      ok: true,
+      skipped: false,
+      issues: [],
+    };
   }, [
     availableFrameGroupIds,
     getFrameNodes,
     readFrameMetadataDraftFromControls,
     requestPreviewTextFit,
-    selectedFrameGroupIds,
     syncDraftPreviewHtmlRef,
     syncFrameMetadataDraft,
   ]);
 
-  const applySelectionPanelDrafts = React.useCallback(() => {
-    if (!applySelectionMetadataDraft()) {
+  const applySelectionPanelDrafts = React.useCallback(async () => {
+    const activeSelectionIds = selectedFrameGroupIdsRef.current;
+
+    if (activeSelectionIds.length === 0) {
+      setMessage('저장할 박스를 먼저 선택하세요.');
+      setSelectionSaveProgress({
+        phase: 'failed',
+        title: '선택 항목 저장',
+        percent: 100,
+        stage: '선택 박스가 없습니다.',
+        detail: '박스 편집 캔버스에서 먼저 박스를 선택한 뒤 다시 저장하세요.',
+      });
       return;
     }
+
+    setSelectionValidationIssues([]);
+    setSelectionSaveProgress({
+      phase: 'running',
+      title: '선택 항목 저장',
+      percent: 12,
+      stage: '선택 박스 확인 중',
+      detail: `${activeSelectionIds.length}개 박스의 메타데이터와 스타일 저장 가능 여부를 확인하고 있습니다.`,
+    });
+    await waitForNextPaint();
+
+    const metadataResult = applySelectionMetadataDraft();
+
+    if (!metadataResult.ok) {
+      const issues = metadataResult.issues;
+      const errorCount = issues.length;
+      setSelectionValidationIssues(issues);
+      setSelectionSaveProgress({
+        phase: 'failed',
+        title: '선택 항목 저장',
+        percent: 100,
+        stage: '메타데이터 저장 실패',
+        detail:
+          errorCount > 0
+            ? `${errorCount}개 오류를 모두 수집했습니다. 빨간 박스와 상세 사유를 확인하세요.`
+            : '메타데이터를 저장할 수 없습니다.',
+      });
+      setMessage(
+        errorCount > 0
+          ? `메타데이터 저장 실패: ${errorCount}개 오류를 모두 확인했습니다.`
+          : '메타데이터 저장에 실패했습니다.'
+      );
+      return;
+    }
+
+    setSelectionValidationIssues([]);
+    setSelectionSaveProgress({
+      phase: 'running',
+      title: '선택 항목 저장',
+      percent: metadataResult.skipped ? 52 : 58,
+      stage: metadataResult.skipped ? '메타데이터 변경 없음' : '메타데이터 반영 중',
+      detail: metadataResult.skipped
+        ? '메타데이터 변경은 없어 스타일 저장 단계로 바로 넘어갑니다.'
+        : '선택한 박스의 메타데이터를 캔버스에 반영했습니다.',
+    });
+    await waitForNextPaint();
+
+    setSelectionSaveProgress({
+      phase: 'running',
+      title: '선택 항목 저장',
+      percent: 82,
+      stage: '스타일 반영 중',
+      detail: `${activeSelectionIds.length}개 박스의 스타일을 일괄 적용하고 있습니다.`,
+    });
+    await waitForNextPaint();
 
     if (!applySelectionStyleDraft()) {
+      setSelectionSaveProgress({
+        phase: 'failed',
+        title: '선택 항목 저장',
+        percent: 100,
+        stage: '스타일 저장 실패',
+        detail: '스타일을 저장하지 못했습니다. 입력값을 확인한 뒤 다시 시도하세요.',
+      });
       return;
     }
 
+    setSelectionSaveProgress({
+      phase: 'completed',
+      title: '선택 항목 저장',
+      percent: 100,
+      stage: '선택 항목 저장 완료',
+      detail:
+        activeSelectionIds.length > 1
+          ? `선택한 ${activeSelectionIds.length}개 박스에 메타데이터와 스타일을 반영했습니다.`
+          : '선택 박스의 메타데이터와 스타일을 반영했습니다.',
+    });
     setMessage(
-      selectedFrameGroupIds.length > 1
-        ? `선택한 ${selectedFrameGroupIds.length}개 박스에 설정을 일괄 반영했습니다.`
+      activeSelectionIds.length > 1
+        ? `선택한 ${activeSelectionIds.length}개 박스에 설정을 일괄 반영했습니다.`
         : '선택 박스 설정을 반영했습니다.'
     );
-  }, [applySelectionMetadataDraft, applySelectionStyleDraft, selectedFrameGroupIds.length]);
+  }, [applySelectionMetadataDraft, applySelectionStyleDraft, waitForNextPaint]);
 
   const stageSelectionStylePreset = React.useCallback((preset: FrameStylePatch) => {
     setSelectionStyleDraft((previous) => ({
@@ -7673,19 +8624,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
       }
       syncDraftPreviewHtmlRef();
-      if (!frameSelectionIdsEqual(selectedFrameGroupIds, selectedFrameGroupIdsRef.current)) {
-        setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current);
-      }
+      setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current.slice());
       const nextEdgeSelectionBase = currentResizeState?.edgeSelectionAfterResize || edgeSelectionStateRef.current;
       const nextEdgeSelection = reconcileLiveEdgeSelection(previewRef.current, nextEdgeSelectionBase);
       const nextEdgeMovementMismatchIds = currentResizeState
         ? detectEdgeRoleMovementMismatches(previewRef.current, currentResizeState)
-        : edgeRoleDiagnostics.mismatchEdgeIds;
+        : edgeRoleDiagnosticsRef.current.mismatchEdgeIds;
       const liveSnapshot = previewRef.current ? buildLiveEdgeTopologySnapshot(previewRef.current) : null;
       edgeSelectionStateRef.current = nextEdgeSelection;
-      if (!edgeSelectionStatesEqual(nextEdgeSelection, edgeSelectionState)) {
-        setEdgeSelectionState(nextEdgeSelection);
-      }
+      setEdgeSelectionState(nextEdgeSelection);
       const nextEdgeRolePresentation = liveSnapshot
         ? resolveEdgeRolePresentation(liveSnapshot, nextEdgeSelection, nextEdgeMovementMismatchIds)
         : {
@@ -7718,8 +8665,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       buildLiveEdgeTopologySnapshot,
       clearTransientCanvasOverlays,
       detectEdgeRoleMovementMismatches,
-      edgeRoleDiagnostics.mismatchEdgeIds,
-      edgeSelectionState,
       finalizeLiveVerticalEdgeTargets,
       normalizeLiveVerticalCohorts,
       normalizePassiveOppositeVerticalEdges,
@@ -7729,7 +8674,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolveEdgeRolePresentation,
       requestPreviewTextFit,
       schedulePreviewEditorState,
-      selectedFrameGroupIds,
       syncDraftPreviewHtmlRef,
       syncSelectionStyleDraft,
     ]
@@ -7737,6 +8681,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const clearFrameSelection = React.useCallback(() => {
     stopPointerInteraction();
+    setSelectionValidationIssues([]);
+    setSelectionSaveProgress(defaultSelectionSaveProgressState);
     setSelectedFrameGroupIds([]);
     setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
     setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
@@ -7893,16 +8839,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       if (!pageInner) {
-        setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
-        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
-        setSelectedFrameGroupIds([frameGroupId]);
+        applyFrameBoxSelection([frameGroupId]);
         return;
       }
 
-      const stableSelection = selectedFrameGroupIds.includes(frameGroupId) ? selectedFrameGroupIds : [frameGroupId];
-      setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
-      setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
-      setSelectedFrameGroupIds(stableSelection);
+      const currentSelectionIds = selectedFrameGroupIdsRef.current;
+      const stableSelection = currentSelectionIds.includes(frameGroupId) ? currentSelectionIds : [frameGroupId];
+      applyFrameBoxSelection(stableSelection);
 
       if (resizeHandle) {
         const direction = (resizeHandle.getAttribute('data-direction') || 'se') as TemplateFrameResizeDirection;
@@ -7960,10 +8903,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       boxCreationMode,
       boxCreationPositionMode,
       buildLiveEdgeTopologySnapshot,
+      applyFrameBoxSelection,
       getFrameNodes,
       lockPreviewEditorStateDuringInteraction,
       previewZoom,
-      selectedFrameGroupIds,
     ]
   );
 
@@ -8953,6 +9896,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background: rgba(13, 148, 136, .98);
           box-shadow: 0 4px 12px rgba(13, 148, 136, .28);
         }
+        .template-edit-preview [${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"] {
+          outline: 2px solid rgba(225, 29, 72, .98) !important;
+          outline-offset: 0;
+          box-shadow:
+            0 0 0 4px rgba(251, 113, 133, .24),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
+        }
+        .template-edit-preview [data-template-selected="true"][${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]::before {
+          background: rgba(225, 29, 72, .98);
+          box-shadow: 0 4px 12px rgba(225, 29, 72, .24);
+        }
         .template-edit-preview [data-template-edge-host="true"] {
           position: relative;
           z-index: 21 !important;
@@ -9335,25 +10289,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               </CardDescription>
             </div>
           </CardHeader>
-          {renderedPreviewHtml ? (
-            <CardContent
-              ref={setPreviewNode}
-              className="template-edit-preview template-extract-draft-preview template-extract-preview-surface !p-0 template-clone template-clone--raster-first-v2-structured"
-              data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
-              data-metadata-visual-mode={selectionPanelTab === 'metadata' ? 'true' : 'false'}
-              onPointerDownCapture={handlePreviewPointerDown}
-              onPointerMoveCapture={handlePreviewPointerMove}
-              onPointerUpCapture={handlePreviewPointerUp}
-              onPointerCancelCapture={handlePreviewPointerCancel}
-              onClickCapture={handlePreviewClickCapture}
-              onInput={handlePreviewInput}
-              dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
-            />
-          ) : (
-            <CardContent className="flex min-h-[560px] items-center justify-center !p-0 text-sm text-slate-500">
-              편집할 템플릿을 먼저 불러오세요.
-            </CardContent>
-          )}
+          <TemplateEditPreviewSurface
+            renderedPreviewHtml={renderedPreviewHtml}
+            boxCreationMode={boxCreationMode}
+            metadataVisualMode={selectionPanelTab === 'metadata'}
+            setPreviewNode={setPreviewNode}
+            handlePreviewPointerDown={handlePreviewPointerDown}
+            handlePreviewPointerMove={handlePreviewPointerMove}
+            handlePreviewPointerUp={handlePreviewPointerUp}
+            handlePreviewPointerCancel={handlePreviewPointerCancel}
+            handlePreviewClickCapture={handlePreviewClickCapture}
+            handlePreviewInput={handlePreviewInput}
+          />
         </Card>
 
         <div className="space-y-6">
@@ -9364,8 +10311,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </CardHeader>
             <CardContent ref={stylePanelRef} className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={applySelectionPanelDrafts} disabled={selectedFrameGroupIds.length === 0}>
-                  선택 항목 저장
+                <Button onClick={() => void applySelectionPanelDrafts()} disabled={selectedFrameGroupIds.length === 0 || selectionSaveProgressActive}>
+                  {selectionSaveProgressActive ? '반영 중...' : '선택 항목 저장'}
                 </Button>
                 <Button
                   size="sm"
@@ -9405,10 +10352,70 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   첫 선택 크기 복제
                 </Button>
               </div>
-              <p className="text-[11px] text-slate-500">
-                박스 생성은 여기서 켜고 캔버스에서 drag 합니다. `relative` 는 먼저 선택한 기준 박스 1개를 anchor 로 삼고,
-                `absolute` 는 다른 박스 resize 전파에서 제외됩니다. 현재 상대 기준: {relativeCreateAnchorFrameGroupId || '미선택'}
-              </p>
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold">진행 상태</div>
+                    <div className="mt-1 truncate text-sm font-semibold text-sky-950">{selectionSaveProgress.title}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={
+                        selectionSaveProgressCompleted
+                          ? 'green'
+                          : selectionSaveProgressFailed
+                            ? 'red'
+                            : selectionSaveProgressActive
+                              ? 'amber'
+                              : 'slate'
+                      }
+                    >
+                      {selectionSaveProgressCompleted
+                        ? '완료'
+                        : selectionSaveProgressFailed
+                          ? '오류'
+                          : selectionSaveProgressActive
+                            ? '진행 중'
+                            : '대기'}
+                    </Badge>
+                    <span className="font-semibold">{selectionSaveProgress.percent}%</span>
+                  </div>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-sky-100">
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={selectionSaveProgress.percent}
+                    className={`h-full rounded-full transition-[width] duration-300 ${
+                      selectionSaveProgressFailed
+                        ? 'bg-rose-500'
+                        : selectionSaveProgressCompleted
+                          ? 'bg-emerald-600'
+                          : 'bg-sky-600'
+                    }`}
+                    style={{ width: `${selectionSaveProgress.percent}%` }}
+                  />
+                </div>
+                <div className="mt-3 text-sm font-semibold">{selectionSaveProgress.stage}</div>
+                <div className="mt-1 text-[11px] leading-5 opacity-90">
+                  {selectionSaveProgress.phase === 'idle'
+                    ? `박스 생성은 여기서 켜고 캔버스에서 drag 합니다. relative 는 먼저 선택한 기준 박스 1개를 anchor 로 삼고, absolute 는 다른 박스 resize 전파에서 제외됩니다. 현재 상대 기준: ${relativeCreateAnchorFrameGroupId || '미선택'}`
+                    : selectionSaveProgress.detail}
+                </div>
+                {selectionValidationIssues.length > 0 ? (
+                  <div className="mt-3 rounded-md border border-rose-200 bg-white/80 p-3 text-[11px] text-rose-950">
+                    <div className="font-semibold">문제가 된 박스</div>
+                    <ul className="mt-2 space-y-1">
+                      {selectionValidationIssues.map((issue, index) => (
+                        <li key={`${issue.frameGroupId}-${index}`}>
+                          {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
               <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
                 {([
                   { id: 'summary', label: '요약' },
