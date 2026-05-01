@@ -1550,6 +1550,11 @@ const readTableColWidths = (table: HTMLTableElement | null) => {
   }
 
   return Array.from(table.querySelectorAll<HTMLTableColElement>('col')).map((col) => {
+    const inlineWidth = parseFramePx(col.style.width || col.getAttribute('width') || '');
+    if (inlineWidth > 0) {
+      return inlineWidth;
+    }
+
     const computedWidth = parseFramePx(getComputedStyle(col).width);
     return computedWidth > 0 ? computedWidth : MIN_TABLE_COLUMN_WIDTH_PX;
   });
@@ -1561,6 +1566,11 @@ const readTableRowHeights = (table: HTMLTableElement | null) => {
   }
 
   return Array.from(table.querySelectorAll<HTMLTableRowElement>('tr')).map((row) => {
+    const inlineHeight = parseFramePx(row.style.height || row.getAttribute('height') || '');
+    if (inlineHeight > 0) {
+      return inlineHeight;
+    }
+
     const computedHeight = parseFramePx(getComputedStyle(row).height) || row.getBoundingClientRect().height;
     return computedHeight > 0 ? computedHeight : MIN_TABLE_ROW_HEIGHT_PX;
   });
@@ -5713,6 +5723,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const resizeStateRef = React.useRef<ResizeState | null>(null);
   const edgePressStateRef = React.useRef<EdgePressState | null>(null);
   const marqueeSelectionStateRef = React.useRef<MarqueeSelectionState | null>(null);
+  const routeTemplateAutoloadedRef = React.useRef('');
   const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
   const previewEditorStateRetryCountRef = React.useRef(0);
@@ -7063,24 +7074,49 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [syncTemplateQuery]
   );
 
+  const handleSelectedTemplateChange = React.useCallback(
+    (nextTemplateId: string) => {
+      const normalizedTemplateId = nextTemplateId.trim();
+      setSelectedTemplateId(normalizedTemplateId);
+
+      if (!normalizedTemplateId) {
+        syncTemplateQuery('');
+        return;
+      }
+
+      void loadTemplate(normalizedTemplateId);
+    },
+    [loadTemplate, syncTemplateQuery]
+  );
+
   React.useEffect(() => {
     void loadTemplates();
   }, [loadTemplates]);
 
   React.useEffect(() => {
-    if (!routeTemplateId) {
+    const normalizedRouteTemplateId = routeTemplateId.trim();
+
+    if (!normalizedRouteTemplateId || loading) {
       return;
     }
 
-    if (selectedTemplateId.trim() !== routeTemplateId) {
-      setSelectedTemplateId(routeTemplateId);
-    }
-
-    if (templateDetail?.template.id === routeTemplateId || loading) {
+    if (templateDetail?.template.id === normalizedRouteTemplateId) {
+      routeTemplateAutoloadedRef.current = normalizedRouteTemplateId;
+      if (selectedTemplateId.trim() !== normalizedRouteTemplateId) {
+        setSelectedTemplateId(normalizedRouteTemplateId);
+      }
       return;
     }
 
-    void loadTemplate(routeTemplateId);
+    if (routeTemplateAutoloadedRef.current === normalizedRouteTemplateId) {
+      return;
+    }
+
+    routeTemplateAutoloadedRef.current = normalizedRouteTemplateId;
+    if (selectedTemplateId.trim() !== normalizedRouteTemplateId) {
+      setSelectedTemplateId(normalizedRouteTemplateId);
+    }
+    void loadTemplate(normalizedRouteTemplateId);
   }, [loadTemplate, loading, routeTemplateId, selectedTemplateId, templateDetail?.template.id]);
 
   React.useEffect(() => {
@@ -10838,7 +10874,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <EntityPicker
                 value={selectedTemplateId}
                 options={templateOptions}
-                onChange={setSelectedTemplateId}
+                onChange={handleSelectedTemplateChange}
                 placeholder="편집할 템플릿을 선택하세요"
                 emptyMessage="저장된 템플릿이 없습니다."
                 optionLayout="inline"
