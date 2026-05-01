@@ -1980,13 +1980,12 @@ const applyOuterLeftWidthDelta = (
   const colWidths = readTableColWidths(table);
   const rowHeights = readTableRowHeights(table);
   const minimums = readTableColMinimums(table, colWidths);
-  const currentShellRect = readFrameElementRect(shell);
   const currentLeft = parseFramePx(shell.style.left);
-  const currentRight = currentShellRect.left + currentShellRect.width;
 
   if (!table || colWidths.length === 0) {
-    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, currentShellRect.width - delta);
-    const appliedDelta = currentShellRect.width - nextWidth;
+    const shellRect = readFrameElementRect(shell);
+    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, shellRect.width - delta);
+    const appliedDelta = shellRect.width - nextWidth;
     shell.style.left = toFrameCssPx(currentLeft + appliedDelta);
     shell.style.width = toFrameCssPx(nextWidth);
     return appliedDelta;
@@ -2010,15 +2009,6 @@ const applyOuterLeftWidthDelta = (
     shell.style.left = toFrameCssPx(currentLeft + applied);
     setTableColWidths(table, nextColWidths);
     syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
-    const nextShellRect = readFrameElementRect(shell);
-    const rightCorrection = currentRight - (nextShellRect.left + nextShellRect.width);
-
-    if (Math.abs(rightCorrection) > 0.01) {
-      const correctedWidth = Math.max(MIN_FRAME_SIZE_PX, nextShellRect.width + rightCorrection);
-      shell.style.width = toFrameCssPx(correctedWidth);
-      table.style.width = toFrameCssPx(correctedWidth);
-    }
-
     return applied;
   }
 
@@ -2031,18 +2021,6 @@ const applyOuterLeftWidthDelta = (
   shell.style.left = toFrameCssPx(currentLeft + delta);
   setTableColWidths(table, nextColWidths);
   syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
-  const nextShellRect = readFrameElementRect(shell);
-  const rightCorrection = currentRight - (nextShellRect.left + nextShellRect.width);
-
-  if (Math.abs(rightCorrection) > 0.01) {
-    const correctedWidth = Math.max(MIN_FRAME_SIZE_PX, nextShellRect.width + rightCorrection);
-    shell.style.width = toFrameCssPx(correctedWidth);
-
-    if (table) {
-      table.style.width = toFrameCssPx(correctedWidth);
-    }
-  }
-
   return delta;
 };
 

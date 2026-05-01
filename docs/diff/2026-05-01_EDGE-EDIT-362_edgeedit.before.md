@@ -685,9 +685,9 @@ runtime state 는 `TemplateEditWorkspace` 가 소유한다.
    - 해결: simple exact physical boundary vertical drag 를 별도 판정(`isSimpleExactPhysicalBoundaryVerticalDrag`)하여, 이 경우에는 `stabilize / realign / live autosnap correction / drag-direction normalize / finalize` 같은 global correction 경로를 건너뛰고 local peer 상태만 유지하도록 분리했다.
    - 결과: `band-5-cell-3:left` 드래그 중 `band-5-cell-2:right / band-5-cell-3:left` 는 끝까지 같은 선을 유지하고, `status-history-1:left` 근처 autosnap 에서도 `band-5-cell-2` 가 최소 너비로 강제 수축되지 않는다.
 22. `status-history-1:left` 의 위치를 변경하면 `status-history-1:right` 가 right-chain(`band-5-cell-6:right` ~ `band-18-cell-2:right`)에서 미세하게 밀려나는 문제
-   - 원인: `status-history-1:left` width drag 는 `applyOuterLeftWidthDelta(...)` 경로를 타는데, 이 함수가 left 이동 후 table col width 합계로 shell width 를 다시 계산하면서 outer-right 를 정확히 보존하지 못했다. 그 결과 autosnap 왕복을 반복할수록 `status-history-1:right` 가 `0.15625px` 단위로 오른쪽으로 누적 drift 되었다.
-   - 해결: `applyOuterLeftWidthDelta(...)` 에서 left edge 이동 후 shell/table width sync 를 끝낸 다음, drag 시작 전 outer-right 와 현재 outer-right 차이를 다시 계산해 shell outer-right 를 정확히 원위치로 보정하도록 추가했다.
-   - 결과: `status-history-1:left` 를 `band-5-cell-2:right` 와 `band-5-cell-6:left` 사이에서 autosnap 되게 반복 이동해도 `status-history-1:right` 는 `band-5-cell-6:right` 와 같은 좌표를 유지한다.
+   - 원인: left/right width drag 보정은 active edge cluster 기준으로만 수행되고 있었고, 같은 node의 passive opposite vertical edge는 baseline 으로 다시 고정하지 않았다. 그래서 `status-history-1:left` 를 움직인 뒤에도 `status-history-1:right` 는 선택 chain 밖의 passive edge라서 subpixel drift 가 남을 수 있었다.
+   - 해결: width drag 후 `normalizePassiveOppositeVerticalEdges(...)` 를 추가하여, 움직이지 않아야 하는 같은 node의 반대편 vertical edge를 drag 시작 baseline 으로 다시 맞추도록 했다.
+   - 결과: `status-history-1:left` drag 후에도 `status-history-1:right` 는 right-chain 과 같은 line coordinate 를 유지한다.
 
 ### 9.49 2026-05-01 `band-5-cell-3:left -> status-history-1:left` snap 경로 재수정
 

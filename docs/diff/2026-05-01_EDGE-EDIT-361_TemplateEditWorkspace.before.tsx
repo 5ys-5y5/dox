@@ -1980,13 +1980,12 @@ const applyOuterLeftWidthDelta = (
   const colWidths = readTableColWidths(table);
   const rowHeights = readTableRowHeights(table);
   const minimums = readTableColMinimums(table, colWidths);
-  const currentShellRect = readFrameElementRect(shell);
   const currentLeft = parseFramePx(shell.style.left);
-  const currentRight = currentShellRect.left + currentShellRect.width;
 
   if (!table || colWidths.length === 0) {
-    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, currentShellRect.width - delta);
-    const appliedDelta = currentShellRect.width - nextWidth;
+    const shellRect = readFrameElementRect(shell);
+    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, shellRect.width - delta);
+    const appliedDelta = shellRect.width - nextWidth;
     shell.style.left = toFrameCssPx(currentLeft + appliedDelta);
     shell.style.width = toFrameCssPx(nextWidth);
     return appliedDelta;
@@ -2010,15 +2009,6 @@ const applyOuterLeftWidthDelta = (
     shell.style.left = toFrameCssPx(currentLeft + applied);
     setTableColWidths(table, nextColWidths);
     syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
-    const nextShellRect = readFrameElementRect(shell);
-    const rightCorrection = currentRight - (nextShellRect.left + nextShellRect.width);
-
-    if (Math.abs(rightCorrection) > 0.01) {
-      const correctedWidth = Math.max(MIN_FRAME_SIZE_PX, nextShellRect.width + rightCorrection);
-      shell.style.width = toFrameCssPx(correctedWidth);
-      table.style.width = toFrameCssPx(correctedWidth);
-    }
-
     return applied;
   }
 
@@ -2031,18 +2021,6 @@ const applyOuterLeftWidthDelta = (
   shell.style.left = toFrameCssPx(currentLeft + delta);
   setTableColWidths(table, nextColWidths);
   syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
-  const nextShellRect = readFrameElementRect(shell);
-  const rightCorrection = currentRight - (nextShellRect.left + nextShellRect.width);
-
-  if (Math.abs(rightCorrection) > 0.01) {
-    const correctedWidth = Math.max(MIN_FRAME_SIZE_PX, nextShellRect.width + rightCorrection);
-    shell.style.width = toFrameCssPx(correctedWidth);
-
-    if (table) {
-      table.style.width = toFrameCssPx(correctedWidth);
-    }
-  }
-
   return delta;
 };
 
@@ -2865,14 +2843,6 @@ const applyFrameResizeWidthDelta = (
     return 0;
   }
 
-  return applyWidthResizeInstructionsDelta(instructions, delta, 0.5);
-};
-
-const applyWidthResizeInstructionsDelta = (
-  instructions: FrameWidthResizeInstruction[],
-  delta: number,
-  minimumThresholdPx = 0.5
-) => {
   let appliedDelta = delta;
 
   if (delta > 0) {
@@ -2935,7 +2905,7 @@ const applyWidthResizeInstructionsDelta = (
     }
   }
 
-  if (Math.abs(appliedDelta) < minimumThresholdPx) {
+  if (Math.abs(appliedDelta) < 0.5) {
     return 0;
   }
 
@@ -6650,7 +6620,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const liveSnapshot = buildLiveEdgeTopologySnapshot(root);
       const liveNodes = getFrameNodes(root);
       const activeMembers = resizeState.edgeResizeTargets
-        .flatMap((edgeTarget) => edgeTarget.members)
+        .flatMap((edgeTarget) => [...edgeTarget.members, ...edgeTarget.physicalPeerMembers])
         .filter(
           (member, memberIndex, members) =>
             members.findIndex((candidateMember) => candidateMember.edgeId === member.edgeId) === memberIndex
@@ -6696,20 +6666,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
+        const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), passiveSide);
+
+        if (!widthInstruction) {
+          return;
+        }
+
         const correctionDelta = baselineCoordinate - passiveLiveEdge.lineCoordinate;
 
         if (Math.abs(correctionDelta) <= 0.01) {
           return;
         }
 
-        const shell = resolveFrameLayoutShell(node);
-
-        if (passiveSide === 'left') {
-          applyOuterLeftWidthDelta(shell, correctionDelta);
-          return;
-        }
-
-        applyOuterRightWidthDelta(shell, correctionDelta);
+        applyFrameResizeWidthDelta(node, correctionDelta, [widthInstruction]);
       });
     },
     [buildLiveEdgeTopologySnapshot, getFrameNodes]

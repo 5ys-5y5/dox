@@ -1980,13 +1980,12 @@ const applyOuterLeftWidthDelta = (
   const colWidths = readTableColWidths(table);
   const rowHeights = readTableRowHeights(table);
   const minimums = readTableColMinimums(table, colWidths);
-  const currentShellRect = readFrameElementRect(shell);
   const currentLeft = parseFramePx(shell.style.left);
-  const currentRight = currentShellRect.left + currentShellRect.width;
 
   if (!table || colWidths.length === 0) {
-    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, currentShellRect.width - delta);
-    const appliedDelta = currentShellRect.width - nextWidth;
+    const shellRect = readFrameElementRect(shell);
+    const nextWidth = Math.max(MIN_FRAME_SIZE_PX, shellRect.width - delta);
+    const appliedDelta = shellRect.width - nextWidth;
     shell.style.left = toFrameCssPx(currentLeft + appliedDelta);
     shell.style.width = toFrameCssPx(nextWidth);
     return appliedDelta;
@@ -2010,15 +2009,6 @@ const applyOuterLeftWidthDelta = (
     shell.style.left = toFrameCssPx(currentLeft + applied);
     setTableColWidths(table, nextColWidths);
     syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
-    const nextShellRect = readFrameElementRect(shell);
-    const rightCorrection = currentRight - (nextShellRect.left + nextShellRect.width);
-
-    if (Math.abs(rightCorrection) > 0.01) {
-      const correctedWidth = Math.max(MIN_FRAME_SIZE_PX, nextShellRect.width + rightCorrection);
-      shell.style.width = toFrameCssPx(correctedWidth);
-      table.style.width = toFrameCssPx(correctedWidth);
-    }
-
     return applied;
   }
 
@@ -2031,18 +2021,6 @@ const applyOuterLeftWidthDelta = (
   shell.style.left = toFrameCssPx(currentLeft + delta);
   setTableColWidths(table, nextColWidths);
   syncShellSizeFromTable(shell, table, nextColWidths, rowHeights, { height: false });
-  const nextShellRect = readFrameElementRect(shell);
-  const rightCorrection = currentRight - (nextShellRect.left + nextShellRect.width);
-
-  if (Math.abs(rightCorrection) > 0.01) {
-    const correctedWidth = Math.max(MIN_FRAME_SIZE_PX, nextShellRect.width + rightCorrection);
-    shell.style.width = toFrameCssPx(correctedWidth);
-
-    if (table) {
-      table.style.width = toFrameCssPx(correctedWidth);
-    }
-  }
-
   return delta;
 };
 
@@ -2865,14 +2843,6 @@ const applyFrameResizeWidthDelta = (
     return 0;
   }
 
-  return applyWidthResizeInstructionsDelta(instructions, delta, 0.5);
-};
-
-const applyWidthResizeInstructionsDelta = (
-  instructions: FrameWidthResizeInstruction[],
-  delta: number,
-  minimumThresholdPx = 0.5
-) => {
   let appliedDelta = delta;
 
   if (delta > 0) {
@@ -2935,7 +2905,7 @@ const applyWidthResizeInstructionsDelta = (
     }
   }
 
-  if (Math.abs(appliedDelta) < minimumThresholdPx) {
+  if (Math.abs(appliedDelta) < 0.5) {
     return 0;
   }
 
@@ -6641,80 +6611,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [buildLiveEdgeTopologySnapshot]
   );
 
-  const normalizePassiveOppositeVerticalEdges = React.useCallback(
-    (root: HTMLElement, resizeState: ResizeState) => {
-      if (!resizeState.edgeResizeTargets?.length || Math.abs(resizeState.appliedEdgeDeltaX || 0) < 0.01) {
-        return;
-      }
-
-      const liveSnapshot = buildLiveEdgeTopologySnapshot(root);
-      const liveNodes = getFrameNodes(root);
-      const activeMembers = resizeState.edgeResizeTargets
-        .flatMap((edgeTarget) => edgeTarget.members)
-        .filter(
-          (member, memberIndex, members) =>
-            members.findIndex((candidateMember) => candidateMember.edgeId === member.edgeId) === memberIndex
-        )
-        .filter((member) => member.orientation === 'vertical' && (member.side === 'left' || member.side === 'right'));
-
-      const frameSideMap = new Map<string, Set<'left' | 'right'>>();
-
-      activeMembers.forEach((member) => {
-        const nextSides = frameSideMap.get(member.frameGroupId) || new Set<'left' | 'right'>();
-        nextSides.add(member.side);
-        frameSideMap.set(member.frameGroupId, nextSides);
-      });
-
-      frameSideMap.forEach((movedSides, frameGroupId) => {
-        if (movedSides.size !== 1) {
-          return;
-        }
-
-        const movedSide = Array.from(movedSides)[0];
-        const passiveSide = movedSide === 'left' ? 'right' : 'left';
-        const passiveLiveEdge =
-          liveSnapshot.edges.find(
-            (edge) =>
-              edge.frameGroupId === frameGroupId &&
-              edge.orientation === 'vertical' &&
-              edge.side === passiveSide
-          ) || null;
-
-        if (!passiveLiveEdge) {
-          return;
-        }
-
-        const baselineCoordinate = resizeState.edgeLineCoordinateBaseline?.[passiveLiveEdge.edgeId];
-
-        if (typeof baselineCoordinate !== 'number') {
-          return;
-        }
-
-        const node = liveNodes.find((candidate) => getFrameGroupId(candidate) === frameGroupId) || null;
-
-        if (!node) {
-          return;
-        }
-
-        const correctionDelta = baselineCoordinate - passiveLiveEdge.lineCoordinate;
-
-        if (Math.abs(correctionDelta) <= 0.01) {
-          return;
-        }
-
-        const shell = resolveFrameLayoutShell(node);
-
-        if (passiveSide === 'left') {
-          applyOuterLeftWidthDelta(shell, correctionDelta);
-          return;
-        }
-
-        applyOuterRightWidthDelta(shell, correctionDelta);
-      });
-    },
-    [buildLiveEdgeTopologySnapshot, getFrameNodes]
-  );
-
   const finalizeLiveVerticalEdgeTargets = React.useCallback(
     (root: HTMLElement, resizeState: ResizeState) => {
       if (!resizeState.edgeResizeTargets?.length) {
@@ -6947,7 +6843,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             realignLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
             finalizeLiveVerticalEdgeTargets(previewRef.current, currentResizeState);
           }
-          normalizePassiveOppositeVerticalEdges(previewRef.current, currentResizeState);
         } else {
           normalizeLiveVerticalCohorts(previewRef.current);
           normalizeLiveVerticalPhysicalPeers(previewRef.current);
@@ -7003,7 +6898,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       edgeSelectionState,
       finalizeLiveVerticalEdgeTargets,
       normalizeLiveVerticalCohorts,
-      normalizePassiveOppositeVerticalEdges,
       normalizeLiveVerticalPhysicalPeers,
       reconcileLiveEdgeSelection,
       realignLiveVerticalEdgeTargets,
@@ -7834,9 +7728,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             );
             normalizeLiveVerticalPhysicalPeersToDragDirection(previewRef.current, resizeState);
           }
-          if (widthResizeTargets.length > 0) {
-            normalizePassiveOppositeVerticalEdges(previewRef.current, resizeState);
-          }
         }
       } else {
         const siblingRects = filterResizeSnapRects(
@@ -7892,7 +7783,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     collectPassiveShiftedHorizontalEdgeIds,
     getFrameNodes,
     normalizeLiveVerticalCohorts,
-    normalizePassiveOppositeVerticalEdges,
     normalizeLiveVerticalPhysicalPeers,
     normalizeLiveVerticalPhysicalPeersToDragDirection,
     realignLiveVerticalEdgeTargets,
