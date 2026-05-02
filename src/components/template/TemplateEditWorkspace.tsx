@@ -4493,7 +4493,7 @@ const appendFrameKindMarker = (
 ) => {
   const shell = resolveFrameLayoutShell(frameNode);
   const hostRect = shell.getBoundingClientRect();
-  const compact = hostRect.width < 72 || hostRect.height < 24;
+  const compact = hostRect.width < 72 || hostRect.height < 16;
   const marker = document.createElement('div');
   marker.className = FRAME_KIND_MARKER_CLASS;
   marker.setAttribute('data-box-kind', boxKind);
@@ -7657,6 +7657,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       schedulePreviewEditorState,
       selectionPanelTab,
       selectedFrameGroupIds,
+      showMetadataIcons,
   ]);
 
   React.useLayoutEffect(() => {
@@ -7668,6 +7669,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
   }, [renderedPreviewHtml, selectionValidationErrorFrameIds, selectedFrameGroupIds, selectionPanelTab]);
+
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    applyRuntimeSelectionVisuals(selectedFrameGroupIdsRef.current, edgeSelectionStateRef.current);
+    applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
+  }, [applyRuntimeSelectionVisuals, selectionValidationErrorFrameIds, showMetadataIcons]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
