@@ -557,6 +557,17 @@ const confirmPromoteKeyBoxToText = () => {
   return window.confirm('key 박스는 text 박스여야 합니다. text 박스로 업데이트하고 설정을 반영할까요?');
 };
 
+const confirmPromoteRuntimeMode = (frameGroupId: string, currentRuntimeMode: string, nextRuntimeMode: TemplateFrameRuntimeMode) => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.confirm(
+    `${frameGroupId} 의 runtime mode ${currentRuntimeMode} 는 현재 박스 타입과 호환되지 않습니다.\n` +
+      `호환 가능한 runtime mode(${nextRuntimeMode})로 변경할까요?`
+  );
+};
+
 const MetadataCanvasLegend = ({
   showMetadataIcons,
   onToggleMetadataIcons,
@@ -8387,12 +8398,59 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
     }
 
+    const autoRuntimePatchByFrameId = new Map<string, FrameMetadataPatch>();
     const affectedFrameGroupIds = Array.from(
       new Set([...activeSelectionIds, ...Array.from(relationPatchByFrameId.keys()), ...Array.from(autoParentPatchByFrameId.keys())])
     );
     const affectedNodes = affectedFrameGroupIds
       .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
       .filter((node): node is HTMLElement => Boolean(node));
+
+    for (const frameGroupId of affectedFrameGroupIds) {
+      const nextMetadata = resolvedMetadataById.get(frameGroupId);
+
+      if (!nextMetadata || !nextMetadata.boxKind || !nextMetadata.runtimeMode) {
+        continue;
+      }
+
+      const compatibleRuntimeModes = getCompatibleRuntimeModes(nextMetadata.boxKind);
+
+      if (compatibleRuntimeModes.includes(nextMetadata.runtimeMode)) {
+        continue;
+      }
+
+      const suggestedRuntimeMode = getDefaultRuntimeMode(nextMetadata.boxKind, nextMetadata.role || 'key_value');
+      const nextRuntimeMode = compatibleRuntimeModes.includes(suggestedRuntimeMode)
+        ? suggestedRuntimeMode
+        : compatibleRuntimeModes[0];
+
+      if (!nextRuntimeMode) {
+        continue;
+      }
+
+      const approved = confirmPromoteRuntimeMode(frameGroupId, nextMetadata.runtimeMode, nextRuntimeMode);
+
+      if (!approved) {
+        return {
+          ok: false,
+          skipped: false,
+          issues: [
+            {
+              frameGroupId,
+              message: `${frameGroupId} 의 runtime mode 보정이 취소되어 저장을 중단했습니다.`,
+            },
+          ],
+        };
+      }
+
+      resolvedMetadataById.set(frameGroupId, {
+        ...nextMetadata,
+        runtimeMode: nextRuntimeMode,
+      });
+      autoRuntimePatchByFrameId.set(frameGroupId, {
+        runtimeMode: nextRuntimeMode,
+      });
+    }
 
     const issues: FrameMetadataValidationIssue[] = [];
 
@@ -8485,6 +8543,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         ...(activeSelectionIds.includes(frameGroupId) ? metadataPatch : {}),
         ...(relationPatchByFrameId.get(frameGroupId) || {}),
         ...(autoParentPatchByFrameId.get(frameGroupId) || {}),
+        ...(autoRuntimePatchByFrameId.get(frameGroupId) || {}),
       };
 
       if (!nextMetadata) {
