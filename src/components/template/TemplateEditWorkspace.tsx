@@ -1,6 +1,6 @@
 'use client';
 
-import { CircleDot, CornerDownRight, FileText, KeyRound, Paperclip, Signature } from 'lucide-react';
+import { CircleDot, CornerDownRight, FileText, KeyRound, Minus, Paperclip, Signature } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server.browser';
@@ -103,11 +103,11 @@ type FrameMetadataPatch = {
 };
 
 type ResolvedFrameMetadata = {
-  boxKind: TemplateFrameBoxKind;
-  role: TemplateFrameRole | 'group';
+  boxKind: TemplateFrameBoxKind | '';
+  role: TemplateFrameRole | 'group' | '';
   valueKey: string;
   parentGroupId: string;
-  runtimeMode: TemplateFrameRuntimeMode;
+  runtimeMode: TemplateFrameRuntimeMode | '';
 };
 
 type MetadataRelationSelectionMode =
@@ -122,7 +122,7 @@ type FrameRelationPreviewMode =
   | { kind: 'value-select'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] }
   | { kind: 'value-linked'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
 
-type SelectionPanelTab = 'summary' | 'create' | 'metadata' | 'style';
+type SelectionPanelTab = 'summary' | 'create' | 'metadata' | 'style' | 'text';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
 
@@ -458,6 +458,7 @@ const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
   attachment: '첨부',
   signature: '서명',
 };
+const NULL_MARKER_LABEL = '-';
 const FRAME_BOX_KIND_DESCRIPTIONS: Record<TemplateFrameBoxKind, string> = {
   text: '문서마다 텍스트를 직접 입력하거나, 고정 라벨처럼 보여주는 박스입니다.',
   attachment: '문서마다 파일을 업로드하고 파일명 표시, 파일 열기 동작을 연결하는 박스입니다.',
@@ -485,12 +486,12 @@ const FrameKindIcon = ({
   className = '',
   strokeWidth = 2.15,
 }: {
-  boxKind: TemplateFrameBoxKind;
+  boxKind: TemplateFrameBoxKind | '';
   className?: string;
   strokeWidth?: number;
 }) => {
   const IconComponent =
-    boxKind === 'text' ? FileText : boxKind === 'attachment' ? Paperclip : Signature;
+    boxKind === 'text' ? FileText : boxKind === 'attachment' ? Paperclip : boxKind === 'signature' ? Signature : Minus;
   return <IconComponent aria-hidden="true" className={className} strokeWidth={strokeWidth} />;
 };
 
@@ -499,11 +500,11 @@ const FrameRoleIcon = ({
   className = '',
   strokeWidth = 2.15,
 }: {
-  role: TemplateFrameRole | 'group';
+  role: TemplateFrameRole | 'group' | '';
   className?: string;
   strokeWidth?: number;
 }) => {
-  const IconComponent = role === 'key' ? KeyRound : role === 'value' ? CornerDownRight : CircleDot;
+  const IconComponent = role === 'key' ? KeyRound : role === 'value' ? CornerDownRight : role === 'key_value' || role === 'group' ? CircleDot : Minus;
   return <IconComponent aria-hidden="true" className={className} strokeWidth={strokeWidth} />;
 };
 
@@ -512,8 +513,8 @@ const FrameMetadataMarker = ({
   role,
   compact = false,
 }: {
-  boxKind: TemplateFrameBoxKind;
-  role: TemplateFrameRole | 'group';
+  boxKind: TemplateFrameBoxKind | '';
+  role: TemplateFrameRole | 'group' | '';
   compact?: boolean;
 }) => (
   <span className="v106-frame-kind-marker__stack" aria-hidden="true">
@@ -521,32 +522,40 @@ const FrameMetadataMarker = ({
       className="v106-frame-kind-marker__pill"
       data-marker-pill="kind"
       data-marker-icon="kind"
-      data-box-kind={boxKind}
+      data-box-kind={boxKind || 'null'}
     >
       <span className="v106-frame-kind-marker__icon">
         <FrameKindIcon boxKind={boxKind} className="h-3 w-3" />
       </span>
-      {!compact ? <span className="v106-frame-kind-marker__text">{FRAME_BOX_KIND_MARKER_LABELS[boxKind]}</span> : null}
+      {!compact ? <span className="v106-frame-kind-marker__text">{boxKind ? FRAME_BOX_KIND_MARKER_LABELS[boxKind] : NULL_MARKER_LABEL}</span> : null}
     </span>
     <span
       className="v106-frame-kind-marker__pill"
       data-marker-pill="role"
       data-marker-icon="role"
-      data-frame-role={role}
+      data-frame-role={role || 'null'}
     >
       <span className="v106-frame-kind-marker__icon">
         <FrameRoleIcon role={role} className="h-3 w-3" />
       </span>
-      {!compact ? <span className="v106-frame-kind-marker__text">{FRAME_ROLE_SHORT_LABELS[role]}</span> : null}
+      {!compact ? <span className="v106-frame-kind-marker__text">{role ? FRAME_ROLE_SHORT_LABELS[role] : NULL_MARKER_LABEL}</span> : null}
     </span>
   </span>
 );
 
 const renderFrameMetadataMarkerMarkup = (
-  boxKind: TemplateFrameBoxKind,
-  role: TemplateFrameRole | 'group',
+  boxKind: TemplateFrameBoxKind | '',
+  role: TemplateFrameRole | 'group' | '',
   compact = false
 ) => renderToStaticMarkup(<FrameMetadataMarker boxKind={boxKind} role={role} compact={compact} />);
+
+const confirmPromoteKeyBoxToText = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.confirm('key 박스는 text 박스여야 합니다. text 박스로 업데이트하고 설정을 반영할까요?');
+};
 
 const MetadataCanvasLegend = ({
   showMetadataIcons,
@@ -582,6 +591,10 @@ const MetadataCanvasLegend = ({
             <FrameKindIcon boxKind="signature" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-rose-700" />
             <span>서명 박스</span>
           </div>
+          <div className="flex items-center gap-2">
+            <FrameKindIcon boxKind="" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-slate-500" />
+            <span>null (미지정)</span>
+          </div>
         </div>
       </div>
       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
@@ -604,6 +617,12 @@ const MetadataCanvasLegend = ({
               <FrameRoleIcon role="key_value" className="h-3.5 w-3.5" />
             </span>
             <span>독립 값</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-slate-500 ring-1 ring-slate-300">
+              <FrameRoleIcon role="" className="h-3.5 w-3.5" />
+            </span>
+            <span>null (미지정)</span>
           </div>
         </div>
       </div>
@@ -695,11 +714,11 @@ const defaultSelectionStyleDraft: SelectionStyleDraft = {
 };
 
 const defaultFrameMetadataDraft: FrameMetadataDraft = {
-  boxKind: 'text',
-  role: 'key_value',
+  boxKind: '',
+  role: '',
   valueKey: '',
   parentGroupId: '',
-  runtimeMode: 'editable_text',
+  runtimeMode: '',
 };
 
 const isTemplateFrameBoxKind = (value: string | null | undefined): value is TemplateFrameBoxKind =>
@@ -806,17 +825,7 @@ const readFrameBoxKind = (node: HTMLElement) => {
     return explicitBoxKind;
   }
 
-  const legacyFieldType = readFrameMetadataAttr(node, TEMPLATE_FRAME_FIELD_TYPE_ATTR).toLowerCase();
-
-  if (legacyFieldType === 'signature') {
-    return 'signature' as const;
-  }
-
-  if (isStatusHistoryFrameNode(node)) {
-    return 'signature' as const;
-  }
-
-  return 'text' as const;
+  return '' as const;
 };
 
 const readFrameRole = (node: HTMLElement) => {
@@ -826,12 +835,7 @@ const readFrameRole = (node: HTMLElement) => {
     return explicitRole as TemplateFrameRole | 'group';
   }
 
-  if (isStatusHistoryFrameNode(node) || readFrameBoxKind(node) !== 'text') {
-    return 'value' as const;
-  }
-
-  const valueKey = normalizeFrameValueKey(readFrameMetadataAttr(node, TEMPLATE_FRAME_VALUE_KEY_ATTR));
-  return valueKey ? ('key_value' as const) : ('key' as const);
+  return '' as const;
 };
 
 const readFrameValueKey = (node: HTMLElement) =>
@@ -841,18 +845,21 @@ const readFrameParentGroupId = (node: HTMLElement) => readFrameMetadataAttr(node
 
 const readFrameRuntimeMode = (node: HTMLElement) => {
   const boxKind = readFrameBoxKind(node);
-  const role = readFrameRole(node);
   const explicitRuntimeMode = readFrameMetadataAttr(node, TEMPLATE_FRAME_RUNTIME_MODE_ATTR);
 
-  if (isTemplateFrameRuntimeMode(explicitRuntimeMode) && getCompatibleRuntimeModes(boxKind).includes(explicitRuntimeMode)) {
+  if (!isTemplateFrameRuntimeMode(explicitRuntimeMode)) {
+    return '' as const;
+  }
+
+  if (!boxKind) {
     return explicitRuntimeMode;
   }
 
-  if (isStatusHistoryFrameNode(node)) {
-    return 'signature_history' as const;
+  if (getCompatibleRuntimeModes(boxKind).includes(explicitRuntimeMode)) {
+    return explicitRuntimeMode;
   }
 
-  return getDefaultRuntimeMode(boxKind, role);
+  return '' as const;
 };
 
 const buildFrameMetadataChangePatch = (nextDraft: FrameMetadataDraft, previousDraft: FrameMetadataDraft): FrameMetadataPatch => {
@@ -885,11 +892,7 @@ const resolveNextFrameMetadata = (node: HTMLElement, patch: FrameMetadataPatch):
   const role = patch.role || readFrameRole(node);
   const valueKey = patch.valueKey !== undefined ? normalizeFrameValueKey(patch.valueKey) : readFrameValueKey(node);
   const parentGroupId = patch.parentGroupId !== undefined ? patch.parentGroupId.trim() : readFrameParentGroupId(node);
-  const runtimeMode = patch.runtimeMode
-    ? patch.runtimeMode
-    : patch.boxKind || patch.role
-      ? getDefaultRuntimeMode(boxKind, role)
-      : readFrameRuntimeMode(node);
+  const runtimeMode = patch.runtimeMode || readFrameRuntimeMode(node);
 
   return {
     boxKind,
@@ -990,7 +993,11 @@ const applyFrameMetadataPatch = (node: HTMLElement, patch: FrameMetadataPatch) =
     }
 
     if (patch.runtimeMode !== undefined) {
-      target.setAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR, patch.runtimeMode);
+      if (patch.runtimeMode.trim()) {
+        target.setAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR, patch.runtimeMode);
+      } else {
+        target.removeAttribute(TEMPLATE_FRAME_RUNTIME_MODE_ATTR);
+      }
     }
   });
 };
@@ -4490,18 +4497,21 @@ const appendRelativeAnchorGuideBadge = (
 
 const appendFrameKindMarker = (
   frameNode: HTMLElement,
-  boxKind: TemplateFrameBoxKind,
-  role: TemplateFrameRole | 'group'
+  boxKind: TemplateFrameBoxKind | '',
+  role: TemplateFrameRole | 'group' | ''
 ) => {
   const shell = resolveFrameLayoutShell(frameNode);
   const hostRect = shell.getBoundingClientRect();
   const compact = hostRect.width < 72 || hostRect.height < 16;
   const marker = document.createElement('div');
   marker.className = FRAME_KIND_MARKER_CLASS;
-  marker.setAttribute('data-box-kind', boxKind);
-  marker.setAttribute('data-frame-role', role);
+  marker.setAttribute('data-box-kind', boxKind || 'null');
+  marker.setAttribute('data-frame-role', role || 'null');
   marker.setAttribute('data-compact', compact ? 'true' : 'false');
-  marker.setAttribute('data-tooltip', `${FRAME_BOX_KIND_SHORT_LABELS[boxKind]} · ${FRAME_ROLE_SHORT_LABELS[role]}`);
+  marker.setAttribute(
+    'data-tooltip',
+    `${boxKind ? FRAME_BOX_KIND_SHORT_LABELS[boxKind] : 'null'} · ${role ? FRAME_ROLE_SHORT_LABELS[role] : 'null'}`
+  );
   shell.setAttribute('data-template-frame-marker-host', 'true');
   marker.innerHTML = renderFrameMetadataMarkerMarkup(boxKind, role, compact);
   shell.appendChild(marker);
@@ -4763,11 +4773,19 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
     const boxKind = readFrameBoxKind(node);
     const role = readFrameRole(node);
     const frameGroupId = getFrameGroupId(node);
-    const isKeyLike = role === 'key' || role === 'group' || parentGroupIds.has(frameGroupId);
+    const isKeyLike = role ? role === 'key' || role === 'group' || parentGroupIds.has(frameGroupId) : false;
 
     node.setAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR, isKeyLike ? 'full' : 'muted');
-    node.setAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
-    node.setAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
+    if (role) {
+      node.setAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
+    } else {
+      node.removeAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR);
+    }
+    if (boxKind) {
+      node.setAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
+    } else {
+      node.removeAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
+    }
     appendFrameKindMarker(node, boxKind, role);
   });
 };
@@ -5984,6 +6002,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     emptyEdgeRoleDiagnosticsState
   );
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
+  const [selectionTextDraft, setSelectionTextDraft] = React.useState('');
+  const [selectionTextMixed, setSelectionTextMixed] = React.useState(false);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('summary');
   const [showMetadataIcons, setShowMetadataIcons] = React.useState(true);
@@ -6096,7 +6116,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const parentGroupId = frameMetadataDraft.parentGroupId.trim();
 
     if (!parentGroupId || !previewRef.current) {
-      return parentGroupId || '-';
+      return parentGroupId || 'null';
     }
 
     const parentNode = resolveFrameSelectionAnchor(
@@ -6311,7 +6331,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [currentValueBoxFrameGroupIds, metadataRelationSelectionMode, primarySelectedFrameGroupId]);
   const valueBoxPickerSummary = React.useMemo(() => {
     if (!shownValueBoxFrameGroupIds.length) {
-      return '-';
+      return 'null';
     }
 
     if (!previewRef.current) {
@@ -7877,6 +7897,40 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncFrameMetadataDraft();
   }, [selectedFrameGroupIds, syncFrameMetadataDraft, templateDetail?.template.id]);
 
+  const syncSelectionTextDraft = React.useCallback(() => {
+    const root = previewRef.current;
+
+    if (!root || selectedFrameGroupIds.length === 0) {
+      setSelectionTextDraft('');
+      setSelectionTextMixed(false);
+      return;
+    }
+
+    const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
+
+    if (!nodes.length) {
+      setSelectionTextDraft('');
+      setSelectionTextMixed(false);
+      return;
+    }
+
+    const texts = nodes.map((node) => {
+      const input = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
+      if (!input) {
+        return '';
+      }
+      return String(input.value || '');
+    });
+    const sharedText = getSharedValue(texts);
+
+    setSelectionTextMixed(!sharedText);
+    setSelectionTextDraft(sharedText || texts[0] || '');
+  }, [getFrameNodes, selectedFrameGroupIds]);
+
+  React.useEffect(() => {
+    syncSelectionTextDraft();
+  }, [selectedFrameGroupIds, syncSelectionTextDraft, templateDetail?.template.id]);
+
   const startParentKeySelectionMode = React.useCallback(() => {
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
@@ -7911,9 +7965,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
     const sourceMetadata = sourceNode ? resolveNextFrameMetadata(sourceNode, {}) : null;
 
-    if (!sourceNode || !sourceMetadata || sourceMetadata.boxKind !== 'text') {
-      setMessage('key 박스로 사용할 기준 박스는 text 박스여야 합니다.');
+    if (!sourceNode || !sourceMetadata) {
+      setMessage('먼저 기준이 될 key 박스 1개를 선택하세요.');
       return;
+    }
+
+    if (sourceMetadata.boxKind !== 'text') {
+      const approved = confirmPromoteKeyBoxToText();
+
+      if (!approved) {
+        setMessage('key 박스 선택을 취소했습니다.');
+        return;
+      }
+
+      applyFrameMetadataPatch(sourceNode, {
+        boxKind: 'text',
+        role: 'key',
+      });
+      syncDraftPreviewHtmlRef();
+      setMessage(`key 박스 ${sourceKeyFrameGroupId}를 text 박스로 업데이트하고 설정을 계속합니다.`);
     }
 
     const existingTargetFrameGroupIds = getFrameNodes(root)
@@ -7934,7 +8004,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       targetFrameGroupIds: existingTargetFrameGroupIds,
     });
     setMessage('현재 key 박스가 선택된 상태입니다. 이제 이 key에 연결할 value 박스들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.');
-  }, [clearTransientCanvasOverlays, getFrameNodes]);
+  }, [clearTransientCanvasOverlays, getFrameNodes, syncDraftPreviewHtmlRef]);
 
   const clearParentKeySelectionDraft = React.useCallback(() => {
     setFrameMetadataDraft((previous) => ({
@@ -7974,8 +8044,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const targetMetadata = resolveNextFrameMetadata(targetNode, {});
 
         if (targetMetadata.boxKind !== 'text') {
-          setMessage('key 박스는 text 박스여야 합니다.');
-          return true;
+          const approved = confirmPromoteKeyBoxToText();
+
+          if (!approved) {
+            setMessage('key 박스 선택을 취소했습니다.');
+            return true;
+          }
+
+          applyFrameMetadataPatch(targetNode, {
+            boxKind: 'text',
+            role: 'key',
+          });
+          syncDraftPreviewHtmlRef();
         }
 
         const nextValueKey = normalizeFrameValueKey(readFrameDisplayText(targetNode)) || frameGroupId;
@@ -8012,7 +8092,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       return true;
     },
-    [applyRuntimeSelectionVisuals]
+    [applyRuntimeSelectionVisuals, syncDraftPreviewHtmlRef]
   );
 
   const waitForNextPaint = React.useCallback(
@@ -8106,6 +8186,42 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
     return true;
   }, [applySelectionStylePatch, readSelectionStyleDraftFromControls]);
+
+  const applySelectionTextDraft = React.useCallback(() => {
+    const root = previewRef.current;
+    const activeSelectionIds = selectedFrameGroupIdsRef.current;
+
+    if (!root || activeSelectionIds.length === 0) {
+      setMessage('텍스트를 적용할 박스를 먼저 선택하세요.');
+      return;
+    }
+
+    const nodes = getFrameNodes(root).filter((node) => activeSelectionIds.includes(getFrameGroupId(node)));
+
+    if (!nodes.length) {
+      return;
+    }
+
+    nodes.forEach((node) => {
+      const input = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
+      if (!input) {
+        return;
+      }
+
+      input.value = selectionTextDraft;
+      input.textContent = selectionTextDraft;
+      markTemplateValueElementEdited(input);
+    });
+
+    syncDraftPreviewHtmlRef();
+    requestPreviewTextFit();
+    setSelectionTextMixed(false);
+    setMessage(
+      activeSelectionIds.length > 1
+        ? `선택한 ${activeSelectionIds.length}개 박스 텍스트를 일괄 반영했습니다.`
+        : '선택 박스 텍스트를 반영했습니다.'
+    );
+  }, [getFrameNodes, requestPreviewTextFit, selectionTextDraft, syncDraftPreviewHtmlRef]);
 
   const readFrameMetadataDraftFromControls = React.useCallback((): FrameMetadataDraft => {
     const root = stylePanelRef.current;
@@ -8209,10 +8325,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
     }
 
-    const affectedFrameGroupIds = Array.from(new Set([...activeSelectionIds, ...Array.from(relationPatchByFrameId.keys())]));
-    const affectedNodes = affectedFrameGroupIds
-      .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
-      .filter((node): node is HTMLElement => Boolean(node));
+    const autoParentPatchByFrameId = new Map<string, FrameMetadataPatch>();
     const resolvedMetadataById = new Map<string, ResolvedFrameMetadata>();
     frameNodeById.forEach((node, frameGroupId) => {
       const nextMetadata = resolveNextFrameMetadata(node, {
@@ -8229,6 +8342,58 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvedMetadataById.set(frameGroupId, normalizedMetadata);
     });
 
+    const keyParentsNeedingPromotion = Array.from(
+      new Set(
+        Array.from(resolvedMetadataById.values())
+          .filter((metadata) => metadata.role === 'value' && metadata.parentGroupId)
+          .map((metadata) => metadata.parentGroupId)
+          .filter((parentGroupId) => {
+            const parentMetadata = resolvedMetadataById.get(parentGroupId);
+            return Boolean(parentMetadata && parentMetadata.boxKind !== 'text');
+          })
+      )
+    );
+
+    for (const parentGroupId of keyParentsNeedingPromotion) {
+      const approved = confirmPromoteKeyBoxToText();
+
+      if (!approved) {
+        return {
+          ok: false,
+          skipped: false,
+          issues: [
+            {
+              frameGroupId: parentGroupId,
+              message: `${parentGroupId} 의 key 박스 text 보정이 취소되어 저장을 중단했습니다.`,
+            },
+          ],
+        };
+      }
+
+      const parentMetadata = resolvedMetadataById.get(parentGroupId);
+
+      if (!parentMetadata) {
+        continue;
+      }
+
+      resolvedMetadataById.set(parentGroupId, {
+        ...parentMetadata,
+        boxKind: 'text',
+        role: 'key',
+      });
+      autoParentPatchByFrameId.set(parentGroupId, {
+        boxKind: 'text',
+        role: 'key',
+      });
+    }
+
+    const affectedFrameGroupIds = Array.from(
+      new Set([...activeSelectionIds, ...Array.from(relationPatchByFrameId.keys()), ...Array.from(autoParentPatchByFrameId.keys())])
+    );
+    const affectedNodes = affectedFrameGroupIds
+      .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
+      .filter((node): node is HTMLElement => Boolean(node));
+
     const issues: FrameMetadataValidationIssue[] = [];
 
     affectedNodes.forEach((node) => {
@@ -8239,7 +8404,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      if (nextMetadata.boxKind !== 'text' && nextMetadata.role === 'key') {
+      if (nextMetadata.boxKind && nextMetadata.boxKind !== 'text' && nextMetadata.role === 'key') {
         issues.push({
           frameGroupId,
           message: `${frameGroupId} 는 ${nextMetadata.boxKind} 박스라 key 역할을 가질 수 없습니다.`,
@@ -8293,7 +8458,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         });
       }
 
-      if (!getCompatibleRuntimeModes(nextMetadata.boxKind).includes(nextMetadata.runtimeMode)) {
+      if (
+        nextMetadata.boxKind &&
+        nextMetadata.runtimeMode &&
+        !getCompatibleRuntimeModes(nextMetadata.boxKind).includes(nextMetadata.runtimeMode)
+      ) {
         issues.push({
           frameGroupId,
           message: `${frameGroupId} 의 runtime mode ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 박스와 호환되지 않습니다.`,
@@ -8315,6 +8484,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const mergedPatch = {
         ...(activeSelectionIds.includes(frameGroupId) ? metadataPatch : {}),
         ...(relationPatchByFrameId.get(frameGroupId) || {}),
+        ...(autoParentPatchByFrameId.get(frameGroupId) || {}),
       };
 
       if (!nextMetadata) {
@@ -8331,7 +8501,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               ? nextMetadata.parentGroupId
               : ''
             : undefined,
-        runtimeMode: nextMetadata.runtimeMode,
+        runtimeMode: nextMetadata.runtimeMode || '',
       });
     });
 
@@ -10895,6 +11065,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview ${RAW_FRAME_NODE_SELECTOR} [data-template-value] {
           background-color: transparent;
         }
+        .template-edit-preview [data-template-frame-role="value"] [data-template-frame-input="true"],
+        .template-edit-preview [data-template-frame-input="true"][data-template-frame-role="value"] {
+          color: rgb(148 163 184) !important;
+          -webkit-text-fill-color: rgb(148 163 184) !important;
+        }
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-frame-input="true"],
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-edit-scope],
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-value] {
@@ -11048,6 +11223,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background: rgba(255, 241, 242, .98);
           border-color: rgba(253, 164, 175, .76);
         }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="kind"][data-box-kind="null"] {
+          color: rgba(100, 116, 139, .95);
+          background: rgba(248, 250, 252, .98);
+          border-color: rgba(203, 213, 225, .9);
+        }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="key"] {
           color: rgba(217, 119, 6, .98);
           background: rgba(255, 251, 235, .98);
@@ -11063,6 +11243,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           color: rgba(5, 150, 105, .98);
           background: rgba(236, 253, 245, .98);
           border-color: rgba(167, 243, 208, .76);
+        }
+        .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="null"] {
+          color: rgba(100, 116, 139, .95);
+          background: rgba(248, 250, 252, .98);
+          border-color: rgba(203, 213, 225, .9);
         }
         .template-edit-preview [data-template-frame-input="true"][${TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR}="true"] {
           opacity: 0;
@@ -11479,6 +11664,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   { id: 'summary', label: '요약' },
                   { id: 'create', label: '박스 생성' },
                   { id: 'metadata', label: '메타데이터' },
+                  { id: 'text', label: '텍스트' },
                   { id: 'style', label: '스타일' },
                 ] as const).map((tab) => (
                   <Button
@@ -11571,6 +11757,37 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       movement mismatch edge: {edgeRoleDiagnostics.mismatchEdgeIds.join(', ') || '-'}
                     </div>
                     <div className="mt-1">프레임 박스 수: {frameNodesAvailable}</div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                    <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">메타데이터 요약</div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      <div>
+                        <span className="font-medium text-slate-900">Box Kind</span>
+                        <div className="mt-0.5">{frameMetadataDraft.boxKind ? FRAME_BOX_KIND_LABELS[frameMetadataDraft.boxKind] : 'null'}</div>
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Role</span>
+                        <div className="mt-0.5">
+                          {frameMetadataDraft.role
+                            ? frameMetadataDraft.role === 'group'
+                              ? 'group | 그룹'
+                              : FRAME_ROLE_LABELS[frameMetadataDraft.role]
+                            : 'null'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Runtime Mode</span>
+                        <div className="mt-0.5">
+                          {frameMetadataDraft.runtimeMode ? FRAME_RUNTIME_MODE_LABELS[frameMetadataDraft.runtimeMode] : 'null'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">현재 연결 상태</span>
+                        <div className="mt-0.5">Key Box: {currentParentKeyBoxLabel}</div>
+                        <div className="mt-0.5 break-all">Value Box: {valueBoxPickerSummary}</div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-2">
@@ -11740,6 +11957,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {selectionPanelTab === 'text' ? (
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-slate-800">박스 텍스트</label>
+                    <p className="text-xs text-slate-500">
+                      현재 선택한 박스의 텍스트를 편집합니다. 여러 박스를 선택하면 같은 값으로 일괄 반영됩니다.
+                    </p>
+                  </div>
+                  <textarea
+                    value={selectionTextDraft}
+                    onChange={(event) => {
+                      setSelectionTextDraft(event.target.value);
+                      setSelectionTextMixed(false);
+                    }}
+                    placeholder={selectionTextMixed ? '여러 박스의 텍스트가 서로 다릅니다.' : '선택한 박스 텍스트'}
+                    className="min-h-40 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus-visible:ring-1 focus-visible:ring-slate-300"
+                  />
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                    <span>{selectedFrameGroupIds.length > 0 ? `${selectedFrameGroupIds.length}개 박스 선택됨` : '선택된 박스 없음'}</span>
+                    <Button size="sm" onClick={() => applySelectionTextDraft()} disabled={selectedFrameGroupIds.length === 0}>
+                      텍스트 반영
+                    </Button>
                   </div>
                 </div>
               ) : null}
