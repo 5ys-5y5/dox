@@ -405,8 +405,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 }: TemplateEditPreviewSurfaceProps) {
   if (!renderedPreviewHtml) {
     return (
-      <CardContent className="flex min-h-[560px] items-center justify-center !p-0 text-sm text-slate-500">
-        편집할 템플릿을 먼저 불러오세요.
+      <CardContent className="p-6">
+        <div className="flex min-h-[560px] items-center justify-center text-sm text-slate-500">
+          편집할 템플릿을 먼저 불러오세요.
+        </div>
       </CardContent>
     );
   }
@@ -414,7 +416,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   return (
     <CardContent
       ref={setPreviewNode}
-      className="template-edit-preview template-extract-draft-preview template-extract-preview-surface !p-0 template-clone template-clone--raster-first-v2-structured"
+      className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 p-4 template-clone template-clone--raster-first-v2-structured"
       data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
       data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
       data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
@@ -7359,6 +7361,61 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [syncTemplateQuery]
   );
 
+  const handleDeleteTemplateOption = React.useCallback(
+    async (option: TemplateOption) => {
+      const templateId = option.id.trim();
+
+      if (!templateId) {
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        const confirmed = window.confirm(`템플릿 ${templateId} 을(를) 삭제할까요?`);
+        if (!confirmed) {
+          return;
+        }
+      }
+
+      setMessage(null);
+
+      try {
+        const response = await fetch(`/api/templates/${templateId}`, {
+          method: 'DELETE',
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || '템플릿 삭제에 실패했습니다.');
+        }
+
+        setTemplates((previous) => previous.filter((item) => item.id !== templateId));
+
+        if (selectedTemplateId.trim() === templateId || templateDetail?.template.id === templateId) {
+          setSelectedTemplateId('');
+          setTemplateDetail(null);
+          setPreviewHtml('');
+          setTemplateName('');
+          setSourceDocumentName('');
+          selectedFrameGroupIdsRef.current = [];
+          edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
+          setSelectedFrameGroupIds([]);
+          setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
+          setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+          setSelectionValidationIssues([]);
+          setSelectionSaveProgress(defaultSelectionSaveProgressState);
+          draftPreviewHtmlRef.current = '';
+          syncTemplateQuery('');
+        }
+
+        setMessage(`템플릿 ${templateId} 삭제를 완료했습니다.`);
+      } catch (error) {
+        const nextMessage = error instanceof Error ? error.message : '템플릿 삭제에 실패했습니다.';
+        setMessage(nextMessage);
+      }
+    },
+    [selectedTemplateId, syncTemplateQuery, templateDetail?.template.id]
+  );
+
   const handleSelectedTemplateChange = React.useCallback(
     (nextTemplateId: string) => {
       const normalizedTemplateId = nextTemplateId.trim();
@@ -10708,7 +10765,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           overflow: hidden;
           border-top: 1px solid rgb(226 232 240);
           border-radius: 0 0 0.75rem 0.75rem;
-          background: rgb(226 232 240);
+          background: rgb(226 232 240) !important;
           box-shadow: none;
           color: rgb(30 41 59);
         }
@@ -11259,12 +11316,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 placeholder="편집할 템플릿을 선택하세요"
                 emptyMessage="저장된 템플릿이 없습니다."
                 optionLayout="inline"
+                onDeleteOption={handleDeleteTemplateOption}
+                deleteOptionLabel="템플릿 삭제"
                 className="w-full"
                 triggerClassName="h-11 min-h-11 items-center rounded-md py-2"
               />
             </div>
             <div className="flex items-end">
               <Button
+                className="h-11 min-h-11"
                 variant="outline"
                 onClick={() => void loadTemplate(selectedTemplateId)}
                 disabled={loading || !selectedTemplateId.trim()}
@@ -11302,13 +11362,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr]">
         <Card className="border-slate-200">
           <CardHeader>
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-              <CardTitle>박스 편집 캔버스</CardTitle>
-              <MetadataCanvasLegend
-                showMetadataIcons={showMetadataIcons}
-                onToggleMetadataIcons={() => setShowMetadataIcons((previous) => !previous)}
-              />
-            </div>
+            <CardTitle>박스 편집 캔버스</CardTitle>
           </CardHeader>
           <TemplateEditPreviewSurface
             renderedPreviewHtml={renderedPreviewHtml}
@@ -11323,6 +11377,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             handlePreviewClickCapture={handlePreviewClickCapture}
             handlePreviewInput={handlePreviewInput}
           />
+          <CardContent className="p-6">
+            <MetadataCanvasLegend
+              showMetadataIcons={showMetadataIcons}
+              onToggleMetadataIcons={() => setShowMetadataIcons((previous) => !previous)}
+            />
+          </CardContent>
         </Card>
 
         <div className="space-y-6">

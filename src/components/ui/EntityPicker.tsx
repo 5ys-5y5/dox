@@ -186,7 +186,7 @@ export function EntityPicker({
                       role="option"
                       aria-selected={selected}
                       className={cn(
-                        'flex w-full items-center rounded-xl border text-left transition-colors',
+                        'flex w-full items-start rounded-xl border text-left transition-colors',
                         option.disabled
                           ? 'cursor-not-allowed border-transparent bg-white opacity-50'
                           : selected
@@ -202,7 +202,7 @@ export function EntityPicker({
                           setOpen(false);
                         }}
                         className={cn(
-                          'flex min-w-0 flex-1 px-3 py-2.5 text-left',
+                          'flex min-w-0 flex-1 items-start justify-start px-3 py-2.5 text-left',
                           inlineOptionLayout ? 'items-baseline gap-2' : 'flex-col'
                         )}
                       >
