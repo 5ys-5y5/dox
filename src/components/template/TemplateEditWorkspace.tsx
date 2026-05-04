@@ -1,6 +1,6 @@
 'use client';
 
-import { CircleDot, CornerDownRight, FileText, KeyRound, Minus, Paperclip, Signature } from 'lucide-react';
+import { CheckCircle2, CircleDot, CornerDownRight, FileText, KeyRound, Loader2, Minus, Paperclip, Signature } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server.browser';
@@ -82,6 +82,9 @@ type SelectionSaveProgressState = {
   stage: string;
   detail: string;
 };
+
+type StyleFieldKey = keyof SelectionStyleDraft;
+type StyleFieldApplyState = 'idle' | 'saving' | 'saved' | 'failed';
 
 type SelectionMetadataApplyResult = {
   ok: boolean;
@@ -722,6 +725,20 @@ const defaultSelectionStyleDraft: SelectionStyleDraft = {
   textAlign: 'left',
   color: '#0f172a',
   backgroundColor: 'transparent',
+};
+
+const defaultStyleFieldApplyStatus: Record<StyleFieldKey, StyleFieldApplyState> = {
+  width: 'idle',
+  height: 'idle',
+  fontSize: 'idle',
+  lineHeight: 'idle',
+  paddingX: 'idle',
+  paddingY: 'idle',
+  borderRadius: 'idle',
+  fontWeight: 'idle',
+  textAlign: 'idle',
+  color: 'idle',
+  backgroundColor: 'idle',
 };
 
 const defaultFrameMetadataDraft: FrameMetadataDraft = {
@@ -6013,6 +6030,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     emptyEdgeRoleDiagnosticsState
   );
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
+  const [styleFieldApplyStatus, setStyleFieldApplyStatus] =
+    React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
   const [selectionTextDraft, setSelectionTextDraft] = React.useState('');
   const [selectionTextMixed, setSelectionTextMixed] = React.useState(false);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
@@ -6024,6 +6043,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   });
   const [selectionSaveProgress, setSelectionSaveProgress] =
     React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
+  const [hasSelectionProgressHistory, setHasSelectionProgressHistory] = React.useState(false);
+  const [showSelectionStatus, setShowSelectionStatus] = React.useState(false);
   const [selectionValidationIssues, setSelectionValidationIssues] = React.useState<FrameMetadataValidationIssue[]>([]);
   const [message, setMessage] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -6082,6 +6103,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectionSaveProgressFailed = selectionSaveProgress.phase === 'failed';
   const selectionSaveProgressCompleted = selectionSaveProgress.phase === 'completed';
   const selectionSaveProgressActive = selectionSaveProgress.phase === 'running';
+  const canShowSelectionStatus = hasSelectionProgressHistory || selectionSaveProgress.phase !== 'idle';
   const routeTemplateId = React.useMemo(() => {
     const normalizedInitialTemplateId = initialTemplateId.trim();
 
@@ -7942,6 +7964,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncSelectionTextDraft();
   }, [selectedFrameGroupIds, syncSelectionTextDraft, templateDetail?.template.id]);
 
+  React.useEffect(() => {
+    setStyleFieldApplyStatus(defaultStyleFieldApplyStatus);
+  }, [selectedFrameGroupIds, selectionPanelTab]);
+
+  React.useEffect(() => {
+    if (selectionSaveProgress.phase === 'idle') {
+      return;
+    }
+
+    setHasSelectionProgressHistory(true);
+    if (selectionSaveProgress.phase === 'running') {
+      setShowSelectionStatus(true);
+    }
+  }, [selectionSaveProgress.phase]);
+
   const startParentKeySelectionMode = React.useCallback(() => {
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
@@ -8197,6 +8234,38 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
     return true;
   }, [applySelectionStylePatch, readSelectionStyleDraftFromControls]);
+
+  const setStyleFieldDraftValue = React.useCallback((field: StyleFieldKey, value: string) => {
+    setSelectionStyleDraft((previous) => ({ ...previous, [field]: value }));
+    setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'idle' }));
+  }, []);
+
+  const applyStyleFieldOnBlur = React.useCallback(
+    (field: StyleFieldKey) => {
+      if (selectedFrameGroupIdsRef.current.length === 0) {
+        return;
+      }
+
+      setSelectionSaveProgress({
+        phase: 'running',
+        title: '선택 항목 저장',
+        percent: 45,
+        stage: '스타일 반영 중',
+        detail: `${field} 스타일을 반영하고 있습니다.`,
+      });
+      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saving' }));
+      const ok = applySelectionStyleDraft();
+      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: ok ? 'saved' : 'failed' }));
+      setSelectionSaveProgress({
+        phase: ok ? 'completed' : 'failed',
+        title: '선택 항목 저장',
+        percent: 100,
+        stage: ok ? '스타일 반영 완료' : '스타일 반영 실패',
+        detail: ok ? `${field} 스타일을 반영했습니다.` : `${field} 스타일 반영에 실패했습니다.`,
+      });
+    },
+    [applySelectionStyleDraft]
+  );
 
   const applySelectionTextDraft = React.useCallback(() => {
     const root = previewRef.current;
@@ -8585,6 +8654,52 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncFrameMetadataDraft,
   ]);
 
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'metadata') {
+      return;
+    }
+
+    if (selectedFrameGroupIds.length === 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setSelectionSaveProgress({
+        phase: 'running',
+        title: '선택 항목 저장',
+        percent: 30,
+        stage: '메타데이터 반영 중',
+        detail: '메타데이터 변경을 자동 반영하고 있습니다.',
+      });
+      const metadataResult = applySelectionMetadataDraft();
+
+      if (!metadataResult.ok) {
+        setSelectionValidationIssues(metadataResult.issues);
+        setSelectionSaveProgress({
+          phase: 'failed',
+          title: '선택 항목 저장',
+          percent: 100,
+          stage: '메타데이터 반영 실패',
+          detail: '메타데이터 자동 반영에 실패했습니다.',
+        });
+        return;
+      }
+
+      setSelectionValidationIssues([]);
+      setSelectionSaveProgress({
+        phase: 'completed',
+        title: '선택 항목 저장',
+        percent: 100,
+        stage: metadataResult.skipped ? '변경 없음' : '메타데이터 반영 완료',
+        detail: metadataResult.skipped ? '반영할 메타데이터 변경이 없습니다.' : '메타데이터를 자동 반영했습니다.',
+      });
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [applySelectionMetadataDraft, frameMetadataDraft, selectedFrameGroupIds, selectionPanelTab]);
+
   const applySelectionPanelDrafts = React.useCallback(async () => {
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
@@ -8703,6 +8818,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       backgroundColor: preset.backgroundColor ?? previous.backgroundColor,
     }));
   }, []);
+
+  const renderStyleApplyStatusIcon = React.useCallback(
+    (field: StyleFieldKey) => {
+      const status = styleFieldApplyStatus[field];
+
+      if (status === 'saving') {
+        return <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-600" aria-label="반영 중" />;
+      }
+
+      if (status === 'saved') {
+        return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-label="반영 완료" />;
+      }
+
+      return null;
+    },
+    [styleFieldApplyStatus]
+  );
 
   const applyPrimaryFramePositionMode = React.useCallback(
     (nextMode: TemplateFramePositionMode) => {
@@ -11645,16 +11777,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         <div className="space-y-6 min-w-0">
           <Card className="border-slate-200">
             <CardHeader>
-              <CardTitle>선택 상태</CardTitle>
-              <CardDescription>엣지는 `selected_edge_clicked`, `selected_edge_auto_multi`, `peer_edge` 역할로 나뉘며 이동 mismatch 를 함께 기록합니다.</CardDescription>
-            </CardHeader>
-            <CardContent ref={stylePanelRef} className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={() => void applySelectionPanelDrafts()} disabled={selectedFrameGroupIds.length === 0 || selectionSaveProgressActive}>
-                  {selectionSaveProgressActive ? '반영 중...' : '선택 항목 저장'}
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>선택 상태</CardTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowSelectionStatus((previous) => !previous)}
+                  disabled={!canShowSelectionStatus}
+                >
+                  {showSelectionStatus ? '상태 숨기기' : '상태 보기'}
                 </Button>
               </div>
-              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+            </CardHeader>
+            <CardContent ref={stylePanelRef} className="space-y-4">
+              {canShowSelectionStatus && showSelectionStatus ? (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
                     <div className="text-xs font-semibold">진행 상태</div>
@@ -11717,7 +11854,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     </ul>
                   </div>
                 ) : null}
-              </div>
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
                 {([
                   { id: 'summary', label: '요약' },
@@ -12068,104 +12206,119 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">너비 (px)</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        너비 (px)
+                        {renderStyleApplyStatusIcon('width')}
+                      </label>
                       <Input
                         data-style-field="width"
                         value={selectionStyleDraft.width}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, width: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('width', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('width')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">높이 (px)</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        높이 (px)
+                        {renderStyleApplyStatusIcon('height')}
+                      </label>
                       <Input
                         data-style-field="height"
                         value={selectionStyleDraft.height}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, height: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('height', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('height')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">폰트 크기</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        폰트 크기
+                        {renderStyleApplyStatusIcon('fontSize')}
+                      </label>
                       <Input
                         data-style-field="fontSize"
                         value={selectionStyleDraft.fontSize}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, fontSize: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('fontSize', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('fontSize')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">줄 간격</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        줄 간격
+                        {renderStyleApplyStatusIcon('lineHeight')}
+                      </label>
                       <Input
                         data-style-field="lineHeight"
                         value={selectionStyleDraft.lineHeight}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, lineHeight: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('lineHeight', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('lineHeight')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">좌우 여백</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        좌우 여백
+                        {renderStyleApplyStatusIcon('paddingX')}
+                      </label>
                       <Input
                         data-style-field="paddingX"
                         value={selectionStyleDraft.paddingX}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, paddingX: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('paddingX', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('paddingX')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">상하 여백</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        상하 여백
+                        {renderStyleApplyStatusIcon('paddingY')}
+                      </label>
                       <Input
                         data-style-field="paddingY"
                         value={selectionStyleDraft.paddingY}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, paddingY: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('paddingY', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('paddingY')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">모서리 반경</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        모서리 반경
+                        {renderStyleApplyStatusIcon('borderRadius')}
+                      </label>
                       <Input
                         data-style-field="borderRadius"
                         value={selectionStyleDraft.borderRadius}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, borderRadius: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('borderRadius', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('borderRadius')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">글자 굵기</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        글자 굵기
+                        {renderStyleApplyStatusIcon('fontWeight')}
+                      </label>
                       <Input
                         data-style-field="fontWeight"
                         value={selectionStyleDraft.fontWeight}
                         placeholder="혼합"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, fontWeight: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('fontWeight', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('fontWeight')}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">정렬</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        정렬
+                        {renderStyleApplyStatusIcon('textAlign')}
+                      </label>
                       <select
                         data-style-field="textAlign"
                         value={selectionStyleDraft.textAlign}
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({
-                            ...previous,
-                            textAlign: event.target.value as SelectionStyleDraft['textAlign'],
-                          }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('textAlign', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('textAlign')}
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
                         <option value="left">left</option>
@@ -12175,28 +12328,29 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">글자 색</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        글자 색
+                        {renderStyleApplyStatusIcon('color')}
+                      </label>
                       <Input
                         data-style-field="color"
                         type="color"
                         value={selectionStyleDraft.color}
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({ ...previous, color: event.target.value }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('color', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('color')}
                       />
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-medium text-slate-800">배경 색</label>
+                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        배경 색
+                        {renderStyleApplyStatusIcon('backgroundColor')}
+                      </label>
                       <Input
                         data-style-field="backgroundColor"
                         value={selectionStyleDraft.backgroundColor}
                         placeholder="transparent"
-                        onChange={(event) =>
-                          setSelectionStyleDraft((previous) => ({
-                            ...previous,
-                            backgroundColor: event.target.value,
-                          }))
-                        }
+                        onChange={(event) => setStyleFieldDraftValue('backgroundColor', event.target.value)}
+                        onBlur={() => applyStyleFieldOnBlur('backgroundColor')}
                       />
                     </div>
                   </div>
