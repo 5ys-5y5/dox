@@ -577,24 +577,9 @@ const confirmPromoteRuntimeMode = (frameGroupId: string, currentRuntimeMode: str
   );
 };
 
-const MetadataCanvasLegend = ({
-  showMetadataIcons,
-  onToggleMetadataIcons,
-}: {
-  showMetadataIcons: boolean;
-  onToggleMetadataIcons: () => void;
-}) => (
+const MetadataCanvasLegend = () => (
   <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-    <div className="flex items-center justify-between gap-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">범례</div>
-      <button
-        type="button"
-        onClick={onToggleMetadataIcons}
-        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-      >
-        {showMetadataIcons ? '아이콘 끄기' : '아이콘 켜기'}
-      </button>
-    </div>
+    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">범례</div>
     <div className="mt-2 grid gap-2 lg:grid-cols-3">
       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
         <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Box Kind</div>
@@ -12058,22 +12043,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr] min-w-0">
+  <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr] min-w-0">
         <Card className="border-slate-200 min-w-0 overflow-hidden">
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
               <CardTitle>박스 편집 캔버스</CardTitle>
-              <Button size="sm" variant="outline" onClick={() => setShowCanvasLegend((previous) => !previous)}>
-                {showCanvasLegend ? '범례 숨기기' : '범례 보기'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => setShowCanvasLegend((previous) => !previous)}>
+                  {showCanvasLegend ? '범례 숨기기' : '범례 보기'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setShowMetadataIcons((previous) => !previous)}>
+                  {showMetadataIcons ? '아이콘 끄기' : '아이콘 켜기'}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           {showCanvasLegend ? (
             <CardContent className="p-6 pt-0">
-              <MetadataCanvasLegend
-                showMetadataIcons={showMetadataIcons}
-                onToggleMetadataIcons={() => setShowMetadataIcons((previous) => !previous)}
-              />
+              <MetadataCanvasLegend />
             </CardContent>
           ) : null}
           <TemplateEditPreviewSurface
