@@ -5987,6 +5987,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('summary');
   const [showMetadataIcons, setShowMetadataIcons] = React.useState(true);
+  const [showCanvasLegend, setShowCanvasLegend] = React.useState(false);
   const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
     kind: 'idle',
   });
@@ -10767,7 +10768,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           min-height: 0;
           overflow: hidden;
           border-top: 1px solid rgb(226 232 240);
-          border-radius: 0 0 0.75rem 0.75rem;
+          border-radius: 0;
           background: rgb(226 232 240) !important;
           box-shadow: none;
           color: rgb(30 41 59);
@@ -11365,10 +11366,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr] min-w-0">
-        <Card className="border-slate-200 min-w-0">
+        <Card className="border-slate-200 min-w-0 overflow-hidden">
           <CardHeader>
-            <CardTitle>박스 편집 캔버스</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>박스 편집 캔버스</CardTitle>
+              <Button size="sm" variant="outline" onClick={() => setShowCanvasLegend((previous) => !previous)}>
+                {showCanvasLegend ? '범례 숨기기' : '범례 보기'}
+              </Button>
+            </div>
           </CardHeader>
+          {showCanvasLegend ? (
+            <CardContent className="p-6 pt-0">
+              <MetadataCanvasLegend
+                showMetadataIcons={showMetadataIcons}
+                onToggleMetadataIcons={() => setShowMetadataIcons((previous) => !previous)}
+              />
+            </CardContent>
+          ) : null}
           <TemplateEditPreviewSurface
             renderedPreviewHtml={renderedPreviewHtml}
             boxCreationMode={boxCreationMode}
@@ -11382,12 +11396,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             handlePreviewClickCapture={handlePreviewClickCapture}
             handlePreviewInput={handlePreviewInput}
           />
-          <CardContent className="p-6">
-            <MetadataCanvasLegend
-              showMetadataIcons={showMetadataIcons}
-              onToggleMetadataIcons={() => setShowMetadataIcons((previous) => !previous)}
-            />
-          </CardContent>
         </Card>
 
         <div className="space-y-6 min-w-0">
