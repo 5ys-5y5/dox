@@ -10758,6 +10758,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       <style>{`
         .template-edit-preview {
           position: relative;
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
           box-sizing: border-box;
           width: 100%;
           max-width: none;
@@ -10774,14 +10777,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview[data-template-preview-scaled="true"] > .page-inner,
         .template-edit-preview[data-template-preview-scaled="true"] > section.page {
-          position: absolute;
-          left: calc(50% - (var(--template-preview-source-width, 0px) / 2));
+          position: relative;
+          left: auto;
           top: 0;
           width: var(--template-preview-source-width, auto) !important;
           min-height: var(--template-preview-source-height, auto) !important;
           height: var(--template-preview-source-height, auto);
-          transform-origin: top left;
-          transform: scale(var(--template-preview-scale, 1));
+          margin-left: auto !important;
+          margin-right: auto !important;
+          transform: none;
+          zoom: var(--template-preview-scale, 1);
         }
         .template-edit-preview > .page-inner,
         .template-edit-preview > section.page,
@@ -11359,8 +11364,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr]">
-        <Card className="border-slate-200">
+      <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr] min-w-0">
+        <Card className="border-slate-200 min-w-0">
           <CardHeader>
             <CardTitle>박스 편집 캔버스</CardTitle>
           </CardHeader>
@@ -11385,7 +11390,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
+        <div className="space-y-6 min-w-0">
           <Card className="border-slate-200">
             <CardHeader>
               <CardTitle>선택 상태</CardTitle>
