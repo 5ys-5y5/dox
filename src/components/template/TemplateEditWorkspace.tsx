@@ -4542,6 +4542,45 @@ const applyRelativeAnchoredFrameRectsInRoot = (root: ParentNode, excludedFrameGr
   });
 };
 
+const rebaseRelativeAnchorConfigForResizeDirection = (
+  frameNode: HTMLElement,
+  pageInner: HTMLElement,
+  direction: TemplateFrameResizeDirection
+) => {
+  const currentConfig = readFrameRelativeAnchorConfig(frameNode, pageInner);
+
+  if (!currentConfig || currentConfig.positionMode !== 'relative') {
+    return;
+  }
+
+  const anchorRect = resolveRelativeAnchorRect(pageInner, currentConfig);
+  if (!anchorRect) {
+    return;
+  }
+
+  const preferredAnchorX = direction.includes('e')
+    ? ('left' as const)
+    : direction.includes('w')
+      ? ('right' as const)
+      : currentConfig.anchorX;
+  const preferredAnchorY = direction.includes('s')
+    ? ('top' as const)
+    : direction.includes('n')
+      ? ('bottom' as const)
+      : currentConfig.anchorY;
+
+  const nextConfig = buildRelativeAnchorConfigFromRect({
+    frameRect: readFrameMoveRect(frameNode),
+    anchorRect,
+    anchorKind: currentConfig.anchorKind,
+    anchorId: currentConfig.anchorId,
+    preferredAnchorX,
+    preferredAnchorY,
+  });
+
+  writeFrameRelativeAnchorAttrs(frameNode, nextConfig);
+};
+
 const appendRelativeAnchorGuideSegment = (
   pageInner: HTMLElement,
   rect: FrameNodeRect,
@@ -11097,6 +11136,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           resizeState.direction,
           resizeState.widthInstructions
         );
+      }
+
+      const resizeDirection = resizeState.direction;
+      if (activeEdgeResizeTargets.length > 0) {
+        const targetNodes = Array.from(
+          new Set(
+            activeEdgeResizeTargets.flatMap((edgeTarget) =>
+              [...edgeTarget.members, ...edgeTarget.physicalPeerMembers].map((member) => member.node)
+            )
+          )
+        );
+        targetNodes.forEach((node) =>
+          rebaseRelativeAnchorConfigForResizeDirection(node, resizeState.pageInner, resizeDirection)
+        );
+      } else {
+        rebaseRelativeAnchorConfigForResizeDirection(resizeState.node, resizeState.pageInner, resizeDirection);
       }
 
       ensureRelativeAnchorConfigs(resizeState.pageInner);
