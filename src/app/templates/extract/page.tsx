@@ -396,6 +396,18 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-col-end',
   'data-template-frame-halign',
   'data-template-frame-valign',
+  'data-template-frame-position-mode',
+  'data-template-frame-relative-anchor-kind',
+  'data-template-frame-relative-anchor-id',
+  'data-template-frame-relative-anchor-x',
+  'data-template-frame-relative-anchor-y',
+  'data-template-frame-relative-offset-x',
+  'data-template-frame-relative-offset-y',
+  'data-template-frame-position-group-id',
+  'data-template-frame-position-group-label',
+  'data-template-frame-position-group-anchor-id',
+  'data-template-frame-position-group-managed',
+  'data-v106-band-source',
 ] as const;
 const FRAME_EDITOR_SUPPORTED_VERSIONS = ['fv1.06', 'fv1.07', 'fv1.08', 'fv1.09', 'fv1.10', 'fv1.11'] as const;
 const FRAME_PROFILE_STORAGE_KEY = 'template-extract-frame-profiles-v109';
@@ -3264,7 +3276,10 @@ const normalizeFramePreviewForV106 = (root: HTMLElement) => {
       const computed = window.getComputedStyle(host);
       const textarea = frameGroup.querySelector<HTMLTextAreaElement>('textarea');
       const attrs = Object.fromEntries(
-        FRAME_GROUP_ATTR_NAMES.map((name) => [name, frameGroup.getAttribute(name) || textarea?.getAttribute(name) || ''])
+        FRAME_GROUP_ATTR_NAMES.map((name) => [
+          name,
+          frameGroup.getAttribute(name) || host.getAttribute(name) || textarea?.getAttribute(name) || '',
+        ])
       );
 
       return {
