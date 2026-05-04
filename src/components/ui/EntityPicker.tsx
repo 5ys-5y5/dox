@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronDown, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Pencil, Trash2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Input } from './Input';
 
@@ -26,7 +26,11 @@ type EntityPickerProps = {
   triggerClassName?: string;
   panelClassName?: string;
   optionLayout?: 'stacked' | 'inline';
+  onCreateOption?: (label: string) => void;
+  createOptionLabel?: string;
   onDeleteOption?: (option: EntityPickerOption) => void;
+  onRenameOption?: (option: EntityPickerOption, nextLabel: string, nextMeta: string) => void;
+  renameOptionLabel?: string;
   deleteOptionLabel?: string;
 };
 
@@ -43,12 +47,20 @@ export function EntityPicker({
   triggerClassName,
   panelClassName,
   optionLayout = 'stacked',
+  onCreateOption,
+  createOptionLabel = '저장',
   onDeleteOption,
+  onRenameOption,
+  renameOptionLabel = '항목 수정',
   deleteOptionLabel = '항목 삭제',
 }: EntityPickerProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
+  const [editingId, setEditingId] = React.useState('');
+  const [editingLabel, setEditingLabel] = React.useState('');
+  const [editingMeta, setEditingMeta] = React.useState('');
   const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
 
   const selectedOption = React.useMemo(
     () => options.find((option) => option.id === value) || null,
@@ -67,6 +79,16 @@ export function EntityPicker({
       return haystack.includes(normalizedQuery);
     });
   }, [options, query]);
+
+  const hasExactMatch = React.useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return false;
+    }
+    return options.some((option) => option.id.toLowerCase() === normalizedQuery || option.label.toLowerCase() === normalizedQuery);
+  }, [options, query]);
+
+  const canCreate = Boolean(onCreateOption && query.trim() && !hasExactMatch);
 
   React.useEffect(() => {
     if (!open) {
@@ -87,8 +109,15 @@ export function EntityPicker({
   }, [open]);
 
   React.useEffect(() => {
-    if (!open) {
-      setQuery('');
+    const selectedLabel = selectedOption?.label || '';
+    if (!open && query !== selectedLabel) {
+      setQuery(selectedLabel);
+    }
+  }, [open, query, selectedOption]);
+
+  React.useEffect(() => {
+    if (open) {
+      window.requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 
@@ -96,51 +125,72 @@ export function EntityPicker({
 
   return (
     <div ref={rootRef} className={cn('relative w-full', className)}>
-      <button
-        type="button"
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+      <div
         className={cn(
-          'group flex min-h-11 w-full items-start justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-300',
+          'group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 transition-colors focus-within:ring-1 focus-within:ring-slate-300',
           disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-slate-400',
           triggerClassName
         )}
       >
-        <div
-          className={cn(
-            'min-w-0 flex-1 text-left',
-            inlineOptionLayout ? 'flex items-baseline gap-2' : ''
-          )}
-        >
-          <div
-            className={cn(
-              'min-w-0 truncate text-sm font-normal leading-5',
-              selectedOption ? 'text-slate-900' : 'text-slate-400'
-            )}
-          >
-            {selectedOption?.label || placeholder}
-          </div>
-          {selectedOption?.meta ? (
-            <div
-              className={cn(
-                'truncate text-[11px] font-normal leading-4 text-slate-500',
-                inlineOptionLayout ? 'max-w-[48%] shrink-0' : 'mt-0.5'
-              )}
-            >
-              {selectedOption.meta}
-            </div>
-          ) : null}
-        </div>
-        <ChevronDown
-          aria-hidden="true"
-          className={cn(
-            'mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150',
-            open ? 'rotate-180' : 'rotate-0'
-          )}
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          disabled={disabled}
+          placeholder={placeholder}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              const normalizedQuery = query.trim().toLowerCase();
+              const exact = options.find(
+                (option) => option.id.toLowerCase() === normalizedQuery || option.label.toLowerCase() === normalizedQuery
+              );
+              if (exact) {
+                onChange(exact.id);
+                setOpen(false);
+                return;
+              }
+              if (canCreate && onCreateOption) {
+                onCreateOption(query.trim());
+                setOpen(false);
+              }
+            }
+          }}
+          className="h-6 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
         />
-      </button>
+        {canCreate ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (!onCreateOption) {
+                return;
+              }
+              onCreateOption(query.trim());
+              setOpen(false);
+            }}
+            className="inline-flex h-7 shrink-0 items-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {createOptionLabel}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen((current) => !current)}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className={cn('h-4 w-4 transition-transform duration-150', open ? 'rotate-180' : 'rotate-0')}
+          />
+        </button>
+      </div>
 
       {open ? (
         <div
@@ -150,12 +200,6 @@ export function EntityPicker({
           )}
         >
           <div className="space-y-2">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={searchPlaceholder}
-              className="h-10 rounded-xl border-slate-300 bg-white"
-            />
             <div role="listbox" className="max-h-64 space-y-1 overflow-auto">
               {allowClear ? (
                 <button
@@ -186,7 +230,7 @@ export function EntityPicker({
                       role="option"
                       aria-selected={selected}
                       className={cn(
-                        'flex w-full items-start rounded-xl border text-left transition-colors',
+                        'flex w-full items-center rounded-xl border text-left transition-colors',
                         option.disabled
                           ? 'cursor-not-allowed border-transparent bg-white opacity-50'
                           : selected
@@ -194,51 +238,118 @@ export function EntityPicker({
                             : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-white'
                       )}
                     >
-                      <button
-                        type="button"
-                        disabled={option.disabled}
-                        onClick={() => {
-                          onChange(option.id);
-                          setOpen(false);
-                        }}
-                        className={cn(
-                          'flex min-w-0 flex-1 items-start justify-start px-3 py-2.5 text-left',
-                          inlineOptionLayout ? 'items-baseline gap-2' : 'flex-col'
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            'min-w-0 truncate text-sm leading-5 text-slate-900',
-                            inlineOptionLayout ? 'font-normal' : 'font-medium'
-                          )}
-                        >
-                          {option.label}
-                        </span>
-                        {option.meta ? (
-                          <span
-                            className={cn(
-                              'truncate text-[11px] font-normal leading-4 text-slate-500',
-                              inlineOptionLayout ? 'max-w-[48%] shrink-0' : 'mt-0.5'
-                            )}
-                          >
-                            {option.meta}
-                          </span>
-                        ) : null}
-                      </button>
-                      {onDeleteOption ? (
+                      {editingId === option.id ? (
+                        <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5">
+                          <Input
+                            value={editingLabel}
+                            onChange={(event) => setEditingLabel(event.target.value)}
+                            className="h-8 min-w-0 flex-1 rounded-md border-slate-300 bg-white text-xs"
+                            placeholder="항목명"
+                          />
+                          <Input
+                            value={editingMeta}
+                            onChange={(event) => setEditingMeta(event.target.value)}
+                            className="h-8 w-32 rounded-md border-slate-300 bg-white text-xs"
+                            placeholder="ID"
+                          />
+                        </div>
+                      ) : (
                         <button
                           type="button"
-                          aria-label={`${deleteOptionLabel}: ${option.label}`}
-                          title={deleteOptionLabel}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onDeleteOption(option);
+                          disabled={option.disabled}
+                          onClick={() => {
+                            onChange(option.id);
+                            setQuery(option.label);
+                            setOpen(false);
                           }}
-                          className="mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-200"
+                          className={cn('flex min-w-0 flex-1 items-center justify-start px-3 py-2.5 text-left', inlineOptionLayout ? 'gap-2' : 'flex-col items-start')}
                         >
-                          <Trash2 aria-hidden="true" className="h-4 w-4" />
+                          <span
+                            className={cn(
+                              'min-w-0 truncate text-sm leading-5 text-slate-900',
+                              inlineOptionLayout ? 'font-normal' : 'font-medium'
+                            )}
+                          >
+                            {option.label}
+                          </span>
+                          {option.meta ? (
+                            <span
+                              className={cn(
+                                'truncate text-[11px] font-normal leading-4 text-slate-500',
+                                inlineOptionLayout ? 'max-w-[48%] shrink-0' : 'mt-0.5'
+                              )}
+                            >
+                              {option.meta}
+                            </span>
+                          ) : null}
                         </button>
-                      ) : null}
+                      )}
+                      <div className="mr-1 flex shrink-0 items-center gap-1">
+                        {onRenameOption ? (
+                          editingId === option.id ? (
+                            <>
+                              <button
+                                type="button"
+                                aria-label={`${renameOptionLabel}: ${option.label}`}
+                                title={renameOptionLabel}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onRenameOption(option, editingLabel, editingMeta);
+                                  setEditingId('');
+                                  setEditingLabel('');
+                                  setEditingMeta('');
+                                }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
+                              >
+                                <Check aria-hidden="true" className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="수정 취소"
+                                title="수정 취소"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setEditingId('');
+                                  setEditingLabel('');
+                                  setEditingMeta('');
+                                }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
+                              >
+                                <X aria-hidden="true" className="h-4 w-4" />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label={`${renameOptionLabel}: ${option.label}`}
+                              title={renameOptionLabel}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setEditingId(option.id);
+                                setEditingLabel(option.label);
+                                setEditingMeta(option.meta || option.id);
+                              }}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                            >
+                              <Pencil aria-hidden="true" className="h-4 w-4" />
+                            </button>
+                          )
+                        ) : null}
+                        {onDeleteOption ? (
+                          <button
+                            type="button"
+                            aria-label={`${deleteOptionLabel}: ${option.label}`}
+                            title={deleteOptionLabel}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDeleteOption(option);
+                            }}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-200"
+                          >
+                            <Trash2 aria-hidden="true" className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })

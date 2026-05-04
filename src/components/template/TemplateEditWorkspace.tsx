@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server.browser';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
-import { EntityPicker } from '../ui/EntityPicker';
+import { EntityPicker, type EntityPickerOption } from '../ui/EntityPicker';
 import { Input } from '../ui/Input';
 import { applyTemplateExtractEditableTextFit } from '../../lib/templateExtractEditableTextFit';
 import type {
@@ -90,6 +90,11 @@ type SelectionMetadataApplyResult = {
   ok: boolean;
   skipped: boolean;
   issues: FrameMetadataValidationIssue[];
+};
+
+type VirtualFrameDefinition = {
+  id: string;
+  label: string;
 };
 
 type FrameStylePatch = Omit<Partial<SelectionStyleDraft>, 'width' | 'height'> & {
@@ -363,6 +368,7 @@ const TEMPLATE_FRAME_VALUE_KEY_ATTR = 'data-template-frame-value-key';
 const TEMPLATE_FRAME_PARENT_GROUP_ATTR = 'data-template-frame-parent-group';
 const TEMPLATE_FRAME_BOX_KIND_ATTR = 'data-template-box-kind';
 const TEMPLATE_FRAME_RUNTIME_MODE_ATTR = 'data-template-runtime-mode';
+const TEMPLATE_VIRTUAL_FRAME_DEFINITIONS_ATTR = 'data-template-virtual-frame-definitions';
 const TEMPLATE_FRAME_FIELD_TYPE_ATTR = 'data-template-frame-field-type';
 const TEMPLATE_FRAME_COLOR_GROUP_ATTR = 'data-template-frame-color-group';
 const TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR = 'data-template-frame-visual-emphasis';
@@ -766,6 +772,51 @@ const normalizeFrameValueKey = (value: string) =>
     .map((segment) => segment.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .join(' > ');
+
+const normalizeVirtualDefinitionId = (value: string) => {
+  const base = value.trim();
+  if (!base) {
+    return '';
+  }
+
+  return base
+    .toLowerCase()
+    .replace(/[^\w\-가-힣]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+};
+
+const parseVirtualFrameDefinitions = (raw: string | null | undefined): VirtualFrameDefinition[] => {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
+
+        const id = normalizeVirtualDefinitionId(String((entry as { id?: unknown }).id || ''));
+        const label = String((entry as { label?: unknown }).label || '').trim();
+
+        if (!id || !label) {
+          return null;
+        }
+
+        return { id, label };
+      })
+      .filter((entry): entry is VirtualFrameDefinition => Boolean(entry));
+  } catch {
+    return [];
+  }
+};
 
 const stringArraysEqual = (left: string[], right: string[]) =>
   left.length === right.length && left.every((value, index) => value === right[index]);
@@ -6046,6 +6097,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [hasSelectionProgressHistory, setHasSelectionProgressHistory] = React.useState(false);
   const [showSelectionStatus, setShowSelectionStatus] = React.useState(false);
   const [selectionValidationIssues, setSelectionValidationIssues] = React.useState<FrameMetadataValidationIssue[]>([]);
+  const [virtualFrameDefinitions, setVirtualFrameDefinitions] = React.useState<VirtualFrameDefinition[]>([]);
   const [message, setMessage] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -6156,9 +6208,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       previewRef.current.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${parentGroupId}"]`)
     );
     const parentText = readFrameDisplayText(parentNode);
+    if (parentText) {
+      return `${parentGroupId} | ${parentText}`;
+    }
 
-    return parentText ? `${parentGroupId} | ${parentText}` : parentGroupId;
-  }, [frameMetadataDraft.parentGroupId, renderedPreviewHtml]);
+    const virtualDefinition = virtualFrameDefinitions.find((definition) => definition.id === parentGroupId);
+    return virtualDefinition ? `${parentGroupId} | ${virtualDefinition.label}` : parentGroupId;
+  }, [frameMetadataDraft.parentGroupId, renderedPreviewHtml, virtualFrameDefinitions]);
   const keyBoxSelectionHelpText = React.useMemo(() => {
     if (metadataRelationSelectionMode.kind === 'parent') {
       const count = metadataRelationSelectionMode.sourceFrameGroupIds.length;
@@ -6181,6 +6237,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     canEditSingleSelection &&
     Boolean(primarySelectedFrameGroupId) &&
     primarySelectedResolvedMetadata?.boxKind === 'text';
+  const hasSelectedMetadataTarget = selectedFrameGroupIds.length > 0;
+  const canEditValueBoxField = hasSelectedMetadataTarget && frameMetadataDraft.role !== 'value';
   const primarySelectedFramePositionMode = React.useMemo(() => {
     if (!primarySelectedFrameGroupId || !previewRef.current) {
       return null;
@@ -6330,6 +6388,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     (scope?: ParentNode | null) => collectFrameSelectionAnchors(scope || previewRef.current),
     []
   );
+  const persistVirtualFrameDefinitions = React.useCallback(
+    (nextDefinitions: VirtualFrameDefinition[]) => {
+      const root = previewRef.current;
+      const host = root?.querySelector<HTMLElement>('.page-inner') || root;
+
+      if (!root || !host) {
+        return;
+      }
+
+      const normalized = nextDefinitions
+        .map((definition) => ({
+          id: normalizeVirtualDefinitionId(definition.id),
+          label: definition.label.trim(),
+        }))
+        .filter((definition) => definition.id && definition.label);
+
+      if (normalized.length > 0) {
+        host.setAttribute(TEMPLATE_VIRTUAL_FRAME_DEFINITIONS_ATTR, JSON.stringify(normalized));
+      } else {
+        host.removeAttribute(TEMPLATE_VIRTUAL_FRAME_DEFINITIONS_ATTR);
+      }
+
+      syncDraftPreviewHtmlRef();
+    },
+    [syncDraftPreviewHtmlRef]
+  );
+
   const availableFrameGroupIds = React.useMemo(() => {
     const root = previewRef.current;
 
@@ -6342,13 +6427,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .filter((frameGroupId) => Boolean(frameGroupId))
       .sort((left, right) => left.localeCompare(right, 'ko'));
   }, [getFrameNodes, renderedPreviewHtml, selectedFrameGroupIds]);
+  const keyBoxPickerOptions = React.useMemo(() => {
+    const frameOptions = availableFrameGroupIds.map((frameGroupId) => {
+      const node = previewRef.current?.querySelector<HTMLElement>(
+        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`
+      );
+      const label = readFrameDisplayText(resolveFrameSelectionAnchor(node)) || frameGroupId;
+      return {
+        id: frameGroupId,
+        label,
+        meta: frameGroupId,
+      };
+    });
+
+    const virtualOptions = virtualFrameDefinitions.map((definition) => ({
+      id: definition.id,
+      label: definition.label,
+      meta: definition.id,
+    }));
+
+    const dedup = new Map<string, { id: string; label: string; meta: string }>();
+    [...frameOptions, ...virtualOptions].forEach((option) => {
+      if (!dedup.has(option.id)) {
+        dedup.set(option.id, option);
+      }
+    });
+    return Array.from(dedup.values());
+  }, [availableFrameGroupIds, renderedPreviewHtml, virtualFrameDefinitions]);
+
+  const virtualDefinitionIds = React.useMemo(
+    () => new Set(virtualFrameDefinitions.map((definition) => definition.id)),
+    [virtualFrameDefinitions]
+  );
   const currentValueBoxFrameGroupIds = React.useMemo(() => {
     if (!primarySelectedFrameGroupId || !previewRef.current) {
       return [];
     }
 
     return getFrameNodes(previewRef.current)
-      .filter((node) => readFrameParentGroupId(node) === primarySelectedFrameGroupId)
+      .filter((node) => readFrameParentGroupId(node) === primarySelectedFrameGroupId && readFrameRole(node) === 'value')
       .map((node) => getFrameGroupId(node))
       .filter(Boolean);
   }, [getFrameNodes, primarySelectedFrameGroupId, renderedPreviewHtml]);
@@ -6362,9 +6479,31 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return currentValueBoxFrameGroupIds;
   }, [currentValueBoxFrameGroupIds, metadataRelationSelectionMode, primarySelectedFrameGroupId]);
+  const valueBoxPickerOptions = React.useMemo(() => {
+    if (!previewRef.current) {
+      return [];
+    }
+
+    return shownValueBoxFrameGroupIds
+      .map((frameGroupId) => {
+        const node = resolveFrameSelectionAnchor(
+          previewRef.current?.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
+        );
+        const label = readFrameDisplayText(node) || frameGroupId;
+        return { id: frameGroupId, label, meta: frameGroupId };
+      })
+      .filter((option) => Boolean(option.id));
+  }, [renderedPreviewHtml, shownValueBoxFrameGroupIds]);
+  const valueBoxPickerCurrentValue = React.useMemo(() => {
+    if (!canEditValueBoxField || shownValueBoxFrameGroupIds.length === 0) {
+      return '';
+    }
+
+    return shownValueBoxFrameGroupIds[0] || '';
+  }, [canEditValueBoxField, shownValueBoxFrameGroupIds]);
   const valueBoxPickerSummary = React.useMemo(() => {
     if (!shownValueBoxFrameGroupIds.length) {
-      return 'null';
+      return '-';
     }
 
     if (!previewRef.current) {
@@ -7979,6 +8118,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
   }, [selectionSaveProgress.phase]);
 
+  React.useEffect(() => {
+    const root = previewRef.current;
+    const host = root?.querySelector<HTMLElement>('.page-inner') || root;
+
+    if (!root || !host) {
+      return;
+    }
+
+    const parsed = parseVirtualFrameDefinitions(host.getAttribute(TEMPLATE_VIRTUAL_FRAME_DEFINITIONS_ATTR));
+    setVirtualFrameDefinitions(parsed);
+  }, [renderedPreviewHtml]);
+
   const startParentKeySelectionMode = React.useCallback(() => {
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
@@ -8065,6 +8216,110 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
     setMessage('연결할 key 박스를 비웠습니다.');
   }, []);
+
+  const upsertVirtualDefinition = React.useCallback(
+    (rawText: string, target: 'key' | 'value') => {
+      const label = rawText.trim();
+      const id = normalizeVirtualDefinitionId(label);
+
+      if (!label || !id) {
+        return;
+      }
+
+      const nextDefinitions = (() => {
+        const existing = virtualFrameDefinitions.find((definition) => definition.id === id);
+        if (existing) {
+          return virtualFrameDefinitions.map((definition) =>
+            definition.id === id ? { ...definition, label } : definition
+          );
+        }
+        return [...virtualFrameDefinitions, { id, label }];
+      })();
+
+      setVirtualFrameDefinitions(nextDefinitions);
+      persistVirtualFrameDefinitions(nextDefinitions);
+      if (target === 'key') {
+        setFrameMetadataDraft((previous) => ({
+          ...previous,
+          parentGroupId: id,
+        }));
+      } else if (primarySelectedFrameGroupId) {
+        setMetadataRelationSelectionMode({
+          kind: 'value',
+          sourceKeyFrameGroupId: primarySelectedFrameGroupId,
+          targetFrameGroupIds: [id],
+        });
+      }
+      setMessage(`가상 정의 ${id} 를 저장했습니다.`);
+    },
+    [persistVirtualFrameDefinitions, primarySelectedFrameGroupId, virtualFrameDefinitions]
+  );
+
+  const renameVirtualDefinition = React.useCallback(
+    (id: string, nextLabelRaw: string, nextIdRaw?: string) => {
+      const nextLabel = nextLabelRaw.trim();
+      const normalizedNextId = normalizeVirtualDefinitionId(String(nextIdRaw || id));
+
+      if (!id || !nextLabel || !normalizedNextId) {
+        return;
+      }
+      if (!virtualFrameDefinitions.some((definition) => definition.id === id)) {
+        return;
+      }
+      if (id !== normalizedNextId && virtualFrameDefinitions.some((definition) => definition.id === normalizedNextId)) {
+        setMessage(`가상 정의 ID ${normalizedNextId} 는 이미 존재합니다.`);
+        return;
+      }
+
+      const nextDefinitions = virtualFrameDefinitions.map((definition) =>
+        definition.id === id ? { ...definition, id: normalizedNextId, label: nextLabel } : definition
+      );
+      setVirtualFrameDefinitions(nextDefinitions);
+      persistVirtualFrameDefinitions(nextDefinitions);
+
+      if (id !== normalizedNextId) {
+        const root = previewRef.current;
+        if (root) {
+          getFrameNodes(root).forEach((node) => {
+            if (readFrameParentGroupId(node) === id) {
+              applyFrameMetadataPatch(node, { parentGroupId: normalizedNextId });
+            }
+            if (readFrameValueKey(node) === id) {
+              applyFrameMetadataPatch(node, { valueKey: normalizedNextId });
+            }
+          });
+          syncDraftPreviewHtmlRef();
+        }
+      }
+
+      setFrameMetadataDraft((previous) => ({
+        ...previous,
+        parentGroupId: previous.parentGroupId === id ? normalizedNextId : previous.parentGroupId,
+        valueKey: previous.valueKey === id ? normalizedNextId : previous.valueKey,
+      }));
+      setMessage(`가상 정의 ${id} 를 ${normalizedNextId} 로 수정했습니다.`);
+    },
+    [getFrameNodes, persistVirtualFrameDefinitions, syncDraftPreviewHtmlRef, virtualFrameDefinitions]
+  );
+
+  const deleteVirtualDefinition = React.useCallback(
+    (id: string) => {
+      if (!virtualFrameDefinitions.some((definition) => definition.id === id)) {
+        return;
+      }
+
+      const nextDefinitions = virtualFrameDefinitions.filter((definition) => definition.id !== id);
+      setVirtualFrameDefinitions(nextDefinitions);
+      persistVirtualFrameDefinitions(nextDefinitions);
+      setFrameMetadataDraft((previous) => ({
+        ...previous,
+        parentGroupId: previous.parentGroupId === id ? '' : previous.parentGroupId,
+        valueKey: previous.valueKey === id ? '' : previous.valueKey,
+      }));
+      setMessage(`가상 정의 ${id} 를 삭제했습니다.`);
+    },
+    [persistVirtualFrameDefinitions, virtualFrameDefinitions]
+  );
 
   const handleMetadataRelationFramePick = React.useCallback(
     (frameGroupId: string) => {
@@ -8545,7 +8800,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         });
       }
 
-      if (nextMetadata.parentGroupId && !availableFrameGroupIds.includes(nextMetadata.parentGroupId)) {
+      if (
+        nextMetadata.parentGroupId &&
+        !availableFrameGroupIds.includes(nextMetadata.parentGroupId) &&
+        !virtualDefinitionIds.has(nextMetadata.parentGroupId)
+      ) {
         issues.push({
           frameGroupId,
           message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
@@ -8561,13 +8820,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (nextMetadata.role === 'value' && nextMetadata.parentGroupId) {
         const parentMetadata = resolvedMetadataById.get(nextMetadata.parentGroupId) || null;
+        const isVirtualParent = virtualDefinitionIds.has(nextMetadata.parentGroupId);
 
-        if (!parentMetadata) {
+        if (!parentMetadata && !isVirtualParent) {
           issues.push({
             frameGroupId,
             message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
           });
-        } else if (parentMetadata.boxKind !== 'text' || parentMetadata.role !== 'key') {
+        } else if (parentMetadata && !isVirtualParent && (parentMetadata.boxKind !== 'text' || parentMetadata.role !== 'key')) {
           issues.push({
             frameGroupId,
             message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 는 text key 박스여야 합니다.`,
@@ -8577,6 +8837,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (
         nextMetadata.parentGroupId &&
+        !virtualDefinitionIds.has(nextMetadata.parentGroupId) &&
         hasResolvedFrameParentCycle(frameGroupId, nextMetadata.parentGroupId, resolvedMetadataById)
       ) {
         issues.push({
@@ -8652,6 +8913,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     requestPreviewTextFit,
     syncDraftPreviewHtmlRef,
     syncFrameMetadataDraft,
+    virtualDefinitionIds,
   ]);
 
   React.useEffect(() => {
@@ -12032,7 +12294,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       <label className="text-sm font-medium text-slate-800">Box Kind</label>
                       <select
                         data-metadata-field="boxKind"
-                        value={frameMetadataDraft.boxKind}
+                        value={hasSelectedMetadataTarget ? frameMetadataDraft.boxKind : ''}
+                        disabled={!hasSelectedMetadataTarget}
                         onChange={(event) =>
                           setFrameMetadataDraft((previous) => ({
                             ...previous,
@@ -12041,7 +12304,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         }
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
-                        <option value="">혼합 / 변경 안 함</option>
+                        <option value="">{hasSelectedMetadataTarget ? '혼합 / 변경 안 함' : '-'}</option>
                         {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => (
                           <option key={boxKind} value={boxKind}>
                             {FRAME_BOX_KIND_LABELS[boxKind]}
@@ -12053,7 +12316,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       <label className="text-sm font-medium text-slate-800">Role</label>
                       <select
                         data-metadata-field="role"
-                        value={frameMetadataDraft.role}
+                        value={hasSelectedMetadataTarget ? frameMetadataDraft.role : ''}
+                        disabled={!hasSelectedMetadataTarget}
                         onChange={(event) =>
                           setFrameMetadataDraft((previous) => ({
                             ...previous,
@@ -12062,7 +12326,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         }
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
-                        <option value="">혼합 / 변경 안 함</option>
+                        <option value="">{hasSelectedMetadataTarget ? '혼합 / 변경 안 함' : '-'}</option>
                         {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => (
                           <option key={role} value={role}>
                             {FRAME_ROLE_LABELS[role]}
@@ -12074,49 +12338,65 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       <label className="text-sm font-medium text-slate-800">Key Box</label>
                       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
                         <div className="font-semibold text-slate-900">현재 연결 예정 / 현재 연결</div>
-                        <div className="mt-1">{currentParentKeyBoxLabel}</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant={metadataRelationSelectionMode.kind === 'parent' ? 'default' : 'outline'}
-                            onClick={() =>
-                              metadataRelationSelectionMode.kind === 'parent'
-                                ? setMetadataRelationSelectionMode({ kind: 'idle' })
-                                : startParentKeySelectionMode()
+                        <div className="mt-1">{hasSelectedMetadataTarget ? currentParentKeyBoxLabel : '-'}</div>
+                        <div className="mt-2">
+                          <EntityPicker
+                            value={hasSelectedMetadataTarget ? frameMetadataDraft.parentGroupId : ''}
+                            options={keyBoxPickerOptions as EntityPickerOption[]}
+                            onChange={(value) =>
+                              setFrameMetadataDraft((previous) => ({
+                                ...previous,
+                                parentGroupId: value,
+                              }))
                             }
-                            disabled={selectedFrameGroupIds.length === 0}
-                          >
-                            {metadataRelationSelectionMode.kind === 'parent' ? '선택 종료' : '선택 모드'}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={clearParentKeySelectionDraft}>
-                            연결 해제
-                          </Button>
+                            onCreateOption={(label) => upsertVirtualDefinition(label, 'key')}
+                            onRenameOption={(option, nextLabel, nextId) => renameVirtualDefinition(option.id, nextLabel, nextId)}
+                            onDeleteOption={(option) => deleteVirtualDefinition(option.id)}
+                            createOptionLabel="저장"
+                            placeholder={hasSelectedMetadataTarget ? 'Key Box 검색/선택 또는 새 정의 입력' : '-'}
+                            emptyMessage="선택 가능한 Key Box가 없습니다."
+                            allowClear
+                            disabled={!hasSelectedMetadataTarget}
+                            optionLayout="inline"
+                            deleteOptionLabel="정의 삭제"
+                            renameOptionLabel="정의 수정"
+                            triggerClassName="h-11 min-h-11 items-center rounded-md py-2"
+                          />
                         </div>
-                        <div className="mt-2">{keyBoxSelectionHelpText}</div>
                       </div>
                     </div>
                     <div className="space-y-2 md:col-span-2">
                       <label className="text-sm font-medium text-slate-800">Value Box</label>
                       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
                         <div className="font-semibold text-slate-900">현재 연결 예정 / 현재 연결</div>
-                        <div className="mt-1 break-all">{valueBoxPickerSummary}</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant={metadataRelationSelectionMode.kind === 'value' ? 'default' : 'outline'}
-                            onClick={() =>
-                              metadataRelationSelectionMode.kind === 'value'
-                                ? setMetadataRelationSelectionMode({ kind: 'idle' })
-                                : startValueBoxSelectionMode()
-                            }
-                            disabled={!canStartValueBoxSelection}
-                          >
-                            {metadataRelationSelectionMode.kind === 'value' ? '선택 종료' : '선택 모드'}
-                          </Button>
-                        </div>
-                        <div className="mt-2">{valueBoxSelectionHelpText}</div>
-                        <div className="mt-2 text-slate-500">
-                          key 박스의 실제 텍스트는 캔버스에서 직접 클릭해 수정합니다. 이 텍스트가 연결된 value box들의 논리 key로 사용됩니다.
+                        <div className="mt-1 break-all">{hasSelectedMetadataTarget ? valueBoxPickerSummary : '-'}</div>
+                        <div className="mt-2">
+                          <EntityPicker
+                            value={valueBoxPickerCurrentValue}
+                            options={valueBoxPickerOptions as EntityPickerOption[]}
+                            onChange={(value) => {
+                              if (!primarySelectedFrameGroupId) {
+                                return;
+                              }
+                              setMetadataRelationSelectionMode({
+                                kind: 'value',
+                                sourceKeyFrameGroupId: primarySelectedFrameGroupId,
+                                targetFrameGroupIds: value ? [value] : [],
+                              });
+                            }}
+                            onCreateOption={(label) => upsertVirtualDefinition(label, 'value')}
+                            onRenameOption={(option, nextLabel, nextId) => renameVirtualDefinition(option.id, nextLabel, nextId)}
+                            onDeleteOption={(option) => deleteVirtualDefinition(option.id)}
+                            createOptionLabel="저장"
+                            placeholder={canEditValueBoxField ? 'Value Box 검색/선택 또는 새 정의 입력' : '-'}
+                            emptyMessage="선택 가능한 Value Box가 없습니다."
+                            allowClear
+                            disabled={!canEditValueBoxField}
+                            optionLayout="inline"
+                            deleteOptionLabel="정의 삭제"
+                            renameOptionLabel="정의 수정"
+                            triggerClassName="h-11 min-h-11 items-center rounded-md py-2"
+                          />
                         </div>
                       </div>
                     </div>
@@ -12124,7 +12404,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       <label className="text-sm font-medium text-slate-800">Runtime Mode</label>
                       <select
                         data-metadata-field="runtimeMode"
-                        value={frameMetadataDraft.runtimeMode}
+                        value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
+                        disabled={!hasSelectedMetadataTarget}
                         onChange={(event) =>
                           setFrameMetadataDraft((previous) => ({
                             ...previous,
@@ -12133,7 +12414,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         }
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
-                        <option value="">혼합 / 자동 기본값 사용</option>
+                        <option value="">{hasSelectedMetadataTarget ? '혼합 / 자동 기본값 사용' : '-'}</option>
                         {runtimeModeOptions.map((runtimeMode) => (
                           <option key={runtimeMode} value={runtimeMode}>
                             {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
