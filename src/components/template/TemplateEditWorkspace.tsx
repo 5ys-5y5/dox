@@ -168,6 +168,23 @@ type PositionImpactGroup = {
   inferred: boolean;
 };
 
+type PositionSelectionClickChainEntry =
+  | {
+      kind: 'group';
+      frameGroupId: string;
+      groupId: string;
+    }
+  | {
+      kind: 'frame';
+      frameGroupId: string;
+    };
+
+type PositionSelectionClickChainSnapshot = {
+  sourceFrameGroupId: string;
+  point: { x: number; y: number } | null;
+  entries: PositionSelectionClickChainEntry[];
+};
+
 type PositionSpacingOrderedGroupMember = {
   group: PositionImpactGroup;
   representativeFrameGroupId: string;
@@ -7224,6 +7241,11 @@ const applyFrameSelectionUi = (
 ) => {
   stripSelectionAttrs(root, { preserveFrameVisualHints: true });
   TemplateFrameEditHtmlService.stripEditorUiState(root);
+  const proxyMemberFrameGroupIdSet = new Set(
+    positionGroupProxySelections.flatMap((proxySelection) =>
+      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
 
   const edgeMetaMap = new Map<
     string,
@@ -7253,11 +7275,9 @@ const applyFrameSelectionUi = (
 
     node.setAttribute('data-template-edge-host', 'true');
 
-    const isProxyRepresentativeSelection = positionGroupProxySelections.some(
-      (proxySelection) => frameGroupId === proxySelection.representativeFrameGroupId
-    );
+    const isProxyMemberSelection = proxyMemberFrameGroupIdSet.has(frameGroupId);
 
-    if (selectionIndex >= 0 && !isProxyRepresentativeSelection) {
+    if (selectionIndex >= 0 && !isProxyMemberSelection) {
       node.setAttribute('data-template-selected', 'true');
       node.setAttribute('data-template-selection-order', String(selectionIndex + 1));
 
@@ -7416,7 +7436,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     'group' | 'frame' | ''
   >('');
   const [expandedPositionBoxGroupIds, setExpandedPositionBoxGroupIds] = React.useState<Record<string, boolean>>({});
-  const [showSelectedPositionImpactDetails, setShowSelectedPositionImpactDetails] = React.useState(false);
   const [positionSpacingDraftByPairKey, setPositionSpacingDraftByPairKey] = React.useState<Record<string, { gapY: string }>>(
     {}
   );
@@ -7439,6 +7458,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [canvasHistoryRevision, setCanvasHistoryRevision] = React.useState(0);
+  const [positionSelectionClickChainSnapshot, setPositionSelectionClickChainSnapshot] =
+    React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const draftPreviewHtmlRef = React.useRef('');
@@ -8004,6 +8025,154 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [positionBoxGroupByFrameGroupId]
   );
+  const resolvePositionSelectionClickChain = React.useCallback(
+    (
+      pageInner: HTMLElement | null,
+      frameGroupId: string,
+      point: { x: number; y: number } | null
+    ): {
+      entries: PositionSelectionClickChainEntry[];
+    } => {
+      const normalizedFrameGroupId = frameGroupId.trim();
+
+      if (!pageInner || !normalizedFrameGroupId) {
+        return {
+          entries: normalizedFrameGroupId
+            ? [
+                {
+                  kind: 'frame',
+                  frameGroupId: normalizedFrameGroupId,
+                },
+              ]
+            : [],
+        };
+      }
+
+      const frameNodeById = new Map<string, HTMLElement>();
+      collectFrameSelectionAnchors(pageInner).forEach((node) => {
+        const candidateFrameGroupId = getFrameGroupId(node);
+        if (candidateFrameGroupId) {
+          frameNodeById.set(candidateFrameGroupId, node);
+        }
+      });
+
+      const selectableGroups = collectPositionBoxGroups(pageInner, { includeSingletons: false })
+        .filter((group) => group.frameGroupIds.length > 1)
+        .map((group) => {
+          const rectEntries = group.frameGroupIds
+            .map((candidateFrameGroupId) => {
+              const candidateNode = frameNodeById.get(candidateFrameGroupId) || null;
+              if (!candidateNode) {
+                return null;
+              }
+              const shell = resolveFrameLayoutShell(candidateNode);
+              return readFrameElementRect(shell, pageInner);
+            })
+            .filter((rect): rect is FrameNodeRect => Boolean(rect));
+
+          if (rectEntries.length <= 1) {
+            return null;
+          }
+
+          const minLeft = Math.min(...rectEntries.map((rect) => rect.left));
+          const minTop = Math.min(...rectEntries.map((rect) => rect.top));
+          const maxRight = Math.max(...rectEntries.map((rect) => rect.left + rect.width));
+          const maxBottom = Math.max(...rectEntries.map((rect) => rect.top + rect.height));
+          const rect = {
+            left: minLeft,
+            top: minTop,
+            width: Math.max(1, maxRight - minLeft),
+            height: Math.max(1, maxBottom - minTop),
+          };
+          const representativeFrameGroupId =
+            group.anchorFrameGroupId.trim() || group.frameGroupIds[0] || '';
+          return representativeFrameGroupId
+            ? {
+                group,
+                rect,
+                representativeFrameGroupId,
+              }
+            : null;
+        })
+        .filter(
+          (
+            candidate
+          ): candidate is {
+            group: PositionImpactGroup;
+            rect: FrameNodeRect;
+            representativeFrameGroupId: string;
+          } => Boolean(candidate)
+        );
+
+      const tolerance = FRAME_RESIZE_TOLERANCE_PX;
+      const pointCandidates =
+        point === null
+          ? []
+          : selectableGroups.filter((candidate) => {
+              const rectRight = candidate.rect.left + candidate.rect.width;
+              const rectBottom = candidate.rect.top + candidate.rect.height;
+              return (
+                point.x >= candidate.rect.left - tolerance &&
+                point.x <= rectRight + tolerance &&
+                point.y >= candidate.rect.top - tolerance &&
+                point.y <= rectBottom + tolerance
+              );
+            });
+
+      const clickedMemberGroup = positionBoxGroupByFrameGroupId.get(normalizedFrameGroupId) || null;
+      const fallbackCandidates = clickedMemberGroup
+        ? selectableGroups.filter((candidate) => candidate.group.id === clickedMemberGroup.id)
+        : [];
+      const sortedCandidates = Array.from(new Map(
+        [...pointCandidates, ...fallbackCandidates].map((candidate) => [candidate.group.id, candidate])
+      ).values()).sort((left, right) => {
+        const leftArea = left.rect.width * left.rect.height;
+        const rightArea = right.rect.width * right.rect.height;
+
+        if (Math.abs(leftArea - rightArea) > 0.1) {
+          return rightArea - leftArea;
+        }
+
+        if (left.group.frameGroupIds.length !== right.group.frameGroupIds.length) {
+          return right.group.frameGroupIds.length - left.group.frameGroupIds.length;
+        }
+
+        return left.group.id.localeCompare(right.group.id, 'ko');
+      });
+
+      const entries: PositionSelectionClickChainEntry[] = [];
+      sortedCandidates.forEach((candidate) => {
+        const representativeFrameGroupId = candidate.representativeFrameGroupId.trim();
+        if (
+          !representativeFrameGroupId ||
+          entries.some(
+            (entry) =>
+              entry.kind === 'group' &&
+              entry.frameGroupId === representativeFrameGroupId &&
+              entry.groupId === candidate.group.id
+          )
+        ) {
+          return;
+        }
+
+        entries.push({
+          kind: 'group',
+          frameGroupId: representativeFrameGroupId,
+          groupId: candidate.group.id,
+        });
+      });
+
+      entries.push({
+        kind: 'frame',
+        frameGroupId: normalizedFrameGroupId,
+      });
+
+      return {
+        entries,
+      };
+    },
+    [positionBoxGroupByFrameGroupId]
+  );
   const resolvePositionOrderLockSelectionVisual = React.useCallback(
     (selectionOrder: number, groupId: string) => {
       const preset = resolvePositionLockColorPreset(selectionOrder, positionOrderLockColorSeed);
@@ -8029,7 +8198,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .map((frameGroupId) => frameGroupId.trim())
         .filter((frameGroupId) => Boolean(frameGroupId));
 
-      if (!normalizedProxyGroupId || normalizedSelectedIds.length !== 1) {
+      if (!normalizedProxyGroupId || normalizedSelectedIds.length <= 0) {
         return null;
       }
 
@@ -8039,10 +8208,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return null;
       }
 
-      const representativeFrameGroupId =
-        group.anchorFrameGroupId.trim() || group.frameGroupIds[0] || normalizedSelectedIds[0] || '';
+      const selectedIdSet = new Set(normalizedSelectedIds);
+      const hasSelectedGroupMember = group.frameGroupIds.some((frameGroupId) => selectedIdSet.has(frameGroupId));
+      if (!hasSelectedGroupMember) {
+        return null;
+      }
 
-      if (!representativeFrameGroupId || normalizedSelectedIds[0] !== representativeFrameGroupId) {
+      const representativeFrameGroupId =
+        group.anchorFrameGroupId.trim() || group.frameGroupIds[0] || '';
+
+      if (!representativeFrameGroupId) {
         return null;
       }
 
@@ -8058,7 +8233,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const resolvePositionGroupProxySelections = React.useCallback(
     (
       candidateSelectedFrameGroupIds: string[],
-      candidatePositionGroupProxySelectionGroupId: string
+      candidatePositionGroupProxySelectionGroupId: string,
+      options?: {
+        selectionKindByFrameGroupId?: Record<string, 'group' | 'frame'>;
+      }
     ): PositionGroupProxySelection[] => {
       const selectedIds = candidateSelectedFrameGroupIds
         .map((frameGroupId) => frameGroupId.trim())
@@ -8092,18 +8270,29 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         seenGroupIds.add(primaryProxy.groupId);
       }
 
-      if (!positionGroupProxySelectionShowAllRepresentativesRef.current) {
+      const shouldShowRepresentativeProxySelections =
+        positionGroupProxySelectionShowAllRepresentativesRef.current || positionOrderLockSelectionMode;
+
+      if (!shouldShowRepresentativeProxySelections) {
         return result;
       }
 
       selectedIds.forEach((frameGroupId, selectionIndex) => {
         const group = positionBoxGroupByFrameGroupId.get(frameGroupId);
+        const optionSelectionKind = options?.selectionKindByFrameGroupId?.[frameGroupId];
         const selectionKind = positionOrderLockSelectionMode
           ? positionOrderLockSelectionKindByFrameGroupId[frameGroupId] || 'frame'
-          : group && group.frameGroupIds.length > 1
-            ? 'group'
-            : 'frame';
+          : optionSelectionKind
+            ? optionSelectionKind
+            : group && group.frameGroupIds.length > 1
+              ? 'group'
+              : 'frame';
         const shouldUseGroup = selectionKind === 'group' && Boolean(group) && (group?.frameGroupIds.length || 0) > 1;
+
+        if (!positionOrderLockSelectionMode && !shouldUseGroup) {
+          return;
+        }
+
         const resolvedGroupId = shouldUseGroup ? group?.id || `single:${frameGroupId}` : `single:${frameGroupId}`;
 
         if (seenGroupIds.has(resolvedGroupId)) {
@@ -8150,6 +8339,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionOrderLockSelectionMode,
       resolvePositionGroupProxySelection,
       resolvePositionOrderLockSelectionVisual,
+      selectionPanelTab,
     ]
   );
   const primarySelectedPositionBoxGroup = React.useMemo(
@@ -8254,97 +8444,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     return Array.from(dedup.values());
   }, [availableFrameGroupIds, renderedPreviewHtml, virtualFrameDefinitions]);
   const selectedPositionTargetRepresentativeFrameGroupId = React.useMemo(
-    () => resolvePositionGroupRepresentativeFrameGroupId(previewRef.current, positionRelationTargetFrameGroupId),
-    [positionRelationTargetFrameGroupId, previewDomVersion, renderedPreviewHtml]
+    () => {
+      const normalizedTargetFrameGroupId = positionRelationTargetFrameGroupId.trim();
+
+      if (!normalizedTargetFrameGroupId) {
+        return '';
+      }
+
+      if (selectionPanelTab !== 'position') {
+        return resolvePositionGroupRepresentativeFrameGroupId(previewRef.current, normalizedTargetFrameGroupId);
+      }
+
+      const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+      return activeProxyGroupId
+        ? resolvePositionGroupRepresentativeFrameGroupId(previewRef.current, normalizedTargetFrameGroupId)
+        : normalizedTargetFrameGroupId;
+    },
+    [positionRelationTargetFrameGroupId, previewDomVersion, renderedPreviewHtml, selectionPanelTab]
   );
-  const selectedPositionTargetFrameNode = React.useMemo(() => {
-    if (!previewRef.current || !selectedPositionTargetRepresentativeFrameGroupId) {
-      return null;
-    }
-
-    return resolveFrameSelectionAnchor(
-      previewRef.current.querySelector<HTMLElement>(
-        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${selectedPositionTargetRepresentativeFrameGroupId}"]`
-      )
-    );
-  }, [previewDomVersion, renderedPreviewHtml, selectedPositionTargetRepresentativeFrameGroupId]);
-  const selectedPositionTargetPageInner = React.useMemo(
-    () => selectedPositionTargetFrameNode?.closest<HTMLElement>('.page-inner') || null,
-    [selectedPositionTargetFrameNode]
-  );
-  const selectedPositionTargetFrameMode = React.useMemo(() => {
-    if (!selectedPositionTargetFrameNode) {
-      return 'absolute' as const;
-    }
-
-    return readFramePositionMode(selectedPositionTargetFrameNode, selectedPositionTargetPageInner);
-  }, [selectedPositionTargetFrameNode, selectedPositionTargetPageInner]);
-  const selectedPositionTargetRelativeConfig = React.useMemo(() => {
-    if (!selectedPositionTargetFrameNode) {
-      return null;
-    }
-
-    return readFrameRelativeAnchorConfig(selectedPositionTargetFrameNode, selectedPositionTargetPageInner);
-  }, [selectedPositionTargetFrameNode, selectedPositionTargetPageInner]);
-  const selectedPositionRelationSummary = React.useMemo(() => {
-    if (!selectedPositionTargetFrameNode) {
-      return {
-        mode: 'absolute' as const,
-        anchorLabel: '-',
-        distanceX: '-',
-        distanceY: '-',
-      };
-    }
-
-    const mode = selectedPositionTargetFrameMode;
-
-    if (mode !== 'relative' || !selectedPositionTargetRelativeConfig) {
-      return {
-        mode,
-        anchorLabel: '-',
-        distanceX: '-',
-        distanceY: '-',
-      };
-    }
-
-    const config = selectedPositionTargetRelativeConfig;
-    if (config.anchorKind === 'page-corner') {
-      return {
-        mode: 'relative',
-        anchorLabel: PAGE_CORNER_ANCHOR_LABELS[config.anchorId] || config.anchorId,
-        distanceX: String(Math.round(config.offsetX)),
-        distanceY: String(Math.round(config.offsetY)),
-      };
-    }
-
-    if (config.anchorKind === 'group') {
-      const groupLabel = positionBoxGroups.find((group) => group.id === config.anchorId)?.label || '';
-      return {
-        mode: 'relative',
-        anchorLabel: `${groupLabel ? `${groupLabel} | ` : ''}${config.anchorId}`,
-        distanceX: String(Math.round(config.offsetX)),
-        distanceY: String(Math.round(config.offsetY)),
-      };
-    }
-
-    const anchorGroup = positionBoxGroupByFrameGroupId.get(config.anchorId);
-
-    return {
-      mode: 'relative',
-      anchorLabel: `${anchorGroup?.label ? `${anchorGroup.label} | ` : ''}${config.anchorId} | ${
-        positionRelationFrameLabelById.get(config.anchorId) || config.anchorId
-      }`,
-      distanceX: String(Math.round(config.offsetX)),
-      distanceY: String(Math.round(config.offsetY)),
-    };
-  }, [
-    positionBoxGroupByFrameGroupId,
-    positionBoxGroups,
-    positionRelationFrameLabelById,
-    selectedPositionTargetFrameMode,
-    selectedPositionTargetFrameNode,
-    selectedPositionTargetRelativeConfig,
-  ]);
   const definedPositionRelativeRelations = React.useMemo(() => {
     const root = previewRef.current;
 
@@ -8861,7 +8978,101 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return orderedIds;
   }, [selectedFrameGroupIds]);
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'position' || selectedPositionGroupingFrameGroupIds.length !== 1) {
+      setPositionSelectionClickChainSnapshot(null);
+    }
+  }, [selectedPositionGroupingFrameGroupIds.length, selectionPanelTab]);
+  const selectedPositionSelectionChainEntries = React.useMemo(() => {
+    if (selectionPanelTab !== 'position' || selectedPositionGroupingFrameGroupIds.length !== 1 || !previewRef.current) {
+      return [] as PositionSelectionClickChainEntry[];
+    }
+
+    const selectedFrameGroupId = selectedPositionGroupingFrameGroupIds[0] || '';
+    if (!selectedFrameGroupId) {
+      return [];
+    }
+    const currentProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+
+    if (positionSelectionClickChainSnapshot?.entries.length) {
+      const matchedSelectionIndex = positionSelectionClickChainSnapshot.entries.findIndex((entry) => {
+        if (entry.frameGroupId !== selectedFrameGroupId) {
+          return false;
+        }
+
+        if (entry.kind === 'group') {
+          return entry.groupId === currentProxyGroupId;
+        }
+
+        return currentProxyGroupId.length === 0;
+      });
+
+      if (matchedSelectionIndex >= 0) {
+        return positionSelectionClickChainSnapshot.entries;
+      }
+    }
+
+    const selectedFrameNode = resolveFrameSelectionAnchor(
+      previewRef.current.querySelector<HTMLElement>(
+        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${selectedFrameGroupId}"]`
+      )
+    );
+    const pageInner = selectedFrameNode?.closest<HTMLElement>('.page-inner') || null;
+
+    if (!selectedFrameNode || !pageInner) {
+      return [];
+    }
+
+    const rect = readFrameMoveRect(selectedFrameNode);
+    const centerPoint = {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+    return resolvePositionSelectionClickChain(pageInner, selectedFrameGroupId, centerPoint).entries;
+  }, [
+    positionSelectionClickChainSnapshot,
+    previewDomVersion,
+    renderedPreviewHtml,
+    resolvePositionSelectionClickChain,
+    selectedPositionGroupingFrameGroupIds,
+    selectionPanelTab,
+  ]);
   const selectedPositionCurrentBoxGroups = React.useMemo(() => {
+    const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+
+    if (selectionPanelTab === 'position' && selectedPositionGroupingFrameGroupIds.length === 1) {
+      const nestedChainGroups = selectedPositionSelectionChainEntries
+        .filter(
+          (
+            entry
+          ): entry is {
+            kind: 'group';
+            frameGroupId: string;
+            groupId: string;
+          } => entry.kind === 'group'
+        )
+        .map((entry) => positionBoxGroups.find((group) => group.id === entry.groupId) || null)
+        .filter((group): group is PositionImpactGroup => Boolean(group))
+        .filter((group, index, groups) => groups.findIndex((candidate) => candidate.id === group.id) === index);
+
+      if (nestedChainGroups.length > 0) {
+        return nestedChainGroups;
+      }
+
+      if (activeProxyGroupId) {
+        const activeProxyGroup = positionBoxGroups.find((group) => group.id === activeProxyGroupId) || null;
+        if (activeProxyGroup) {
+          return [activeProxyGroup];
+        }
+      }
+
+      const singleSelectedFrameGroupId = selectedPositionGroupingFrameGroupIds[0] || '';
+      const directGroup = singleSelectedFrameGroupId
+        ? positionBoxGroupByFrameGroupId.get(singleSelectedFrameGroupId) || null
+        : null;
+      return directGroup ? [directGroup] : [];
+    }
+
     const seenGroupIds = new Set<string>();
     const currentGroups: PositionImpactGroup[] = [];
 
@@ -8877,26 +9088,54 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
 
     return currentGroups;
-  }, [positionBoxGroupByFrameGroupId, selectedPositionGroupingFrameGroupIds]);
+  }, [
+    positionBoxGroupByFrameGroupId,
+    positionBoxGroups,
+    selectedPositionGroupingFrameGroupIds,
+    selectedPositionSelectionChainEntries,
+    selectionPanelTab,
+  ]);
+  const selectedPositionNestedGroupInfoLines = React.useMemo(() => {
+    if (selectionPanelTab !== 'position' || selectedPositionCurrentBoxGroups.length <= 0) {
+      return [] as string[];
+    }
+
+    return selectedPositionCurrentBoxGroups.map(
+      (group) =>
+        `${group.label || group.id} [${group.id}] · 대표 ${group.anchorFrameGroupId} · ${group.frameGroupIds.length}개`
+    );
+  }, [selectedPositionCurrentBoxGroups, selectionPanelTab]);
   const selectedPositionCurrentBoxGroupLabels = React.useMemo(
     () => readPositionImpactGroupDisplayLabels(selectedPositionCurrentBoxGroups),
     [selectedPositionCurrentBoxGroups]
   );
+  const selectedPositionDisplayIds = React.useMemo(() => {
+    if (selectionPanelTab !== 'position') {
+      return selectedFrameGroupIds;
+    }
+
+    const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+    if (activeProxyGroupId) {
+      const activeProxyGroup = positionBoxGroups.find((group) => group.id === activeProxyGroupId) || null;
+
+      if (activeProxyGroup) {
+        return [activeProxyGroup.label || activeProxyGroup.id];
+      }
+    }
+
+    return selectedFrameGroupIds;
+  }, [positionBoxGroups, selectedFrameGroupIds, selectionPanelTab]);
   const selectedExplicitPositionCurrentBoxGroups = React.useMemo(
     () => selectedPositionCurrentBoxGroups.filter((group) => !group.inferred),
     [selectedPositionCurrentBoxGroups]
   );
   const hasSelectedPositionBoxes = selectedFrameGroupIds.length > 0;
-  const hasSelectedPositionImpactTargets = selectedPositionImpactFrameGroupIds.length > 0;
   const canClearSelectedPositionGroups = selectedExplicitPositionCurrentBoxGroups.length > 0;
+  const selectedPositionInfoCount =
+    selectionPanelTab === 'position' ? selectedPositionDisplayIds.length : selectedFrameGroupIds.length;
   const selectedPositionInfoTitle = hasSelectedPositionBoxes
-    ? `${selectedFrameGroupIds.length}개의 선택된 박스 정보`
+    ? `${selectedPositionInfoCount}개의 선택된 박스 정보`
     : '템플렛 박스 정보';
-  React.useEffect(() => {
-    if ((!hasSelectedPositionBoxes || !hasSelectedPositionImpactTargets) && showSelectedPositionImpactDetails) {
-      setShowSelectedPositionImpactDetails(false);
-    }
-  }, [hasSelectedPositionBoxes, hasSelectedPositionImpactTargets, showSelectedPositionImpactDetails]);
   const positionOrderLockConfirmPreviewCount = React.useMemo(() => {
     return positionOrderLockFrameGroupIds.length;
   }, [positionOrderLockFrameGroupIds]);
@@ -10520,28 +10759,48 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       options?: {
         positionGroupProxySelectionGroupId?: string | null;
         showAllRepresentativeProxySelections?: boolean;
+        disableAutoPositionGroupProxySelection?: boolean;
       }
     ) => {
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-      const nextPositionGroupProxySelectionGroupId = (options?.positionGroupProxySelectionGroupId || '').trim();
+      const normalizedSelectionIds = Array.from(
+        new Set(
+          nextSelectedFrameGroupIds
+            .map((frameGroupId) => frameGroupId.trim())
+            .filter((frameGroupId) => Boolean(frameGroupId))
+        )
+      );
+      let nextPositionGroupProxySelectionGroupId = (options?.positionGroupProxySelectionGroupId || '').trim();
+
       const nextPositionGroupProxySelections = resolvePositionGroupProxySelections(
-        nextSelectedFrameGroupIds,
-        nextPositionGroupProxySelectionGroupId
+        normalizedSelectionIds,
+        nextPositionGroupProxySelectionGroupId,
+        options?.disableAutoPositionGroupProxySelection
+          ? {
+              selectionKindByFrameGroupId: normalizedSelectionIds.reduce<Record<string, 'frame'>>((accumulator, frameGroupId) => {
+                accumulator[frameGroupId] = 'frame';
+                return accumulator;
+              }, {}),
+            }
+          : undefined
       );
       positionGroupProxySelectionGroupIdRef.current = nextPositionGroupProxySelectionGroupId;
       positionGroupProxySelectionShowAllRepresentativesRef.current = Boolean(
         options?.showAllRepresentativeProxySelections
       );
-      selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
+      selectedFrameGroupIdsRef.current = normalizedSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
-      setSelectedFrameGroupIds(nextSelectedFrameGroupIds);
+      setSelectedFrameGroupIds(normalizedSelectionIds);
       setEdgeSelectionState(emptyEdgeSelection);
       setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
       setSelectionValidationIssues([]);
       setSelectionSaveProgress(defaultSelectionSaveProgressState);
-      applyRuntimeSelectionUi(nextSelectedFrameGroupIds, emptyEdgeSelection, nextPositionGroupProxySelections);
+      applyRuntimeSelectionUi(normalizedSelectionIds, emptyEdgeSelection, nextPositionGroupProxySelections);
     },
-    [applyRuntimeSelectionUi, resolvePositionGroupProxySelections]
+    [
+      applyRuntimeSelectionUi,
+      resolvePositionGroupProxySelections,
+    ]
   );
 
   const resolveMarqueeSelectionIds = React.useCallback(
@@ -14435,37 +14694,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const selectedPositionBoxGroup = positionBoxGroupByFrameGroupId.get(frameGroupId) || null;
         const selectedPositionBoxGroupIds = selectedPositionBoxGroup?.frameGroupIds || [];
 
-        if (selectedPositionBoxGroupIds.length > 1) {
-          const representativeFrameGroupId =
-            selectedPositionBoxGroup?.anchorFrameGroupId?.trim() || selectedPositionBoxGroupIds[0] || frameGroupId;
-          const selectedGroupId = selectedPositionBoxGroup?.id || '';
-          const currentSelectionIds = selectedFrameGroupIdsRef.current
-            .map((selectionId) => selectionId.trim())
-            .filter((selectionId) => Boolean(selectionId));
-          const isGroupProxySelected =
-            currentSelectionIds.length === 1 && currentSelectionIds[0] === representativeFrameGroupId;
-          const normalizedCandidateFrameGroupId = positionOrderLockCandidateFrameGroupId.trim();
-          const normalizedCandidateGroupId = positionOrderLockCandidateGroupId.trim();
-          const isSameCandidateGroup = Boolean(selectedGroupId) && normalizedCandidateGroupId === selectedGroupId;
-          const isCandidateGroupProxySelection =
-            isSameCandidateGroup && normalizedCandidateFrameGroupId === representativeFrameGroupId;
-          const selectedGroupRepresentativeFrameGroupId =
-            positionOrderLockFrameGroupIds.find((selectedId) => {
-              const normalizedSelectedId = selectedId.trim();
-              if (!normalizedSelectedId) {
-                return false;
-              }
+        if (positionOrderLockSelectionMode) {
+          if (selectedPositionBoxGroupIds.length > 1) {
+            const representativeFrameGroupId =
+              selectedPositionBoxGroup?.anchorFrameGroupId?.trim() || selectedPositionBoxGroupIds[0] || frameGroupId;
+            const selectedGroupId = selectedPositionBoxGroup?.id || '';
+            const normalizedCandidateFrameGroupId = positionOrderLockCandidateFrameGroupId.trim();
+            const normalizedCandidateGroupId = positionOrderLockCandidateGroupId.trim();
+            const isSameCandidateGroup = Boolean(selectedGroupId) && normalizedCandidateGroupId === selectedGroupId;
+            const isCandidateGroupProxySelection =
+              isSameCandidateGroup && normalizedCandidateFrameGroupId === representativeFrameGroupId;
+            const selectedGroupRepresentativeFrameGroupId =
+              positionOrderLockFrameGroupIds.find((selectedId) => {
+                const normalizedSelectedId = selectedId.trim();
+                if (!normalizedSelectedId) {
+                  return false;
+                }
 
-              return (
-                (positionBoxGroupByFrameGroupId.get(normalizedSelectedId)?.id || '') === selectedGroupId &&
-                (positionOrderLockSelectionKindByFrameGroupId[normalizedSelectedId] || 'frame') === 'group'
-              );
-            }) || '';
-          const canConvertExistingGroupSelectionToFrame =
-            Boolean(selectedGroupRepresentativeFrameGroupId) &&
-            frameGroupId !== selectedGroupRepresentativeFrameGroupId;
+                return (
+                  (positionBoxGroupByFrameGroupId.get(normalizedSelectedId)?.id || '') === selectedGroupId &&
+                  (positionOrderLockSelectionKindByFrameGroupId[normalizedSelectedId] || 'frame') === 'group'
+                );
+              }) || '';
+            const canConvertExistingGroupSelectionToFrame =
+              Boolean(selectedGroupRepresentativeFrameGroupId) &&
+              frameGroupId !== selectedGroupRepresentativeFrameGroupId;
 
-          if (positionOrderLockSelectionMode) {
             event.preventDefault();
             if (canConvertExistingGroupSelectionToFrame) {
               previewPositionOrderLockCandidateSelection(frameGroupId, {
@@ -14497,26 +14751,65 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             return;
           }
 
-          if (!isGroupProxySelected) {
-            event.preventDefault();
-            applyFrameBoxSelection([representativeFrameGroupId], {
-              positionGroupProxySelectionGroupId: selectedGroupId,
-            });
-            return;
-          }
-
-          if (currentSelectionIds[0] !== frameGroupId) {
-            event.preventDefault();
-            applyFrameBoxSelection([frameGroupId]);
-            return;
-          }
-        }
-
-        if (positionOrderLockSelectionMode) {
           event.preventDefault();
           previewPositionOrderLockCandidateSelection(frameGroupId, { commitSelection: true });
           return;
         }
+
+        event.preventDefault();
+        const pointerPoint = pageInner
+          ? readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100)
+          : null;
+        const clickChain = resolvePositionSelectionClickChain(pageInner, frameGroupId, pointerPoint);
+        setPositionSelectionClickChainSnapshot({
+          sourceFrameGroupId: frameGroupId,
+          point: pointerPoint,
+          entries: clickChain.entries,
+        });
+        const currentSelectionIds = selectedFrameGroupIdsRef.current
+          .map((selectionId) => selectionId.trim())
+          .filter((selectionId) => Boolean(selectionId));
+        const currentSelectedId = currentSelectionIds.length === 1 ? currentSelectionIds[0] || '' : '';
+        const currentProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+        const currentChainIndex = clickChain.entries.findIndex((entry) => {
+          if (entry.kind === 'group') {
+            if (currentProxyGroupId) {
+              return entry.groupId === currentProxyGroupId;
+            }
+            return entry.frameGroupId === currentSelectedId;
+          }
+
+          return entry.frameGroupId === currentSelectedId && currentProxyGroupId.length === 0;
+        });
+        const nextChainIndex =
+          clickChain.entries.length > 0
+            ? currentChainIndex >= 0
+              ? (currentChainIndex + 1) % clickChain.entries.length
+              : 0
+            : -1;
+        const nextEntry = nextChainIndex >= 0 ? clickChain.entries[nextChainIndex] : null;
+
+        if (!nextEntry) {
+          applyFrameBoxSelection([frameGroupId]);
+          return;
+        }
+
+        if (nextEntry.kind === 'group') {
+          const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
+          const nextSelectionIds =
+            nextGroup?.frameGroupIds
+              .map((frameGroupId) => frameGroupId.trim())
+              .filter((frameGroupId) => Boolean(frameGroupId)) || [];
+          applyFrameBoxSelection(nextSelectionIds.length > 0 ? nextSelectionIds : [nextEntry.frameGroupId], {
+            positionGroupProxySelectionGroupId: nextEntry.groupId,
+          });
+          return;
+        }
+
+        applyFrameBoxSelection([nextEntry.frameGroupId], {
+          disableAutoPositionGroupProxySelection: true,
+        });
+        return;
       }
 
       const explicitEdgeDirection = (edgeButton?.getAttribute('data-direction') ||
@@ -14633,8 +14926,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionOrderLockCandidateGroupId,
       positionOrderLockFrameGroupIds,
       positionOrderLockSelectionKindByFrameGroupId,
+      positionBoxGroups,
       positionBoxGroupByFrameGroupId,
       positionOrderLockSelectionMode,
+      resolvePositionSelectionClickChain,
       resolvePositionSelectionRepresentativeFrameGroupId,
       previewPositionOrderLockCandidateSelection,
       previewZoom,
@@ -16814,30 +17109,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                             </Button>
                           </div>
                         ) : null}
-                        <div className="mt-1">상태: {selectedPositionRelationSummary.mode}</div>
-                        <div className="mt-1">기준: {selectedPositionRelationSummary.anchorLabel}</div>
-                        <div className="mt-1">선택 박스 소속 그룹: {selectedPositionCurrentBoxGroupLabels.join(', ') || '-'}</div>
-                        <div className="mt-1 flex items-center gap-2">
-                          <span>위치 영향 대상 수: {selectedPositionImpactFrameGroupIds.length}</span>
-                          {hasSelectedPositionImpactTargets ? (
-                            <button
-                              type="button"
-                              className="h-5 min-w-5 rounded border border-slate-300 bg-white px-1 text-[11px] font-semibold leading-none text-slate-700"
-                              onClick={() => setShowSelectedPositionImpactDetails((previous) => !previous)}
-                              aria-label={showSelectedPositionImpactDetails ? '위치 영향 대상 숨기기' : '위치 영향 대상 보기'}
-                            >
-                              {showSelectedPositionImpactDetails ? '−' : '+'}
-                            </button>
-                          ) : null}
+                        <div className="mt-1">선택 박스 수: {selectedPositionInfoCount}</div>
+                        <div className="mt-1 break-all">선택 ID: {selectedPositionDisplayIds.join(', ') || '-'}</div>
+                        <div className="mt-1">위치 관계: {primarySelectedFramePositionMode || '-'}</div>
+                        <div className="mt-1">상대 기준 라벨: {primaryRelativeAnchorLabel || '-'}</div>
+                        <div className="mt-1">
+                          소속 박스 그룹:{' '}
+                          {selectedPositionCurrentBoxGroupLabels.join(', ') ||
+                            (primarySelectedPositionBoxGroup
+                              ? `${primarySelectedPositionBoxGroup.label} (${primarySelectedPositionBoxGroup.frameGroupIds.length}개)`
+                              : '-')}
                         </div>
-                        {hasSelectedPositionImpactTargets && showSelectedPositionImpactDetails ? (
-                          <>
-                            <div className="mt-1">위치 영향 대상 그룹: {selectedPositionImpactGroupLabels.join(', ') || '-'}</div>
-                            <div className="mt-1 break-all">위치 영향 대상: {selectedPositionImpactFrameGroupIds.join(', ') || '-'}</div>
-                          </>
-                        ) : null}
-                        <div className="mt-1">거리 x: {selectedPositionRelationSummary.distanceX}</div>
-                        <div className="mt-1">거리 y: {selectedPositionRelationSummary.distanceY}</div>
+                        <div className="mt-1 break-all">
+                          중첩 박스 그룹 정보: {selectedPositionNestedGroupInfoLines.join(' | ') || '-'}
+                        </div>
+                        <div className="mt-1">위치 영향 대상 수: {primaryRelativeAffectedFrameGroupIds.length}</div>
+                        <div className="mt-1 break-all">위치 영향 대상 그룹: {primaryRelativeImpactGroupLabels.join(', ') || '-'}</div>
+                        <div className="mt-1 break-all">위치 영향 대상: {primaryRelativeAffectedFrameGroupIds.join(', ') || '-'}</div>
                       </>
                     ) : (
                       <>
@@ -16883,13 +17171,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                                 type="button"
                                 className="flex flex-1 items-center gap-1 text-left"
                                 onClick={() => {
-                                  if (!representativeFrameGroupId) {
+                                  const groupSelectionIds = group.frameGroupIds
+                                    .map((frameGroupId) => frameGroupId.trim())
+                                    .filter((frameGroupId) => Boolean(frameGroupId));
+                                  if (groupSelectionIds.length <= 0 && !representativeFrameGroupId) {
                                     return;
                                   }
 
-                                  applyFrameBoxSelection([representativeFrameGroupId], {
-                                    positionGroupProxySelectionGroupId: group.id,
-                                  });
+                                  applyFrameBoxSelection(
+                                    groupSelectionIds.length > 0 ? groupSelectionIds : [representativeFrameGroupId],
+                                    {
+                                      positionGroupProxySelectionGroupId: group.id,
+                                    }
+                                  );
                                 }}
                               >
                                 <span className="font-medium text-slate-800">
