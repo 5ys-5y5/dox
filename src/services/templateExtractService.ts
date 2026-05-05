@@ -66,6 +66,34 @@ const getSupabase = () => {
 
 const TEMPLATE_EXTRACT_DB_SCHEMA = 'template_extracts';
 const DEFAULT_LAYOUT_MODE: TemplateLayoutResizeMode = 'grow_height';
+const EXTRACT_POSITION_ATTR_NAMES = [
+  'data-template-frame-position-mode',
+  'data-template-frame-relative-anchor-kind',
+  'data-template-frame-relative-anchor-id',
+  'data-template-frame-relative-anchor-x',
+  'data-template-frame-relative-anchor-y',
+  'data-template-frame-relative-offset-x',
+  'data-template-frame-relative-offset-y',
+  'data-template-frame-position-group-id',
+  'data-template-frame-position-group-label',
+  'data-template-frame-position-group-anchor-id',
+  'data-template-frame-position-group-managed',
+  'data-template-position-group-aliases',
+];
+
+const stripExtractRelativePositionAttrs = (content: string) => {
+  let nextContent = String(content || '');
+
+  EXTRACT_POSITION_ATTR_NAMES.forEach((attrName) => {
+    const escapedAttrName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    nextContent = nextContent.replace(
+      new RegExp(`\\s${escapedAttrName}\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)`, 'gi'),
+      ''
+    );
+  });
+
+  return nextContent;
+};
 
 // TEMPLATE_EXTRACT_SCHEMA_BOUNDARY
 // 템플릿 추출 도메인은 template_extracts 스키마만 사용합니다.
@@ -85,8 +113,12 @@ const toDraftDto = (row: ExtractDraftRow): TemplateExtractDraftDto => ({
   id: row.id,
   sourceTitle: row.source_title,
   sourceKind: row.source_kind,
-  sourceContent: row.source_content,
-  generatedDraftHtml: row.generated_draft_html,
+  sourceContent:
+    row.source_kind === 'html' ? stripExtractRelativePositionAttrs(row.source_content) : row.source_content,
+  generatedDraftHtml:
+    row.source_kind === 'html'
+      ? stripExtractRelativePositionAttrs(row.generated_draft_html)
+      : row.generated_draft_html,
   status: row.status,
   confidenceSummary: row.confidence_summary,
   similarTemplateIds: row.similar_template_ids || [],
@@ -151,7 +183,10 @@ export const TemplateExtractService = {
     similarTemplateIds: string[] = []
   ): Promise<TemplateExtractDetailResult> {
     const sourceTitle = resolvedSource.sourceTitle?.trim() || null;
-    const sourceContent = resolvedSource.sourceContent.trim();
+    const sourceContent =
+      resolvedSource.sourceKind === 'html'
+        ? stripExtractRelativePositionAttrs(resolvedSource.sourceContent.trim())
+        : resolvedSource.sourceContent.trim();
 
     if (!sourceContent) {
       throw new Error('템플릿 추출 실패: sourceContent가 비어 있습니다.');
@@ -166,6 +201,10 @@ export const TemplateExtractService = {
       sourceTitle,
       sourceContent
     );
+    const generatedDraftHtml =
+      resolvedSource.sourceKind === 'html'
+        ? stripExtractRelativePositionAttrs(analysis.generatedDraftHtml)
+        : analysis.generatedDraftHtml;
     const pipelineTrace =
       resolvedSource.pipelineTrace ||
       (resolvedSource.sourceKind === 'html'
@@ -186,7 +225,7 @@ export const TemplateExtractService = {
           source_title: sourceTitle,
           source_kind: resolvedSource.sourceKind,
           source_content: sourceContent,
-          generated_draft_html: analysis.generatedDraftHtml,
+          generated_draft_html: generatedDraftHtml,
           status: 'draft',
           confidence_summary: analysis.confidenceSummary,
           similar_template_ids: similarTemplateIds,
@@ -315,10 +354,11 @@ export const TemplateExtractService = {
       throw new Error(`템플릿 추출 승인 실패: 후보 필드 조회 중 오류가 발생했습니다. (${candidateError.message})`);
     }
 
-    const approvedDraftHtml =
+    const approvedDraftHtml = stripExtractRelativePositionAttrs(
       typeof params.generatedDraftHtml === 'string' && params.generatedDraftHtml.trim()
         ? params.generatedDraftHtml.trim()
-        : draft.generated_draft_html;
+        : draft.generated_draft_html
+    );
 
     const reviewedFields =
       params.reviewedFields && params.reviewedFields.length > 0

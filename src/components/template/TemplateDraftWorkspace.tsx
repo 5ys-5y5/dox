@@ -40,17 +40,6 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-col-end',
   'data-template-frame-halign',
   'data-template-frame-valign',
-  'data-template-frame-position-mode',
-  'data-template-frame-relative-anchor-kind',
-  'data-template-frame-relative-anchor-id',
-  'data-template-frame-relative-anchor-x',
-  'data-template-frame-relative-anchor-y',
-  'data-template-frame-relative-offset-x',
-  'data-template-frame-relative-offset-y',
-  'data-template-frame-position-group-id',
-  'data-template-frame-position-group-label',
-  'data-template-frame-position-group-anchor-id',
-  'data-template-frame-position-group-managed',
   'data-v106-band-source',
 ] as const;
 
