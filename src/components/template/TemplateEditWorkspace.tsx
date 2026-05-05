@@ -326,6 +326,8 @@ type MarqueeSelectionState = {
   pageInner: HTMLElement;
   anchorFrameGroupId: string | null;
   baseSelectionIds: string[];
+  lastSelectionIds: string[];
+  lastProxySelections?: PositionGroupProxySelection[];
   origin: {
     x: number;
     y: number;
@@ -7562,6 +7564,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const deferredPreviewEditorStateRef = React.useRef(false);
   const positionGroupProxySelectionGroupIdRef = React.useRef('');
   const positionGroupProxySelectionShowAllGroupsRef = React.useRef(false);
+  const positionGroupProxySelectionsOverrideRef = React.useRef<PositionGroupProxySelection[] | null>(null);
   const positionSpacingDraftApplyRequestedRef = React.useRef(false);
   const canvasHistoryEntriesRef = React.useRef<CanvasHistoryEntry[]>([]);
   const canvasHistoryIndexRef = React.useRef(-1);
@@ -7895,6 +7898,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setPreviewDomVersion((previous) => previous + 1);
       positionGroupProxySelectionGroupIdRef.current = nextEntry.positionGroupProxySelectionGroupId;
       positionGroupProxySelectionShowAllGroupsRef.current = nextEntry.showAllGroupProxySelections;
+      positionGroupProxySelectionsOverrideRef.current = null;
       selectedFrameGroupIdsRef.current = nextEntry.selectedFrameGroupIds.slice();
       edgeSelectionStateRef.current = emptyEdgeSelection;
       setSelectedFrameGroupIds(nextEntry.selectedFrameGroupIds.slice());
@@ -8283,6 +8287,31 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const selectedIds = candidateSelectedFrameGroupIds
         .map((frameGroupId) => frameGroupId.trim())
         .filter((frameGroupId) => Boolean(frameGroupId));
+      const selectedIdSet = new Set(selectedIds);
+      const persistedProxySelectionsOverride = positionGroupProxySelectionsOverrideRef.current;
+
+      if (persistedProxySelectionsOverride !== null && !positionOrderLockSelectionMode) {
+        return persistedProxySelectionsOverride
+          .map((entry) => {
+            const frameGroupIds = Array.from(
+              new Set(
+                entry.frameGroupIds
+                  .map((frameGroupId) => frameGroupId.trim())
+                  .filter((frameGroupId) => Boolean(frameGroupId))
+              )
+            );
+            return {
+              ...entry,
+              frameGroupIds,
+            };
+          })
+          .filter(
+            (entry) =>
+              entry.frameGroupIds.length > 0 &&
+              entry.frameGroupIds.every((frameGroupId) => selectedIdSet.has(frameGroupId))
+          );
+      }
+
       const result: PositionGroupProxySelection[] = [];
       const seenGroupIds = new Set<string>();
 
@@ -10064,6 +10093,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
     positionGroupProxySelectionShowAllGroupsRef.current = false;
+    positionGroupProxySelectionsOverrideRef.current = null;
   }, [selectionPanelTab]);
 
   const virtualDefinitionIds = React.useMemo(
@@ -11079,8 +11109,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
       }
 
+      const nextPositionGroupProxySelectionsOverride =
+        options?.overridePositionGroupProxySelections !== undefined
+          ? options.overridePositionGroupProxySelections.map((entry) => ({
+              ...entry,
+              frameGroupIds: Array.from(
+                new Set(
+                  entry.frameGroupIds
+                    .map((frameGroupId) => frameGroupId.trim())
+                    .filter((frameGroupId) => Boolean(frameGroupId))
+                )
+              ),
+            }))
+          : null;
       const nextPositionGroupProxySelections =
-        options?.overridePositionGroupProxySelections ||
+        nextPositionGroupProxySelectionsOverride ||
         resolvePositionGroupProxySelections(
           normalizedSelectionIds,
           nextPositionGroupProxySelectionGroupId,
@@ -11093,6 +11136,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               }
             : undefined
         );
+      positionGroupProxySelectionsOverrideRef.current = nextPositionGroupProxySelectionsOverride;
       positionGroupProxySelectionGroupIdRef.current = nextPositionGroupProxySelectionGroupId;
       positionGroupProxySelectionShowAllGroupsRef.current = Boolean(
         options?.showAllGroupProxySelections
@@ -14897,6 +14941,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
     positionGroupProxySelectionShowAllGroupsRef.current = false;
+    positionGroupProxySelectionsOverrideRef.current = null;
     applyFrameBoxSelection(selectedFrameGroupIdsRef.current.slice(), {
       positionGroupProxySelectionGroupId: '',
       showAllGroupProxySelections: false,
@@ -14908,6 +14953,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     stopPointerInteraction();
     positionGroupProxySelectionGroupIdRef.current = '';
     positionGroupProxySelectionShowAllGroupsRef.current = false;
+    positionGroupProxySelectionsOverrideRef.current = null;
     setPositionOrderLockSelectionMode(false);
     setPositionOrderLockFrameGroupIds([]);
     setPositionOrderLockSelectionKindByFrameGroupId({});
@@ -15057,6 +15103,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           pageInner,
           anchorFrameGroupId: resolvedAnchorFrameGroupId || null,
           baseSelectionIds,
+          lastSelectionIds: baseSelectionIds.slice(),
+          lastProxySelections: useGroupedShiftSelection
+            ? resolvePositionMarqueeProxySelections(pageInner, baseSelectionIds)
+            : undefined,
           origin: readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100),
           ghost: null,
           mode: 'contained',
@@ -15369,6 +15419,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         marqueeSelectionState.pageInner,
         nextSelectionIds
       );
+      marqueeSelectionState.lastSelectionIds = nextSelectionIds;
+      marqueeSelectionState.lastProxySelections = marqueeProxySelections;
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
       selectedFrameGroupIdsRef.current = nextSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
@@ -16069,17 +16121,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         ) {
           const nextMode: FrameMarqueeSelectionMode =
             finalPoint.x >= marqueeSelectionState.origin.x ? 'contained' : 'intersected';
-          const nextSelectionIds = resolveMarqueeSelectionIds(
+          const computedSelectionIds = resolveMarqueeSelectionIds(
             marqueeSelectionState.pageInner,
             finalRect,
             nextMode,
             marqueeSelectionState.baseSelectionIds
           );
+          const nextSelectionIds =
+            marqueeSelectionState.active && marqueeSelectionState.lastSelectionIds.length > 0
+              ? marqueeSelectionState.lastSelectionIds
+              : computedSelectionIds;
           const marqueeProxySelections = keepGroupedShiftSelection
-            ? resolvePositionMarqueeProxySelections(
+            ? marqueeSelectionState.lastProxySelections ||
+              resolvePositionMarqueeProxySelections(
                 marqueeSelectionState.pageInner,
                 nextSelectionIds
-              )
+              ) ||
+              []
             : undefined;
           applyFrameBoxSelection(
             nextSelectionIds,
@@ -16107,7 +16165,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ? resolvePositionMarqueeProxySelections(
                 marqueeSelectionState.pageInner,
                 nextSelectionIds
-              )
+              ) || []
             : undefined;
           applyFrameBoxSelection(
             nextSelectionIds,
