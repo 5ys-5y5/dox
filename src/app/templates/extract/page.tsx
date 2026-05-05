@@ -536,6 +536,18 @@ const hasSupportedFrameEditorMarkup = (html: string | null | undefined) =>
     );
   });
 
+const readSingleFrameGroupId = (frameGroupIds: string[]) => {
+  const normalizedFrameGroupIds = frameGroupIds
+    .map((frameGroupId) => frameGroupId.trim())
+    .filter((frameGroupId) => Boolean(frameGroupId));
+
+  if (normalizedFrameGroupIds.length !== 1) {
+    return '';
+  }
+
+  return normalizedFrameGroupIds[0] || '';
+};
+
 const querySupportedFrameEditorSection = (root: ParentNode) =>
   Array.from(root.querySelectorAll<HTMLElement>('section[data-template-extraction-stage="frames"]')).find(
     (section) => isSupportedFrameEditorVersion(section.getAttribute('data-template-frame-group-version'))
@@ -4037,8 +4049,9 @@ export default function TemplateExtractPage() {
 
   const syncFrameEditorSelectionState = React.useCallback(() => {
     const root = draftPreviewRef.current;
+    const selectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds);
 
-    if (!root || selectedFrameGroupIds.length === 0) {
+    if (!root || !selectedFrameGroupId) {
       setFrameEditorValueKey('');
       setFrameEditorRole('group');
       setFrameEditorOutlineStyle('solid');
@@ -4053,7 +4066,7 @@ export default function TemplateExtractPage() {
     const selectedNode = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
       .filter((node) => !node.matches('[data-template-frame-input="true"]'))
       .find(
-      (node) => (node.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+      (node) => (node.getAttribute('data-template-frame-group') || '') === selectedFrameGroupId
     );
 
     if (!selectedNode) {
@@ -6259,12 +6272,13 @@ export default function TemplateExtractPage() {
   const splitSelectedFrameGroup = React.useCallback(
     (axis: 'vertical' | 'horizontal') => {
       const root = draftPreviewRef.current;
-      if (!root || selectedFrameGroupIds.length !== 1) {
+      const selectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds);
+      if (!root || !selectedFrameGroupId) {
         return;
       }
 
       const node = getFrameEditorNodes(root).find(
-        (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+        (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupId
       );
 
       if (!node) {
@@ -6287,8 +6301,8 @@ export default function TemplateExtractPage() {
         return;
       }
 
-      const firstId = `${selectedFrameGroupIds[0]}-a`;
-      const secondId = `${selectedFrameGroupIds[0]}-b`;
+      const firstId = `${selectedFrameGroupId}-a`;
+      const secondId = `${selectedFrameGroupId}-b`;
       const splitResult = TemplateFrameEditGeometryService.splitFrame({
         frame: currentFrame,
         candidate: candidatesResult.value[0],
@@ -6373,13 +6387,14 @@ export default function TemplateExtractPage() {
 
   const applySelectedFrameSize = React.useCallback(() => {
     const root = draftPreviewRef.current;
+    const selectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds);
 
-    if (!root || selectedFrameGroupIds.length !== 1) {
+    if (!root || !selectedFrameGroupId) {
       return;
     }
 
     const node = getFrameEditorNodes(root).find(
-      (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+      (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupId
     );
 
     if (!node) {
@@ -6421,12 +6436,27 @@ export default function TemplateExtractPage() {
       return;
     }
 
-    const parentGroupId = selectedFrameGroupIds[0];
     const nodes = getFrameEditorNodes(root).filter((node) =>
       selectedFrameGroupIds.includes(node.getAttribute('data-template-frame-group') || '')
     );
+    if (nodes.length < 2) {
+      return;
+    }
 
-    applyFrameEditorMetadata(nodes.slice(1), { parentGroup: parentGroupId });
+    const sortedNodes = nodes
+      .slice()
+      .sort((left, right) => {
+        const leftRect = readFrameNodeRect(left);
+        const rightRect = readFrameNodeRect(right);
+        return leftRect.top - rightRect.top || leftRect.left - rightRect.left;
+      });
+    const parentGroupId = sortedNodes[0]?.getAttribute('data-template-frame-group') || '';
+
+    if (!parentGroupId) {
+      return;
+    }
+
+    applyFrameEditorMetadata(sortedNodes.slice(1), { parentGroup: parentGroupId });
   }, [applyFrameEditorMetadata, getFrameEditorNodes, selectedFrameGroupIds]);
 
   const handleDraftPreviewPointerDown = React.useCallback(

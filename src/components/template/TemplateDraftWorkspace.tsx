@@ -67,6 +67,18 @@ const hasSupportedFrameEditorMarkup = (html: string | null | undefined) =>
     );
   });
 
+const readSingleFrameGroupId = (frameGroupIds: string[]) => {
+  const normalizedFrameGroupIds = frameGroupIds
+    .map((frameGroupId) => frameGroupId.trim())
+    .filter((frameGroupId) => Boolean(frameGroupId));
+
+  if (normalizedFrameGroupIds.length !== 1) {
+    return '';
+  }
+
+  return normalizedFrameGroupIds[0] || '';
+};
+
 const stripDraftPreviewUiState = (html: string) => {
   if (!html.trim()) {
     return '';
@@ -554,8 +566,9 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
 
     const syncFrameEditorSelectionState = React.useCallback(() => {
       const root = draftPreviewRef.current;
+      const selectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds);
 
-      if (!root || selectedFrameGroupIds.length === 0) {
+      if (!root || !selectedFrameGroupId) {
         setFrameEditorValueKey('');
         setFrameEditorRole('group');
         setFrameEditorParentGroup('');
@@ -565,7 +578,7 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
       }
 
       const selectedNode = Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)).find(
-        (node) => (node.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+        (node) => (node.getAttribute('data-template-frame-group') || '') === selectedFrameGroupId
       );
 
       if (!selectedNode) {
@@ -781,12 +794,13 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
     const splitSelectedFrameGroup = React.useCallback(
       (axis: 'vertical' | 'horizontal') => {
         const root = draftPreviewRef.current;
-        if (!root || selectedFrameGroupIds.length !== 1) {
+        const selectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds);
+        if (!root || !selectedFrameGroupId) {
           return;
         }
 
         const node = getFrameEditorNodes(root).find(
-          (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+          (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupId
         );
 
         if (!node) {
@@ -821,8 +835,8 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
           innerCandidates.sort((left, right) => Math.abs(left - midpoint) - Math.abs(right - midpoint))[0] ??
           midpoint;
 
-        const firstId = `${selectedFrameGroupIds[0]}-a`;
-        const secondId = `${selectedFrameGroupIds[0]}-b`;
+        const firstId = `${selectedFrameGroupId}-a`;
+        const secondId = `${selectedFrameGroupId}-b`;
         const secondNode = node.cloneNode(true) as HTMLElement;
         const input = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
         const secondInput = secondNode.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
@@ -908,13 +922,14 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
 
     const applySelectedFrameSize = React.useCallback(() => {
       const root = draftPreviewRef.current;
+      const selectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds);
 
-      if (!root || selectedFrameGroupIds.length !== 1) {
+      if (!root || !selectedFrameGroupId) {
         return;
       }
 
       const node = getFrameEditorNodes(root).find(
-        (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupIds[0]
+        (item) => (item.getAttribute('data-template-frame-group') || '') === selectedFrameGroupId
       );
 
       if (!node) {
@@ -950,19 +965,34 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
       syncFrameEditorSelectionState,
     ]);
 
-    const linkSelectedFrameGroups = React.useCallback(() => {
-      const root = draftPreviewRef.current;
-      if (!root || selectedFrameGroupIds.length < 2) {
-        return;
-      }
+  const linkSelectedFrameGroups = React.useCallback(() => {
+    const root = draftPreviewRef.current;
+    if (!root || selectedFrameGroupIds.length < 2) {
+      return;
+    }
 
-      const parentGroupId = selectedFrameGroupIds[0];
-      const nodes = getFrameEditorNodes(root).filter((node) =>
-        selectedFrameGroupIds.includes(node.getAttribute('data-template-frame-group') || '')
-      );
+    const nodes = getFrameEditorNodes(root).filter((node) =>
+      selectedFrameGroupIds.includes(node.getAttribute('data-template-frame-group') || '')
+    );
+    if (nodes.length < 2) {
+      return;
+    }
 
-      applyFrameEditorMetadata(nodes.slice(1), { parentGroup: parentGroupId });
-    }, [applyFrameEditorMetadata, getFrameEditorNodes, selectedFrameGroupIds]);
+    const sortedNodes = nodes
+      .slice()
+      .sort((left, right) => {
+        const leftRect = readSelectableFrameNodeRect(left);
+        const rightRect = readSelectableFrameNodeRect(right);
+        return leftRect.top - rightRect.top || leftRect.left - rightRect.left;
+      });
+    const parentGroupId = sortedNodes[0]?.getAttribute('data-template-frame-group') || '';
+
+    if (!parentGroupId) {
+      return;
+    }
+
+    applyFrameEditorMetadata(sortedNodes.slice(1), { parentGroup: parentGroupId });
+  }, [applyFrameEditorMetadata, getFrameEditorNodes, selectedFrameGroupIds]);
 
     const syncPreviewEditTarget = React.useCallback(
       (target: EventTarget | null) => {

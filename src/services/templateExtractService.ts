@@ -76,7 +76,6 @@ const EXTRACT_POSITION_ATTR_NAMES = [
   'data-template-frame-relative-offset-y',
   'data-template-frame-position-group-id',
   'data-template-frame-position-group-label',
-  'data-template-frame-position-group-anchor-id',
   'data-template-frame-position-group-managed',
   'data-template-position-group-aliases',
 ];
