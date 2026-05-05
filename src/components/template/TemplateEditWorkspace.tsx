@@ -176,6 +176,7 @@ type PositionSpacingOrderedGroupMember = {
   representativeRect: FrameNodeRect;
   groupRect: FrameNodeRect;
   memberFrameGroupIds: string[];
+  memberRects: FrameNodeRect[];
 };
 
 type PositionSpacingPairSummary = {
@@ -193,7 +194,21 @@ type PositionSpacingResolvedPair = {
   anchorMember: PositionSpacingOrderedGroupMember;
   targetMember: PositionSpacingOrderedGroupMember;
   anchorY: TemplateFrameRelativeVerticalPin;
+  anchorReferenceRect: FrameNodeRect;
+  targetReferenceRect: FrameNodeRect;
   defaultGapY: number;
+};
+
+type PositionSpacingGuideRelation = {
+  pairKey: string;
+  anchorLabel: string;
+  targetLabel: string;
+  anchorFrameGroupId: string;
+  targetFrameGroupId: string;
+  anchorY: TemplateFrameRelativeVerticalPin;
+  anchorReferenceRect: FrameNodeRect;
+  targetReferenceRect: FrameNodeRect;
+  gapYPx: number;
 };
 
 type DefinedPositionRelativeRelation = {
@@ -5982,6 +5997,96 @@ const applyDefinedPositionRelativeRelationUi = (
   }
 };
 
+const applyPositionSpacingGuideUi = (
+  root: HTMLElement,
+  selectionPanelTab: SelectionPanelTab,
+  relations: PositionSpacingGuideRelation[] = []
+) => {
+  root.querySelectorAll<HTMLElement>('[data-v106-position-spacing-guide="true"]').forEach((element) => {
+    element.remove();
+  });
+
+  if (selectionPanelTab !== 'position' || relations.length <= 0) {
+    return;
+  }
+
+  relations.forEach((relation) => {
+    const anchorNode = resolveFrameSelectionAnchor(
+      root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${relation.anchorFrameGroupId}"]`)
+    );
+    const targetNode = resolveFrameSelectionAnchor(
+      root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${relation.targetFrameGroupId}"]`)
+    );
+    const pageInner =
+      anchorNode?.closest<HTMLElement>('.page-inner') ||
+      targetNode?.closest<HTMLElement>('.page-inner') ||
+      null;
+
+    if (!pageInner) {
+      return;
+    }
+
+    const anchorEdgeY =
+      relation.anchorY === 'bottom'
+        ? relation.anchorReferenceRect.top + relation.anchorReferenceRect.height
+        : relation.anchorReferenceRect.top;
+    const targetEdgeY =
+      relation.anchorY === 'bottom'
+        ? relation.targetReferenceRect.top
+        : relation.targetReferenceRect.top + relation.targetReferenceRect.height;
+    const anchorCenterX = relation.anchorReferenceRect.left + relation.anchorReferenceRect.width / 2;
+    const targetCenterX = relation.targetReferenceRect.left + relation.targetReferenceRect.width / 2;
+    const lineX = (anchorCenterX + targetCenterX) / 2;
+    const topY = Math.min(anchorEdgeY, targetEdgeY);
+    const lineHeight = Math.max(1, Math.abs(targetEdgeY - anchorEdgeY));
+    const capWidth = 12;
+    const capHalf = capWidth / 2;
+
+    const verticalLine = document.createElement('div');
+    verticalLine.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
+    verticalLine.setAttribute('data-frame-editor-ui', 'true');
+    verticalLine.setAttribute('data-v106-position-spacing-guide', 'true');
+    verticalLine.setAttribute('data-relative-guide-orientation', 'vertical');
+    verticalLine.style.left = toFrameCssPx(lineX);
+    verticalLine.style.top = toFrameCssPx(topY);
+    verticalLine.style.width = toFrameCssPx(1);
+    verticalLine.style.height = toFrameCssPx(lineHeight);
+    pageInner.appendChild(verticalLine);
+
+    const startCap = document.createElement('div');
+    startCap.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
+    startCap.setAttribute('data-frame-editor-ui', 'true');
+    startCap.setAttribute('data-v106-position-spacing-guide', 'true');
+    startCap.setAttribute('data-relative-guide-orientation', 'horizontal');
+    startCap.style.left = toFrameCssPx(lineX - capHalf);
+    startCap.style.top = toFrameCssPx(anchorEdgeY);
+    startCap.style.width = toFrameCssPx(capWidth);
+    startCap.style.height = toFrameCssPx(1);
+    pageInner.appendChild(startCap);
+
+    const endCap = document.createElement('div');
+    endCap.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
+    endCap.setAttribute('data-frame-editor-ui', 'true');
+    endCap.setAttribute('data-v106-position-spacing-guide', 'true');
+    endCap.setAttribute('data-relative-guide-orientation', 'horizontal');
+    endCap.style.left = toFrameCssPx(lineX - capHalf);
+    endCap.style.top = toFrameCssPx(targetEdgeY);
+    endCap.style.width = toFrameCssPx(capWidth);
+    endCap.style.height = toFrameCssPx(1);
+    pageInner.appendChild(endCap);
+
+    const labelBadge = document.createElement('div');
+    labelBadge.className = FRAME_RELATIVE_ANCHOR_BADGE_CLASS;
+    labelBadge.setAttribute('data-frame-editor-ui', 'true');
+    labelBadge.setAttribute('data-v106-position-spacing-guide', 'true');
+    labelBadge.setAttribute('data-relative-anchor-role', 'spacing-gap');
+    labelBadge.textContent = `${relation.anchorLabel} ↔ ${relation.targetLabel} · ${Math.round(relation.gapYPx)}px`;
+    labelBadge.style.left = toFrameCssPx(lineX + 10);
+    labelBadge.style.top = toFrameCssPx(topY + lineHeight / 2);
+    pageInner.appendChild(labelBadge);
+  });
+};
+
 const syncPreviewSurfaceSelectionPanelTabAttr = (root: HTMLElement, selectionPanelTab: SelectionPanelTab) => {
   root.setAttribute('data-selection-panel-tab', selectionPanelTab);
 };
@@ -7149,9 +7254,7 @@ const applyFrameSelectionUi = (
     node.setAttribute('data-template-edge-host', 'true');
 
     const isProxyRepresentativeSelection = positionGroupProxySelections.some(
-      (proxySelection) =>
-        Number.isFinite(proxySelection.selectionOrder) &&
-        frameGroupId === proxySelection.representativeFrameGroupId
+      (proxySelection) => frameGroupId === proxySelection.representativeFrameGroupId
     );
 
     if (selectionIndex >= 0 && !isProxyRepresentativeSelection) {
@@ -7970,18 +8073,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
 
       if (primaryProxy) {
-        const selectionOrder = Math.max(1, selectedIds.indexOf(primaryProxy.representativeFrameGroupId) + 1);
-        const visual = resolvePositionOrderLockSelectionVisual(selectionOrder, primaryProxy.groupId);
-        result.push({
-          ...primaryProxy,
-          selectionOrder,
-          colorName: visual.colorName,
-          outlineColor: visual.outlineColor,
-          fillColor: visual.fillColor,
-          haloColor: visual.haloColor,
-          badgeColor: visual.badgeColor,
-          badgeTextColor: visual.badgeTextColor,
-        });
+        if (positionOrderLockSelectionMode) {
+          const selectionOrder = Math.max(1, selectedIds.indexOf(primaryProxy.representativeFrameGroupId) + 1);
+          const visual = resolvePositionOrderLockSelectionVisual(selectionOrder, primaryProxy.groupId);
+          result.push({
+            ...primaryProxy,
+            selectionOrder,
+            colorName: visual.colorName,
+            outlineColor: visual.outlineColor,
+            fillColor: visual.fillColor,
+            haloColor: visual.haloColor,
+            badgeColor: visual.badgeColor,
+            badgeTextColor: visual.badgeTextColor,
+          });
+        } else {
+          result.push(primaryProxy);
+        }
         seenGroupIds.add(primaryProxy.groupId);
       }
 
@@ -8008,22 +8115,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         if (!representativeFrameGroupId || !selectedIdSet.has(representativeFrameGroupId) || frameGroupId !== representativeFrameGroupId) {
           return;
         }
-        const selectionOrder = selectionIndex + 1;
-        const visual = resolvePositionOrderLockSelectionVisual(selectionOrder, resolvedGroupId);
-
-        result.push({
-          groupId: resolvedGroupId,
-          label: shouldUseGroup ? group?.label || frameGroupId : frameGroupId,
-          representativeFrameGroupId,
-          frameGroupIds: shouldUseGroup ? group?.frameGroupIds.slice() || [frameGroupId] : [frameGroupId],
-          selectionOrder,
-          colorName: visual.colorName,
-          outlineColor: visual.outlineColor,
-          fillColor: visual.fillColor,
-          haloColor: visual.haloColor,
-          badgeColor: visual.badgeColor,
-          badgeTextColor: visual.badgeTextColor,
-        });
+        if (positionOrderLockSelectionMode) {
+          const selectionOrder = selectionIndex + 1;
+          const visual = resolvePositionOrderLockSelectionVisual(selectionOrder, resolvedGroupId);
+          result.push({
+            groupId: resolvedGroupId,
+            label: shouldUseGroup ? group?.label || frameGroupId : frameGroupId,
+            representativeFrameGroupId,
+            frameGroupIds: shouldUseGroup ? group?.frameGroupIds.slice() || [frameGroupId] : [frameGroupId],
+            selectionOrder,
+            colorName: visual.colorName,
+            outlineColor: visual.outlineColor,
+            fillColor: visual.fillColor,
+            haloColor: visual.haloColor,
+            badgeColor: visual.badgeColor,
+            badgeTextColor: visual.badgeTextColor,
+          });
+        } else {
+          result.push({
+            groupId: resolvedGroupId,
+            label: shouldUseGroup ? group?.label || frameGroupId : frameGroupId,
+            representativeFrameGroupId,
+            frameGroupIds: shouldUseGroup ? group?.frameGroupIds.slice() || [frameGroupId] : [frameGroupId],
+          });
+        }
         seenGroupIds.add(resolvedGroupId);
       });
 
@@ -8884,7 +8999,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const selectedGroups = (() => {
       const seenEntityKeys = new Set<string>();
-      const result: PositionImpactGroup[] = [];
+      const result: Array<{
+        group: PositionImpactGroup;
+        selectionKind: 'group' | 'frame';
+      }> = [];
 
       normalizedTargetFrameGroupIds.forEach((frameGroupId) => {
         const group = groupByFrameGroupId.get(frameGroupId);
@@ -8899,16 +9017,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         seenEntityKeys.add(entityKey);
 
         if (shouldUseGroup && group) {
-          result.push(group);
+          result.push({
+            group,
+            selectionKind: 'group',
+          });
           return;
         }
 
         result.push({
-          id: `single:${frameGroupId}`,
-          label: frameGroupId,
-          anchorFrameGroupId: frameGroupId,
-          frameGroupIds: [frameGroupId],
-          inferred: true,
+          group: {
+            id: `single:${frameGroupId}`,
+            label: frameGroupId,
+            anchorFrameGroupId: frameGroupId,
+            frameGroupIds: [frameGroupId],
+            inferred: true,
+          },
+          selectionKind: 'frame',
         });
       });
 
@@ -8924,7 +9048,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
 
     return selectedGroups
-      .map((group) => {
+      .map((selectedEntry) => {
+        const group = selectedEntry.group;
         const representativeFrameGroupId = group.anchorFrameGroupId.trim() || group.frameGroupIds[0] || '';
         const representativeNode = frameNodeById.get(representativeFrameGroupId) || null;
         const representativePageInner = representativeNode?.closest<HTMLElement>('.page-inner') || null;
@@ -8959,19 +9084,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const minTop = Math.min(...memberEntries.map((entry) => entry.rect.top));
         const maxRight = Math.max(...memberEntries.map((entry) => entry.rect.left + entry.rect.width));
         const maxBottom = Math.max(...memberEntries.map((entry) => entry.rect.top + entry.rect.height));
+        const groupRect = {
+          left: minLeft,
+          top: minTop,
+          width: Math.max(1, maxRight - minLeft),
+          height: Math.max(1, maxBottom - minTop),
+        };
+        const memberRects = memberEntries.map((entry) => entry.rect);
+        const spacingReferenceRects =
+          selectedEntry.selectionKind === 'group'
+            ? [groupRect]
+            : memberRects;
+
         return {
           group,
           representativeFrameGroupId,
           representativeNode,
           representativePageInner,
           representativeRect,
-          groupRect: {
-            left: minLeft,
-            top: minTop,
-            width: Math.max(1, maxRight - minLeft),
-            height: Math.max(1, maxBottom - minTop),
-          },
+          groupRect,
           memberFrameGroupIds: memberEntries.map((entry) => entry.frameGroupId),
+          memberRects: spacingReferenceRects,
         };
       })
       .filter(
@@ -8998,36 +9131,177 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         anchorMember: PositionSpacingOrderedGroupMember,
         targetMember: PositionSpacingOrderedGroupMember
       ) => {
-        const anchorTop = anchorMember.groupRect.top;
-        const anchorBottom = anchorMember.groupRect.top + anchorMember.groupRect.height;
-        const targetTop = targetMember.groupRect.top;
-        const targetBottom = targetMember.groupRect.top + targetMember.groupRect.height;
-        const downwardGap = targetTop - anchorBottom;
-        const upwardGap = anchorTop - targetBottom;
+        const directionTolerance = 0.5;
+        const anchorGroupTop = anchorMember.groupRect.top;
+        const anchorGroupBottom = anchorMember.groupRect.top + anchorMember.groupRect.height;
+        const targetGroupTop = targetMember.groupRect.top;
+        const targetGroupBottom = targetMember.groupRect.top + targetMember.groupRect.height;
+        const anchorIsClearlyAbove = anchorGroupBottom <= targetGroupTop - directionTolerance;
+        const targetIsClearlyAbove = targetGroupBottom <= anchorGroupTop - directionTolerance;
+        let bestDownwardClear:
+          | {
+              gap: number;
+              anchorRect: FrameNodeRect;
+              targetRect: FrameNodeRect;
+            }
+          | null = null;
+        let bestUpwardClear:
+          | {
+              gap: number;
+              anchorRect: FrameNodeRect;
+              targetRect: FrameNodeRect;
+            }
+          | null = null;
+        let bestDownwardAny:
+          | {
+              gap: number;
+              anchorRect: FrameNodeRect;
+              targetRect: FrameNodeRect;
+            }
+          | null = null;
+        let bestUpwardAny:
+          | {
+              gap: number;
+              anchorRect: FrameNodeRect;
+              targetRect: FrameNodeRect;
+            }
+          | null = null;
+        let bestOverlap:
+          | {
+              magnitude: number;
+              anchorY: TemplateFrameRelativeVerticalPin;
+              anchorRect: FrameNodeRect;
+              targetRect: FrameNodeRect;
+            }
+          | null = null;
 
-        if (downwardGap >= 0) {
+        anchorMember.memberRects.forEach((anchorRect) => {
+          targetMember.memberRects.forEach((targetRect) => {
+            const anchorRectTop = anchorRect.top;
+            const anchorRectBottom = anchorRect.top + anchorRect.height;
+            const targetRectTop = targetRect.top;
+            const targetRectBottom = targetRect.top + targetRect.height;
+            const downwardGap = targetRectTop - anchorRectBottom;
+            const upwardGap = anchorRectTop - targetRectBottom;
+
+            if (downwardGap >= -directionTolerance) {
+              const normalizedGap = Math.max(0, downwardGap);
+              const candidate = {
+                gap: normalizedGap,
+                anchorRect,
+                targetRect,
+              };
+
+              if (!bestDownwardAny || normalizedGap < bestDownwardAny.gap) {
+                bestDownwardAny = candidate;
+              }
+
+              if (anchorRectBottom <= targetRectTop - directionTolerance) {
+                if (!bestDownwardClear || normalizedGap < bestDownwardClear.gap) {
+                  bestDownwardClear = candidate;
+                }
+              }
+            }
+
+            if (upwardGap >= -directionTolerance) {
+              const normalizedGap = Math.max(0, upwardGap);
+              const candidate = {
+                gap: normalizedGap,
+                anchorRect,
+                targetRect,
+              };
+
+              if (!bestUpwardAny || normalizedGap < bestUpwardAny.gap) {
+                bestUpwardAny = candidate;
+              }
+
+              if (targetRectBottom <= anchorRectTop - directionTolerance) {
+                if (!bestUpwardClear || normalizedGap < bestUpwardClear.gap) {
+                  bestUpwardClear = candidate;
+                }
+              }
+            }
+
+            if (downwardGap < 0 && upwardGap < 0) {
+              const downwardMagnitude = Math.abs(downwardGap);
+              const upwardMagnitude = Math.abs(upwardGap);
+              const overlapMagnitude = Math.min(downwardMagnitude, upwardMagnitude);
+              const overlapAnchorY = downwardMagnitude <= upwardMagnitude ? ('bottom' as const) : ('top' as const);
+
+              if (!bestOverlap || overlapMagnitude < bestOverlap.magnitude) {
+                bestOverlap = {
+                  magnitude: overlapMagnitude,
+                  anchorY: overlapAnchorY,
+                  anchorRect,
+                  targetRect,
+                };
+              }
+            }
+          });
+        });
+
+        if (anchorIsClearlyAbove && (bestDownwardClear || bestDownwardAny)) {
+          const resolved = bestDownwardClear || bestDownwardAny;
+
+          if (resolved) {
+            return {
+              isClearVertical: true,
+              preferredGapMagnitude: resolved.gap,
+              gapY: resolved.gap,
+              anchorY: 'bottom' as const,
+              anchorReferenceRect: resolved.anchorRect,
+              targetReferenceRect: resolved.targetRect,
+            };
+          }
+        }
+
+        if (targetIsClearlyAbove && (bestUpwardClear || bestUpwardAny)) {
+          const resolved = bestUpwardClear || bestUpwardAny;
+
+          if (resolved) {
+            return {
+              isClearVertical: true,
+              preferredGapMagnitude: resolved.gap,
+              gapY: resolved.gap,
+              anchorY: 'top' as const,
+              anchorReferenceRect: resolved.anchorRect,
+              targetReferenceRect: resolved.targetRect,
+            };
+          }
+        }
+
+        const resolvedDownward = bestDownwardClear || bestDownwardAny;
+        const resolvedUpward = bestUpwardClear || bestUpwardAny;
+
+        if (resolvedDownward && (!resolvedUpward || resolvedDownward.gap <= resolvedUpward.gap)) {
           return {
             isClearVertical: true,
-            preferredGapMagnitude: downwardGap,
-            gapY: downwardGap,
+            preferredGapMagnitude: resolvedDownward.gap,
+            gapY: resolvedDownward.gap,
             anchorY: 'bottom' as const,
+            anchorReferenceRect: resolvedDownward.anchorRect,
+            targetReferenceRect: resolvedDownward.targetRect,
           };
         }
 
-        if (upwardGap >= 0) {
+        if (resolvedUpward) {
           return {
             isClearVertical: true,
-            preferredGapMagnitude: upwardGap,
-            gapY: upwardGap,
+            preferredGapMagnitude: resolvedUpward.gap,
+            gapY: resolvedUpward.gap,
             anchorY: 'top' as const,
+            anchorReferenceRect: resolvedUpward.anchorRect,
+            targetReferenceRect: resolvedUpward.targetRect,
           };
         }
 
         return {
           isClearVertical: false,
-          preferredGapMagnitude: Math.min(Math.abs(downwardGap), Math.abs(upwardGap)),
+          preferredGapMagnitude: bestOverlap?.magnitude || 0,
           gapY: 0,
-          anchorY: Math.abs(downwardGap) <= Math.abs(upwardGap) ? ('bottom' as const) : ('top' as const),
+          anchorY: bestOverlap?.anchorY || ('bottom' as const),
+          anchorReferenceRect: bestOverlap?.anchorRect || anchorMember.groupRect,
+          targetReferenceRect: bestOverlap?.targetRect || targetMember.groupRect,
         };
       };
 
@@ -9054,7 +9328,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           const leftToRight = resolveVerticalRelation(leftMember, rightMember);
           const rightToLeft = resolveVerticalRelation(rightMember, leftMember);
           const isClearVertical = leftToRight.isClearVertical || rightToLeft.isClearVertical;
-          const preferredGapMagnitude = Math.min(leftToRight.preferredGapMagnitude, rightToLeft.preferredGapMagnitude);
+          const preferredGapMagnitude = (() => {
+            if (leftToRight.isClearVertical && rightToLeft.isClearVertical) {
+              return Math.min(leftToRight.preferredGapMagnitude, rightToLeft.preferredGapMagnitude);
+            }
+
+            if (leftToRight.isClearVertical) {
+              return leftToRight.preferredGapMagnitude;
+            }
+
+            if (rightToLeft.isClearVertical) {
+              return rightToLeft.preferredGapMagnitude;
+            }
+
+            return Math.min(leftToRight.preferredGapMagnitude, rightToLeft.preferredGapMagnitude);
+          })();
           const sortKey = [resolveEntityKey(leftMember), resolveEntityKey(rightMember)].sort((a, b) => a.localeCompare(b, 'ko')).join('<->');
 
           relationByIndexPair.set(`${leftIndex}:${rightIndex}`, {
@@ -9131,6 +9419,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           anchorMember,
           targetMember,
           anchorY: directedRelation.anchorY,
+          anchorReferenceRect: directedRelation.anchorReferenceRect,
+          targetReferenceRect: directedRelation.targetReferenceRect,
           defaultGapY: directedRelation.gapY,
         });
       });
@@ -9139,9 +9429,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     []
   );
+  const positionSpacingResolvedPairs = React.useMemo(
+    () => resolvePositionSpacingPairsFromOrderedMembers(positionSpacingAutoOrderedGroupMembers),
+    [positionSpacingAutoOrderedGroupMembers, resolvePositionSpacingPairsFromOrderedMembers]
+  );
   const positionSpacingPairSummaries = React.useMemo(
     () =>
-      resolvePositionSpacingPairsFromOrderedMembers(positionSpacingAutoOrderedGroupMembers).map((pair) => {
+      positionSpacingResolvedPairs.map((pair) => {
         const anchorMember = pair.anchorMember;
         const targetMember = pair.targetMember;
         const anchorLabel = resolvePositionOrderLockGroupLabel(anchorMember.group.id, anchorMember.group.label);
@@ -9157,8 +9451,39 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           defaultGapY: pair.defaultGapY,
         };
       }),
-    [positionSpacingAutoOrderedGroupMembers, resolvePositionOrderLockGroupLabel, resolvePositionSpacingPairsFromOrderedMembers]
+    [positionSpacingResolvedPairs, resolvePositionOrderLockGroupLabel]
   );
+  const positionSpacingGuideRelations = React.useMemo(() => {
+    if (!positionOrderLockSelectionMode) {
+      return [] as PositionSpacingGuideRelation[];
+    }
+
+    return positionSpacingResolvedPairs.map((pair) => {
+      const anchorMember = pair.anchorMember;
+      const targetMember = pair.targetMember;
+      const anchorLabel = resolvePositionOrderLockGroupLabel(anchorMember.group.id, anchorMember.group.label);
+      const targetLabel = resolvePositionOrderLockGroupLabel(targetMember.group.id, targetMember.group.label);
+      const draftGap = Number.parseFloat(positionSpacingDraftByPairKey[pair.pairKey]?.gapY || '');
+      const resolvedGapY = Number.isFinite(draftGap) ? Math.max(0, draftGap) : Math.max(0, pair.defaultGapY);
+
+      return {
+        pairKey: pair.pairKey,
+        anchorLabel,
+        targetLabel,
+        anchorFrameGroupId: anchorMember.representativeFrameGroupId,
+        targetFrameGroupId: targetMember.representativeFrameGroupId,
+        anchorY: pair.anchorY,
+        anchorReferenceRect: pair.anchorReferenceRect,
+        targetReferenceRect: pair.targetReferenceRect,
+        gapYPx: resolvedGapY,
+      };
+    });
+  }, [
+    positionOrderLockSelectionMode,
+    positionSpacingResolvedPairs,
+    positionSpacingDraftByPairKey,
+    resolvePositionOrderLockGroupLabel,
+  ]);
   React.useEffect(() => {
     if (positionSpacingPairSummaries.length <= 0) {
       setPositionSpacingDraftByPairKey((previous) =>
@@ -10039,6 +10364,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -10065,6 +10391,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectionPanelTab,
     positionRelationAnchorFrameGroupId,
     focusedDefinedPositionRelativeRelations,
+    positionSpacingGuideRelations,
     syncPreviewSurfaceScale,
   ]);
 
@@ -10117,6 +10444,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -10132,6 +10460,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
       focusedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
     ]
   );
 
@@ -10163,6 +10492,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     },
     [
       buildLiveEdgeTopologySnapshot,
@@ -10173,6 +10503,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
       focusedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
     ]
   );
 
@@ -10229,7 +10560,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .map((node) => getFrameGroupId(node))
         .filter((frameGroupId) => Boolean(frameGroupId));
 
-      if (selectionPanelTab === 'position' && positionOrderLockSelectionMode) {
+      if (selectionPanelTab === 'position') {
         const normalizedBaseSelectionIds = baseSelectionIds
           .map((frameGroupId) => resolvePositionSelectionRepresentativeFrameGroupId(frameGroupId))
           .filter((frameGroupId) => Boolean(frameGroupId));
@@ -10242,7 +10573,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       return Array.from(new Set([...baseSelectionIds, ...hits]));
     },
-    [getFrameNodes, positionOrderLockSelectionMode, resolvePositionSelectionRepresentativeFrameGroupId, selectionPanelTab]
+    [getFrameNodes, resolvePositionSelectionRepresentativeFrameGroupId, selectionPanelTab]
   );
 
   const commitCreatedFrameShell = React.useCallback(
@@ -10678,6 +11009,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -10698,6 +11030,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
       focusedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
       resolveEdgeRolePresentation,
       syncPreviewSurfaceScale,
       resolvePositionGroupProxySelections,
@@ -10746,6 +11079,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIds);
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
     applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+    applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     setEdgeRoleDiagnostics((previous) =>
       edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
         ? previous
@@ -10767,6 +11101,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       previewRelativeGuideFrameGroupId,
       resolvePositionGroupProxySelections,
       focusedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
       showMetadataIcons,
   ]);
 
@@ -10811,6 +11146,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyFrameRelationSelectionUi(root, frameRelationPreviewMode, selectedFrameGroupIds);
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
     applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+    applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
   }, [
       frameRelationPreviewMode,
       renderedPreviewHtml,
@@ -10818,6 +11154,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
       focusedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
   ]);
 
   React.useEffect(() => {
@@ -11405,21 +11742,44 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [applyFrameBoxSelection, positionBoxGroupByFrameGroupId, positionOrderLockFrameGroupIds]
   );
 
-  const startPositionOrderLockSelection = React.useCallback(() => {
+  const startPositionOrderLockSelectionFromCurrentCanvasSelection = React.useCallback(() => {
     if (positionOrderLockSelectionMode) {
       return;
     }
 
+    const selectedFrameGroupIds = selectedFrameGroupIdsRef.current
+      .map((frameGroupId) => frameGroupId.trim())
+      .filter((frameGroupId) => Boolean(frameGroupId));
+    const uniqueSelectedFrameGroupIds = Array.from(new Set(selectedFrameGroupIds));
+
+    if (uniqueSelectedFrameGroupIds.length < 2) {
+      setMessage('2개 이상의 박스를 선택해야 합니다.');
+      return;
+    }
+
+    const nextSelectionKindByFrameGroupId = uniqueSelectedFrameGroupIds.reduce<Record<string, 'group' | 'frame'>>(
+      (accumulator, frameGroupId) => {
+        const group = positionBoxGroupByFrameGroupId.get(frameGroupId);
+        accumulator[frameGroupId] = group && group.frameGroupIds.length > 1 ? 'group' : 'frame';
+        return accumulator;
+      },
+      {}
+    );
+
     setPositionOrderLockSelectionMode(true);
     setPositionOrderLockColorSeed(Math.floor(Math.random() * 1_000_000));
-    setPositionOrderLockFrameGroupIds([]);
-    setPositionOrderLockSelectionKindByFrameGroupId({});
+    setPositionOrderLockFrameGroupIds(uniqueSelectedFrameGroupIds);
+    setPositionOrderLockSelectionKindByFrameGroupId(nextSelectionKindByFrameGroupId);
+    setPositionSpacingDraftByPairKey({});
     setPositionOrderLockCandidateFrameGroupId('');
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
-    positionGroupProxySelectionShowAllRepresentativesRef.current = false;
-  }, [positionOrderLockSelectionMode]);
-
+    positionGroupProxySelectionShowAllRepresentativesRef.current = true;
+    applyFrameBoxSelection(uniqueSelectedFrameGroupIds, {
+      positionGroupProxySelectionGroupId: '',
+      showAllRepresentativeProxySelections: true,
+    });
+  }, [applyFrameBoxSelection, positionBoxGroupByFrameGroupId, positionOrderLockSelectionMode]);
   const applyPositionSpacingBySelectedFrameGroupIds = React.useCallback(
     (
       selectedTargetFrameGroupIdsArg: string[],
@@ -11536,21 +11896,28 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           targetGroupMember.representativeRect,
           anchorGroupMember.groupRect
         );
-        const representativeConfig = buildRelativeAnchorConfigFromRect({
-          frameRect: targetGroupMember.representativeRect,
-          anchorRect: anchorGroupMember.groupRect,
-          anchorKind: 'group',
-          anchorId: anchorGroupMember.group.id,
-          preferredAnchorX: preferredRepresentativePins.preferredAnchorX,
-          preferredAnchorY: preferredRepresentativePins.preferredAnchorY,
-        });
         const pairKey = pair.pairKey;
         const pairDraft = draftByPairKeyArg[pairKey];
         const draftGapY = Number.parseFloat(pairDraft?.gapY || '');
         const resolvedGapY = Number.isFinite(draftGapY) ? Math.max(0, draftGapY) : Math.max(0, pair.defaultGapY);
-
-        representativeConfig.anchorY = pair.anchorY;
-        representativeConfig.offsetY = -resolvedGapY - targetGroupMember.representativeRect.height;
+        const anchorReferenceBottom = pair.anchorReferenceRect.top + pair.anchorReferenceRect.height;
+        const targetReferenceBottom = pair.targetReferenceRect.top + pair.targetReferenceRect.height;
+        const deltaY =
+          pair.anchorY === 'bottom'
+            ? anchorReferenceBottom + resolvedGapY - pair.targetReferenceRect.top
+            : pair.anchorReferenceRect.top - resolvedGapY - targetReferenceBottom;
+        const nextRepresentativeRect = {
+          ...targetGroupMember.representativeRect,
+          top: targetGroupMember.representativeRect.top + deltaY,
+        };
+        const representativeConfig = buildRelativeAnchorConfigFromRect({
+          frameRect: nextRepresentativeRect,
+          anchorRect: anchorGroupMember.groupRect,
+          anchorKind: 'group',
+          anchorId: anchorGroupMember.group.id,
+          preferredAnchorX: preferredRepresentativePins.preferredAnchorX,
+          preferredAnchorY: pair.anchorY,
+        });
 
         if (
           !hasSameRelativeConfig(
@@ -11883,6 +12250,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectedPositionGroupingFrameGroupIds,
     syncDraftPreviewHtmlRef,
   ]);
+  const applySelectedPositionGroupRelationFromCanvasSelection = React.useCallback(() => {
+    if (selectedFrameGroupIdsRef.current.length < 2) {
+      setMessage('2개 이상의 박스를 선택해야 합니다.');
+      return;
+    }
+
+    applySelectedPositionGroupRelation();
+  }, [applySelectedPositionGroupRelation]);
 
   const clearSelectedPositionGroupRelation = React.useCallback(() => {
     const root = previewRef.current;
@@ -12649,6 +13024,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current.slice());
       syncDraftPreviewHtmlRef();
       syncSelectionStyleDraft();
@@ -12667,6 +13043,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionRelationAnchorFrameGroupId,
       selectionPanelTab,
       focusedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
     ]
   );
   const clearSelectedRelativeFramePositions = React.useCallback(() => {
@@ -12730,6 +13107,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
     applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+    applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current.slice());
     syncDraftPreviewHtmlRef();
     syncSelectionStyleDraft();
@@ -12749,6 +13127,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectionPanelTab,
     positionRelationAnchorFrameGroupId,
     focusedDefinedPositionRelativeRelations,
+    positionSpacingGuideRelations,
     syncDraftPreviewHtmlRef,
     syncSelectionStyleDraft,
   ]);
@@ -13827,6 +14206,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           positionRelationAnchorFrameGroupId
         );
         applyDefinedPositionRelativeRelationUi(previewRef.current, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+        applyPositionSpacingGuideUi(previewRef.current, selectionPanelTab, positionSpacingGuideRelations);
       }
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
@@ -13856,6 +14236,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
       focusedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
       requestPreviewTextFit,
       schedulePreviewEditorState,
       syncDraftPreviewHtmlRef,
@@ -14004,7 +14385,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         !edgeButton && !resizeHandle && Boolean(pageInner) && (event.shiftKey || !frameNode);
 
       if (shouldStartMarqueeSelection && pageInner) {
-        const useGroupedShiftSelection = selectionPanelTab === 'position' && positionOrderLockSelectionMode;
+        const useGroupedShiftSelection = selectionPanelTab === 'position';
         const shouldAccumulateSelection = Boolean(event.shiftKey);
         const rawAnchorFrameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
         const resolvedAnchorFrameGroupId = useGroupedShiftSelection
@@ -14980,7 +15361,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const marqueeSelectionState = marqueeSelectionStateRef.current;
 
       if (marqueeSelectionState?.pointerId === event.pointerId) {
-        const keepGroupedShiftSelection = selectionPanelTab === 'position' && positionOrderLockSelectionMode;
+        const keepGroupedShiftSelection = selectionPanelTab === 'position';
         event.preventDefault();
         const owner = activePointerOwnerRef.current;
 
@@ -15606,6 +15987,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview .${FRAME_RELATIVE_ANCHOR_BADGE_CLASS}[data-relative-anchor-role="relation-gap"] {
           background: rgba(59, 130, 246, .96);
         }
+        .template-edit-preview .${FRAME_RELATIVE_ANCHOR_BADGE_CLASS}[data-relative-anchor-role="spacing-gap"] {
+          background: rgba(5, 150, 105, .96);
+        }
         .template-edit-preview [data-template-relative-anchor-target="true"] {
           box-shadow:
             0 0 0 3px rgba(249, 115, 22, .2),
@@ -15867,6 +16251,28 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           {showCanvasLegend ? (
             <CardContent className="p-6 pt-0">
               <MetadataCanvasLegend />
+            </CardContent>
+          ) : null}
+          {selectionPanelTab === 'position' && hasSelectedPositionBoxes && !positionOrderLockSelectionMode ? (
+            <CardContent className="grid grid-cols-2 gap-1.5 px-6 pb-3 pt-0">
+              <button
+                type="button"
+                className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
+                  selectedPositionGroupingFrameGroupIds.length < 2 ? 'opacity-50' : ''
+                }`}
+                onClick={applySelectedPositionGroupRelationFromCanvasSelection}
+              >
+                박스 묶기
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
+                  selectedPositionGroupingFrameGroupIds.length < 2 ? 'opacity-50' : ''
+                }`}
+                onClick={startPositionOrderLockSelectionFromCurrentCanvasSelection}
+              >
+                박스 간격 고정
+              </button>
             </CardContent>
           ) : null}
           {selectionPanelTab === 'position' && positionOrderLockSelectionMode ? (
@@ -16396,39 +16802,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     <div className="font-semibold text-slate-900">{selectedPositionInfoTitle}</div>
                     {hasSelectedPositionBoxes ? (
                       <>
-                        <div className="mt-2">
-                          {canClearSelectedPositionGroups ? (
-                            <div className="grid grid-cols-2 gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={applySelectedPositionGroupRelation}
-                                disabled={selectedPositionGroupingFrameGroupIds.length < 2}
-                                className="w-full"
-                              >
-                                선택 박스 묶기
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={clearSelectedPositionGroupRelation}
-                                className="w-full"
-                              >
-                                선택 박스 그룹 해제
-                              </Button>
-                            </div>
-                          ) : (
+                        {canClearSelectedPositionGroups ? (
+                          <div className="mt-2">
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={applySelectedPositionGroupRelation}
-                              disabled={selectedPositionGroupingFrameGroupIds.length < 2}
+                              onClick={clearSelectedPositionGroupRelation}
                               className="w-full"
                             >
-                              선택 박스 묶기
+                              선택 박스 그룹 해제
                             </Button>
-                          )}
-                        </div>
+                          </div>
+                        ) : null}
                         <div className="mt-1">상태: {selectedPositionRelationSummary.mode}</div>
                         <div className="mt-1">기준: {selectedPositionRelationSummary.anchorLabel}</div>
                         <div className="mt-1">선택 박스 소속 그룹: {selectedPositionCurrentBoxGroupLabels.join(', ') || '-'}</div>
@@ -16473,24 +16858,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       </div>
                     ) : null}
 
-                  </div>
-
-                  <div className="w-full">
-                    {!positionOrderLockSelectionMode ? (
-                      <Button size="sm" variant="outline" onClick={startPositionOrderLockSelection} className="w-full">
-                        박스 간격 고정하기
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={confirmPositionOrderLock}
-                        disabled={positionOrderLockConfirmPreviewCount < 2}
-                        className="w-full"
-                      >
-                        {positionOrderLockConfirmButtonLabel}
-                      </Button>
-                    )}
                   </div>
 
                   {positionBoxGroups.length > 0 ? (
