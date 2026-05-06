@@ -43,6 +43,7 @@ export {
   TopHeaderShell,
   OverlayShell,
 } from "@/components/design-system/shells";
+export { AppHeaderClone, AppSidebarClone } from "@/components/design-system/layout";
 export {
   ConversationGrid,
   ConversationQuickReplyButton,
@@ -89,4 +90,3 @@ export {
   type WidgetConversationTab,
   type WidgetConversationSession,
 } from "@/components/design-system/widget/WidgetUI.parts";
-

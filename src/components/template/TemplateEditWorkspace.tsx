@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server.browser';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
+import { UnderlineTabs } from '../design-system/tabs';
 import { EntityPicker, type EntityPickerOption } from '../ui/EntityPicker';
 import { Input } from '../ui/Input';
 import { applyTemplateExtractEditableTextFit } from '../../lib/templateExtractEditableTextFit';
@@ -17223,26 +17224,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 ) : null}
                 </div>
               ) : null}
-              <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
-                {([
-                  { id: 'summary', label: '요약' },
-                  { id: 'create', label: '박스 생성' },
-                  { id: 'metadata', label: '메타데이터' },
-                  { id: 'position', label: '박스 위치' },
-                  { id: 'text', label: '텍스트' },
-                  { id: 'style', label: '스타일' },
-                ] as const).map((tab) => (
-                  <Button
-                    key={tab.id}
-                    size="sm"
-                    variant={selectionPanelTab === tab.id ? 'default' : 'outline'}
-                    className="flex-1 md:flex-none"
-                    onClick={() => setSelectionPanelTab(tab.id)}
-                  >
-                    {tab.label}
-                  </Button>
-                ))}
-              </div>
+              <UnderlineTabs
+                tabs={[
+                  { key: 'summary', label: '요약' },
+                  { key: 'create', label: '박스 생성' },
+                  { key: 'metadata', label: '메타데이터' },
+                  { key: 'position', label: '박스 위치' },
+                  { key: 'text', label: '텍스트' },
+                  { key: 'style', label: '스타일' },
+                ]}
+                activeKey={selectionPanelTab}
+                onSelect={setSelectionPanelTab}
+              />
 
               {selectionPanelTab === 'create' ? (
                 <div className="space-y-3 rounded-xl border border-slate-200 p-4">

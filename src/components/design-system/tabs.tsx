@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
 
 export type TabItem<T extends string = string> = {
   key: T;
