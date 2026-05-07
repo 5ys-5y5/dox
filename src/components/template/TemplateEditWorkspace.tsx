@@ -8825,6 +8825,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [positionOrderLockSelectionKindByFrameGroupId, setPositionOrderLockSelectionKindByFrameGroupId] = React.useState<
     Record<string, 'group' | 'frame'>
   >({});
+  const [positionOrderLockSelectionGroupIdByFrameGroupId, setPositionOrderLockSelectionGroupIdByFrameGroupId] = React.useState<
+    Record<string, string>
+  >({});
   const [positionOrderLockColorSeed, setPositionOrderLockColorSeed] = React.useState(0);
   const [positionOrderLockCandidateFrameGroupId, setPositionOrderLockCandidateFrameGroupId] = React.useState('');
   const [positionOrderLockCandidateGroupId, setPositionOrderLockCandidateGroupId] = React.useState('');
@@ -11456,7 +11459,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
   const resolvePositionSpacingOrderedGroupMembers = React.useCallback((
     targetFrameGroupIds: string[],
-    selectionKindByFrameGroupIdArg: Record<string, 'group' | 'frame'> = {}
+    selectionKindByFrameGroupIdArg: Record<string, 'group' | 'frame'> = {},
+    selectionGroupIdByFrameGroupIdArg: Record<string, string> = {}
   ) => {
     const root = previewRef.current;
     const normalizedTargetFrameGroupIds = Array.from(
@@ -11468,6 +11472,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const positionBoxGroups = collectPositionBoxGroups(root, { includeSingletons: true });
+    const groupById = new Map(positionBoxGroups.map((group) => [group.id, group] as const));
     const groupByFrameGroupId = new Map<string, PositionImpactGroup>();
     positionBoxGroups.forEach((group) => {
       group.frameGroupIds.forEach((frameGroupId) => {
@@ -11484,8 +11489,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }> = [];
 
       normalizedTargetFrameGroupIds.forEach((frameGroupId) => {
-        const group = groupByFrameGroupId.get(frameGroupId);
         const selectionKind = selectionKindByFrameGroupIdArg[frameGroupId] || 'frame';
+        const explicitSelectionGroupId = (selectionGroupIdByFrameGroupIdArg[frameGroupId] || '').trim();
+        const group =
+          selectionKind === 'group' && explicitSelectionGroupId
+            ? groupById.get(explicitSelectionGroupId) || groupByFrameGroupId.get(frameGroupId)
+            : groupByFrameGroupId.get(frameGroupId);
         const shouldUseGroup = selectionKind === 'group' && Boolean(group) && (group?.frameGroupIds.length || 0) > 1;
         const entityKey = shouldUseGroup ? `group:${group?.id || ''}` : `frame:${frameGroupId}`;
 
@@ -11518,6 +11527,96 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       return result;
     })();
+    const parentGroupIdByChildGroupId = new Map<string, string>();
+    positionBoxGroups.forEach((group) => {
+      (group.childGroupIds || []).forEach((childGroupId) => {
+        const normalizedChildGroupId = childGroupId.trim();
+        if (normalizedChildGroupId && !parentGroupIdByChildGroupId.has(normalizedChildGroupId)) {
+          parentGroupIdByChildGroupId.set(normalizedChildGroupId, group.id);
+        }
+      });
+    });
+    const resolveAncestorGroups = (groupId: string) => {
+      const ancestors: PositionImpactGroup[] = [];
+      const visitedGroupIds = new Set<string>();
+      let currentGroupId = groupId.trim();
+
+      while (currentGroupId && !visitedGroupIds.has(currentGroupId)) {
+        visitedGroupIds.add(currentGroupId);
+        const parentGroupId = parentGroupIdByChildGroupId.get(currentGroupId) || '';
+        const parentGroup = parentGroupId ? groupById.get(parentGroupId) || null : null;
+
+        if (!parentGroup) {
+          break;
+        }
+
+        ancestors.push(parentGroup);
+        currentGroupId = parentGroup.id;
+      }
+
+      return ancestors;
+    };
+    const groupContainsGroup = (containerGroup: PositionImpactGroup, targetGroup: PositionImpactGroup) => {
+      if (containerGroup.id === targetGroup.id) {
+        return true;
+      }
+
+      const containerFrameGroupIdSet = new Set(containerGroup.frameGroupIds);
+      return targetGroup.frameGroupIds.every((frameGroupId) => containerFrameGroupIdSet.has(frameGroupId));
+    };
+    const resolveEffectiveSpacingGroup = (
+      selectedEntry: {
+        group: PositionImpactGroup;
+        selectionKind: 'group' | 'frame';
+        selectionEntityId: string;
+      },
+      peerEntries: Array<{
+        group: PositionImpactGroup;
+        selectionKind: 'group' | 'frame';
+        selectionEntityId: string;
+      }>
+    ) => {
+      if (selectedEntry.selectionKind !== 'group' || selectedEntry.group.frameGroupIds.length <= 1) {
+        return selectedEntry.group;
+      }
+
+      let effectiveGroup = selectedEntry.group;
+      resolveAncestorGroups(selectedEntry.group.id).forEach((ancestorGroup) => {
+        const hasExternalPeer = peerEntries.some((peerEntry) => {
+          if (peerEntry.group.id === selectedEntry.group.id) {
+            return false;
+          }
+
+          return !groupContainsGroup(ancestorGroup, peerEntry.group);
+        });
+
+        if (hasExternalPeer) {
+          effectiveGroup = ancestorGroup;
+        }
+      });
+
+      return effectiveGroup;
+    };
+    const effectiveSelectedGroups = Array.from(
+      selectedGroups
+        .reduce((accumulator, selectedEntry) => {
+          const effectiveGroup = resolveEffectiveSpacingGroup(selectedEntry, selectedGroups);
+          const entityKey =
+            selectedEntry.selectionKind === 'group'
+              ? `group:${effectiveGroup.id}`
+              : `frame:${selectedEntry.selectionEntityId}`;
+
+          if (!accumulator.has(entityKey)) {
+            accumulator.set(entityKey, {
+              ...selectedEntry,
+              group: effectiveGroup,
+            });
+          }
+
+          return accumulator;
+        }, new Map<string, typeof selectedGroups[number]>())
+        .values()
+    );
 
     const frameNodeById = new Map<string, HTMLElement>();
     collectFrameSelectionAnchors(root).forEach((node) => {
@@ -11527,7 +11626,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
     });
 
-    return selectedGroups
+    return effectiveSelectedGroups
       .map((selectedEntry) => {
         const group = selectedEntry.group;
         const memberEntries = group.frameGroupIds
@@ -11652,10 +11751,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const positionSpacingAutoOrderedGroupMembers = React.useMemo(() => {
     return resolvePositionSpacingOrderedGroupMembers(
       positionOrderLockFrameGroupIds,
-      positionOrderLockSelectionKindByFrameGroupId
+      positionOrderLockSelectionKindByFrameGroupId,
+      positionOrderLockSelectionGroupIdByFrameGroupId
     );
   }, [
     positionOrderLockFrameGroupIds,
+    positionOrderLockSelectionGroupIdByFrameGroupId,
     positionOrderLockSelectionKindByFrameGroupId,
     resolvePositionSpacingOrderedGroupMembers,
   ]);
@@ -12151,6 +12252,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockSelectionMode(false);
     setPositionOrderLockFrameGroupIds([]);
     setPositionOrderLockSelectionKindByFrameGroupId({});
+    setPositionOrderLockSelectionGroupIdByFrameGroupId({});
     setPositionOrderLockCandidateFrameGroupId('');
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
@@ -13337,6 +13439,68 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       schedulePositionSelectionReactStateCommit,
       selectionPanelTab,
     ]
+  );
+  const applyShiftMergedPositionEntitySelection = React.useCallback(
+    (nextEntry: PositionSelectionClickChainEntry) => {
+      const currentSelectionIds = selectedFrameGroupIdsRef.current
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId));
+      const currentProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+      const currentProxySelections = resolvePositionGroupProxySelections(
+        currentSelectionIds,
+        currentProxyGroupId
+      );
+
+      const nextGroup =
+        nextEntry.kind === 'group'
+          ? positionBoxGroupById.get(nextEntry.groupId) || null
+          : null;
+      const nextEntryFrameGroupIds =
+        nextEntry.kind === 'group'
+          ? Array.from(
+              new Set(
+                (
+                  nextEntry.groupFrameGroupIds && nextEntry.groupFrameGroupIds.length > 0
+                    ? nextEntry.groupFrameGroupIds
+                    : nextGroup?.frameGroupIds || [nextEntry.frameGroupId]
+                )
+                  .map((frameGroupId) => frameGroupId.trim())
+                  .filter((frameGroupId) => Boolean(frameGroupId))
+              )
+            )
+          : [nextEntry.frameGroupId.trim()].filter(Boolean);
+      const nextSelectionIds = Array.from(new Set([...currentSelectionIds, ...nextEntryFrameGroupIds]));
+      const nextSelectionIdSet = new Set(nextSelectionIds);
+      const proxySelectionByGroupId = new Map<string, PositionGroupProxySelection>();
+
+      currentProxySelections.forEach((proxySelection) => {
+        const frameGroupIds = proxySelection.frameGroupIds
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter((frameGroupId) => Boolean(frameGroupId));
+
+        if (frameGroupIds.length > 1 && frameGroupIds.every((frameGroupId) => nextSelectionIdSet.has(frameGroupId))) {
+          proxySelectionByGroupId.set(proxySelection.groupId, {
+            ...proxySelection,
+            frameGroupIds,
+          });
+        }
+      });
+
+      if (nextEntry.kind === 'group' && nextEntryFrameGroupIds.length > 1) {
+        proxySelectionByGroupId.set(nextEntry.groupId, {
+          groupId: nextEntry.groupId,
+          label: nextGroup?.label || nextEntry.groupId,
+          frameGroupIds: nextEntryFrameGroupIds,
+        });
+      }
+
+      applyFrameBoxSelection(nextSelectionIds, {
+        positionGroupProxySelectionGroupId: '',
+        showAllGroupProxySelections: true,
+        overridePositionGroupProxySelections: Array.from(proxySelectionByGroupId.values()),
+      });
+    },
+    [applyFrameBoxSelection, positionBoxGroupById, resolvePositionGroupProxySelections]
   );
 
   const commitCreatedFrameShell = React.useCallback(
@@ -14539,6 +14703,35 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           });
           return next;
         });
+        setPositionOrderLockSelectionGroupIdByFrameGroupId((previous) => {
+          const next = { ...previous };
+
+          if (replaceSelectionFromGroupId.length > 0) {
+            Object.keys(next).forEach((frameGroupId) => {
+              if (isFrameInPositionGroup(frameGroupId, replaceSelectionFromGroupId)) {
+                delete next[frameGroupId];
+              }
+            });
+          }
+
+          if (nextSelectionKind === 'group' && resolvedSelectionGroupId) {
+            Object.keys(next).forEach((frameGroupId) => {
+              if (isFrameInPositionGroup(frameGroupId, resolvedSelectionGroupId)) {
+                delete next[frameGroupId];
+              }
+            });
+          }
+
+          nextSelectionFrameGroupIds.forEach((frameGroupId) => {
+            if (nextSelectionKind === 'group' && resolvedSelectionGroupId) {
+              next[frameGroupId] = resolvedSelectionGroupId;
+              return;
+            }
+
+            delete next[frameGroupId];
+          });
+          return next;
+        });
       }
       setPositionOrderLockCandidateFrameGroupId(selectionFrameGroupId);
       setPositionOrderLockCandidateGroupId((options?.candidateGroupId || normalizedGroup?.id || '').trim());
@@ -14556,7 +14749,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .map((frameGroupId) => frameGroupId.trim())
       .filter((frameGroupId) => Boolean(frameGroupId));
     const uniqueSelectedFrameGroupIds = Array.from(new Set(selectedFrameGroupIds));
+    const currentProxySelections = resolvePositionGroupProxySelections(
+      uniqueSelectedFrameGroupIds,
+      positionGroupProxySelectionGroupIdRef.current.trim()
+    );
+    const explicitGroupByFrameGroupId = new Map<string, PositionGroupProxySelection>();
+    currentProxySelections.forEach((proxySelection) => {
+      proxySelection.frameGroupIds.forEach((frameGroupId) => {
+        const normalizedFrameGroupId = frameGroupId.trim();
+        if (normalizedFrameGroupId) {
+          explicitGroupByFrameGroupId.set(normalizedFrameGroupId, proxySelection);
+        }
+      });
+    });
     const expandedSelectedFrameGroupIds = uniqueSelectedFrameGroupIds.flatMap((frameGroupId) => {
+      const explicitGroup = explicitGroupByFrameGroupId.get(frameGroupId);
+      if (explicitGroup && explicitGroup.frameGroupIds.length > 1) {
+        return explicitGroup.frameGroupIds
+          .map((memberFrameGroupId) => memberFrameGroupId.trim())
+          .filter((memberFrameGroupId) => Boolean(memberFrameGroupId));
+      }
+
       const group = positionBoxGroupByFrameGroupId.get(frameGroupId);
       if (!group || group.frameGroupIds.length <= 1) {
         return [frameGroupId];
@@ -14574,8 +14787,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const nextSelectionKindByFrameGroupId = nextSelectedFrameGroupIds.reduce<Record<string, 'group' | 'frame'>>(
       (accumulator, frameGroupId) => {
+        const explicitGroup = explicitGroupByFrameGroupId.get(frameGroupId);
+        if (explicitGroup && explicitGroup.frameGroupIds.length > 1) {
+          accumulator[frameGroupId] = 'group';
+          return accumulator;
+        }
+
         const group = positionBoxGroupByFrameGroupId.get(frameGroupId);
         accumulator[frameGroupId] = group && group.frameGroupIds.length > 1 ? 'group' : 'frame';
+        return accumulator;
+      },
+      {}
+    );
+    const nextSelectionGroupIdByFrameGroupId = nextSelectedFrameGroupIds.reduce<Record<string, string>>(
+      (accumulator, frameGroupId) => {
+        const explicitGroup = explicitGroupByFrameGroupId.get(frameGroupId);
+        if (explicitGroup && explicitGroup.frameGroupIds.length > 1) {
+          accumulator[frameGroupId] = explicitGroup.groupId;
+          return accumulator;
+        }
+
+        const group = positionBoxGroupByFrameGroupId.get(frameGroupId);
+        if (group && group.frameGroupIds.length > 1) {
+          accumulator[frameGroupId] = group.id;
+        }
         return accumulator;
       },
       {}
@@ -14585,6 +14820,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockColorSeed(Math.floor(Math.random() * 1_000_000));
     setPositionOrderLockFrameGroupIds(nextSelectedFrameGroupIds);
     setPositionOrderLockSelectionKindByFrameGroupId(nextSelectionKindByFrameGroupId);
+    setPositionOrderLockSelectionGroupIdByFrameGroupId(nextSelectionGroupIdByFrameGroupId);
     setPositionSpacingDraftByPairKey({});
     setPositionOrderLockCandidateFrameGroupId('');
     setPositionOrderLockCandidateGroupId('');
@@ -14593,13 +14829,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyFrameBoxSelection(nextSelectedFrameGroupIds, {
       positionGroupProxySelectionGroupId: '',
       showAllGroupProxySelections: true,
+      overridePositionGroupProxySelections: currentProxySelections,
     });
-  }, [applyFrameBoxSelection, positionBoxGroupByFrameGroupId, positionOrderLockSelectionMode]);
+  }, [
+    applyFrameBoxSelection,
+    positionBoxGroupByFrameGroupId,
+    positionOrderLockSelectionMode,
+    resolvePositionGroupProxySelections,
+  ]);
   const applyPositionSpacingBySelectedFrameGroupIds = React.useCallback(
     (
       selectedTargetFrameGroupIdsArg: string[],
       draftByPairKeyArg: Record<string, { gapY: string }>,
-      selectionKindByFrameGroupIdArg: Record<string, 'group' | 'frame'>
+      selectionKindByFrameGroupIdArg: Record<string, 'group' | 'frame'>,
+      selectionGroupIdByFrameGroupIdArg: Record<string, string>
     ): {
       ok: boolean;
       message: string;
@@ -14641,7 +14884,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       const orderedGroupMembers = resolvePositionSpacingOrderedGroupMembers(
         selectedTargetFrameGroupIds,
-        selectionKindByFrameGroupIdArg
+        selectionKindByFrameGroupIdArg,
+        selectionGroupIdByFrameGroupIdArg
       );
 
       if (orderedGroupMembers.length < 2) {
@@ -14807,7 +15051,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const result = applyPositionSpacingBySelectedFrameGroupIds(
       selectedTargetFrameGroupIds,
       positionSpacingDraftByPairKey,
-      positionOrderLockSelectionKindByFrameGroupId
+      positionOrderLockSelectionKindByFrameGroupId,
+      positionOrderLockSelectionGroupIdByFrameGroupId
     );
     if (!result.ok && result.message) {
       setMessage(result.message);
@@ -14815,6 +15060,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [
     applyPositionSpacingBySelectedFrameGroupIds,
     positionOrderLockFrameGroupIds,
+    positionOrderLockSelectionGroupIdByFrameGroupId,
     positionOrderLockSelectionKindByFrameGroupId,
     positionOrderLockSelectionMode,
     positionSpacingDraftByPairKey,
@@ -14825,7 +15071,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const result = applyPositionSpacingBySelectedFrameGroupIds(
       selectedTargetFrameGroupIds,
       positionSpacingDraftByPairKey,
-      positionOrderLockSelectionKindByFrameGroupId
+      positionOrderLockSelectionKindByFrameGroupId,
+      positionOrderLockSelectionGroupIdByFrameGroupId
     );
 
     if (!result.ok) {
@@ -14836,6 +15083,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockSelectionMode(false);
     setPositionOrderLockFrameGroupIds([]);
     setPositionOrderLockSelectionKindByFrameGroupId({});
+    setPositionOrderLockSelectionGroupIdByFrameGroupId({});
     setPositionOrderLockCandidateFrameGroupId('');
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
@@ -14848,6 +15096,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [
     applyPositionSpacingBySelectedFrameGroupIds,
     positionOrderLockFrameGroupIds,
+    positionOrderLockSelectionGroupIdByFrameGroupId,
     positionOrderLockSelectionKindByFrameGroupId,
     positionSpacingDraftByPairKey,
   ]);
@@ -14903,6 +15152,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       setPositionOrderLockFrameGroupIds(nextSelectionIds);
       setPositionOrderLockSelectionKindByFrameGroupId((previous) => {
+        const next = { ...previous };
+        frameGroupIdsToRemove.forEach((frameGroupId) => {
+          delete next[frameGroupId];
+        });
+        return next;
+      });
+      setPositionOrderLockSelectionGroupIdByFrameGroupId((previous) => {
         const next = { ...previous };
         frameGroupIdsToRemove.forEach((frameGroupId) => {
           delete next[frameGroupId];
@@ -17343,6 +17599,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockSelectionMode(false);
     setPositionOrderLockFrameGroupIds([]);
     setPositionOrderLockSelectionKindByFrameGroupId({});
+    setPositionOrderLockSelectionGroupIdByFrameGroupId({});
     setPositionOrderLockCandidateFrameGroupId('');
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
@@ -17412,6 +17669,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setPositionOrderLockSelectionMode(false);
       setPositionOrderLockFrameGroupIds([]);
       setPositionOrderLockSelectionKindByFrameGroupId({});
+      setPositionOrderLockSelectionGroupIdByFrameGroupId({});
       setPositionOrderLockCandidateFrameGroupId('');
       setPositionOrderLockCandidateGroupId('');
       setPositionOrderLockCandidateSelectionStage('');
@@ -17653,6 +17911,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          const nextEntry = clickChain.entries[nextChainIndex] || null;
 
 	          if (!nextEntry) {
+	            return;
+	          }
+
+	          if (event.shiftKey) {
+	            applyShiftMergedPositionEntitySelection(nextEntry);
 	            return;
 	          }
 
@@ -17964,7 +18227,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const nextEntry = nextChainIndex >= 0 ? clickChain.entries[nextChainIndex] : null;
 
         if (!nextEntry) {
+          if (event.shiftKey) {
+            applyShiftMergedPositionEntitySelection({
+              kind: 'frame',
+              frameGroupId,
+            });
+            return;
+          }
+
           applyFrameBoxSelection([frameGroupId]);
+          return;
+        }
+
+        if (event.shiftKey) {
+          applyShiftMergedPositionEntitySelection(nextEntry);
           return;
         }
 
@@ -18113,6 +18389,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       boxCreationPositionMode,
       buildLiveEdgeTopologySnapshot,
       applyFrameBoxSelection,
+      applyShiftMergedPositionEntitySelection,
       clearFrameSelection,
       deleteCanvasSelectionEntity,
       getFrameNodes,
