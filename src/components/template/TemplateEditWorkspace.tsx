@@ -9366,6 +9366,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [positionSpacingBulkGapY, setPositionSpacingBulkGapY] = React.useState('');
   const [positionSpacingBulkGapError, setPositionSpacingBulkGapError] = React.useState(false);
   const [selectedPositionSpacingSettingRelationKey, setSelectedPositionSpacingSettingRelationKey] = React.useState('');
+  const [positionSelectionStateRevision, setPositionSelectionStateRevision] = React.useState(0);
   const [definedPositionRelationGapDraftByKey, setDefinedPositionRelationGapDraftByKey] = React.useState<
     Record<string, { gapY: string }>
   >({});
@@ -11933,7 +11934,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     return selectedPositionExactMatchedBoxGroup;
-  }, [positionBoxGroups, selectedPositionExactMatchedBoxGroup, selectionPanelTab]);
+  }, [positionBoxGroups, positionSelectionStateRevision, selectedPositionExactMatchedBoxGroup, selectionPanelTab]);
   const selectedPositionResolvedFrameGroupIds = React.useMemo(() => {
     if (selectionPanelTab !== 'position') {
       return selectedPositionGroupingFrameGroupIds;
@@ -12045,6 +12046,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     return resolvePositionSelectionClickChain(pageInner, selectedFrameGroupId, centerPoint).entries;
   }, [
     positionSelectionClickChainSnapshot,
+    positionSelectionStateRevision,
     previewDomVersion,
     renderedPreviewHtml,
     resolvePositionSelectionClickChain,
@@ -12131,6 +12133,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [
     positionBoxGroupByFrameGroupId,
     positionBoxGroups,
+    positionSelectionStateRevision,
     selectedPositionGroupingFrameGroupIds,
     selectedPositionSelectionChainEntries,
     selectionPanelTab,
@@ -12159,7 +12162,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     return selectedPositionResolvedBoxGroup || null;
-  }, [positionBoxGroupById, selectedPositionResolvedBoxGroup, selectedFrameGroupIds, selectionPanelTab]);
+  }, [positionBoxGroupById, positionSelectionStateRevision, selectedPositionResolvedBoxGroup, selectedFrameGroupIds, selectionPanelTab]);
   const selectedPositionActiveGroupChildGroupIds = React.useMemo(
     () =>
       selectedPositionActiveGroup
@@ -12258,6 +12261,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }));
   }, [
     positionBoxGroups,
+    positionSelectionStateRevision,
     selectedPositionCurrentBoxGroups,
     selectedPositionResolvedBoxGroup,
     selectionPanelTab,
@@ -12282,7 +12286,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     return selectedFrameGroupIds;
-  }, [selectedFrameGroupIds, selectedPositionCurrentBoxGroups, selectedPositionResolvedBoxGroup, selectionPanelTab]);
+  }, [positionSelectionStateRevision, selectedFrameGroupIds, selectedPositionCurrentBoxGroups, selectedPositionResolvedBoxGroup, selectionPanelTab]);
   const selectedExplicitPositionCurrentBoxGroups = React.useMemo(
     () => selectedPositionCurrentBoxGroups.filter((group) => !group.inferred),
     [selectedPositionCurrentBoxGroups]
@@ -18970,6 +18974,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionSelectionClickChainSnapshot(null);
     setSelectionValidationIssues([]);
     setSelectionSaveProgress(defaultSelectionSaveProgressState);
+    setSelectedPositionSpacingSettingRelationKey('');
+    setPositionSelectionStateRevision((previous) => previous + 1);
     setSelectedFrameGroupIds([]);
     setEdgeSelectionState(emptyEdgeSelection);
     setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
@@ -19040,6 +19046,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setPositionSelectionClickChainSnapshot(null);
       setSelectionValidationIssues([]);
       setSelectionSaveProgress(defaultSelectionSaveProgressState);
+      setSelectedPositionSpacingSettingRelationKey('');
+      setPositionSelectionStateRevision((previous) => previous + 1);
       setSelectedFrameGroupIds([]);
       setEdgeSelectionState(emptyEdgeSelection);
       setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
@@ -19118,45 +19126,60 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-	      const hasSelection =
-	        selectedFrameGroupIdsRef.current.length > 0 ||
-	        edgeSelectionStateRef.current.tokens.length > 0 ||
-	        positionOrderLockSelectionMode;
+      const hasSelection =
+        selectedFrameGroupIdsRef.current.length > 0 ||
+        selectedFrameGroupIds.length > 0 ||
+        edgeSelectionStateRef.current.tokens.length > 0 ||
+        edgeSelectionState.tokens.length > 0 ||
+        positionGroupProxySelectionGroupIdRef.current.trim().length > 0 ||
+        selectedPositionSpacingSettingRelationKey.trim().length > 0 ||
+        positionOrderLockSelectionMode;
 
       if (!hasSelection) {
         return;
       }
 
-	      event.preventDefault();
-	      if (positionOrderLockSelectionMode) {
-	        const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-	        positionGroupProxySelectionGroupIdRef.current = '';
-	        positionGroupProxySelectionShowAllGroupsRef.current = false;
-	        positionGroupProxySelectionsOverrideRef.current = null;
-	        selectedFrameGroupIdsRef.current = [];
-	        edgeSelectionStateRef.current = emptyEdgeSelection;
-	        setSelectedFrameGroupIds([]);
-	        setEdgeSelectionState(emptyEdgeSelection);
-	        setPositionOrderLockFrameGroupIds([]);
-	        setPositionOrderLockSelectionKindByFrameGroupId({});
-	        setPositionOrderLockSelectionGroupIdByFrameGroupId({});
-	        setSelectedPositionSpacingSettingRelationKey('');
-	        setPositionOrderLockCandidateFrameGroupId('');
-	        setPositionOrderLockCandidateGroupId('');
-	        setPositionOrderLockCandidateSelectionStage('');
-	        setPositionSpacingCheckedRowKeys({});
-	        applyRuntimeSelectionUi([], emptyEdgeSelection, []);
-	        return;
-	      }
+      event.preventDefault();
+      if (positionOrderLockSelectionMode) {
+        const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+        positionGroupProxySelectionGroupIdRef.current = '';
+        positionGroupProxySelectionShowAllGroupsRef.current = false;
+        positionGroupProxySelectionsOverrideRef.current = null;
+        selectedFrameGroupIdsRef.current = [];
+        edgeSelectionStateRef.current = emptyEdgeSelection;
+        setSelectedFrameGroupIds([]);
+        setEdgeSelectionState(emptyEdgeSelection);
+        setPositionOrderLockFrameGroupIds([]);
+        setPositionOrderLockSelectionKindByFrameGroupId({});
+        setPositionOrderLockSelectionGroupIdByFrameGroupId({});
+        setSelectedPositionSpacingSettingRelationKey('');
+        setPositionOrderLockCandidateFrameGroupId('');
+        setPositionOrderLockCandidateGroupId('');
+        setPositionOrderLockCandidateSelectionStage('');
+        setPositionSpacingCheckedRowKeys({});
+        setPositionSelectionClickChainSnapshot(null);
+        setSelectionValidationIssues([]);
+        setSelectionSaveProgress(defaultSelectionSaveProgressState);
+        setPositionSelectionStateRevision((previous) => previous + 1);
+        applyRuntimeSelectionUi([], emptyEdgeSelection, []);
+        return;
+      }
 
-	      clearFrameSelection();
-	    };
+      clearFrameSelection();
+    };
 
     window.addEventListener('keydown', handleWindowKeyDown);
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-	  }, [applyRuntimeSelectionUi, clearFrameSelection, positionOrderLockSelectionMode]);
+  }, [
+    applyRuntimeSelectionUi,
+    clearFrameSelection,
+    edgeSelectionState.tokens.length,
+    positionOrderLockSelectionMode,
+    selectedFrameGroupIds.length,
+    selectedPositionSpacingSettingRelationKey,
+  ]);
 
   const handlePreviewPointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
