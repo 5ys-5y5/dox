@@ -170,6 +170,9 @@ type PositionImpactGroup = {
   directFrameGroupIds?: string[];
 };
 
+const isLegacyInferredPositionGroupId = (groupId: string | null | undefined) =>
+  /^inferred:/i.test(String(groupId || '').trim());
+
 type PositionGroupTreeEntry = {
   id: string;
   label?: string;
@@ -1436,7 +1439,7 @@ const normalizePositionGroupDisplayLabel = (label: string, fallbackId = '') => {
     return `${POSITION_GROUP_LABEL_PREFIX} ${Number.parseInt(labelMatch[1] || '0', 10) || labelMatch[1]}`;
   }
 
-  if (normalizedLabel && !/^position-box-/i.test(normalizedLabel) && !/^inferred:/i.test(normalizedLabel)) {
+  if (normalizedLabel && !/^position-box-/i.test(normalizedLabel) && !isLegacyInferredPositionGroupId(normalizedLabel)) {
     return normalizedLabel;
   }
 
@@ -1986,7 +1989,7 @@ const resolveRelativeAnchorRect = (
   if (config.anchorKind === 'group') {
     const targetGroupId = String(config.anchorId || '').trim();
 
-    if (!targetGroupId) {
+    if (!targetGroupId || isLegacyInferredPositionGroupId(targetGroupId)) {
       return null;
     }
 
@@ -1995,37 +1998,7 @@ const resolveRelativeAnchorRect = (
       return readFrameElementRect(wrapper, pageInner);
     }
 
-    const positionGroups = collectPositionBoxGroups(pageInner, { includeSingletons: true });
-    const targetGroup = positionGroups.find((group) => group.id === targetGroupId);
-
-    if (!targetGroup || targetGroup.frameGroupIds.length <= 0) {
-      return null;
-    }
-
-    const memberRects = targetGroup.frameGroupIds
-      .map((frameGroupId) => {
-        const memberNode = resolveFrameSelectionAnchor(
-          pageInner.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
-        );
-        return memberNode ? readFrameMoveRect(memberNode) : null;
-      })
-      .filter((rect): rect is FrameNodeRect => Boolean(rect));
-
-    if (memberRects.length <= 0) {
-      return null;
-    }
-
-    const minLeft = Math.min(...memberRects.map((rect) => rect.left));
-    const minTop = Math.min(...memberRects.map((rect) => rect.top));
-    const maxRight = Math.max(...memberRects.map((rect) => rect.left + rect.width));
-    const maxBottom = Math.max(...memberRects.map((rect) => rect.top + rect.height));
-
-    return {
-      left: minLeft,
-      top: minTop,
-      width: Math.max(1, maxRight - minLeft),
-      height: Math.max(1, maxBottom - minTop),
-    };
+    return null;
   }
 
   const anchorNode = resolveFrameSelectionAnchor(
@@ -2271,6 +2244,10 @@ const readRelativeAnchorTargetLabel = (
   }
 
   if (config.anchorKind === 'group') {
+    if (isLegacyInferredPositionGroupId(config.anchorId)) {
+      return `사용 불가 추론 그룹 기준: ${config.anchorId}`;
+    }
+
     const groupLabel =
       collectPositionBoxGroups(scope, { includeSingletons: true }).find((group) => group.id === config.anchorId)?.label ||
       normalizePositionGroupDisplayLabel('', config.anchorId);
@@ -2278,20 +2255,6 @@ const readRelativeAnchorTargetLabel = (
   }
 
   return config.anchorId;
-};
-
-const readFrameBandSourceFrameGroupId = (frameNode: HTMLElement | null | undefined) => {
-  if (!frameNode) {
-    return '';
-  }
-
-  return (
-    resolveFrameLayoutShell(frameNode)
-      .getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR)
-      ?.trim() ||
-    frameNode.getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR)?.trim() ||
-    ''
-  );
 };
 
 const collectExplicitRelativeFlowChildFrameGroupIds = (
@@ -2355,41 +2318,6 @@ const collectExplicitRelativeFlowChildFrameGroupIds = (
   return groupedChildFrameGroupIds;
 };
 
-const collectBandSourceAlignedFrameGroupIds = (
-  sourceFrameNode: HTMLElement,
-  allFrameNodes: HTMLElement[]
-) => {
-  const sourceFrameGroupId = getFrameGroupId(sourceFrameNode);
-  const bandSourceFrameGroupId = readFrameBandSourceFrameGroupId(sourceFrameNode);
-  const groupedFrameGroupIds = new Set<string>();
-
-  if (!sourceFrameGroupId || !bandSourceFrameGroupId) {
-    return groupedFrameGroupIds;
-  }
-
-  const sourcePageInner = sourceFrameNode.closest<HTMLElement>('.page-inner');
-  if (!sourcePageInner) {
-    return groupedFrameGroupIds;
-  }
-
-  allFrameNodes.forEach((candidate) => {
-    if (candidate.closest<HTMLElement>('.page-inner') !== sourcePageInner) {
-      return;
-    }
-
-    const candidateId = getFrameGroupId(candidate);
-    const candidateBandSource = readFrameBandSourceFrameGroupId(candidate);
-
-    if (!candidateId || candidateId === sourceFrameGroupId || !candidateBandSource || candidateBandSource !== bandSourceFrameGroupId) {
-      return;
-    }
-
-    groupedFrameGroupIds.add(candidateId);
-  });
-
-  return groupedFrameGroupIds;
-};
-
 const collectPositionImpactGroupCandidateFrameGroupIds = (
   sourceFrameNode: HTMLElement | null,
   allFrameNodes: HTMLElement[],
@@ -2410,13 +2338,8 @@ const collectPositionImpactGroupCandidateFrameGroupIds = (
     allFrameNodes,
     resolvedPageInner
   );
-  const bandAlignedFrameGroupIds = collectBandSourceAlignedFrameGroupIds(sourceFrameNode, allFrameNodes);
 
   explicitRelativeChildIds.forEach((frameGroupId) => {
-    collectedFrameGroupIds.add(frameGroupId);
-  });
-
-  bandAlignedFrameGroupIds.forEach((frameGroupId) => {
     collectedFrameGroupIds.add(frameGroupId);
   });
 
@@ -2880,11 +2803,9 @@ const collectPositionBoxGroups = (
   scope: ParentNode | null | undefined,
   options?: {
     includeSingletons?: boolean;
-    includeExplicitMembersInInferred?: boolean;
   }
 ) => {
   const includeSingletons = options?.includeSingletons ?? false;
-  const includeExplicitMembersInInferred = options?.includeExplicitMembersInInferred ?? false;
 
   if (!scope) {
     return [] as PositionImpactGroup[];
@@ -2906,13 +2827,11 @@ const collectPositionBoxGroups = (
       firstIndex: number;
     }
   >();
-  const explicitMemberIds = new Set<string>();
-
   frameNodes.forEach((frameNode, index) => {
     const frameGroupId = getFrameGroupId(frameNode);
     const config = readFramePositionGroupConfig(frameNode);
 
-    if (!frameGroupId || !config?.groupId) {
+    if (!frameGroupId || !config?.groupId || isLegacyInferredPositionGroupId(config.groupId)) {
       return;
     }
 
@@ -2928,7 +2847,6 @@ const collectPositionBoxGroups = (
     }
     bucket.firstIndex = Math.min(bucket.firstIndex, index);
     explicitBuckets.set(config.groupId, bucket);
-    explicitMemberIds.add(frameGroupId);
   });
 
   let groupsWithOrder: Array<PositionImpactGroup & { firstIndex: number }> = [];
@@ -2944,53 +2862,6 @@ const collectPositionBoxGroups = (
       label: bucket.label,
       frameGroupIds,
       inferred: false,
-      directFrameGroupIds: frameGroupIds,
-      childGroupIds: [],
-      firstIndex: bucket.firstIndex,
-    });
-  });
-
-  const inferredBuckets = new Map<
-    string,
-    {
-      frameGroupIds: string[];
-      firstIndex: number;
-    }
-  >();
-
-  frameNodes.forEach((frameNode, index) => {
-    const frameGroupId = getFrameGroupId(frameNode);
-    const bandSource = readFrameBandSourceFrameGroupId(frameNode);
-    const pageInner = frameNode.closest<HTMLElement>('.page-inner');
-    const pageKey = pageInner?.getAttribute('data-page')?.trim() || '1';
-
-    if (!frameGroupId || (!includeExplicitMembersInInferred && explicitMemberIds.has(frameGroupId)) || !bandSource) {
-      return;
-    }
-
-    const bucketKey = `${pageKey}|${bandSource}`;
-    const bucket = inferredBuckets.get(bucketKey) || {
-      frameGroupIds: [],
-      firstIndex: index,
-    };
-
-    bucket.frameGroupIds.push(frameGroupId);
-    bucket.firstIndex = Math.min(bucket.firstIndex, index);
-    inferredBuckets.set(bucketKey, bucket);
-  });
-
-  inferredBuckets.forEach((bucket, bucketKey) => {
-    const frameGroupIds = Array.from(new Set(bucket.frameGroupIds)).sort((left, right) => left.localeCompare(right, 'ko'));
-
-    if (frameGroupIds.length <= 1) {
-      return;
-    }
-
-    groupsWithOrder.push({
-      id: `inferred:${bucketKey}`,
-      label: '',
-      frameGroupIds,
-      inferred: true,
       directFrameGroupIds: frameGroupIds,
       childGroupIds: [],
       firstIndex: bucket.firstIndex,
@@ -3025,6 +2896,10 @@ const collectPositionBoxGroups = (
         }
       });
       (treeEntry?.childGroupIds || []).forEach((childGroupId) => {
+        if (isLegacyInferredPositionGroupId(childGroupId)) {
+          return;
+        }
+
         resolveTreeFrameGroupIds(childGroupId, new Set(visitedGroupIds)).forEach((frameGroupId) => {
           frameIds.add(frameGroupId);
         });
@@ -3034,6 +2909,10 @@ const collectPositionBoxGroups = (
     };
 
     treeEntries.forEach((entry) => {
+      if (isLegacyInferredPositionGroupId(entry.id)) {
+        return;
+      }
+
       const frameGroupIds = resolveTreeFrameGroupIds(entry.id)
         .filter((frameGroupId) => frameIndexById.has(frameGroupId))
         .sort((left, right) => left.localeCompare(right, 'ko'));
@@ -3154,6 +3033,17 @@ const collectPositionGroupWrapperElements = (scope: ParentNode | null | undefine
 const resolvePositionGroupWrapperElement = (scope: ParentNode | null | undefined, groupId: string) =>
   collectPositionGroupWrapperElements(scope).find((element) => readPositionGroupWrapperId(element) === groupId.trim()) || null;
 
+const readPositionGroupWrapperRect = (scope: ParentNode | null | undefined, groupId: string): FrameNodeRect | null => {
+  if (isLegacyInferredPositionGroupId(groupId)) {
+    return null;
+  }
+
+  const wrapper = resolvePositionGroupWrapperElement(scope, groupId);
+  const pageInner = wrapper?.closest<HTMLElement>('.page-inner') || null;
+
+  return wrapper && pageInner ? readFrameElementRect(wrapper, pageInner) : null;
+};
+
 const unwrapPositionGroupWrapperElement = (wrapper: HTMLElement, pageInner: HTMLElement) => {
   const parent = wrapper.parentElement || pageInner;
   const insertBefore = wrapper.nextSibling;
@@ -3187,10 +3077,9 @@ const materializePositionGroupWrappersInPage = (pageInner: HTMLElement): boolean
     }
   });
 
-  const groups = collectPositionBoxGroups(pageInner, {
-    includeSingletons: false,
-    includeExplicitMembersInInferred: true,
-  }).filter((group) => group.frameGroupIds.filter((frameGroupId) => frameNodeById.has(frameGroupId)).length > 1);
+  const groups = collectPositionBoxGroups(pageInner, { includeSingletons: false }).filter(
+    (group) => group.frameGroupIds.filter((frameGroupId) => frameNodeById.has(frameGroupId)).length > 1
+  );
   const groupById = new Map(groups.map((group) => [group.id, group] as const));
   const groupMemberSetById = new Map(
     groups.map((group) => [
@@ -3222,34 +3111,7 @@ const materializePositionGroupWrappersInPage = (pageInner: HTMLElement): boolean
       const childSet = groupMemberSetById.get(childGroupId);
       return childSet && Array.from(childSet).every((frameGroupId) => memberSet.has(frameGroupId));
     });
-    const inferredChildGroupIds = groups
-      .filter((candidate) => candidate.id !== group.id)
-      .filter((candidate) => {
-        const candidateSet = groupMemberSetById.get(candidate.id) || new Set<string>();
-        return (
-          candidateSet.size > 1 &&
-          candidateSet.size < memberSet.size &&
-          Array.from(candidateSet).every((frameGroupId) => memberSet.has(frameGroupId))
-        );
-      })
-      .filter((candidate) => {
-        const candidateSet = groupMemberSetById.get(candidate.id) || new Set<string>();
-        return !groups.some((middle) => {
-          if (middle.id === group.id || middle.id === candidate.id) {
-            return false;
-          }
-
-          const middleSet = groupMemberSetById.get(middle.id) || new Set<string>();
-          return (
-            middleSet.size > candidateSet.size &&
-            middleSet.size < memberSet.size &&
-            Array.from(candidateSet).every((frameGroupId) => middleSet.has(frameGroupId)) &&
-            Array.from(middleSet).every((frameGroupId) => memberSet.has(frameGroupId))
-          );
-        });
-      })
-      .map((candidate) => candidate.id);
-    const childGroupIds = Array.from(new Set([...declaredChildGroupIds, ...inferredChildGroupIds]));
+    const childGroupIds = Array.from(new Set(declaredChildGroupIds));
     const childFrameGroupIds = new Set(
       childGroupIds.flatMap((childGroupId) => Array.from(groupMemberSetById.get(childGroupId) || []))
     );
@@ -3379,6 +3241,80 @@ const removePositionGroupWrappersByIds = (root: ParentNode | null | undefined, g
   });
 
   return removedCount;
+};
+
+const collectPositionGroupStructureWarnings = (root: ParentNode | null | undefined) => {
+  if (!root) {
+    return [] as string[];
+  }
+
+  const warnings = new Set<string>();
+  const groups = collectPositionBoxGroups(root, { includeSingletons: false }).filter((group) => !group.inferred);
+  const groupById = new Map(groups.map((group) => [group.id, group] as const));
+  const treeEntryById = new Map(readPositionGroupTreeEntries(root).map((entry) => [entry.id, entry] as const));
+  const declaredChildPairs = new Set<string>();
+
+  treeEntryById.forEach((entry) => {
+    if (isLegacyInferredPositionGroupId(entry.id)) {
+      warnings.add(`legacy-group:${entry.id}`);
+    }
+    (entry.childGroupIds || []).forEach((childGroupId) => {
+      declaredChildPairs.add(`${entry.id}->${childGroupId}`);
+    });
+  });
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node);
+    const pageInner = node.closest<HTMLElement>('.page-inner');
+    const groupConfig = readFramePositionGroupConfig(node);
+    const relativeConfig = readFrameRelativeAnchorConfig(node, pageInner);
+
+    if (isLegacyInferredPositionGroupId(groupConfig?.groupId)) {
+      warnings.add(`legacy-member:${groupConfig?.groupId}`);
+    }
+
+    if (relativeConfig?.anchorKind !== 'group') {
+      return;
+    }
+
+    const anchorGroupId = String(relativeConfig.anchorId || '').trim();
+    if (isLegacyInferredPositionGroupId(anchorGroupId)) {
+      warnings.add(`legacy-anchor:${anchorGroupId}`);
+      return;
+    }
+
+    if (anchorGroupId && !groupById.has(anchorGroupId)) {
+      warnings.add(`missing-anchor:${frameGroupId || 'unknown'}:${anchorGroupId}`);
+    }
+  });
+
+  for (let leftIndex = 0; leftIndex < groups.length; leftIndex += 1) {
+    const leftGroup = groups[leftIndex];
+    const leftFrameIdSet = new Set(leftGroup.frameGroupIds);
+
+    for (let rightIndex = leftIndex + 1; rightIndex < groups.length; rightIndex += 1) {
+      const rightGroup = groups[rightIndex];
+      const rightFrameIds = rightGroup.frameGroupIds;
+      const intersectionCount = rightFrameIds.filter((frameGroupId) => leftFrameIdSet.has(frameGroupId)).length;
+
+      if (intersectionCount <= 0) {
+        continue;
+      }
+
+      const leftContainsRight = rightFrameIds.every((frameGroupId) => leftFrameIdSet.has(frameGroupId));
+      const rightFrameIdSet = new Set(rightFrameIds);
+      const rightContainsLeft = leftGroup.frameGroupIds.every((frameGroupId) => rightFrameIdSet.has(frameGroupId));
+      const relationshipDeclared =
+        (leftContainsRight && declaredChildPairs.has(`${leftGroup.id}->${rightGroup.id}`)) ||
+        (rightContainsLeft && declaredChildPairs.has(`${rightGroup.id}->${leftGroup.id}`));
+
+      if (!relationshipDeclared) {
+        warnings.add(`overlap:${leftGroup.id}:${rightGroup.id}`);
+      }
+    }
+  }
+
+  return Array.from(warnings);
 };
 
 const readNextPositionGroupLabel = (groups: PositionImpactGroup[]) => {
@@ -3579,28 +3515,6 @@ const normalizePositionGroupRelativeAnchors = (
     });
   });
 
-  const resolveRectFromFrameGroupIds = (frameGroupIds: string[]) => {
-    const rects = frameGroupIds
-      .map((frameGroupId) => frameNodeById.get(frameGroupId.trim()) || null)
-      .map((node) => (node ? readFrameMoveRect(node) : null))
-      .filter((rect): rect is FrameNodeRect => Boolean(rect));
-
-    if (rects.length <= 0) {
-      return null;
-    }
-
-    const minLeft = Math.min(...rects.map((rect) => rect.left));
-    const minTop = Math.min(...rects.map((rect) => rect.top));
-    const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
-    const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
-    return {
-      left: minLeft,
-      top: minTop,
-      width: Math.max(1, maxRight - minLeft),
-      height: Math.max(1, maxBottom - minTop),
-    } as FrameNodeRect;
-  };
-
   const resolveExternalAnchor = (
     ownerGroup: PositionImpactGroup,
     config: TemplateFrameRelativeAnchorConfig | null,
@@ -3627,7 +3541,7 @@ const normalizePositionGroupRelativeAnchors = (
       const anchorGroup = groupById.get(anchorGroupId) || null;
       const anchorRect =
         anchorGroup && anchorGroup.frameGroupIds.length > 0
-          ? resolveRectFromFrameGroupIds(anchorGroup.frameGroupIds)
+          ? readPositionGroupWrapperRect(pageInner, anchorGroup.id)
           : resolveRelativeAnchorRect(pageInner, config);
 
       if (!anchorRect) {
@@ -3651,7 +3565,7 @@ const normalizePositionGroupRelativeAnchors = (
 
       const anchorPositionGroup = groupByFrameGroupId.get(anchorFrameGroupId) || null;
       if (anchorPositionGroup && anchorPositionGroup.frameGroupIds.length > 1 && anchorPositionGroup.id !== ownerGroup.id) {
-        const anchorRect = resolveRectFromFrameGroupIds(anchorPositionGroup.frameGroupIds);
+        const anchorRect = readPositionGroupWrapperRect(pageInner, anchorPositionGroup.id);
         if (!anchorRect) {
           return null;
         }
@@ -7062,11 +6976,16 @@ const applyDefinedPositionRelativeRelationUi = (
       frameNodeById.get(relation.anchorFrameGroupId) ||
       null;
     const hostPageInner = hostNode?.closest<HTMLElement>('.page-inner') || null;
-    const targetRect = resolveRectFromFrameGroupIds(relation.targetFrameGroupIds);
+    const targetRect =
+      relation.targetKind === 'group'
+        ? readPositionGroupWrapperRect(root, relation.targetGroupId)
+        : resolveRectFromFrameGroupIds(relation.targetFrameGroupIds);
     const anchorRect =
-      relation.anchorKind === 'page-corner' && hostPageInner
-        ? resolvePageCornerAnchorRect(hostPageInner, relation.anchorPageCornerId)
-        : resolveRectFromFrameGroupIds(relation.anchorFrameGroupIds);
+      relation.anchorKind === 'group'
+        ? readPositionGroupWrapperRect(root, relation.anchorGroupId)
+        : relation.anchorKind === 'page-corner' && hostPageInner
+          ? resolvePageCornerAnchorRect(hostPageInner, relation.anchorPageCornerId)
+          : resolveRectFromFrameGroupIds(relation.anchorFrameGroupIds);
 
     if (!targetRect || !anchorRect || !hostPageInner) {
       return;
@@ -8223,10 +8142,7 @@ const appendPositionGroupCatalogOverlay = (root: HTMLElement) => {
     return;
   }
 
-  const groups = collectPositionBoxGroups(root, {
-    includeSingletons: false,
-    includeExplicitMembersInInferred: true,
-  }).filter(
+  const groups = collectPositionBoxGroups(root, { includeSingletons: false }).filter(
     (group) => group.frameGroupIds.length > 1
   );
 
@@ -8573,6 +8489,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const positionGroupProxySelectionGroupIdRef = React.useRef('');
   const positionGroupProxySelectionShowAllGroupsRef = React.useRef(false);
   const positionGroupProxySelectionsOverrideRef = React.useRef<PositionGroupProxySelection[] | null>(null);
+  const lastPositionGroupStructureWarningRef = React.useRef('');
   const positionSpacingDraftApplyRequestedRef = React.useRef(false);
   const canvasHistoryEntriesRef = React.useRef<CanvasHistoryEntry[]>([]);
   const canvasHistoryIndexRef = React.useRef(-1);
@@ -9186,10 +9103,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
   const positionBoxGroups = React.useMemo(
     () => {
-      const collectOptions = {
-        includeSingletons: false,
-        includeExplicitMembersInInferred: true,
-      };
+      const collectOptions = { includeSingletons: false };
 
       if (previewRef.current) {
         return collectPositionBoxGroups(previewRef.current, collectOptions);
@@ -9209,6 +9123,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => positionBoxGroups.filter((group) => group.frameGroupIds.length > 0),
     [positionBoxGroups]
   );
+  const positionBoxGroupById = React.useMemo(
+    () => new Map(positionBoxGroups.map((group) => [group.id, group] as const)),
+    [positionBoxGroups]
+  );
+  const positionGroupStructureWarnings = React.useMemo(() => {
+    if (previewRef.current) {
+      return collectPositionGroupStructureWarnings(previewRef.current);
+    }
+
+    if (typeof document === 'undefined' || !renderedPreviewHtml) {
+      return [] as string[];
+    }
+
+    const container = document.createElement('div');
+    container.innerHTML = renderedPreviewHtml;
+    return collectPositionGroupStructureWarnings(container);
+  }, [previewDomVersion, renderedPreviewHtml]);
+  const positionGroupStructureWarningSignature = React.useMemo(
+    () => positionGroupStructureWarnings.slice().sort((left, right) => left.localeCompare(right, 'ko')).join('|'),
+    [positionGroupStructureWarnings]
+  );
   const positionBoxGroupByFrameGroupId = React.useMemo(() => {
     const nextMap = new Map<string, PositionImpactGroup>();
 
@@ -9220,6 +9155,29 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return nextMap;
   }, [positionBoxGroups]);
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'position') {
+      return;
+    }
+
+    if (!positionGroupStructureWarningSignature) {
+      lastPositionGroupStructureWarningRef.current = '';
+      return;
+    }
+
+    if (lastPositionGroupStructureWarningRef.current === positionGroupStructureWarningSignature) {
+      return;
+    }
+
+    lastPositionGroupStructureWarningRef.current = positionGroupStructureWarningSignature;
+    const warningMessage =
+      '그룹 위치 구조 경고: bandSource/추론 그룹 또는 물리 그룹 박스로 표현할 수 없는 겹침 관계가 남아 있습니다. 그룹 해제 후 그룹을 다시 생성하세요.';
+    setMessage(warningMessage);
+
+    if (typeof window !== 'undefined') {
+      window.alert(warningMessage);
+    }
+  }, [positionGroupStructureWarningSignature, selectionPanelTab]);
   React.useEffect(() => {
     const normalizedCurrentTargetGroupId = moveGroupAssignmentTargetGroupId.trim();
     if (explicitPositionBoxGroups.length <= 0) {
@@ -9345,10 +9303,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         )
       );
 
-      const selectableGroups = collectPositionBoxGroups(pageInner, {
-        includeSingletons: false,
-        includeExplicitMembersInInferred: true,
-      })
+      const selectableGroups = collectPositionBoxGroups(pageInner, { includeSingletons: false })
         .filter((group) => group.frameGroupIds.length > 1 || !group.inferred)
         .map((group) => {
           const normalizedGroupFrameIds = Array.from(
@@ -9924,8 +9879,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
           .map((node) => node?.closest<HTMLElement>('.page-inner') || null)
           .find((pageInner): pageInner is HTMLElement => Boolean(pageInner)) || null;
-      const wrapper = groupPageInner ? resolvePositionGroupWrapperElement(groupPageInner, group.id) : null;
-      const groupRect = wrapper ? readFrameElementRect(wrapper, groupPageInner) : resolveRectFromFrameGroupIds(group.frameGroupIds);
+      const groupRect = groupPageInner ? readPositionGroupWrapperRect(groupPageInner, group.id) : null;
       if (groupRect) {
         groupRectById.set(group.id, groupRect);
       }
@@ -9958,7 +9912,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             : buildFrameLabel(targetFrameGroupId);
         const targetRect =
           targetKind === 'group' && targetGroupId
-            ? groupRectById.get(targetGroupId) || readFrameMoveRect(targetNode)
+            ? groupRectById.get(targetGroupId) || null
             : readFrameMoveRect(targetNode);
 
         if (!targetRect) {
@@ -10171,10 +10125,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const targetRect = resolveRectFromFrameGroupIds(relation.targetFrameGroupIds);
+      const targetRect =
+        relation.targetKind === 'group'
+          ? readPositionGroupWrapperRect(root, relation.targetGroupId)
+          : resolveRectFromFrameGroupIds(relation.targetFrameGroupIds);
       const anchorRect =
         relation.anchorKind === 'group'
-          ? resolveRectFromFrameGroupIds(relation.anchorFrameGroupIds)
+          ? readPositionGroupWrapperRect(root, relation.anchorGroupId)
           : resolveRectFromFrameGroupIds([relation.anchorFrameGroupId]);
 
       if (!targetRect || !anchorRect) {
@@ -10454,11 +10411,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       const targetRect =
         relation.targetKind === 'group'
-          ? resolveRectFromFrameGroupIds(relation.targetFrameGroupIds) || targetRectFromNodes
+          ? readPositionGroupWrapperRect(root, relation.targetGroupId)
           : targetRectFromNodes;
       const anchorRect =
         relation.anchorKind === 'group'
-          ? resolveRectFromFrameGroupIds(relation.anchorFrameGroupIds)
+          ? readPositionGroupWrapperRect(root, relation.anchorGroupId)
           : relation.anchorKind === 'frame'
             ? resolveRectFromFrameGroupIds([relation.anchorFrameGroupId])
             : resolvePageCornerAnchorRect(targetPageInner, relation.anchorPageCornerId);
@@ -10820,6 +10777,120 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => readPositionImpactGroupDisplayLabels(selectedPositionCurrentBoxGroups),
     [selectedPositionCurrentBoxGroups]
   );
+  const selectedPositionActiveGroup = React.useMemo(() => {
+    if (selectionPanelTab !== 'position') {
+      return null;
+    }
+
+    const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+    if (activeProxyGroupId) {
+      return positionBoxGroupById.get(activeProxyGroupId) || null;
+    }
+
+    return selectedPositionResolvedBoxGroup || null;
+  }, [positionBoxGroupById, selectedPositionResolvedBoxGroup, selectedFrameGroupIds, selectionPanelTab]);
+  const selectedPositionActiveGroupChildGroupIds = React.useMemo(
+    () =>
+      selectedPositionActiveGroup
+        ? Array.from(
+            new Set(
+              (selectedPositionActiveGroup.childGroupIds || [])
+                .map((groupId) => groupId.trim())
+                .filter((groupId) => Boolean(groupId) && positionBoxGroupById.has(groupId))
+            )
+          )
+        : [],
+    [positionBoxGroupById, selectedPositionActiveGroup]
+  );
+  const selectedPositionActiveGroupChildGroupLabels = React.useMemo(
+    () =>
+      selectedPositionActiveGroupChildGroupIds.map((groupId) => {
+        const group = positionBoxGroupById.get(groupId);
+        const label = normalizePositionGroupDisplayLabel(group?.label || '', groupId);
+        return `${label} (${group?.frameGroupIds.length || 0}개)`;
+      }),
+    [positionBoxGroupById, selectedPositionActiveGroupChildGroupIds]
+  );
+  const selectedPositionActiveGroupDirectFrameGroupIds = React.useMemo(() => {
+    if (!selectedPositionActiveGroup) {
+      return [] as string[];
+    }
+
+    const childFrameGroupIds = new Set(
+      selectedPositionActiveGroupChildGroupIds.flatMap(
+        (groupId) => positionBoxGroupById.get(groupId)?.frameGroupIds || []
+      )
+    );
+    const directFrameGroupIds =
+      selectedPositionActiveGroup.directFrameGroupIds && selectedPositionActiveGroup.directFrameGroupIds.length > 0
+        ? selectedPositionActiveGroup.directFrameGroupIds
+        : selectedPositionActiveGroup.frameGroupIds.filter((frameGroupId) => !childFrameGroupIds.has(frameGroupId));
+
+    return Array.from(
+      new Set(directFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+    ).sort((left, right) => left.localeCompare(right, 'ko'));
+  }, [positionBoxGroupById, selectedPositionActiveGroup, selectedPositionActiveGroupChildGroupIds]);
+  const selectedPositionParentGroupLabels = React.useMemo(
+    () =>
+      selectedPositionActiveGroup
+        ? []
+        : selectedPositionCurrentBoxGroups.map(
+            (group) => `${normalizePositionGroupDisplayLabel(group.label, group.id)} (${group.frameGroupIds.length}개)`
+          ),
+    [selectedPositionActiveGroup, selectedPositionCurrentBoxGroups]
+  );
+  const selectedPositionParentGroupIds = React.useMemo(
+    () => (selectedPositionActiveGroup ? [] : selectedPositionCurrentBoxGroups.map((group) => group.id)),
+    [selectedPositionActiveGroup, selectedPositionCurrentBoxGroups]
+  );
+  const selectedPositionGroupDetailRows = React.useMemo(() => {
+    if (selectionPanelTab !== 'position') {
+      return [] as Array<{
+        groupId: string;
+        label: string;
+        frameGroupIds: string[];
+        isSelectedGroup: boolean;
+      }>;
+    }
+
+    const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+    const orderedGroups: PositionImpactGroup[] = [];
+    const seenGroupIds = new Set<string>();
+    const pushGroup = (group: PositionImpactGroup | null | undefined) => {
+      if (!group || seenGroupIds.has(group.id)) {
+        return;
+      }
+
+      seenGroupIds.add(group.id);
+      orderedGroups.push(group);
+    };
+
+    if (activeProxyGroupId) {
+      pushGroup(positionBoxGroups.find((group) => group.id === activeProxyGroupId) || null);
+    }
+
+    pushGroup(selectedPositionResolvedBoxGroup);
+    selectedPositionCurrentBoxGroups.forEach(pushGroup);
+
+    return orderedGroups
+      .filter((group) => group.frameGroupIds.length > 0)
+      .map((group) => ({
+        groupId: group.id,
+        label: normalizePositionGroupDisplayLabel(group.label, group.id),
+        frameGroupIds: group.frameGroupIds
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter((frameGroupId) => Boolean(frameGroupId))
+          .sort((left, right) => left.localeCompare(right, 'ko')),
+        isSelectedGroup:
+          (activeProxyGroupId && group.id === activeProxyGroupId) ||
+          Boolean(selectedPositionResolvedBoxGroup && group.id === selectedPositionResolvedBoxGroup.id),
+      }));
+  }, [
+    positionBoxGroups,
+    selectedPositionCurrentBoxGroups,
+    selectedPositionResolvedBoxGroup,
+    selectionPanelTab,
+  ]);
   const selectedPositionDisplayIds = React.useMemo(() => {
     if (selectionPanelTab !== 'position') {
       return selectedFrameGroupIds;
@@ -10847,7 +10918,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
   const hasSelectedPositionBoxes = selectedFrameGroupIds.length > 0;
   const canClearSelectedPositionGroups = selectedExplicitPositionCurrentBoxGroups.length > 0;
-  const canCreatePositionGroupFromSelection = selectedPositionEntitySelection.entityCount >= 2;
+  const canCreatePositionGroupFromSelection =
+    selectedPositionEntitySelection.entityCount >= 2 ||
+    selectedPositionGroupingFrameGroupIds.length >= 2 ||
+    Boolean(selectedPositionResolvedBoxGroup && selectedPositionResolvedBoxGroup.frameGroupIds.length >= 2);
   const canStartPositionSpacingLockFromSelection = selectedPositionEntitySelection.entityCount >= 2;
   const canAssignSelectedItemsToGroup =
     explicitPositionBoxGroups.length > 0 && selectedPositionEntitySelection.entityCount > 0;
@@ -11140,9 +11214,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           selectedEntry.selectionKind === 'group' && resolvedPageInner
             ? resolvePositionGroupWrapperElement(resolvedPageInner, group.id)
             : null;
-        const groupRect = wrapper
-          ? readFrameElementRect(wrapper, resolvedPageInner)
-          : (() => {
+        const groupRect =
+          selectedEntry.selectionKind === 'group'
+            ? wrapper && resolvedPageInner
+              ? readFrameElementRect(wrapper, resolvedPageInner)
+              : null
+            : (() => {
               const minLeft = Math.min(...normalizedMemberEntries.map((entry) => entry.rect.left));
               const minTop = Math.min(...normalizedMemberEntries.map((entry) => entry.rect.top));
               const maxRight = Math.max(...normalizedMemberEntries.map((entry) => entry.rect.left + entry.rect.width));
@@ -11154,6 +11231,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 height: Math.max(1, maxBottom - minTop),
               };
             })();
+
+        if (!groupRect) {
+          return null;
+        }
+
         const spacingReferenceRects =
           selectedEntry.selectionKind === 'group'
             ? [groupRect]
@@ -12831,10 +12913,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .filter((frameGroupId) => Boolean(frameGroupId));
 
       if (selectionPanelTab === 'position') {
-        const matchedGroups = collectPositionBoxGroups(pageInner, {
-          includeSingletons: false,
-          includeExplicitMembersInInferred: true,
-        })
+        const matchedGroups = collectPositionBoxGroups(pageInner, { includeSingletons: false })
           .map((group) => {
             const frameGroupIds = Array.from(
               new Set(
@@ -12849,7 +12928,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             }
 
             const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
-            const rect = wrapper ? readFrameElementRect(wrapper, pageInner) : collectFrameGroupUnionRect(frameGroupIds, frameNodeById);
+            const rect = wrapper ? readFrameElementRect(wrapper, pageInner) : null;
 
             if (!rect) {
               return null;
@@ -12932,10 +13011,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const proxies: PositionGroupProxySelection[] = [];
       const selectedProxyMemberIds = new Set<string>();
 
-      collectPositionBoxGroups(pageInner, {
-        includeSingletons: false,
-        includeExplicitMembersInInferred: true,
-      })
+      collectPositionBoxGroups(pageInner, { includeSingletons: false })
         .filter((group) => group.frameGroupIds.length > 1)
         .filter((group) => group.frameGroupIds.every((frameGroupId) => selectedFrameGroupIdSet.has(frameGroupId)))
         .sort((left, right) => {
@@ -14561,15 +14637,44 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    if (selectedPositionEntitySelection.entityCount < 2) {
-      setMessage(`하나의 ${POSITION_GROUP_LABEL_PREFIX}으로 묶을 그룹 또는 상자를 2개 이상 선택하세요.`);
-      return;
-    }
-
     const allGroups = collectPositionBoxGroups(root, { includeSingletons: false });
     const groupById = new Map(allGroups.map((group) => [group.id, group] as const));
-    const selectedChildGroupIds = selectedPositionEntitySelection.groupIds.filter((groupId) => groupById.has(groupId));
-    const selectedDirectFrameGroupIds = selectedPositionEntitySelection.frameGroupIds.slice();
+    const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+    const activeProxyGroup = activeProxyGroupId ? groupById.get(activeProxyGroupId) || null : null;
+    const singleSelectedGroup =
+      selectedPositionEntitySelection.entityCount === 1 && selectedPositionEntitySelection.groupIds.length === 1
+        ? groupById.get(selectedPositionEntitySelection.groupIds[0] || '') || null
+        : null;
+    const rawSelectedFrameGroupIds = Array.from(
+      new Set(selectedPositionGroupingFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+    );
+    let selectedChildGroupIds = selectedPositionEntitySelection.groupIds.filter((groupId) => groupById.has(groupId));
+    let selectedDirectFrameGroupIds = selectedPositionEntitySelection.frameGroupIds.slice();
+    let forcedParentGroupId = '';
+
+    if (selectedPositionEntitySelection.entityCount < 2) {
+      const sourceGroup = activeProxyGroup || singleSelectedGroup;
+      const sourceDirectFrameGroupIds = Array.from(
+        new Set(
+          (sourceGroup?.directFrameGroupIds?.length ? sourceGroup.directFrameGroupIds : sourceGroup?.frameGroupIds || [])
+            .map((frameGroupId) => frameGroupId.trim())
+            .filter(Boolean)
+        )
+      );
+
+      if (sourceGroup && sourceDirectFrameGroupIds.length >= 2) {
+        selectedChildGroupIds = [];
+        selectedDirectFrameGroupIds = sourceDirectFrameGroupIds;
+        forcedParentGroupId = sourceGroup.id;
+      } else if (rawSelectedFrameGroupIds.length >= 2 && !selectedPositionExactMatchedBoxGroup) {
+        selectedChildGroupIds = [];
+        selectedDirectFrameGroupIds = rawSelectedFrameGroupIds;
+      } else {
+        setMessage(`하나의 ${POSITION_GROUP_LABEL_PREFIX}으로 묶을 그룹 또는 상자를 2개 이상 선택하세요.`);
+        return;
+      }
+    }
+
     const regroupTargetFrameGroupIds = Array.from(
       new Set(
         [
@@ -14665,6 +14770,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
+    const regroupTargetFrameGroupIdSet = new Set(regroupTargetFrameGroupIds);
+    const selectedChildGroupIdSet = new Set(selectedChildGroupIds);
+    const containingParentGroups = allGroups
+      .filter((group) => group.id !== nextGroupId)
+      .filter((group) => !selectedChildGroupIdSet.has(group.id))
+      .filter((group) => {
+        if (forcedParentGroupId && group.id === forcedParentGroupId) {
+          return true;
+        }
+
+        if (group.frameGroupIds.length <= regroupTargetFrameGroupIds.length) {
+          return false;
+        }
+
+        return regroupTargetFrameGroupIds.every((frameGroupId) =>
+          group.frameGroupIds.some((memberFrameGroupId) => memberFrameGroupId.trim() === frameGroupId)
+        );
+      })
+      .sort((left, right) => {
+        if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+          return left.frameGroupIds.length - right.frameGroupIds.length;
+        }
+        return left.id.localeCompare(right.id, 'ko');
+      });
+    const nearestParentGroup = containingParentGroups[0] || null;
+
     writePositionGroupTreeEntry(
       root,
       {
@@ -14675,6 +14806,41 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       },
       regroupTargetFrameGroupIds
     );
+
+    if (nearestParentGroup) {
+      const existingParentEntry =
+        readPositionGroupTreeEntries(root).find((entry) => entry.id === nearestParentGroup.id) || null;
+      const previousParentChildGroupIds = existingParentEntry?.childGroupIds || nearestParentGroup.childGroupIds || [];
+      const previousParentDirectFrameGroupIds =
+        existingParentEntry?.frameGroupIds || nearestParentGroup.directFrameGroupIds || nearestParentGroup.frameGroupIds;
+      const nextParentChildGroupIds = Array.from(
+        new Set(
+          [
+            ...previousParentChildGroupIds.filter((groupId) => !selectedChildGroupIdSet.has(groupId)),
+            nextGroupId,
+          ].map((groupId) => groupId.trim()).filter(Boolean)
+        )
+      );
+      const nextParentDirectFrameGroupIds = Array.from(
+        new Set(
+          previousParentDirectFrameGroupIds
+            .map((frameGroupId) => frameGroupId.trim())
+            .filter((frameGroupId) => Boolean(frameGroupId) && !regroupTargetFrameGroupIdSet.has(frameGroupId))
+        )
+      );
+
+      writePositionGroupTreeEntry(
+        root,
+        {
+          id: nearestParentGroup.id,
+          label: nearestParentGroup.label,
+          childGroupIds: nextParentChildGroupIds,
+          frameGroupIds: nextParentDirectFrameGroupIds,
+        },
+        nearestParentGroup.frameGroupIds
+      );
+    }
+
     materializePositionGroupWrappers(root);
     normalizePositionGroupRelativeAnchors(root, nextGroupId);
     ensureRelativeAnchorConfigs(root);
@@ -14685,11 +14851,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       `${POSITION_GROUP_LABEL_PREFIX} 만들기 완료: ${nextGroupLabel} (${appliedCount}개 상자)` +
         (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
     );
-  }, [
-    requestPreviewTextFit,
-    selectedPositionEntitySelection,
-    syncDraftPreviewHtmlRef,
-  ]);
+	  }, [
+	    requestPreviewTextFit,
+	    selectedPositionEntitySelection,
+	    selectedPositionExactMatchedBoxGroup,
+	    selectedPositionGroupingFrameGroupIds,
+	    syncDraftPreviewHtmlRef,
+	  ]);
   const applySelectedPositionGroupRelationFromCanvasSelection = React.useCallback(() => {
     if (selectedFrameGroupIdsRef.current.length < 2) {
       setMessage('2개 이상의 상자를 선택해야 합니다.');
@@ -14732,9 +14900,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    const materializedTargetGroupId = targetGroup.inferred
-      ? `position-box-${Date.now().toString(36)}`
-      : targetGroup.id;
+    const materializedTargetGroupId = targetGroup.id;
     const materializedTargetGroupLabel = targetGroup.label.trim() || readNextPositionGroupLabel(allGroups);
     const existingTreeEntry = readPositionGroupTreeEntries(root).find((entry) => entry.id === materializedTargetGroupId) || null;
     const assignmentSourceFrameGroupIds = Array.from(
@@ -14753,7 +14919,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const nextFrameGroupIds = Array.from(
       new Set([
         ...(existingTreeEntry?.frameGroupIds || []),
-        ...(targetGroup.inferred ? targetGroup.frameGroupIds : []),
         ...selectedDirectFrameGroupIds,
       ].map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
     );
@@ -16908,10 +17073,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const groups = collectPositionBoxGroups(root, {
-        includeSingletons: false,
-        includeExplicitMembersInInferred: true,
-      });
+      const groups = collectPositionBoxGroups(root, { includeSingletons: false });
       const groupById = new Map(groups.map((group) => [group.id, group] as const));
       let targetFrameGroupIds: string[] = [];
       let targetGroupIds: string[] = [];
@@ -19659,13 +19821,69 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	                <>
 	                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
 	                    <div className="space-y-2">
-	                      {renderPositionSummarySection(
-	                        '선택 상자',
-	                        [
-	                          renderPositionSummaryCountRow('position-summary-selected-count', '선택 상자', selectedFrameGroupIds.length),
-	                          renderPositionSummaryListRow('position-summary-selected-ids', '선택 ID', selectedFrameGroupIds),
-	                        ]
-	                      )}
+		                      {renderPositionSummarySection(
+		                        selectedPositionActiveGroup ? '선택 그룹' : '선택 상자',
+		                        selectedPositionActiveGroup
+		                          ? [
+		                              renderPositionSummaryTextRow(
+		                                'position-summary-selected-entity-kind',
+		                                '선택 대상',
+		                                '그룹'
+		                              ),
+		                              renderPositionSummaryTextRow(
+		                                'position-summary-selected-group-label',
+		                                '그룹 이름',
+		                                normalizePositionGroupDisplayLabel(
+		                                  selectedPositionActiveGroup.label,
+		                                  selectedPositionActiveGroup.id
+		                                )
+		                              ),
+		                              renderPositionSummaryTextRow(
+		                                'position-summary-selected-group-id',
+		                                '그룹 ID',
+		                                selectedPositionActiveGroup.id
+		                              ),
+		                              renderPositionSummaryListRow(
+		                                'position-summary-selected-group-child-groups',
+		                                '하위 그룹',
+		                                selectedPositionActiveGroupChildGroupLabels
+		                              ),
+		                              renderPositionSummaryListRow(
+		                                'position-summary-selected-group-child-group-ids',
+		                                '하위 그룹 ID',
+		                                selectedPositionActiveGroupChildGroupIds
+		                              ),
+		                              renderPositionSummaryListRow(
+		                                'position-summary-selected-group-direct-boxes',
+		                                '하위 상자 ID',
+		                                selectedPositionActiveGroupDirectFrameGroupIds
+		                              ),
+		                              renderPositionSummaryListRow(
+		                                'position-summary-selected-group-all-boxes',
+		                                '포함 전체 상자 ID',
+		                                selectedPositionActiveGroup.frameGroupIds
+		                              ),
+		                            ]
+		                          : [
+		                              renderPositionSummaryTextRow(
+		                                'position-summary-selected-entity-kind',
+		                                '선택 대상',
+		                                selectedFrameGroupIds.length > 0 ? '상자' : ''
+		                              ),
+		                              renderPositionSummaryCountRow('position-summary-selected-count', '선택 상자', selectedFrameGroupIds.length),
+		                              renderPositionSummaryListRow('position-summary-selected-ids', '선택 상자 ID', selectedFrameGroupIds),
+		                              renderPositionSummaryListRow(
+		                                'position-summary-parent-groups',
+		                                '상위 그룹',
+		                                selectedPositionParentGroupLabels
+		                              ),
+		                              renderPositionSummaryListRow(
+		                                'position-summary-parent-group-ids',
+		                                '상위 그룹 ID',
+		                                selectedPositionParentGroupIds
+		                              ),
+		                            ]
+		                      )}
 	                      {renderPositionSummarySection(
 	                        '그룹 / 위치 영향',
 	                        [
@@ -19679,6 +19897,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	                                )} (${primarySelectedPositionBoxGroup.frameGroupIds.length}개)`
 	                              : ''
 	                          ),
+	                          ...selectedPositionGroupDetailRows.flatMap((groupDetail) => [
+	                            renderPositionSummaryTextRow(
+	                              `position-summary-group-detail-id-${groupDetail.groupId}`,
+	                              groupDetail.isSelectedGroup
+	                                ? '선택 그룹 ID'
+	                                : '상위 그룹 ID',
+	                              groupDetail.groupId
+	                            ),
+	                            renderPositionSummaryListRow(
+	                              `position-summary-group-detail-members-${groupDetail.groupId}`,
+	                              `${groupDetail.label} 소속 상자 ID`,
+	                              groupDetail.frameGroupIds
+	                            ),
+	                          ]),
 	                          renderPositionSummaryListRow(
 	                            'position-summary-impact-groups',
 	                            '위치 영향 대상 그룹',
