@@ -719,6 +719,32 @@ const resolvePositionStableVisual = (entityId: string, label = '', selectionOrde
   ...resolvePositionStableColorPreset(entityId, label),
 });
 
+const buildStablePositionGroupProxySelection = (
+  groupId: string,
+  label: string,
+  frameGroupIds: string[],
+  selectionOrder = 1
+): PositionGroupProxySelection => {
+  const normalizedGroupId = groupId.trim();
+  const normalizedLabel = label.trim() || normalizedGroupId;
+  const visual = resolvePositionStableVisual(normalizedGroupId, normalizedLabel, selectionOrder);
+
+  return {
+    groupId: normalizedGroupId,
+    label: normalizedLabel,
+    frameGroupIds: Array.from(
+      new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+    ),
+    selectionOrder: visual.selectionOrder,
+    colorName: visual.colorName,
+    outlineColor: visual.outlineColor,
+    fillColor: visual.fillColor,
+    haloColor: visual.haloColor,
+    badgeColor: visual.badgeColor,
+    badgeTextColor: visual.badgeTextColor,
+  };
+};
+
 const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
   renderedPreviewHtml,
   boxCreationMode,
@@ -3007,6 +3033,100 @@ const prunePositionGroupTreeReferences = (
           )
         ),
       }))
+      .filter((entry) => (entry.childGroupIds || []).length > 0 || (entry.frameGroupIds || []).length > 0);
+
+    if (JSON.stringify(previousEntries) === JSON.stringify(nextEntries)) {
+      return;
+    }
+
+    changedCount += 1;
+    if (nextEntries.length > 0) {
+      host.setAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR, JSON.stringify(nextEntries));
+    } else {
+      host.removeAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR);
+    }
+  });
+
+  return changedCount;
+};
+
+const unwrapPositionGroupTreeEntriesByIds = (root: ParentNode | null | undefined, groupIds: string[]) => {
+  if (!root) {
+    return 0;
+  }
+
+  const targetGroupIdSet = new Set(groupIds.map((groupId) => groupId.trim()).filter(Boolean));
+
+  if (targetGroupIdSet.size <= 0) {
+    return 0;
+  }
+
+  let changedCount = 0;
+  const hostElements: HTMLElement[] = [];
+
+  if (root instanceof HTMLElement && root.hasAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR)) {
+    hostElements.push(root);
+  }
+  hostElements.push(...Array.from(root.querySelectorAll<HTMLElement>(`[${TEMPLATE_POSITION_GROUP_TREE_ATTR}]`)));
+
+  hostElements.forEach((host) => {
+    const previousEntries = readStoredPositionGroupTreeEntriesFromHost(host);
+
+    if (previousEntries.length <= 0) {
+      return;
+    }
+
+    const targetEntryById = new Map(
+      previousEntries
+        .filter((entry) => targetGroupIdSet.has(entry.id))
+        .map((entry) => [entry.id, entry] as const)
+    );
+
+    if (targetEntryById.size <= 0) {
+      return;
+    }
+
+    const nextEntries = previousEntries
+      .filter((entry) => !targetGroupIdSet.has(entry.id))
+      .map((entry) => {
+        const nextChildGroupIds: string[] = [];
+        const nextFrameGroupIds = (entry.frameGroupIds || [])
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter(Boolean);
+
+        (entry.childGroupIds || []).forEach((childGroupId) => {
+          const normalizedChildGroupId = childGroupId.trim();
+          const targetEntry = targetEntryById.get(normalizedChildGroupId) || null;
+
+          if (!targetEntry) {
+            if (normalizedChildGroupId) {
+              nextChildGroupIds.push(normalizedChildGroupId);
+            }
+            return;
+          }
+
+          (targetEntry.childGroupIds || []).forEach((grandChildGroupId) => {
+            const normalizedGrandChildGroupId = grandChildGroupId.trim();
+
+            if (normalizedGrandChildGroupId && !targetGroupIdSet.has(normalizedGrandChildGroupId)) {
+              nextChildGroupIds.push(normalizedGrandChildGroupId);
+            }
+          });
+          (targetEntry.frameGroupIds || []).forEach((frameGroupId) => {
+            const normalizedFrameGroupId = frameGroupId.trim();
+
+            if (normalizedFrameGroupId) {
+              nextFrameGroupIds.push(normalizedFrameGroupId);
+            }
+          });
+        });
+
+        return {
+          ...entry,
+          childGroupIds: Array.from(new Set(nextChildGroupIds)),
+          frameGroupIds: Array.from(new Set(nextFrameGroupIds)),
+        };
+      })
       .filter((entry) => (entry.childGroupIds || []).length > 0 || (entry.frameGroupIds || []).length > 0);
 
     if (JSON.stringify(previousEntries) === JSON.stringify(nextEntries)) {
@@ -7067,6 +7187,20 @@ const queryFrameSelectionAnchorByFrameGroupId = (
   );
 };
 
+const collectFrameSelectionAnchorByIdMap = (scope: ParentNode | null | undefined) => {
+  const frameNodeById = new Map<string, HTMLElement>();
+
+  collectFrameSelectionAnchors(scope).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+
+    if (frameGroupId && !frameNodeById.has(frameGroupId)) {
+      frameNodeById.set(frameGroupId, node);
+    }
+  });
+
+  return frameNodeById;
+};
+
 const isInteractiveTarget = (target: HTMLElement | null) => {
   const interactive = target?.closest<HTMLElement>(
     'input, textarea, select, option, button, a, [contenteditable="true"], [data-template-frame-input="true"]'
@@ -8702,7 +8836,8 @@ const clearFastSelectionEditorUi = (root: HTMLElement) => {
 
 const appendPositionGroupProxyOverlayFast = (
   root: HTMLElement,
-  positionGroupProxySelections: PositionGroupProxySelection[] = []
+  positionGroupProxySelections: PositionGroupProxySelection[] = [],
+  frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
   if (!positionGroupProxySelections.length) {
     return;
@@ -8719,7 +8854,7 @@ const appendPositionGroupProxyOverlayFast = (
     >();
 
     positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
-      const frameNode = queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId);
+      const frameNode = frameNodeById.get(frameGroupId.trim()) || null;
 
       if (!frameNode) {
         return;
@@ -8803,7 +8938,8 @@ const applyPositionImpactGroupSelectionUiFast = (
   selectionPanelTab: SelectionPanelTab,
   selectedFrameGroupIds: string[] = [],
   positionRelationAnchorFrameGroupId: string = '',
-  positionBoxGroups: PositionImpactGroup[] = []
+  positionBoxGroups: PositionImpactGroup[] = [],
+  frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((node) => {
     node.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
@@ -8863,7 +8999,7 @@ const applyPositionImpactGroupSelectionUiFast = (
     }
 
     group.frameGroupIds.forEach((frameGroupId) => {
-      const frameNode = queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId);
+      const frameNode = frameNodeById.get(frameGroupId.trim()) || null;
       if (frameNode) {
         frameNode.setAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR, group.id);
       }
@@ -8874,7 +9010,8 @@ const applyPositionImpactGroupSelectionUiFast = (
 const applyFastFrameSelectionUi = (
   root: HTMLElement,
   selectedIds: string[],
-  positionGroupProxySelections: PositionGroupProxySelection[] = []
+  positionGroupProxySelections: PositionGroupProxySelection[] = [],
+  frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
   clearFastSelectionEditorUi(root);
 
@@ -8889,7 +9026,7 @@ const applyFastFrameSelectionUi = (
   const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
 
   normalizedSelectedIds.forEach((frameGroupId, selectionIndex) => {
-    const node = queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId);
+    const node = frameNodeById.get(frameGroupId) || null;
 
     if (!node) {
       return;
@@ -8911,7 +9048,7 @@ const applyFastFrameSelectionUi = (
     appendFrameSelectionFill(node, canShowCanvasDeleteButton);
   });
 
-  appendPositionGroupProxyOverlayFast(root, positionGroupProxySelections);
+  appendPositionGroupProxyOverlayFast(root, positionGroupProxySelections, frameNodeById);
 };
 
 const appendPositionGroupCatalogOverlay = (root: HTMLElement) => {
@@ -9280,8 +9417,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const canvasHistoryEntriesRef = React.useRef<CanvasHistoryEntry[]>([]);
   const canvasHistoryIndexRef = React.useRef(-1);
   const canvasHistoryNavigationInProgressRef = React.useRef(false);
-  const autoPersistDraftTimerRef = React.useRef<number | null>(null);
-  const autoPersistDraftInFlightRef = React.useRef(false);
   const queuedAutoPersistDraftHtmlRef = React.useRef('');
   const lastPersistedDraftHtmlRef = React.useRef('');
 
@@ -9660,109 +9795,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     restoreCanvasHistoryAtIndex(currentIndex + 1, '다시 실행하기');
   }, [restoreCanvasHistoryAtIndex]);
-  const resolveActiveTemplateId = React.useCallback(
-    () => selectedTemplateId.trim() || templateDetail?.template.id || '',
-    [selectedTemplateId, templateDetail?.template.id]
-  );
   const cancelScheduledAutoPersistDraft = React.useCallback(() => {
-    if (typeof window === 'undefined') {
-      autoPersistDraftTimerRef.current = null;
-      return;
-    }
-
-    if (autoPersistDraftTimerRef.current !== null) {
-      window.clearTimeout(autoPersistDraftTimerRef.current);
-      autoPersistDraftTimerRef.current = null;
-    }
+    queuedAutoPersistDraftHtmlRef.current = '';
   }, []);
-  const flushQueuedAutoPersistDraft = React.useCallback(async () => {
-    const templateId = resolveActiveTemplateId();
-    const queuedDraftHtml = queuedAutoPersistDraftHtmlRef.current.trim();
-
-    if (!templateId || !queuedDraftHtml) {
-      return;
-    }
-
-    if (queuedDraftHtml === lastPersistedDraftHtmlRef.current.trim()) {
-      queuedAutoPersistDraftHtmlRef.current = '';
-      return;
-    }
-
-    if (autoPersistDraftInFlightRef.current) {
-      return;
-    }
-
-    autoPersistDraftInFlightRef.current = true;
-
-    try {
-      const response = await fetch(`/api/templates/${templateId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          draftHtml: queuedDraftHtml,
-        }),
-      });
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || '자동 저장에 실패했습니다.');
-      }
-
-      const updatedTemplate = result.data?.template as TemplateRecordDto | undefined;
-      if (updatedTemplate) {
-        setTemplates((previous) =>
-          [updatedTemplate, ...previous.filter((item) => item.id !== updatedTemplate.id)].slice(0, 64)
-        );
-      }
-      setTemplateDetail((previous) =>
-        previous
-          ? {
-              ...previous,
-              template: {
-                ...previous.template,
-                draftHtml: queuedDraftHtml,
-              },
-            }
-          : previous
-      );
-      lastPersistedDraftHtmlRef.current = queuedDraftHtml;
-      queuedAutoPersistDraftHtmlRef.current = '';
-    } catch (error) {
-      const nextMessage =
-        error instanceof Error ? error.message : '위치 자동 저장에 실패했습니다.';
-      setMessage(nextMessage);
-    } finally {
-      autoPersistDraftInFlightRef.current = false;
-    }
-  }, [resolveActiveTemplateId]);
-  const scheduleAutoPersistDraft = React.useCallback(
-    (nextDraftHtml: string) => {
-      const normalizedDraftHtml = nextDraftHtml.trim();
-      const templateId = resolveActiveTemplateId();
-
-      if (!templateId || !normalizedDraftHtml) {
-        return;
-      }
-
-      if (normalizedDraftHtml === lastPersistedDraftHtmlRef.current.trim()) {
-        queuedAutoPersistDraftHtmlRef.current = '';
-        return;
-      }
-
-      queuedAutoPersistDraftHtmlRef.current = normalizedDraftHtml;
-      cancelScheduledAutoPersistDraft();
-
-      if (typeof window === 'undefined') {
-        return;
-      }
-
-      autoPersistDraftTimerRef.current = window.setTimeout(() => {
-        autoPersistDraftTimerRef.current = null;
-        void flushQueuedAutoPersistDraft();
-      }, 350);
-    },
-    [cancelScheduledAutoPersistDraft, flushQueuedAutoPersistDraft, resolveActiveTemplateId]
-  );
   React.useEffect(() => {
     return () => {
       cancelScheduledAutoPersistDraft();
@@ -9791,9 +9826,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         showAllGroupProxySelections: positionGroupProxySelectionShowAllGroupsRef.current,
       });
     }
-    scheduleAutoPersistDraft(nextDraftHtml);
     return nextDraftHtml;
-  }, [pushCanvasHistoryEntry, scheduleAutoPersistDraft]);
+  }, [pushCanvasHistoryEntry]);
 
   const requestPreviewTextFit = React.useCallback(() => {
     const root = previewRef.current;
@@ -10014,7 +10048,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           if (root && result.clearedCount > 0) {
             applyRelativeAnchoredFrameRectsInRoot(root);
             syncDraftPreviewHtmlRef();
-            void flushQueuedAutoPersistDraft();
             requestPreviewTextFit();
             setMessage(
               `문제 간격 설정 ${result.clearedCount}개를 삭제했습니다. 대상: ${formatIssueList(
@@ -10032,7 +10065,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
     }
   }, [
-    flushQueuedAutoPersistDraft,
     positionGroupStructureWarningSignature,
     positionGroupStructureWarnings,
     requestPreviewTextFit,
@@ -12257,10 +12289,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
   const hasSelectedPositionBoxes = selectedFrameGroupIds.length > 0;
   const canClearSelectedPositionGroups = selectedExplicitPositionCurrentBoxGroups.length > 0;
-  const canCreatePositionGroupFromSelection =
-    selectedPositionEntitySelection.entityCount >= 2 ||
-    selectedPositionGroupingFrameGroupIds.length >= 2 ||
-    Boolean(selectedPositionResolvedBoxGroup && selectedPositionResolvedBoxGroup.frameGroupIds.length >= 2);
+  const canCreatePositionGroupFromSelection = selectedPositionEntitySelection.entityCount >= 2;
   const canOpenPositionSpacingSettings = true;
   const canAssignSelectedItemsToGroup =
     explicitPositionBoxGroups.length > 0 && selectedPositionEntitySelection.entityCount > 0;
@@ -14252,7 +14281,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     (
       nextSelectedFrameGroupIds: string[],
       nextEdgeSelectionState: TemplateEdgeSelectionStateDto,
-      overridePositionGroupProxySelections?: PositionGroupProxySelection[]
+      overridePositionGroupProxySelections?: PositionGroupProxySelection[],
+      frameNodeById?: Map<string, HTMLElement>
     ) => {
       selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
       edgeSelectionStateRef.current = nextEdgeSelectionState;
@@ -14262,18 +14292,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
+      const resolvedFrameNodeById = frameNodeById || collectFrameSelectionAnchorByIdMap(root);
       applyFastFrameSelectionUi(
         root,
         nextSelectedFrameGroupIds,
         overridePositionGroupProxySelections ??
-          resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
+          resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current),
+        resolvedFrameNodeById
       );
       applyPositionImpactGroupSelectionUiFast(
         root,
         selectionPanelTab,
         nextSelectedFrameGroupIds,
         positionRelationAnchorFrameGroupId,
-        positionBoxGroups
+        positionBoxGroups,
+        resolvedFrameNodeById
       );
     },
     [
@@ -14299,6 +14332,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         showAllGroupProxySelections?: boolean;
         disableAutoPositionGroupProxySelection?: boolean;
         overridePositionGroupProxySelections?: PositionGroupProxySelection[];
+        fastFrameNodeById?: Map<string, HTMLElement>;
       }
     ) => {
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
@@ -14372,7 +14406,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
 
       if (selectionPanelTab === 'position') {
-        applyFastFrameBoxSelectionVisuals(normalizedSelectionIds, emptyEdgeSelection, nextPositionGroupProxySelections);
+        applyFastFrameBoxSelectionVisuals(
+          normalizedSelectionIds,
+          emptyEdgeSelection,
+          nextPositionGroupProxySelections,
+          options?.fastFrameNodeById
+        );
         schedulePositionSelectionReactStateCommit(commitSelectionReactState);
         schedulePreviewEditorStateAfterSelectionPaint();
       } else {
@@ -14467,6 +14506,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectDefinedPositionRelationEntities = React.useCallback(
     (relation: DefinedPositionRelativeRelation) => {
       setSelectedPositionSpacingSettingRelationKey(relation.key);
+      const frameNodeById = collectFrameSelectionAnchorByIdMap(previewRef.current);
       const selectionIdSet = new Set<string>();
       const nextSelectionKindByFrameGroupId: Record<string, 'group' | 'frame'> = {};
       const nextSelectionGroupIdByFrameGroupId: Record<string, string> = {};
@@ -14477,14 +14517,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         if (!normalizedFrameGroupId) {
           return;
         }
-        const root = previewRef.current;
-        const hasFrameNode = Boolean(
-          root?.querySelector<HTMLElement>(
-            `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${escapeCssAttributeValue(normalizedFrameGroupId)}"]`
-          )
-        );
 
-        if (!hasFrameNode) {
+        if (!frameNodeById.has(normalizedFrameGroupId)) {
           return;
         }
 
@@ -14556,6 +14590,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         positionGroupProxySelectionGroupId: '',
         showAllGroupProxySelections: true,
         overridePositionGroupProxySelections: Array.from(proxySelectionsByGroupId.values()),
+        fastFrameNodeById: frameNodeById,
       });
     },
     [applyFrameBoxSelection, positionBoxGroupById, positionSpacingEntityVisualByKey]
@@ -15889,12 +15924,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       const normalizedSelectionIdSet = new Set(normalizedSelectionIds);
       const normalizedProxySelections = (proxySelections || [])
-        .map((proxySelection) => ({
-          ...proxySelection,
-          frameGroupIds: Array.from(
+        .map((proxySelection, proxySelectionIndex) => {
+          const frameGroupIds = Array.from(
             new Set(proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
-          ),
-        }))
+          );
+
+          return buildStablePositionGroupProxySelection(
+            proxySelection.groupId,
+            proxySelection.label,
+            frameGroupIds,
+            proxySelectionIndex + 1
+          );
+        })
         .filter(
           (proxySelection) =>
             proxySelection.frameGroupIds.length > 1 &&
@@ -16440,35 +16481,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const groupById = new Map(allGroups.map((group) => [group.id, group] as const));
     const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
     const activeProxyGroup = activeProxyGroupId ? groupById.get(activeProxyGroupId) || null : null;
-    const singleSelectedGroup =
-      selectedPositionEntitySelection.entityCount === 1 && selectedPositionEntitySelection.groupIds.length === 1
-        ? groupById.get(selectedPositionEntitySelection.groupIds[0] || '') || null
-        : null;
+    const currentSelectedFrameGroupIds = Array.from(
+      new Set(selectedFrameGroupIdsRef.current.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+    );
+
+    if (activeProxyGroup && currentSelectedFrameGroupIds.length === activeProxyGroup.frameGroupIds.length) {
+      const activeProxyFrameGroupIdSet = new Set(activeProxyGroup.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
+      const isOnlyActiveProxyGroupSelected = currentSelectedFrameGroupIds.every((frameGroupId) =>
+        activeProxyFrameGroupIdSet.has(frameGroupId)
+      );
+
+      if (isOnlyActiveProxyGroupSelected) {
+        setMessage(`단일 ${POSITION_GROUP_LABEL_PREFIX}은 다시 ${POSITION_GROUP_LABEL_PREFIX}으로 만들 수 없습니다. 하위 상자를 2개 이상 직접 선택하세요.`);
+        return;
+      }
+    }
+
     const rawSelectedFrameGroupIds = Array.from(
       new Set(selectedPositionGroupingFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
     );
     let selectedChildGroupIds = selectedPositionEntitySelection.groupIds.filter((groupId) => groupById.has(groupId));
     let selectedDirectFrameGroupIds = selectedPositionEntitySelection.frameGroupIds.slice();
-    let forcedParentGroupId = '';
 
     if (selectedPositionEntitySelection.entityCount < 2) {
-      const sourceGroup = activeProxyGroup || singleSelectedGroup;
-      const sourceDirectFrameGroupIds = Array.from(
-        new Set(
-          (sourceGroup?.directFrameGroupIds?.length ? sourceGroup.directFrameGroupIds : sourceGroup?.frameGroupIds || [])
-            .map((frameGroupId) => frameGroupId.trim())
-            .filter(Boolean)
-        )
-      );
-
-      if (sourceGroup && sourceDirectFrameGroupIds.length >= 2) {
-        selectedChildGroupIds = [];
-        selectedDirectFrameGroupIds = sourceDirectFrameGroupIds;
-        forcedParentGroupId = sourceGroup.id;
-      } else if (rawSelectedFrameGroupIds.length >= 2 && !selectedPositionExactMatchedBoxGroup) {
+      if (
+        selectedPositionEntitySelection.groupIds.length <= 0 &&
+        rawSelectedFrameGroupIds.length >= 2 &&
+        !selectedPositionExactMatchedBoxGroup
+      ) {
         selectedChildGroupIds = [];
         selectedDirectFrameGroupIds = rawSelectedFrameGroupIds;
       } else {
+        if (
+          selectedPositionEntitySelection.entityCount === 1 &&
+          selectedPositionEntitySelection.groupIds.length === 1
+        ) {
+          setMessage(`단일 ${POSITION_GROUP_LABEL_PREFIX}은 다시 ${POSITION_GROUP_LABEL_PREFIX}으로 만들 수 없습니다. 하위 상자를 2개 이상 직접 선택하세요.`);
+          return;
+        }
+
         setMessage(`하나의 ${POSITION_GROUP_LABEL_PREFIX}으로 묶을 그룹 또는 상자를 2개 이상 선택하세요.`);
         return;
       }
@@ -16575,10 +16626,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .filter((group) => group.id !== nextGroupId)
       .filter((group) => !selectedChildGroupIdSet.has(group.id))
       .filter((group) => {
-        if (forcedParentGroupId && group.id === forcedParentGroupId) {
-          return true;
-        }
-
         if (group.frameGroupIds.length <= regroupTargetFrameGroupIds.length) {
           return false;
         }
@@ -16862,21 +16909,29 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         explicitGroupByFrameGroupId.set(frameGroupId, group);
       });
     });
-    const targetGroupIds = Array.from(
-      new Set(
-        selectedPositionGroupingFrameGroupIds
-          .map((frameGroupId) => explicitGroupByFrameGroupId.get(frameGroupId)?.id || '')
-          .filter((groupId) => Boolean(groupId))
-      )
-    );
-    const targetIds = Array.from(
-      new Set(
-        selectedPositionGroupingFrameGroupIds.flatMap((frameGroupId) => {
-          const group = explicitGroupByFrameGroupId.get(frameGroupId);
-          return group ? group.frameGroupIds : [];
-        })
-      )
-    );
+    const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
+    const activeProxyGroup = activeProxyGroupId
+      ? explicitGroups.find((group) => group.id === activeProxyGroupId) || null
+      : null;
+    const targetGroupIds = activeProxyGroup
+      ? [activeProxyGroup.id]
+      : Array.from(
+          new Set(
+            selectedPositionGroupingFrameGroupIds
+              .map((frameGroupId) => explicitGroupByFrameGroupId.get(frameGroupId)?.id || '')
+              .filter((groupId) => Boolean(groupId))
+          )
+        );
+    const targetIds = activeProxyGroup
+      ? activeProxyGroup.frameGroupIds.slice()
+      : Array.from(
+          new Set(
+            selectedPositionGroupingFrameGroupIds.flatMap((frameGroupId) => {
+              const group = explicitGroupByFrameGroupId.get(frameGroupId);
+              return group ? group.frameGroupIds : [];
+            })
+          )
+        );
 
     if (targetIds.length === 0) {
       setMessage(`해제할 명시 ${POSITION_GROUP_LABEL_PREFIX}이 없습니다. 먼저 그룹에 속한 상자를 선택하세요.`);
@@ -16886,6 +16941,34 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const spacingDependencies = collectPositionSpacingDependenciesForGroupMutation(root, targetGroupIds, targetIds);
 
     if (spacingDependencies.dependencyCount > 0) {
+      const targetGroupIdSet = new Set(targetGroupIds.map((groupId) => groupId.trim()).filter(Boolean));
+      const hasGroupAnchorDependency = spacingDependencies.anchorIds.some((anchorId) =>
+        targetGroupIdSet.has(anchorId.trim())
+      );
+      const canUnwrapGroupLayer = targetGroupIds.some((groupId) =>
+        readPositionGroupTreeEntries(root).some((entry) => entry.id === groupId) ||
+        Boolean(resolvePositionGroupWrapperElement(root, groupId))
+      );
+
+      if (!hasGroupAnchorDependency && canUnwrapGroupLayer) {
+        const unwrappedCount = unwrapPositionGroupTreeEntriesByIds(root, targetGroupIds);
+        const removedWrapperCount = removePositionGroupWrappersByIds(root, targetGroupIds);
+
+        if (unwrappedCount <= 0 && removedWrapperCount <= 0) {
+          setMessage(`해제할 ${POSITION_GROUP_LABEL_PREFIX} 레이어를 찾지 못했습니다.`);
+          return;
+        }
+
+        materializePositionGroupWrappers(root);
+        applyRelativeAnchoredFrameRectsInRoot(root);
+        syncDraftPreviewHtmlRef();
+        requestPreviewTextFit();
+        setMessage(
+          `${POSITION_GROUP_LABEL_PREFIX} 레이어 해제 완료: ${targetGroupIds.join(', ')}. 기존 간격 설정은 유지했습니다.`
+        );
+        return;
+      }
+
       const blockedMessage = buildBlockedGroupMutationMessage('그룹 해제', spacingDependencies);
       setMessage(blockedMessage);
       if (typeof window !== 'undefined') {
@@ -18975,7 +19058,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyRelativeAnchoredFrameRectsInRoot(root);
       applyRuntimeSelectionUi([], emptyEdgeSelection, []);
       syncDraftPreviewHtmlRef();
-      void flushQueuedAutoPersistDraft();
       requestPreviewTextFit();
       schedulePreviewEditorState();
       setMessage(
@@ -18986,7 +19068,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [
       applyRuntimeSelectionUi,
-      flushQueuedAutoPersistDraft,
       requestPreviewTextFit,
       schedulePreviewEditorState,
       syncDraftPreviewHtmlRef,
@@ -20746,6 +20827,61 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }));
   }, []);
 
+  const selectPositionGroupFromGroupList = React.useCallback(
+    (group: PositionImpactGroup) => {
+      const groupSelectionIds = group.frameGroupIds
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId));
+
+      if (groupSelectionIds.length <= 0) {
+        return;
+      }
+
+      const groupDisplayLabel = normalizePositionGroupDisplayLabel(group.label, group.id);
+      const groupProxySelection = buildStablePositionGroupProxySelection(group.id, groupDisplayLabel, groupSelectionIds);
+
+      if (positionOrderLockSelectionMode) {
+        applyPositionOrderLockMarqueeSelection(groupSelectionIds, [groupProxySelection]);
+        return;
+      }
+
+      applyFrameBoxSelection(groupSelectionIds, {
+        positionGroupProxySelectionGroupId: group.id,
+        showAllGroupProxySelections: true,
+        overridePositionGroupProxySelections: [groupProxySelection],
+      });
+    },
+    [applyFrameBoxSelection, applyPositionOrderLockMarqueeSelection, positionOrderLockSelectionMode]
+  );
+
+  const selectPositionFrameFromGroupList = React.useCallback(
+    (frameGroupId: string) => {
+      const normalizedFrameGroupId = frameGroupId.trim();
+
+      if (!normalizedFrameGroupId) {
+        return;
+      }
+
+      if (positionOrderLockSelectionMode) {
+        setPositionOrderLockFrameGroupIds([normalizedFrameGroupId]);
+        setPositionOrderLockSelectionKindByFrameGroupId({
+          [normalizedFrameGroupId]: 'frame',
+        });
+        setPositionOrderLockSelectionGroupIdByFrameGroupId({});
+        setPositionOrderLockCandidateFrameGroupId(normalizedFrameGroupId);
+        setPositionOrderLockCandidateGroupId('');
+        setPositionOrderLockCandidateSelectionStage('frame');
+      }
+
+      applyFrameBoxSelection([normalizedFrameGroupId], {
+        disableAutoPositionGroupProxySelection: true,
+        showAllGroupProxySelections: false,
+        overridePositionGroupProxySelections: [],
+      });
+    },
+    [applyFrameBoxSelection, positionOrderLockSelectionMode]
+  );
+
   const renderPositionSummarySection = (title: string, children: React.ReactNode) => {
     const content = React.Children.toArray(children);
 
@@ -22334,45 +22470,41 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 		              {selectionPanelTab === 'position' ? (
 		                <>
 		                  {positionBoxGroups.length > 0 ? (
-                    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
-                      <div className="font-semibold text-slate-900">전체 그룹 ({positionBoxGroups.length}개)</div>
+                    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-left text-xs leading-5 text-slate-700">
+                      <div className="text-left font-semibold text-slate-900">전체 그룹 ({positionBoxGroups.length}개)</div>
                       {positionBoxGroupTreeRows.map(({ group, depth }) => {
                         const isSelectedGroup = primarySelectedPositionBoxGroup?.id === group.id;
                         const isExpanded = Boolean(expandedPositionBoxGroupIds[group.id]);
+                        const groupDisplayLabel = normalizePositionGroupDisplayLabel(group.label, group.id);
+                        const groupVisual = resolvePositionStableVisual(group.id, groupDisplayLabel);
 
                         return (
                           <div
                             key={group.id}
-                            style={{ marginLeft: `${depth * 20}px` }}
-                            className={`rounded border p-2 text-xs ${
-                              isSelectedGroup
-                                ? 'border-blue-300 bg-blue-50'
-                                : 'border-amber-300 bg-amber-50'
-                            }`}
+                            style={{
+                              marginLeft: `${depth * 20}px`,
+                              borderColor: groupVisual.outlineColor,
+                              backgroundColor: groupVisual.fillColor,
+                              boxShadow: isSelectedGroup
+                                ? `0 0 0 2px ${groupVisual.haloColor}, inset 0 0 0 1px rgba(255, 255, 255, .82)`
+                                : 'inset 0 0 0 1px rgba(255, 255, 255, .72)',
+                            }}
+                            className="rounded border p-2 text-left text-xs"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <button
                                 type="button"
-                                className="flex flex-1 items-center gap-1 text-left"
-                                onClick={() => {
-                                  const groupSelectionIds = group.frameGroupIds
-                                    .map((frameGroupId) => frameGroupId.trim())
-                                    .filter((frameGroupId) => Boolean(frameGroupId));
-                                  if (groupSelectionIds.length <= 0) {
-                                    return;
-                                  }
-
-                                  applyFrameBoxSelection(
-                                    groupSelectionIds,
-                                    {
-                                      positionGroupProxySelectionGroupId: group.id,
-                                    }
-                                  );
-                                }}
+                                className="flex min-w-0 flex-1 items-center justify-start gap-2 self-stretch text-left"
+                                onClick={() => selectPositionGroupFromGroupList(group)}
                               >
-                                <span className="font-medium text-slate-800">
-                                  {group.label}{' '}
-                                  <span className="font-normal text-slate-500">({group.frameGroupIds.length}개)</span>
+                                <span
+                                  className="h-3 w-3 shrink-0 rounded-full"
+                                  style={{ backgroundColor: groupVisual.badgeColor }}
+                                  aria-hidden="true"
+                                />
+                                <span className="flex min-w-0 flex-1 flex-col items-start justify-start text-left leading-4">
+                                  <span className="block max-w-full truncate text-left font-semibold text-slate-900">{groupDisplayLabel}</span>
+                                  <span className="block text-left font-normal text-slate-600">포함 상자 {group.frameGroupIds.length}개</span>
                                 </span>
                               </button>
                               <button
@@ -22390,7 +22522,35 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                               </button>
                             </div>
                             {isExpanded ? (
-                              <div className="mt-1 break-all text-slate-600">{group.frameGroupIds.join(', ')}</div>
+                              <div className="mt-2 flex flex-wrap items-start justify-start gap-1 text-left">
+                                {group.frameGroupIds.map((frameGroupId) => {
+                                  const normalizedFrameGroupId = frameGroupId.trim();
+
+                                  if (!normalizedFrameGroupId) {
+                                    return null;
+                                  }
+
+                                  return (
+                                    <button
+                                      key={`${group.id}:${normalizedFrameGroupId}`}
+                                      type="button"
+                                      className="inline-flex max-w-full items-center justify-start rounded-full border bg-white px-2 py-0.5 text-left text-[10px] font-medium leading-4 text-slate-700 hover:bg-slate-50"
+                                      style={{
+                                        borderColor: groupVisual.outlineColor,
+                                        color: groupVisual.badgeColor,
+                                      }}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        selectPositionFrameFromGroupList(normalizedFrameGroupId);
+                                      }}
+                                      title={`${normalizedFrameGroupId} 상자 선택`}
+                                    >
+                                      <span className="truncate">{normalizedFrameGroupId}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             ) : null}
                           </div>
                         );
