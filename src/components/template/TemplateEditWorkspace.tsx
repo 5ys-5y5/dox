@@ -287,6 +287,19 @@ type PositionGroupProxySelection = {
 
 type FrameMarqueeSelectionMode = 'contained' | 'intersected';
 
+type MarqueeFrameHitEntry = {
+  frameGroupId: string;
+  rect: FrameNodeRect;
+};
+
+type MarqueePositionGroupHitEntry = {
+  groupId: string;
+  label: string;
+  frameGroupIds: string[];
+  frameGroupIdSet: Set<string>;
+  rect: FrameNodeRect;
+};
+
 type DragState = {
   pointerId: number;
   startX: number;
@@ -339,6 +352,8 @@ type MarqueeSelectionState = {
   baseSelectionIds: string[];
   lastSelectionIds: string[];
   lastProxySelections?: PositionGroupProxySelection[];
+  frameHitEntries: MarqueeFrameHitEntry[];
+  positionGroupHitEntries: MarqueePositionGroupHitEntry[];
   origin: {
     x: number;
     y: number;
@@ -1575,6 +1590,115 @@ const rectIntersectsRect = (left: FrameNodeRect, right: FrameNodeRect) =>
   left.left + left.width > right.left + FRAME_RESIZE_TOLERANCE_PX &&
   left.top < right.top + right.height - FRAME_RESIZE_TOLERANCE_PX &&
   left.top + left.height > right.top + FRAME_RESIZE_TOLERANCE_PX;
+
+const resolveMarqueeSelectionIdsFromHitEntries = ({
+  selectionRect,
+  mode,
+  baseSelectionIds,
+  frameHitEntries,
+  positionGroupHitEntries,
+  usePositionGroups,
+}: {
+  selectionRect: FrameNodeRect;
+  mode: FrameMarqueeSelectionMode;
+  baseSelectionIds: string[];
+  frameHitEntries: MarqueeFrameHitEntry[];
+  positionGroupHitEntries: MarqueePositionGroupHitEntry[];
+  usePositionGroups: boolean;
+}) => {
+  const hits = frameHitEntries
+    .filter((entry) =>
+      mode === 'contained' ? rectContainsRect(selectionRect, entry.rect) : rectIntersectsRect(selectionRect, entry.rect)
+    )
+    .map((entry) => entry.frameGroupId)
+    .filter((frameGroupId) => Boolean(frameGroupId));
+
+  if (!usePositionGroups) {
+    return Array.from(new Set([...baseSelectionIds, ...hits]));
+  }
+
+  const matchedGroups = positionGroupHitEntries.filter((entry) =>
+    mode === 'contained' ? rectContainsRect(selectionRect, entry.rect) : rectIntersectsRect(selectionRect, entry.rect)
+  );
+  const selectedGroups: MarqueePositionGroupHitEntry[] = [];
+
+  matchedGroups.forEach((candidate) => {
+    const isCoveredBySelectedParent = selectedGroups.some((selectedGroup) =>
+      candidate.frameGroupIds.every((frameGroupId) => selectedGroup.frameGroupIdSet.has(frameGroupId))
+    );
+
+    if (!isCoveredBySelectedParent) {
+      selectedGroups.push(candidate);
+    }
+  });
+
+  const selectedGroupMemberIds = new Set(selectedGroups.flatMap((groupWithRect) => groupWithRect.frameGroupIds));
+  const ungroupedHitSelectionIds = hits.filter((frameGroupId) => !selectedGroupMemberIds.has(frameGroupId));
+
+  return Array.from(
+    new Set([
+      ...baseSelectionIds,
+      ...Array.from(selectedGroupMemberIds),
+      ...ungroupedHitSelectionIds,
+    ])
+  );
+};
+
+const resolvePositionMarqueeProxySelectionsFromHitEntries = (
+  positionGroupHitEntries: MarqueePositionGroupHitEntry[],
+  selectedFrameGroupIds: string[]
+) => {
+  const selectedFrameGroupIdSet = new Set(
+    selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
+  );
+  const proxies: PositionGroupProxySelection[] = [];
+  const selectedProxyMemberIds = new Set<string>();
+
+  positionGroupHitEntries
+    .filter((group) => group.frameGroupIds.every((frameGroupId) => selectedFrameGroupIdSet.has(frameGroupId)))
+    .forEach((group) => {
+      const frameGroupIds = group.frameGroupIds
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId));
+      const isCoveredBySelectedParent = frameGroupIds.every((frameGroupId) => selectedProxyMemberIds.has(frameGroupId));
+
+      if (isCoveredBySelectedParent) {
+        return;
+      }
+
+      frameGroupIds.forEach((frameGroupId) => {
+        selectedProxyMemberIds.add(frameGroupId);
+      });
+      proxies.push({
+        groupId: group.groupId,
+        label: group.label,
+        frameGroupIds,
+      });
+    });
+
+  return proxies;
+};
+
+const positionGroupProxySelectionsEqual = (
+  left: PositionGroupProxySelection[] | undefined,
+  right: PositionGroupProxySelection[] | undefined
+) => {
+  const leftEntries = left || [];
+  const rightEntries = right || [];
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every((leftEntry, index) => {
+    const rightEntry = rightEntries[index];
+    return (
+      Boolean(rightEntry) &&
+      leftEntry.groupId === rightEntry.groupId &&
+      stringArraysEqual(leftEntry.frameGroupIds, rightEntry.frameGroupIds)
+    );
+  });
+};
 
 const createFrameEditorGhost = (
   className: string,
@@ -6534,6 +6658,26 @@ const renderRelativeAnchorGuides = (
   }
 };
 
+const escapeCssAttributeValue = (value: string) =>
+  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+const queryFrameSelectionAnchorByFrameGroupId = (
+  scope: ParentNode | null | undefined,
+  frameGroupId: string | null | undefined
+) => {
+  const normalizedFrameGroupId = String(frameGroupId || '').trim();
+
+  if (!scope || !normalizedFrameGroupId) {
+    return null;
+  }
+
+  return resolveFrameSelectionAnchor(
+    scope.querySelector<HTMLElement>(
+      `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${escapeCssAttributeValue(normalizedFrameGroupId)}"]`
+    )
+  );
+};
+
 const isInteractiveTarget = (target: HTMLElement | null) => {
   const interactive = target?.closest<HTMLElement>(
     'input, textarea, select, option, button, a, [contenteditable="true"], [data-template-frame-input="true"]'
@@ -8137,6 +8281,254 @@ const appendPositionGroupProxyOverlay = (
   });
 };
 
+const clearFastSelectionEditorUi = (root: HTMLElement) => {
+  root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
+    element.removeAttribute('data-template-selected');
+    element.removeAttribute('data-template-primary-selected');
+    element.removeAttribute('data-template-selection-order');
+  });
+  root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
+    element.removeAttribute('data-template-edge-visual');
+    element.removeAttribute('data-template-edge-anchor-node');
+  });
+  root.querySelectorAll<HTMLElement>('[data-template-relative-anchor-target="true"]').forEach((element) => {
+    element.removeAttribute('data-template-relative-anchor-target');
+  });
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR}="true"]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
+  });
+  root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR).forEach((button) => {
+    button.setAttribute('data-edge-selection-mode', 'idle');
+    button.removeAttribute('data-edge-selection-order');
+    button.removeAttribute('data-edge-anchor');
+    button.removeAttribute('data-edge-selection-role');
+    button.removeAttribute('data-edge-movement-mismatch');
+  });
+  root
+    .querySelectorAll<HTMLElement>(
+      `.${FRAME_SELECTION_FILL_CLASS}, .${FRAME_SELECTION_BADGE_CLASS}, .${FRAME_DELETE_BUTTON_CLASS}, [data-v106-position-group-proxy-overlay]`
+    )
+    .forEach((element) => {
+      element.remove();
+    });
+};
+
+const appendPositionGroupProxyOverlayFast = (
+  root: HTMLElement,
+  positionGroupProxySelections: PositionGroupProxySelection[] = []
+) => {
+  if (!positionGroupProxySelections.length) {
+    return;
+  }
+
+  const canShowDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
+
+  positionGroupProxySelections.forEach((positionGroupProxySelection) => {
+    const pageInnerBuckets = new Map<
+      HTMLElement,
+      Array<{
+        rect: FrameNodeRect;
+      }>
+    >();
+
+    positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId);
+
+      if (!frameNode) {
+        return;
+      }
+
+      const shell = resolveFrameLayoutShell(frameNode);
+      const pageInner = shell.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        return;
+      }
+
+      const current = pageInnerBuckets.get(pageInner) || [];
+      current.push({ rect: readFrameElementRect(shell, pageInner) });
+      pageInnerBuckets.set(pageInner, current);
+    });
+
+    pageInnerBuckets.forEach((entries, pageInner) => {
+      if (entries.length <= 0) {
+        return;
+      }
+
+      const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
+      const minTop = Math.min(...entries.map((entry) => entry.rect.top));
+      const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
+      const maxBottom = Math.max(...entries.map((entry) => entry.rect.top + entry.rect.height));
+      const overlay = document.createElement('div');
+      overlay.setAttribute('data-frame-editor-ui', 'true');
+      overlay.setAttribute('data-v106-position-group-proxy-overlay', positionGroupProxySelection.groupId);
+      overlay.style.position = 'absolute';
+      overlay.style.pointerEvents = 'none';
+      overlay.style.zIndex = '29';
+      overlay.style.left = toFrameCssPx(minLeft);
+      overlay.style.top = toFrameCssPx(minTop);
+      overlay.style.width = toFrameCssPx(Math.max(1, maxRight - minLeft));
+      overlay.style.height = toFrameCssPx(Math.max(1, maxBottom - minTop));
+      overlay.style.outline = `3px solid ${positionGroupProxySelection.outlineColor || 'rgba(13, 148, 136, .98)'}`;
+      overlay.style.boxShadow = `0 0 0 5px ${positionGroupProxySelection.haloColor || 'rgba(45, 212, 191, .22)'}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
+      overlay.style.background = positionGroupProxySelection.fillColor || 'rgba(13, 148, 136, .14)';
+
+      const badge = document.createElement('div');
+      badge.setAttribute('data-frame-editor-ui', 'true');
+      badge.style.position = 'absolute';
+      badge.style.top = '-10px';
+      badge.style.left = '-10px';
+      badge.style.minWidth = '20px';
+      badge.style.height = '20px';
+      badge.style.padding = '0 6px';
+      badge.style.borderRadius = '999px';
+      badge.style.display = 'inline-flex';
+      badge.style.alignItems = 'center';
+      badge.style.justifyContent = 'center';
+      badge.style.background = positionGroupProxySelection.badgeColor || 'rgba(15, 23, 42, .96)';
+      badge.style.color = positionGroupProxySelection.badgeTextColor || '#fff';
+      badge.style.fontSize = '10px';
+      badge.style.fontWeight = '700';
+      badge.textContent = Number.isFinite(positionGroupProxySelection.selectionOrder)
+        ? `${positionGroupProxySelection.colorName || '선택'} 상자`
+        : '선택 상자';
+      overlay.appendChild(badge);
+      if (canShowDeleteButton) {
+        appendFrameDeleteButtonAtRect(
+          pageInner,
+          {
+            left: minLeft,
+            top: minTop,
+            width: Math.max(1, maxRight - minLeft),
+            height: Math.max(1, maxBottom - minTop),
+          },
+          'group',
+          positionGroupProxySelection.groupId,
+          `${normalizePositionGroupDisplayLabel(positionGroupProxySelection.label, positionGroupProxySelection.groupId)} 삭제`
+        );
+      }
+
+      pageInner.appendChild(overlay);
+    });
+  });
+};
+
+const applyPositionImpactGroupSelectionUiFast = (
+  root: HTMLElement,
+  selectionPanelTab: SelectionPanelTab,
+  selectedFrameGroupIds: string[] = [],
+  positionRelationAnchorFrameGroupId: string = '',
+  positionBoxGroups: PositionImpactGroup[] = []
+) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((node) => {
+    node.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
+  });
+
+  if (selectionPanelTab !== 'position') {
+    return;
+  }
+
+  const boxGroups = positionBoxGroups.filter((group) => group.frameGroupIds.length > 1);
+
+  if (boxGroups.length <= 0) {
+    return;
+  }
+
+  const normalizedSelectedFrameGroupIds = Array.from(
+    new Set(
+      selectedFrameGroupIds
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
+  const normalizedAnchorFrameGroupId = positionRelationAnchorFrameGroupId.trim();
+
+  if (normalizedSelectedFrameGroupIds.length <= 0 && !normalizedAnchorFrameGroupId) {
+    return;
+  }
+
+  const groupIdByFrameGroupId = new Map<string, string>();
+  boxGroups.forEach((group) => {
+    group.frameGroupIds.forEach((frameGroupId) => {
+      groupIdByFrameGroupId.set(frameGroupId, group.id);
+    });
+  });
+
+  const activeGroupIds = new Set<string>();
+  normalizedSelectedFrameGroupIds.forEach((frameGroupId) => {
+    const groupId = groupIdByFrameGroupId.get(frameGroupId);
+    if (groupId) {
+      activeGroupIds.add(groupId);
+    }
+  });
+  if (normalizedAnchorFrameGroupId) {
+    const anchorGroupId = groupIdByFrameGroupId.get(normalizedAnchorFrameGroupId);
+    if (anchorGroupId) {
+      activeGroupIds.add(anchorGroupId);
+    }
+  }
+
+  if (activeGroupIds.size <= 0) {
+    return;
+  }
+
+  boxGroups.forEach((group) => {
+    if (!activeGroupIds.has(group.id)) {
+      return;
+    }
+
+    group.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId);
+      if (frameNode) {
+        frameNode.setAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR, group.id);
+      }
+    });
+  });
+};
+
+const applyFastFrameSelectionUi = (
+  root: HTMLElement,
+  selectedIds: string[],
+  positionGroupProxySelections: PositionGroupProxySelection[] = []
+) => {
+  clearFastSelectionEditorUi(root);
+
+  const normalizedSelectedIds = Array.from(
+    new Set(selectedIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+  );
+  const proxyMemberFrameGroupIdSet = new Set(
+    positionGroupProxySelections.flatMap((proxySelection) =>
+      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
+  const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
+
+  normalizedSelectedIds.forEach((frameGroupId, selectionIndex) => {
+    const node = queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId);
+
+    if (!node) {
+      return;
+    }
+
+    node.setAttribute('data-template-edge-host', 'true');
+
+    if (proxyMemberFrameGroupIdSet.has(frameGroupId)) {
+      return;
+    }
+
+    node.setAttribute('data-template-selected', 'true');
+    node.setAttribute('data-template-selection-order', String(selectionIndex + 1));
+
+    if (selectionIndex === 0) {
+      node.setAttribute('data-template-primary-selected', 'true');
+    }
+
+    appendFrameSelectionFill(node, canShowCanvasDeleteButton);
+  });
+
+  appendPositionGroupProxyOverlayFast(root, positionGroupProxySelections);
+};
+
 const appendPositionGroupCatalogOverlay = (root: HTMLElement) => {
   if (root.getAttribute('data-selection-panel-tab') !== 'position') {
     return;
@@ -8484,6 +8876,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const routeTemplateAutoloadedRef = React.useRef('');
   const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
+  const previewEditorStateAfterPaintFrameRefs = React.useRef<number[]>([]);
+  const previewEditorStateAfterPaintTimerRef = React.useRef<number | null>(null);
+  const positionSelectionReactStateCommitTimerRef = React.useRef<number | null>(null);
   const previewEditorStateRetryCountRef = React.useRef(0);
   const deferredPreviewEditorStateRef = React.useRef(false);
   const positionGroupProxySelectionGroupIdRef = React.useRef('');
@@ -9100,7 +9495,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .map((node) => getFrameGroupId(node))
       .filter((frameGroupId) => Boolean(frameGroupId))
       .sort((left, right) => left.localeCompare(right, 'ko'));
-  }, [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
+  }, [previewDomVersion, renderedPreviewHtml]);
   const positionBoxGroups = React.useMemo(
     () => {
       const collectOptions = { includeSingletons: false };
@@ -11915,12 +12310,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, []);
 
   const cancelScheduledPreviewEditorState = React.useCallback(() => {
-    if (typeof window === 'undefined' || previewEditorStateFrameRef.current === null) {
+    if (typeof window === 'undefined') {
       return;
     }
 
-    window.cancelAnimationFrame(previewEditorStateFrameRef.current);
-    previewEditorStateFrameRef.current = null;
+    if (previewEditorStateFrameRef.current !== null) {
+      window.cancelAnimationFrame(previewEditorStateFrameRef.current);
+      previewEditorStateFrameRef.current = null;
+    }
+
+    if (previewEditorStateAfterPaintFrameRefs.current.length > 0) {
+      previewEditorStateAfterPaintFrameRefs.current.forEach((frameId) => window.cancelAnimationFrame(frameId));
+      previewEditorStateAfterPaintFrameRefs.current = [];
+    }
+
+    if (previewEditorStateAfterPaintTimerRef.current !== null) {
+      window.clearTimeout(previewEditorStateAfterPaintTimerRef.current);
+      previewEditorStateAfterPaintTimerRef.current = null;
+    }
   }, []);
 
   const hasActivePointerInteraction = React.useCallback(
@@ -12632,6 +13039,47 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     positionSpacingGuideRelations,
     syncPreviewSurfaceScale,
   ]);
+  const schedulePreviewEditorStateAfterSelectionPaint = React.useCallback(() => {
+    if (typeof window === 'undefined') {
+      schedulePreviewEditorState();
+      return;
+    }
+
+    cancelScheduledPreviewEditorState();
+    const firstFrameId = window.requestAnimationFrame(() => {
+      previewEditorStateAfterPaintFrameRefs.current = [];
+      previewEditorStateAfterPaintTimerRef.current = window.setTimeout(() => {
+        previewEditorStateAfterPaintTimerRef.current = null;
+        schedulePreviewEditorState();
+      }, 360);
+    });
+    previewEditorStateAfterPaintFrameRefs.current = [firstFrameId];
+  }, [cancelScheduledPreviewEditorState, schedulePreviewEditorState]);
+  const schedulePositionSelectionReactStateCommit = React.useCallback((commit: () => void) => {
+    if (typeof window === 'undefined') {
+      React.startTransition(commit);
+      return;
+    }
+
+    if (positionSelectionReactStateCommitTimerRef.current !== null) {
+      window.clearTimeout(positionSelectionReactStateCommitTimerRef.current);
+      positionSelectionReactStateCommitTimerRef.current = null;
+    }
+
+    positionSelectionReactStateCommitTimerRef.current = window.setTimeout(() => {
+      positionSelectionReactStateCommitTimerRef.current = null;
+      React.startTransition(commit);
+    }, 240);
+  }, []);
+  React.useEffect(
+    () => () => {
+      if (typeof window !== 'undefined' && positionSelectionReactStateCommitTimerRef.current !== null) {
+        window.clearTimeout(positionSelectionReactStateCommitTimerRef.current);
+        positionSelectionReactStateCommitTimerRef.current = null;
+      }
+    },
+    []
+  );
 
   const setPreviewNode = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -12762,23 +13210,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      applyFrameCanvasVisualHints(root);
-      applyFrameSelectionUi(
+      applyFastFrameSelectionUi(
         root,
         nextSelectedFrameGroupIds,
-        nextEdgeSelectionState,
-        null,
-        {},
-        [],
-        previewRelativeGuideFrameGroupId,
         overridePositionGroupProxySelections ??
           resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
       );
-      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
-      applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
+      applyPositionImpactGroupSelectionUiFast(
+        root,
+        selectionPanelTab,
+        nextSelectedFrameGroupIds,
+        positionRelationAnchorFrameGroupId,
+        positionBoxGroups
+      );
     },
     [
-      previewRelativeGuideFrameGroupId,
+      positionBoxGroups,
       resolvePositionGroupProxySelections,
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
@@ -12864,15 +13311,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       selectedFrameGroupIdsRef.current = normalizedSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
-      setSelectedFrameGroupIds(normalizedSelectionIds);
-      setEdgeSelectionState(emptyEdgeSelection);
-      setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
-      setSelectionValidationIssues([]);
-      setSelectionSaveProgress(defaultSelectionSaveProgressState);
+      const commitSelectionReactState = () => {
+        setSelectedFrameGroupIds(normalizedSelectionIds);
+        setEdgeSelectionState(emptyEdgeSelection);
+        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        setSelectionValidationIssues([]);
+        setSelectionSaveProgress(defaultSelectionSaveProgressState);
+      };
+
       if (selectionPanelTab === 'position') {
         applyFastFrameBoxSelectionVisuals(normalizedSelectionIds, emptyEdgeSelection, nextPositionGroupProxySelections);
-        schedulePreviewEditorState();
+        schedulePositionSelectionReactStateCommit(commitSelectionReactState);
+        schedulePreviewEditorStateAfterSelectionPaint();
       } else {
+        commitSelectionReactState();
         applyRuntimeSelectionUi(normalizedSelectionIds, emptyEdgeSelection, nextPositionGroupProxySelections);
       }
     },
@@ -12881,169 +13333,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyRuntimeSelectionUi,
       positionBoxGroups,
       resolvePositionGroupProxySelections,
-      schedulePreviewEditorState,
+      schedulePreviewEditorStateAfterSelectionPaint,
+      schedulePositionSelectionReactStateCommit,
       selectionPanelTab,
     ]
-  );
-
-  const resolveMarqueeSelectionIds = React.useCallback(
-    (
-      pageInner: HTMLElement,
-      selectionRect: FrameNodeRect,
-      mode: FrameMarqueeSelectionMode,
-      baseSelectionIds: string[]
-    ) => {
-      const frameNodesInPage = getFrameNodes(pageInner).filter(
-        (node) => node.closest<HTMLElement>('.page-inner') === pageInner
-      );
-      const frameNodeById = new Map<string, HTMLElement>();
-      frameNodesInPage.forEach((node) => {
-        const frameGroupId = getFrameGroupId(node);
-
-        if (frameGroupId) {
-          frameNodeById.set(frameGroupId, node);
-        }
-      });
-      const hits = frameNodesInPage
-        .filter((node) => {
-          const rect = readFrameMoveRect(node);
-          return mode === 'contained' ? rectContainsRect(selectionRect, rect) : rectIntersectsRect(selectionRect, rect);
-        })
-        .map((node) => getFrameGroupId(node))
-        .filter((frameGroupId) => Boolean(frameGroupId));
-
-      if (selectionPanelTab === 'position') {
-        const matchedGroups = collectPositionBoxGroups(pageInner, { includeSingletons: false })
-          .map((group) => {
-            const frameGroupIds = Array.from(
-              new Set(
-                group.frameGroupIds
-                  .map((frameGroupId) => frameGroupId.trim())
-                  .filter((frameGroupId) => Boolean(frameGroupId) && frameNodeById.has(frameGroupId))
-              )
-            );
-
-            if (frameGroupIds.length <= 1) {
-              return null;
-            }
-
-            const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
-            const rect = wrapper ? readFrameElementRect(wrapper, pageInner) : null;
-
-            if (!rect) {
-              return null;
-            }
-
-            const matched = mode === 'contained' ? rectContainsRect(selectionRect, rect) : rectIntersectsRect(selectionRect, rect);
-
-            if (!matched) {
-              return null;
-            }
-
-            return {
-              group,
-              frameGroupIds,
-              frameGroupIdSet: new Set(frameGroupIds),
-              rect,
-            };
-          })
-          .filter(
-            (
-              groupWithRect
-            ): groupWithRect is {
-              group: PositionImpactGroup;
-              frameGroupIds: string[];
-              frameGroupIdSet: Set<string>;
-              rect: FrameNodeRect;
-            } => Boolean(groupWithRect)
-          )
-          .sort((left, right) => {
-            const leftArea = left.rect.width * left.rect.height;
-            const rightArea = right.rect.width * right.rect.height;
-
-            if (Math.abs(leftArea - rightArea) > 0.1) {
-              return rightArea - leftArea;
-            }
-
-            if (left.frameGroupIds.length !== right.frameGroupIds.length) {
-              return right.frameGroupIds.length - left.frameGroupIds.length;
-            }
-
-            return left.group.id.localeCompare(right.group.id, 'ko');
-          });
-        const selectedGroups: typeof matchedGroups = [];
-
-        matchedGroups.forEach((candidate) => {
-          const isCoveredBySelectedParent = selectedGroups.some((selectedGroup) =>
-            candidate.frameGroupIds.every((frameGroupId) => selectedGroup.frameGroupIdSet.has(frameGroupId))
-          );
-
-          if (!isCoveredBySelectedParent) {
-            selectedGroups.push(candidate);
-          }
-        });
-
-        const selectedGroupMemberIds = new Set(selectedGroups.flatMap((groupWithRect) => groupWithRect.frameGroupIds));
-        const ungroupedHitSelectionIds = hits.filter((frameGroupId) => !selectedGroupMemberIds.has(frameGroupId));
-        const nextSelectionIds = [
-          ...baseSelectionIds,
-          ...Array.from(selectedGroupMemberIds),
-          ...ungroupedHitSelectionIds,
-        ];
-
-        return Array.from(new Set(nextSelectionIds));
-      }
-
-      return Array.from(new Set([...baseSelectionIds, ...hits]));
-    },
-    [getFrameNodes, selectionPanelTab]
-  );
-
-  const resolvePositionMarqueeProxySelections = React.useCallback(
-    (pageInner: HTMLElement, selectedFrameGroupIds: string[]) => {
-      if (selectionPanelTab !== 'position') {
-        return undefined;
-      }
-
-      const selectedFrameGroupIdSet = new Set(
-        selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
-      );
-      const proxies: PositionGroupProxySelection[] = [];
-      const selectedProxyMemberIds = new Set<string>();
-
-      collectPositionBoxGroups(pageInner, { includeSingletons: false })
-        .filter((group) => group.frameGroupIds.length > 1)
-        .filter((group) => group.frameGroupIds.every((frameGroupId) => selectedFrameGroupIdSet.has(frameGroupId)))
-        .sort((left, right) => {
-          if (left.frameGroupIds.length !== right.frameGroupIds.length) {
-            return right.frameGroupIds.length - left.frameGroupIds.length;
-          }
-
-          return left.id.localeCompare(right.id, 'ko');
-        })
-        .forEach((group) => {
-          const frameGroupIds = group.frameGroupIds
-            .map((frameGroupId) => frameGroupId.trim())
-            .filter((frameGroupId) => Boolean(frameGroupId));
-          const isCoveredBySelectedParent = frameGroupIds.every((frameGroupId) => selectedProxyMemberIds.has(frameGroupId));
-
-          if (isCoveredBySelectedParent) {
-            return;
-          }
-
-          frameGroupIds.forEach((frameGroupId) => {
-            selectedProxyMemberIds.add(frameGroupId);
-          });
-          proxies.push({
-            groupId: group.id,
-            label: group.label,
-            frameGroupIds,
-          });
-        });
-
-      return proxies;
-    },
-    [selectionPanelTab]
   );
 
   const commitCreatedFrameShell = React.useCallback(
@@ -17318,10 +17611,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
 	        if (clickChain.entries.length > 0) {
 	          event.preventDefault();
-	          setPositionSelectionClickChainSnapshot({
-	            sourceFrameGroupId: '',
-	            point: pointerPoint,
-	            entries: clickChain.entries,
+	          React.startTransition(() => {
+	            setPositionSelectionClickChainSnapshot({
+	              sourceFrameGroupId: '',
+	              point: pointerPoint,
+	              entries: clickChain.entries,
+	            });
 	          });
 	          const currentSelectionIds = selectedFrameGroupIdsRef.current
 	            .map((selectionId) => selectionId.trim())
@@ -17429,6 +17724,69 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ? Array.from(new Set(selectedFrameGroupIdsRef.current.flatMap(expandGroupMembers)))
             : selectedFrameGroupIdsRef.current.slice()
           : [];
+        const frameHitEntries = getFrameNodes(pageInner)
+          .filter((node) => node.closest<HTMLElement>('.page-inner') === pageInner)
+          .map((node) => {
+            const frameGroupId = getFrameGroupId(node);
+
+            if (!frameGroupId) {
+              return null;
+            }
+
+            return {
+              frameGroupId,
+              rect: readFrameMoveRect(node),
+            };
+          })
+          .filter((entry): entry is MarqueeFrameHitEntry => Boolean(entry));
+        const frameGroupIdSet = new Set(frameHitEntries.map((entry) => entry.frameGroupId));
+        const positionGroupHitEntries =
+          selectionPanelTab === 'position'
+            ? positionBoxGroups
+                .map((group) => {
+                  const frameGroupIds = Array.from(
+                    new Set(
+                      group.frameGroupIds
+                        .map((frameGroupId) => frameGroupId.trim())
+                        .filter((frameGroupId) => Boolean(frameGroupId) && frameGroupIdSet.has(frameGroupId))
+                    )
+                  );
+
+                  if (frameGroupIds.length <= 1) {
+                    return null;
+                  }
+
+                  const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
+                  const rect = wrapper ? readFrameElementRect(wrapper, pageInner) : null;
+
+                  if (!rect) {
+                    return null;
+                  }
+
+                  return {
+                    groupId: group.id,
+                    label: group.label,
+                    frameGroupIds,
+                    frameGroupIdSet: new Set(frameGroupIds),
+                    rect,
+                  };
+                })
+                .filter((entry): entry is MarqueePositionGroupHitEntry => Boolean(entry))
+                .sort((left, right) => {
+                  const leftArea = left.rect.width * left.rect.height;
+                  const rightArea = right.rect.width * right.rect.height;
+
+                  if (Math.abs(leftArea - rightArea) > 0.1) {
+                    return rightArea - leftArea;
+                  }
+
+                  if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+                    return right.frameGroupIds.length - left.frameGroupIds.length;
+                  }
+
+                  return left.groupId.localeCompare(right.groupId, 'ko');
+                })
+            : [];
 
         event.preventDefault();
         lockPreviewEditorStateDuringInteraction();
@@ -17441,9 +17799,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           anchorFrameGroupId: resolvedAnchorFrameGroupId || null,
           baseSelectionIds,
           lastSelectionIds: baseSelectionIds.slice(),
-        lastProxySelections: selectionPanelTab === 'position'
-            ? resolvePositionMarqueeProxySelections(pageInner, baseSelectionIds)
+          lastProxySelections: selectionPanelTab === 'position'
+            ? resolvePositionMarqueeProxySelectionsFromHitEntries(positionGroupHitEntries, baseSelectionIds)
             : undefined,
+          frameHitEntries,
+          positionGroupHitEntries,
           origin: readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100),
           ghost: null,
           mode: 'contained',
@@ -17558,10 +17918,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ? readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100)
           : null;
         const clickChain = resolvePositionSelectionClickChain(pageInner, frameGroupId, pointerPoint);
-        setPositionSelectionClickChainSnapshot({
-          sourceFrameGroupId: frameGroupId,
-          point: pointerPoint,
-          entries: clickChain.entries,
+        React.startTransition(() => {
+          setPositionSelectionClickChainSnapshot({
+            sourceFrameGroupId: frameGroupId,
+            point: pointerPoint,
+            entries: clickChain.entries,
+          });
         });
         const currentSelectionIds = selectedFrameGroupIdsRef.current
           .map((selectionId) => selectionId.trim())
@@ -17809,25 +18171,34 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         writeFrameEditorGhostRect(marqueeSelectionState.ghost, nextRect);
       }
 
-      const nextSelectionIds = resolveMarqueeSelectionIds(
-        marqueeSelectionState.pageInner,
-        nextRect,
-        nextMode,
-        marqueeSelectionState.baseSelectionIds
-      );
+      const nextSelectionIds = resolveMarqueeSelectionIdsFromHitEntries({
+        selectionRect: nextRect,
+        mode: nextMode,
+        baseSelectionIds: marqueeSelectionState.baseSelectionIds,
+        frameHitEntries: marqueeSelectionState.frameHitEntries,
+        positionGroupHitEntries: marqueeSelectionState.positionGroupHitEntries,
+        usePositionGroups: selectionPanelTab === 'position',
+      });
       const shouldShowMarqueeProxySelections = selectionPanelTab === 'position';
       const marqueeProxySelections = shouldShowMarqueeProxySelections
-        ? resolvePositionMarqueeProxySelections(
-            marqueeSelectionState.pageInner,
+        ? resolvePositionMarqueeProxySelectionsFromHitEntries(
+            marqueeSelectionState.positionGroupHitEntries,
             nextSelectionIds
           )
         : undefined;
+      if (
+        stringArraysEqual(marqueeSelectionState.lastSelectionIds, nextSelectionIds) &&
+        positionGroupProxySelectionsEqual(marqueeSelectionState.lastProxySelections, marqueeProxySelections)
+      ) {
+        return;
+      }
+
       marqueeSelectionState.lastSelectionIds = nextSelectionIds;
       marqueeSelectionState.lastProxySelections = marqueeProxySelections;
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
       selectedFrameGroupIdsRef.current = nextSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
-      applyRuntimeSelectionUi(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
+      applyFastFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
       return;
     }
 
@@ -18430,6 +18801,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyRuntimeSelectionVisuals([], resizeState.edgeSelectionAfterResize || edgeSelectionStateRef.current);
     }
   }, [
+    applyFastFrameBoxSelectionVisuals,
     applyRuntimeSelectionUi,
     applyRuntimeSelectionVisuals,
     buildLiveEdgeTopologySnapshot,
@@ -18446,8 +18818,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolveLiveEdgeAutosnapCorrection,
     refreshLockedEdgeResizeTargets,
     resolveLiveEdgeResizeTargets,
-    resolveMarqueeSelectionIds,
-    resolvePositionMarqueeProxySelections,
     selectionPanelTab,
     positionOrderLockSelectionMode,
     stabilizeLiveVerticalEdgeTargetsToAppliedDelta,
@@ -18526,20 +18896,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         ) {
           const nextMode: FrameMarqueeSelectionMode =
             finalPoint.x >= marqueeSelectionState.origin.x ? 'contained' : 'intersected';
-          const computedSelectionIds = resolveMarqueeSelectionIds(
-            marqueeSelectionState.pageInner,
-            finalRect,
-            nextMode,
-            marqueeSelectionState.baseSelectionIds
-          );
+          const computedSelectionIds = resolveMarqueeSelectionIdsFromHitEntries({
+            selectionRect: finalRect,
+            mode: nextMode,
+            baseSelectionIds: marqueeSelectionState.baseSelectionIds,
+            frameHitEntries: marqueeSelectionState.frameHitEntries,
+            positionGroupHitEntries: marqueeSelectionState.positionGroupHitEntries,
+            usePositionGroups: selectionPanelTab === 'position',
+          });
           const nextSelectionIds =
             marqueeSelectionState.active && marqueeSelectionState.lastSelectionIds.length > 0
               ? marqueeSelectionState.lastSelectionIds
               : computedSelectionIds;
           const marqueeProxySelections = keepGroupedShiftSelection
             ? marqueeSelectionState.lastProxySelections ||
-              resolvePositionMarqueeProxySelections(
-                marqueeSelectionState.pageInner,
+              resolvePositionMarqueeProxySelectionsFromHitEntries(
+                marqueeSelectionState.positionGroupHitEntries,
                 nextSelectionIds
               ) ||
               []
@@ -18567,8 +18939,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             true
           );
           const marqueeProxySelections = keepGroupedShiftSelection
-            ? resolvePositionMarqueeProxySelections(
-                marqueeSelectionState.pageInner,
+            ? resolvePositionMarqueeProxySelectionsFromHitEntries(
+                marqueeSelectionState.positionGroupHitEntries,
                 nextSelectionIds
               ) || []
             : undefined;
@@ -18635,8 +19007,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       clearTransientCanvasOverlays,
       commitCreatedFrameShell,
       resolveEdgeRolePresentation,
-      resolveMarqueeSelectionIds,
-      resolvePositionMarqueeProxySelections,
       schedulePreviewEditorState,
       selectionPanelTab,
       positionOrderLockSelectionMode,
