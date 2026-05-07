@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, CircleDot, CornerDownRight, FileText, KeyRound, Loader2, Minus, Paperclip, Redo2, Signature, Undo2, X } from 'lucide-react';
+import { CheckCircle2, CircleDot, CornerDownRight, FileText, KeyRound, Loader2, Minus, Paperclip, Redo2, Save, Signature, Trash2, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server.browser';
@@ -256,6 +256,7 @@ type DefinedPositionRelativeRelation = {
   targetLabel: string;
   targetFrameGroupIds: string[];
   targetConfiguredFrameGroupIds: string[];
+  relationConfiguredFrameGroupIds?: string[];
   anchorKind: 'group' | 'frame' | 'page-corner';
   anchorLabel: string;
   anchorPageCornerId: string;
@@ -615,15 +616,108 @@ const POSITION_LOCK_COLOR_PRESETS = [
     badgeColor: 'rgba(15, 118, 110, .96)',
     badgeTextColor: '#fff',
   },
+  {
+    colorName: '분홍색',
+    outlineColor: 'rgba(219, 39, 119, .98)',
+    fillColor: 'rgba(244, 114, 182, .12)',
+    haloColor: 'rgba(244, 114, 182, .3)',
+    badgeColor: 'rgba(190, 24, 93, .96)',
+    badgeTextColor: '#fff',
+  },
+  {
+    colorName: '하늘색',
+    outlineColor: 'rgba(2, 132, 199, .98)',
+    fillColor: 'rgba(56, 189, 248, .12)',
+    haloColor: 'rgba(56, 189, 248, .3)',
+    badgeColor: 'rgba(3, 105, 161, .96)',
+    badgeTextColor: '#fff',
+  },
+  {
+    colorName: '라임색',
+    outlineColor: 'rgba(101, 163, 13, .98)',
+    fillColor: 'rgba(163, 230, 53, .12)',
+    haloColor: 'rgba(163, 230, 53, .3)',
+    badgeColor: 'rgba(77, 124, 15, .96)',
+    badgeTextColor: '#fff',
+  },
+  {
+    colorName: '자홍색',
+    outlineColor: 'rgba(192, 38, 211, .98)',
+    fillColor: 'rgba(232, 121, 249, .12)',
+    haloColor: 'rgba(232, 121, 249, .3)',
+    badgeColor: 'rgba(162, 28, 175, .96)',
+    badgeTextColor: '#fff',
+  },
+  {
+    colorName: '황색',
+    outlineColor: 'rgba(217, 119, 6, .98)',
+    fillColor: 'rgba(251, 191, 36, .12)',
+    haloColor: 'rgba(251, 191, 36, .3)',
+    badgeColor: 'rgba(180, 83, 9, .96)',
+    badgeTextColor: '#fff',
+  },
+  {
+    colorName: '슬레이트색',
+    outlineColor: 'rgba(71, 85, 105, .98)',
+    fillColor: 'rgba(148, 163, 184, .12)',
+    haloColor: 'rgba(148, 163, 184, .3)',
+    badgeColor: 'rgba(51, 65, 85, .96)',
+    badgeTextColor: '#fff',
+  },
 ] as const;
 
-const resolvePositionLockColorPreset = (selectionOrder: number, seed: number) => {
-  const safeOrder = Number.isFinite(selectionOrder) ? Math.max(1, Math.floor(selectionOrder)) : 1;
-  const length = POSITION_LOCK_COLOR_PRESETS.length;
-  const safeSeed = Number.isFinite(seed) ? Math.abs(Math.floor(seed)) : 0;
-  const offset = (safeSeed + safeOrder - 1) % length;
-  return POSITION_LOCK_COLOR_PRESETS[offset] || POSITION_LOCK_COLOR_PRESETS[0];
+const POSITION_STABLE_COLOR_INDEX_ORDER = [0, 1, 4, 3, 2, 6, 5, 10, 7, 9, 8, 11] as const;
+
+const readPositionEntityColorNumber = (...values: string[]) => {
+  for (const value of values) {
+    const normalizedValue = value.trim();
+    const match =
+      normalizedValue.match(/그룹\s*(\d+)/iu) ||
+      normalizedValue.match(/box\s*(\d+)/iu) ||
+      normalizedValue.match(/이동\s+묶음\s+박스\s*(\d+)/iu) ||
+      normalizedValue.match(/이동\s+묶음\s+상자\s*(\d+)/iu) ||
+      normalizedValue.match(/group\s*(\d+)/iu) ||
+      normalizedValue.match(/position-box-(\d+)/iu);
+
+    if (match) {
+      const nextNumber = Number.parseInt(match[1] || '', 10);
+      if (Number.isFinite(nextNumber) && nextNumber > 0) {
+        return nextNumber;
+      }
+    }
+  }
+
+  return null;
 };
+
+const hashPositionEntityColorKey = (value: string) => {
+  const normalizedValue = value.trim();
+  let hash = 0;
+
+  for (let index = 0; index < normalizedValue.length; index += 1) {
+    hash = Math.imul(hash, 31) + normalizedValue.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+};
+
+const resolvePositionStableColorPreset = (entityId: string, label = '') => {
+  const colorNumber = readPositionEntityColorNumber(label, entityId);
+  const colorOrderIndex =
+    colorNumber !== null
+      ? (colorNumber - 1) % POSITION_STABLE_COLOR_INDEX_ORDER.length
+      : hashPositionEntityColorKey(`${label}|${entityId}`) % POSITION_STABLE_COLOR_INDEX_ORDER.length;
+  const paletteIndex = POSITION_STABLE_COLOR_INDEX_ORDER[colorOrderIndex] ?? 0;
+
+  return POSITION_LOCK_COLOR_PRESETS[paletteIndex] || POSITION_LOCK_COLOR_PRESETS[0];
+};
+
+const resolvePositionStableVisual = (entityId: string, label = '', selectionOrder = 1) => ({
+  selectionOrder,
+  groupId: entityId,
+  ...resolvePositionStableColorPreset(entityId, label),
+});
 
 const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
   renderedPreviewHtml,
@@ -1470,6 +1564,15 @@ const normalizePositionGroupDisplayLabel = (label: string, fallbackId = '') => {
   return normalizedLabel || POSITION_GROUP_LABEL_PREFIX;
 };
 
+const stripPositionGroupMemberCountSuffix = (label: string) =>
+  label.trim().replace(/\s*\((이동\s+묶음\s+박스|이동\s+묶음\s+상자|그룹)\s*\d+개\)\s*$/u, '');
+
+const resolvePositionGroupProxySelectionBadgeLabel = (positionGroupProxySelection: PositionGroupProxySelection) =>
+  normalizePositionGroupDisplayLabel(
+    stripPositionGroupMemberCountSuffix(positionGroupProxySelection.label),
+    positionGroupProxySelection.groupId
+  );
+
 const readPositionGroupWrapperLabel = (element: HTMLElement | null | undefined) =>
   normalizePositionGroupDisplayLabel(
     element?.getAttribute(TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR)?.trim() || '',
@@ -1845,6 +1948,7 @@ const readStoredRelativeAnchorConfig = (element: HTMLElement | null | undefined)
   if (
     positionMode !== 'relative' ||
     (anchorKind !== 'frame' && anchorKind !== 'page-corner' && anchorKind !== 'group') ||
+    (anchorKind === 'group' && isLegacyInferredPositionGroupId(anchorId)) ||
     !anchorId ||
     (anchorX !== 'left' && anchorX !== 'right') ||
     (anchorY !== 'top' && anchorY !== 'bottom') ||
@@ -1871,9 +1975,17 @@ const getRelativeAnchorAttributeTargets = (frameNode: HTMLElement | null | undef
   }
 
   const shell = resolveFrameLayoutShell(frameNode);
+  const frameGroupId = getFrameGroupId(frameNode);
+  const persistedFrameNode = frameNode.matches(RAW_FRAME_NODE_SELECTOR)
+    ? frameNode
+    : Array.from(shell.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR)).find(
+        (candidate) => candidate.getAttribute('data-template-frame-group')?.trim() === frameGroupId
+      ) || null;
   const textarea = shell.querySelector<HTMLElement>('[data-template-frame-input="true"]');
 
-  return [shell, frameNode, textarea].filter((element): element is HTMLElement => Boolean(element));
+  return Array.from(
+    new Set([shell, frameNode, persistedFrameNode, textarea].filter((element): element is HTMLElement => Boolean(element)))
+  );
 };
 
 const writeFramePositionModeAttrs = (
@@ -1894,6 +2006,43 @@ const clearFrameRelativeAnchorAttrs = (frameNode: HTMLElement | null | undefined
     element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR);
     element.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR);
   });
+};
+
+const hasFrameRelativeAnchorAttrs = (frameNode: HTMLElement | null | undefined) =>
+  getRelativeAnchorAttributeTargets(frameNode).some((element) => {
+    const positionMode = element.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim();
+    const anchorKind = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR)?.trim();
+    const anchorId = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR)?.trim();
+
+    return positionMode === 'relative' || Boolean(anchorKind || anchorId);
+  });
+
+const hasLegacyInferredRelativeAnchorAttrs = (frameNode: HTMLElement | null | undefined) =>
+  getRelativeAnchorAttributeTargets(frameNode).some((element) => {
+    const anchorKind = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR)?.trim();
+    const anchorId = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR)?.trim();
+
+    return anchorKind === 'group' && isLegacyInferredPositionGroupId(anchorId);
+  });
+
+const clearLegacyInferredRelativeAnchors = (scope: ParentNode | null | undefined) => {
+  if (!scope) {
+    return 0;
+  }
+
+  let clearedCount = 0;
+  collectFrameSelectionAnchors(scope).forEach((frameNode) => {
+    const pageInner = frameNode.closest<HTMLElement>('.page-inner') || null;
+
+    if (!pageInner || !hasLegacyInferredRelativeAnchorAttrs(frameNode)) {
+      return;
+    }
+
+    applyFramePositionMode(frameNode, 'absolute', pageInner);
+    clearedCount += 1;
+  });
+
+  return clearedCount;
 };
 
 const readStoredPositionGroupConfig = (
@@ -2250,6 +2399,18 @@ const readFramePositionMode = (
 
   const shell = resolveFrameLayoutShell(frameNode);
   const textarea = shell.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+  const relativeAttributeTargets = [frameNode, shell, textarea].filter((element): element is HTMLElement => Boolean(element));
+  const hasLegacyInferredAnchor = relativeAttributeTargets.some((element) => {
+    const anchorKind = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR)?.trim();
+    const anchorId = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR)?.trim();
+
+    return anchorKind === 'group' && isLegacyInferredPositionGroupId(anchorId);
+  });
+
+  if (hasLegacyInferredAnchor) {
+    return 'absolute';
+  }
+
   const explicitMode =
     frameNode.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim() ||
     shell.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim() ||
@@ -2260,7 +2421,7 @@ const readFramePositionMode = (
     return explicitMode;
   }
 
-  const hasStoredRelativeAnchorAttrs = [frameNode, shell, textarea].some((element) => {
+  const hasStoredRelativeAnchorAttrs = relativeAttributeTargets.some((element) => {
     if (!element) {
       return false;
     }
@@ -2274,6 +2435,7 @@ const readFramePositionMode = (
 
     return (
       (anchorKind === 'frame' || anchorKind === 'page-corner' || anchorKind === 'group') &&
+      !(anchorKind === 'group' && isLegacyInferredPositionGroupId(anchorId)) &&
       Boolean(anchorId) &&
       (anchorX === 'left' || anchorX === 'right') &&
       (anchorY === 'top' || anchorY === 'bottom') &&
@@ -3440,6 +3602,232 @@ const collectPositionGroupStructureWarnings = (root: ParentNode | null | undefin
 
   return Array.from(warnings);
 };
+
+const formatIssueList = (values: string[], limit = 5) => {
+  const uniqueValues = Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  if (uniqueValues.length <= limit) {
+    return uniqueValues.join(', ') || '-';
+  }
+
+  return `${uniqueValues.slice(0, limit).join(', ')} 외 ${uniqueValues.length - limit}개`;
+};
+
+const readRawRelativeAnchorIdentity = (frameNode: HTMLElement | null | undefined) => {
+  if (!frameNode) {
+    return null as null | {
+      anchorKind: TemplateFrameRelativeAnchorKind;
+      anchorId: string;
+    };
+  }
+
+  for (const element of getRelativeAnchorAttributeTargets(frameNode)) {
+    const positionMode = element.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim();
+    const anchorKind = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR)?.trim();
+    const anchorId = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR)?.trim() || '';
+
+    if (
+      positionMode === 'relative' &&
+      (anchorKind === 'group' || anchorKind === 'frame' || anchorKind === 'page-corner') &&
+      anchorId
+    ) {
+      return {
+        anchorKind,
+        anchorId,
+      };
+    }
+  }
+
+  return null;
+};
+
+const formatPositionGroupStructureWarningMessage = (warnings: string[]) => {
+  const legacyGroupIds: string[] = [];
+  const legacyMemberGroupIds: string[] = [];
+  const legacyAnchorGroupIds: string[] = [];
+  const missingAnchorEntries: Array<{ frameGroupId: string; anchorGroupId: string }> = [];
+  const overlapEntries: Array<{ leftGroupId: string; rightGroupId: string }> = [];
+
+  warnings.forEach((warning) => {
+    const [kind, first = '', second = ''] = warning.split(':');
+
+    if (kind === 'legacy-group') {
+      legacyGroupIds.push(first);
+      return;
+    }
+
+    if (kind === 'legacy-member') {
+      legacyMemberGroupIds.push(first);
+      return;
+    }
+
+    if (kind === 'legacy-anchor') {
+      legacyAnchorGroupIds.push(first);
+      return;
+    }
+
+    if (kind === 'missing-anchor') {
+      missingAnchorEntries.push({
+        frameGroupId: first || 'unknown',
+        anchorGroupId: second || '',
+      });
+      return;
+    }
+
+    if (kind === 'overlap') {
+      overlapEntries.push({
+        leftGroupId: first,
+        rightGroupId: second,
+      });
+    }
+  });
+
+  const lines = ['그룹 위치 구조 경고'];
+
+  if (missingAnchorEntries.length > 0) {
+    lines.push(
+      `저장된 상대 위치 anchor가 존재하지 않는 물리 그룹을 참조합니다. 누락 그룹: ${formatIssueList(
+        missingAnchorEntries.map((entry) => entry.anchorGroupId)
+      )}. 영향 상자: ${formatIssueList(missingAnchorEntries.map((entry) => entry.frameGroupId))}.`
+    );
+    lines.push('해결: 상자/그룹은 유지하고, 누락 그룹을 참조하는 간격 설정만 삭제해야 합니다.');
+  }
+
+  if (legacyAnchorGroupIds.length > 0) {
+    lines.push(
+      `저장된 상대 위치 anchor가 더 이상 허용하지 않는 추론 그룹을 참조합니다. 추론 그룹: ${formatIssueList(
+        legacyAnchorGroupIds
+      )}.`
+    );
+    lines.push('해결: 추론 그룹 기준 간격 설정을 삭제하고 물리 그룹 기준으로 다시 설정해야 합니다.');
+  }
+
+  if (legacyGroupIds.length > 0 || legacyMemberGroupIds.length > 0) {
+    lines.push(
+      `bandSource/추론 그룹 정의가 남아 있습니다. 그룹: ${formatIssueList([
+        ...legacyGroupIds,
+        ...legacyMemberGroupIds,
+      ])}.`
+    );
+    lines.push('해결: 해당 그룹을 해제한 뒤 물리 그룹으로 다시 생성해야 합니다.');
+  }
+
+  if (overlapEntries.length > 0) {
+    lines.push(
+      `그룹끼리 겹치지만 부모/자식 위계로 선언되지 않은 관계가 있습니다. 관계: ${formatIssueList(
+        overlapEntries.map((entry) => `${entry.leftGroupId} ↔ ${entry.rightGroupId}`),
+        3
+      )}.`
+    );
+    lines.push('해결: 겹친 그룹을 해제한 뒤 원하는 부모/자식 구조로 다시 생성해야 합니다.');
+  }
+
+  return lines.join('\n');
+};
+
+const hasRepairableInvalidPositionSpacingWarning = (warnings: string[]) =>
+  warnings.some((warning) => warning.startsWith('missing-anchor:') || warning.startsWith('legacy-anchor:'));
+
+const clearInvalidPositionSpacingAnchors = (root: ParentNode | null | undefined) => {
+  if (!root) {
+    return {
+      clearedCount: 0,
+      clearedFrameGroupIds: [] as string[],
+    };
+  }
+
+  const physicalGroupIds = new Set(
+    collectPositionBoxGroups(root, { includeSingletons: false })
+      .filter((group) => !group.inferred)
+      .map((group) => group.id)
+  );
+  const frameNodes = collectFrameSelectionAnchors(root);
+  const frameGroupIds = new Set(frameNodes.map((node) => getFrameGroupId(node)).filter(Boolean));
+  const clearedFrameGroupIds: string[] = [];
+
+  frameNodes.forEach((node) => {
+    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
+    const rawConfig = readRawRelativeAnchorIdentity(node);
+
+    if (!rawConfig) {
+      return;
+    }
+
+    const shouldClear =
+      (rawConfig.anchorKind === 'group' &&
+        (isLegacyInferredPositionGroupId(rawConfig.anchorId) || !physicalGroupIds.has(rawConfig.anchorId))) ||
+      (rawConfig.anchorKind === 'frame' && !frameGroupIds.has(rawConfig.anchorId));
+
+    if (!shouldClear) {
+      return;
+    }
+
+    applyFramePositionMode(node, 'absolute', pageInner);
+    clearedFrameGroupIds.push(getFrameGroupId(node) || 'unknown');
+  });
+
+  return {
+    clearedCount: clearedFrameGroupIds.length,
+    clearedFrameGroupIds,
+  };
+};
+
+const collectPositionSpacingDependenciesForGroupMutation = (
+  root: ParentNode | null | undefined,
+  groupIds: string[],
+  frameGroupIds: string[]
+) => {
+  if (!root) {
+    return {
+      dependencyCount: 0,
+      targetFrameGroupIds: [] as string[],
+      anchorFrameGroupIds: [] as string[],
+      anchorIds: [] as string[],
+    };
+  }
+
+  const targetGroupIdSet = new Set(groupIds.map((groupId) => groupId.trim()).filter(Boolean));
+  const targetFrameGroupIdSet = new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
+  const targetFrameGroupIds: string[] = [];
+  const anchorFrameGroupIds: string[] = [];
+  const anchorIds: string[] = [];
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    const rawConfig = readRawRelativeAnchorIdentity(node);
+
+    if (!rawConfig) {
+      return;
+    }
+
+    if (targetFrameGroupIdSet.has(frameGroupId)) {
+      targetFrameGroupIds.push(frameGroupId);
+    }
+
+    const anchorHitsTarget =
+      (rawConfig.anchorKind === 'group' && targetGroupIdSet.has(rawConfig.anchorId)) ||
+      (rawConfig.anchorKind === 'frame' && targetFrameGroupIdSet.has(rawConfig.anchorId));
+
+    if (anchorHitsTarget) {
+      anchorFrameGroupIds.push(frameGroupId || 'unknown');
+      anchorIds.push(rawConfig.anchorId);
+    }
+  });
+
+  return {
+    dependencyCount: targetFrameGroupIds.length + anchorFrameGroupIds.length,
+    targetFrameGroupIds: Array.from(new Set(targetFrameGroupIds)),
+    anchorFrameGroupIds: Array.from(new Set(anchorFrameGroupIds)),
+    anchorIds: Array.from(new Set(anchorIds)),
+  };
+};
+
+const buildBlockedGroupMutationMessage = (
+  actionLabel: string,
+  dependencies: ReturnType<typeof collectPositionSpacingDependenciesForGroupMutation>
+) =>
+  `${actionLabel} 불가: 선택한 그룹/상자에 간격 설정이 연결되어 있습니다. ` +
+  `연결 상자: ${formatIssueList([...dependencies.targetFrameGroupIds, ...dependencies.anchorFrameGroupIds])}. ` +
+  `먼저 '간격 설정'에서 관련 간격을 삭제한 뒤 다시 실행하세요.`;
 
 const readNextPositionGroupLabel = (groups: PositionImpactGroup[]) => {
   const maxLabelIndex = groups.reduce((maxIndex, group) => {
@@ -6537,6 +6925,7 @@ const applyRelativeAnchoredFrameRects = (pageInner: HTMLElement, excludedFrameGr
 };
 
 const ensureRelativeAnchorConfigs = (scope: ParentNode) => {
+  clearLegacyInferredRelativeAnchors(scope);
   Array.from(scope.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     collectFrameSelectionAnchors(pageInner).forEach((node) => {
       writeFramePositionModeAttrs(node, readFramePositionMode(node, pageInner));
@@ -8257,9 +8646,7 @@ const appendPositionGroupProxyOverlay = (
       badge.style.color = positionGroupProxySelection.badgeTextColor || '#fff';
       badge.style.fontSize = '10px';
       badge.style.fontWeight = '700';
-      badge.textContent = Number.isFinite(positionGroupProxySelection.selectionOrder)
-        ? `${positionGroupProxySelection.colorName || '선택'} 상자`
-        : '선택 상자';
+      badge.textContent = resolvePositionGroupProxySelectionBadgeLabel(positionGroupProxySelection);
       overlay.appendChild(badge);
       if (canShowDeleteButton) {
         appendFrameDeleteButtonAtRect(
@@ -8389,9 +8776,7 @@ const appendPositionGroupProxyOverlayFast = (
       badge.style.color = positionGroupProxySelection.badgeTextColor || '#fff';
       badge.style.fontSize = '10px';
       badge.style.fontWeight = '700';
-      badge.textContent = Number.isFinite(positionGroupProxySelection.selectionOrder)
-        ? `${positionGroupProxySelection.colorName || '선택'} 상자`
-        : '선택 상자';
+      badge.textContent = resolvePositionGroupProxySelectionBadgeLabel(positionGroupProxySelection);
       overlay.appendChild(badge);
       if (canShowDeleteButton) {
         appendFrameDeleteButtonAtRect(
@@ -8828,7 +9213,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [positionOrderLockSelectionGroupIdByFrameGroupId, setPositionOrderLockSelectionGroupIdByFrameGroupId] = React.useState<
     Record<string, string>
   >({});
-  const [positionOrderLockColorSeed, setPositionOrderLockColorSeed] = React.useState(0);
   const [positionOrderLockCandidateFrameGroupId, setPositionOrderLockCandidateFrameGroupId] = React.useState('');
   const [positionOrderLockCandidateGroupId, setPositionOrderLockCandidateGroupId] = React.useState('');
   const [positionOrderLockCandidateSelectionStage, setPositionOrderLockCandidateSelectionStage] = React.useState<
@@ -8840,6 +9224,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [positionSpacingDraftByPairKey, setPositionSpacingDraftByPairKey] = React.useState<Record<string, { gapY: string }>>(
     {}
   );
+  const [positionSpacingDraftErrorByPairKey, setPositionSpacingDraftErrorByPairKey] = React.useState<Record<string, boolean>>({});
+  const [positionSpacingCheckedRowKeys, setPositionSpacingCheckedRowKeys] = React.useState<Record<string, boolean>>({});
+  const [positionSpacingBulkGapY, setPositionSpacingBulkGapY] = React.useState('');
+  const [positionSpacingBulkGapError, setPositionSpacingBulkGapError] = React.useState(false);
+  const [selectedPositionSpacingSettingRelationKey, setSelectedPositionSpacingSettingRelationKey] = React.useState('');
   const [definedPositionRelationGapDraftByKey, setDefinedPositionRelationGapDraftByKey] = React.useState<
     Record<string, { gapY: string }>
   >({});
@@ -8888,7 +9277,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const positionGroupProxySelectionShowAllGroupsRef = React.useRef(false);
   const positionGroupProxySelectionsOverrideRef = React.useRef<PositionGroupProxySelection[] | null>(null);
   const lastPositionGroupStructureWarningRef = React.useRef('');
-  const positionSpacingDraftApplyRequestedRef = React.useRef(false);
   const canvasHistoryEntriesRef = React.useRef<CanvasHistoryEntry[]>([]);
   const canvasHistoryIndexRef = React.useRef(-1);
   const canvasHistoryNavigationInProgressRef = React.useRef(false);
@@ -9525,6 +9913,50 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => new Map(positionBoxGroups.map((group) => [group.id, group] as const)),
     [positionBoxGroups]
   );
+  const positionBoxGroupTreeRows = React.useMemo(() => {
+    const groupById = new Map(positionBoxGroups.map((group) => [group.id, group] as const));
+    const childGroupIdsByParentId = new Map<string, string[]>();
+    const childGroupIdSet = new Set<string>();
+
+    positionBoxGroups.forEach((group) => {
+      const childGroupIds = Array.from(
+        new Set(
+          (group.childGroupIds || [])
+            .map((childGroupId) => childGroupId.trim())
+            .filter((childGroupId) => Boolean(childGroupId) && groupById.has(childGroupId))
+        )
+      );
+
+      if (childGroupIds.length > 0) {
+        childGroupIdsByParentId.set(group.id, childGroupIds);
+        childGroupIds.forEach((childGroupId) => childGroupIdSet.add(childGroupId));
+      }
+    });
+
+    const rows: Array<{ group: PositionImpactGroup; depth: number }> = [];
+    const visitedGroupIds = new Set<string>();
+    const appendGroup = (group: PositionImpactGroup, depth: number) => {
+      if (visitedGroupIds.has(group.id)) {
+        return;
+      }
+
+      visitedGroupIds.add(group.id);
+      rows.push({ group, depth });
+      (childGroupIdsByParentId.get(group.id) || []).forEach((childGroupId) => {
+        const childGroup = groupById.get(childGroupId) || null;
+        if (childGroup) {
+          appendGroup(childGroup, depth + 1);
+        }
+      });
+    };
+
+    positionBoxGroups
+      .filter((group) => !childGroupIdSet.has(group.id))
+      .forEach((group) => appendGroup(group, 0));
+    positionBoxGroups.forEach((group) => appendGroup(group, 0));
+
+    return rows;
+  }, [positionBoxGroups]);
   const positionGroupStructureWarnings = React.useMemo(() => {
     if (previewRef.current) {
       return collectPositionGroupStructureWarnings(previewRef.current);
@@ -9568,14 +10000,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     lastPositionGroupStructureWarningRef.current = positionGroupStructureWarningSignature;
-    const warningMessage =
-      '그룹 위치 구조 경고: bandSource/추론 그룹 또는 물리 그룹 박스로 표현할 수 없는 겹침 관계가 남아 있습니다. 그룹 해제 후 그룹을 다시 생성하세요.';
+    const warningMessage = formatPositionGroupStructureWarningMessage(positionGroupStructureWarnings);
     setMessage(warningMessage);
 
     if (typeof window !== 'undefined') {
-      window.alert(warningMessage);
+      if (hasRepairableInvalidPositionSpacingWarning(positionGroupStructureWarnings)) {
+        const shouldClearInvalidSpacing = window.confirm(`${warningMessage}\n\n문제 간격 설정을 지금 삭제할까요?`);
+
+        if (shouldClearInvalidSpacing) {
+          const root = previewRef.current;
+          const result = clearInvalidPositionSpacingAnchors(root);
+
+          if (root && result.clearedCount > 0) {
+            applyRelativeAnchoredFrameRectsInRoot(root);
+            syncDraftPreviewHtmlRef();
+            void flushQueuedAutoPersistDraft();
+            requestPreviewTextFit();
+            setMessage(
+              `문제 간격 설정 ${result.clearedCount}개를 삭제했습니다. 대상: ${formatIssueList(
+                result.clearedFrameGroupIds
+              )}.`
+            );
+            return;
+          }
+
+          setMessage('삭제할 문제 간격 설정을 찾지 못했습니다. 템플릿을 다시 불러온 뒤 확인하세요.');
+          return;
+        }
+      } else {
+        window.alert(warningMessage);
+      }
     }
-  }, [positionGroupStructureWarningSignature, selectionPanelTab]);
+  }, [
+    flushQueuedAutoPersistDraft,
+    positionGroupStructureWarningSignature,
+    positionGroupStructureWarnings,
+    requestPreviewTextFit,
+    selectionPanelTab,
+    syncDraftPreviewHtmlRef,
+  ]);
   React.useEffect(() => {
     const normalizedCurrentTargetGroupId = moveGroupAssignmentTargetGroupId.trim();
     if (explicitPositionBoxGroups.length <= 0) {
@@ -9904,15 +10367,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [positionBoxGroupByFrameGroupId]
   );
   const resolvePositionOrderLockSelectionVisual = React.useCallback(
-    (selectionOrder: number, groupId: string) => {
-      const preset = resolvePositionLockColorPreset(selectionOrder, positionOrderLockColorSeed);
-      return {
-        selectionOrder,
-        groupId,
-        ...preset,
-      };
-    },
-    [positionOrderLockColorSeed]
+    (selectionOrder: number, groupId: string, label = '') =>
+      resolvePositionStableVisual(groupId, label, selectionOrder),
+    []
   );
   const resolvePositionGroupProxySelection = React.useCallback(
     (
@@ -10005,7 +10462,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             selectionOrderCandidateIndexes.length > 0
               ? Math.max(1, Math.min(...selectionOrderCandidateIndexes) + 1)
               : 1;
-          const visual = resolvePositionOrderLockSelectionVisual(selectionOrder, primaryProxy.groupId);
+          const visual = resolvePositionOrderLockSelectionVisual(selectionOrder, primaryProxy.groupId, primaryProxy.label);
           result.push({
             ...primaryProxy,
             selectionOrder,
@@ -10035,7 +10492,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }, 0);
 
       selectedIds.forEach((frameGroupId) => {
-        const group = positionBoxGroupByFrameGroupId.get(frameGroupId);
+        const explicitSelectionGroupId = positionOrderLockSelectionMode
+          ? (positionOrderLockSelectionGroupIdByFrameGroupId[frameGroupId] || '').trim()
+          : '';
+        const group = explicitSelectionGroupId
+          ? positionBoxGroupById.get(explicitSelectionGroupId) || positionBoxGroupByFrameGroupId.get(frameGroupId)
+          : positionBoxGroupByFrameGroupId.get(frameGroupId);
         const optionSelectionKind = options?.selectionKindByFrameGroupId?.[frameGroupId];
         const selectionKind = positionOrderLockSelectionMode
           ? positionOrderLockSelectionKindByFrameGroupId[frameGroupId] || 'frame'
@@ -10058,7 +10520,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         if (positionOrderLockSelectionMode) {
           nextSelectionOrder += 1;
           const selectionOrder = nextSelectionOrder;
-          const visual = resolvePositionOrderLockSelectionVisual(selectionOrder, resolvedGroupId);
+          const visual = resolvePositionOrderLockSelectionVisual(
+            selectionOrder,
+            resolvedGroupId,
+            shouldUseGroup ? group?.label || frameGroupId : frameGroupId
+          );
           result.push({
             groupId: resolvedGroupId,
             label: shouldUseGroup ? group?.label || frameGroupId : frameGroupId,
@@ -10085,6 +10551,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [
       positionBoxGroupByFrameGroupId,
+      positionBoxGroupById,
+      positionOrderLockSelectionGroupIdByFrameGroupId,
       positionOrderLockSelectionKindByFrameGroupId,
       positionOrderLockSelectionMode,
       resolvePositionGroupProxySelection,
@@ -10293,7 +10761,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
 
         const targetConfig =
-          readStoredRelativeAnchorConfig(targetNode) || readStoredRelativeAnchorConfig(resolveFrameLayoutShell(targetNode));
+          readStoredRelativeAnchorConfig(targetNode) ||
+          readStoredRelativeAnchorConfig(resolveFrameLayoutShell(targetNode)) ||
+          readStoredRelativeAnchorConfig(resolveFrameContentTarget(targetNode)) ||
+          readStoredRelativeAnchorConfig(targetNode.querySelector<HTMLElement>('[data-template-frame-position-mode="relative"]'));
         if (!targetConfig) {
           return null;
         }
@@ -10436,124 +10907,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .sort((left, right) => left.targetSortTop - right.targetSortTop)
       .map(({ targetSortTop: _targetSortTop, ...relation }) => relation);
   }, [positionRelationFrameLabelById, previewDomVersion, renderedPreviewHtml]);
-  const existingPositionSpacingByPairKey = React.useMemo(() => {
-    const root = previewRef.current;
-    const nextMap = new Map<
-      string,
-      {
-        gapY: number | null;
-        mixed: boolean;
-        relationCount: number;
-      }
-    >();
-
-    if (!root) {
-      return nextMap;
-    }
-
-    const frameNodeById = new Map<string, HTMLElement>();
-    collectFrameSelectionAnchors(root).forEach((node) => {
-      const frameGroupId = getFrameGroupId(node).trim();
-      if (frameGroupId) {
-        frameNodeById.set(frameGroupId, node);
-      }
-    });
-    const resolveRectFromFrameGroupIds = (frameGroupIds: string[]) => {
-      const rects = frameGroupIds
-        .map((frameGroupId) => frameGroupId.trim())
-        .filter((frameGroupId) => Boolean(frameGroupId))
-        .map((frameGroupId) => {
-          const node = frameNodeById.get(frameGroupId) || null;
-          return node ? readFrameMoveRect(node) : null;
-        })
-        .filter((rect): rect is FrameNodeRect => Boolean(rect));
-
-      if (rects.length <= 0) {
-        return null;
-      }
-
-      const minLeft = Math.min(...rects.map((rect) => rect.left));
-      const minTop = Math.min(...rects.map((rect) => rect.top));
-      const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
-      const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
-
-      return {
-        left: minLeft,
-        top: minTop,
-        width: Math.max(1, maxRight - minLeft),
-        height: Math.max(1, maxBottom - minTop),
-      } as FrameNodeRect;
-    };
-    const resolveVerticalGap = (firstRect: FrameNodeRect, secondRect: FrameNodeRect) => {
-      const firstTop = firstRect.top;
-      const firstBottom = firstRect.top + firstRect.height;
-      const secondTop = secondRect.top;
-      const secondBottom = secondRect.top + secondRect.height;
-
-      if (firstBottom <= secondTop) {
-        return secondTop - firstBottom;
-      }
-
-      if (secondBottom <= firstTop) {
-        return firstTop - secondBottom;
-      }
-
-      return 0;
-    };
-
-    const gapValuesByPairKey = new Map<string, number[]>();
-
-    definedPositionRelativeRelations.forEach((relation) => {
-      if (relation.anchorKind === 'page-corner') {
-        return;
-      }
-
-      const targetEntityId =
-        relation.targetKind === 'group'
-          ? relation.targetGroupId.trim()
-          : (
-              relation.targetConfiguredFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
-              relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
-              ''
-            ).trim();
-      const anchorEntityId =
-        relation.anchorKind === 'group' ? relation.anchorGroupId.trim() : relation.anchorFrameGroupId.trim();
-
-      if (!targetEntityId || !anchorEntityId || targetEntityId === anchorEntityId) {
-        return;
-      }
-
-      const targetRect =
-        relation.targetKind === 'group'
-          ? readPositionGroupWrapperRect(root, relation.targetGroupId)
-          : resolveRectFromFrameGroupIds(relation.targetFrameGroupIds);
-      const anchorRect =
-        relation.anchorKind === 'group'
-          ? readPositionGroupWrapperRect(root, relation.anchorGroupId)
-          : resolveRectFromFrameGroupIds([relation.anchorFrameGroupId]);
-
-      if (!targetRect || !anchorRect) {
-        return;
-      }
-
-      const pairKey = [targetEntityId, anchorEntityId].sort((left, right) => left.localeCompare(right, 'ko')).join('<->');
-      const normalizedGap = Math.max(0, Math.round(resolveVerticalGap(targetRect, anchorRect)));
-      const currentValues = gapValuesByPairKey.get(pairKey) || [];
-      currentValues.push(normalizedGap);
-      gapValuesByPairKey.set(pairKey, currentValues);
-    });
-
-    gapValuesByPairKey.forEach((values, pairKey) => {
-      const uniqueValues = Array.from(new Set(values));
-      nextMap.set(pairKey, {
-        gapY: uniqueValues.length === 1 ? uniqueValues[0] : uniqueValues[0] ?? null,
-        mixed: uniqueValues.length > 1,
-        relationCount: values.length,
-      });
-    });
-
-    return nextMap;
-  }, [definedPositionRelativeRelations, previewDomVersion, renderedPreviewHtml]);
   const focusedDefinedPositionRelativeRelations = React.useMemo(() => {
     if (definedPositionRelativeRelations.length <= 0) {
       return definedPositionRelativeRelations;
@@ -10650,34 +11003,566 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => (selectedFrameGroupIds.length > 0 ? focusedDefinedPositionRelativeRelations : []),
     [focusedDefinedPositionRelativeRelations, selectedFrameGroupIds.length]
   );
-  const definedPositionRelativeRelationDisplayRows = React.useMemo(
+  const positionSpacingSettingRelations = React.useMemo(() => {
+    const baseRelations = definedPositionRelativeRelations.filter((relation) => relation.anchorKind !== 'page-corner');
+    const seenRelationKeys = new Set<string>();
+    const root = previewRef.current;
+
+    if (!root) {
+      return baseRelations;
+    }
+
+    const frameNodes = collectFrameSelectionAnchors(root);
+    const frameNodeById = new Map<string, HTMLElement>();
+    frameNodes.forEach((node) => {
+      const frameGroupId = getFrameGroupId(node).trim();
+      if (frameGroupId) {
+        frameNodeById.set(frameGroupId, node);
+      }
+    });
+
+    const readPartialRelativeAnchorConfig = (element: HTMLElement | null | undefined): TemplateFrameRelativeAnchorConfig | null => {
+      if (!element) {
+        return null;
+      }
+
+      const positionMode = element.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim();
+      const anchorKind = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR)?.trim();
+      const anchorId = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR)?.trim();
+      const anchorX = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR)?.trim();
+      const anchorY = element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR)?.trim();
+      const offsetX = Number.parseFloat(element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR) || '');
+      const offsetY = Number.parseFloat(element.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR) || '');
+
+      if (
+        positionMode !== 'relative' ||
+        (anchorKind !== 'frame' && anchorKind !== 'page-corner' && anchorKind !== 'group') ||
+        !anchorId ||
+        (anchorY !== 'top' && anchorY !== 'bottom')
+      ) {
+        return null;
+      }
+
+      return {
+        positionMode,
+        anchorKind,
+        anchorId,
+        anchorX: anchorX === 'right' ? 'right' : 'left',
+        anchorY,
+        offsetX: Number.isFinite(offsetX) ? offsetX : 0,
+        offsetY: Number.isFinite(offsetY) ? offsetY : 0,
+      };
+    };
+    const readNodeRelativeConfig = (node: HTMLElement) => {
+      const configElements = [
+        node,
+        resolveFrameLayoutShell(node),
+        resolveFrameContentTarget(node),
+        node.querySelector<HTMLElement>('[data-template-frame-position-mode="relative"]'),
+      ];
+
+      for (const element of configElements) {
+        const config = readStoredRelativeAnchorConfig(element) || readPartialRelativeAnchorConfig(element);
+        if (config) {
+          return config;
+        }
+      }
+
+      return null;
+    };
+    const buildFrameLabel = (frameGroupId: string) => {
+      const normalizedFrameGroupId = frameGroupId.trim();
+      const frameText = positionRelationFrameLabelById.get(normalizedFrameGroupId) || '';
+      return frameText ? `${normalizedFrameGroupId} | ${frameText}` : normalizedFrameGroupId;
+    };
+    const buildGroupLabel = (group: PositionImpactGroup) =>
+      `${normalizePositionGroupDisplayLabel(group.label, group.id)} (${POSITION_GROUP_LABEL_PREFIX} ${group.frameGroupIds.length}개)`;
+    const resolveRectFromFrameGroupIds = (frameGroupIds: string[]) => {
+      const rects = frameGroupIds
+        .map((frameGroupId) => frameNodeById.get(frameGroupId.trim()) || null)
+        .map((node) => (node ? readFrameMoveRect(node) : null))
+        .filter((rect): rect is FrameNodeRect => Boolean(rect));
+
+      if (rects.length <= 0) {
+        return null;
+      }
+
+      const minLeft = Math.min(...rects.map((rect) => rect.left));
+      const minTop = Math.min(...rects.map((rect) => rect.top));
+      const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
+      const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
+      return {
+        left: minLeft,
+        top: minTop,
+        width: Math.max(1, maxRight - minLeft),
+        height: Math.max(1, maxBottom - minTop),
+      };
+    };
+
+    const fallbackRelations = frameNodes
+      .map((targetNode) => {
+        const targetFrameGroupId = getFrameGroupId(targetNode).trim();
+        const targetConfig = readNodeRelativeConfig(targetNode);
+
+        if (!targetFrameGroupId || !targetConfig || targetConfig.anchorKind === 'page-corner') {
+          return null;
+        }
+
+        const targetGroup = positionBoxGroupByFrameGroupId.get(targetFrameGroupId) || null;
+        const targetKind: DefinedPositionRelativeRelation['targetKind'] =
+          targetGroup && targetGroup.frameGroupIds.length > 1 ? 'group' : 'frame';
+        const targetGroupId = targetKind === 'group' ? targetGroup?.id || '' : '';
+        const targetFrameGroupIds = targetKind === 'group' ? targetGroup?.frameGroupIds.slice() || [targetFrameGroupId] : [targetFrameGroupId];
+        const targetRect =
+          targetKind === 'group' && targetGroupId
+            ? readPositionGroupWrapperRect(root, targetGroupId) || resolveRectFromFrameGroupIds(targetFrameGroupIds)
+            : resolveRectFromFrameGroupIds([targetFrameGroupId]);
+
+        let anchorKind: DefinedPositionRelativeRelation['anchorKind'] = 'frame';
+        let anchorGroupId = '';
+        let anchorFrameGroupId = '';
+        let anchorFrameGroupIds: string[] = [];
+        let anchorLabel = '';
+        let anchorRect: FrameNodeRect | null = null;
+        const rawAnchorId = String(targetConfig.anchorId || '').trim();
+
+        if (targetConfig.anchorKind === 'group') {
+          const anchorGroup = positionBoxGroupById.get(rawAnchorId) || null;
+          if (anchorGroup && anchorGroup.frameGroupIds.length > 1) {
+            anchorKind = 'group';
+            anchorGroupId = anchorGroup.id;
+            anchorFrameGroupIds = anchorGroup.frameGroupIds.slice();
+            anchorLabel = buildGroupLabel(anchorGroup);
+            anchorRect = readPositionGroupWrapperRect(root, anchorGroup.id) || resolveRectFromFrameGroupIds(anchorGroup.frameGroupIds);
+          } else {
+            anchorKind = 'frame';
+            anchorFrameGroupId = rawAnchorId;
+            anchorFrameGroupIds = rawAnchorId ? [rawAnchorId] : [];
+            anchorLabel = buildFrameLabel(rawAnchorId);
+            anchorRect = resolveRectFromFrameGroupIds(anchorFrameGroupIds);
+          }
+        } else {
+          const anchorFrameGroup = positionBoxGroupByFrameGroupId.get(rawAnchorId) || null;
+          if (anchorFrameGroup && anchorFrameGroup.frameGroupIds.length > 1) {
+            anchorKind = 'group';
+            anchorGroupId = anchorFrameGroup.id;
+            anchorFrameGroupIds = anchorFrameGroup.frameGroupIds.slice();
+            anchorLabel = buildGroupLabel(anchorFrameGroup);
+            anchorRect = readPositionGroupWrapperRect(root, anchorFrameGroup.id) || resolveRectFromFrameGroupIds(anchorFrameGroup.frameGroupIds);
+          } else {
+            anchorKind = 'frame';
+            anchorFrameGroupId = rawAnchorId;
+            anchorFrameGroupIds = rawAnchorId ? [rawAnchorId] : [];
+            anchorLabel = buildFrameLabel(rawAnchorId);
+            anchorRect = resolveRectFromFrameGroupIds(anchorFrameGroupIds);
+          }
+        }
+
+        const targetEntityId = targetKind === 'group' ? targetGroupId : targetFrameGroupId;
+        const anchorEntityId = anchorKind === 'group' ? anchorGroupId : anchorFrameGroupId;
+        const relationKey = `${targetKind}:${targetEntityId}:configured:${targetFrameGroupId}:${anchorKind}:${anchorEntityId}`;
+
+        if (!targetEntityId || !anchorEntityId || targetEntityId === anchorEntityId || seenRelationKeys.has(relationKey)) {
+          return null;
+        }
+
+        seenRelationKeys.add(relationKey);
+        const gapYPx =
+          targetRect && anchorRect
+            ? Math.round(
+                targetConfig.anchorY === 'bottom'
+                  ? targetRect.top - (anchorRect.top + anchorRect.height)
+                  : anchorRect.top - (targetRect.top + targetRect.height)
+              )
+            : Math.round(targetConfig.offsetY);
+
+        return {
+          key: relationKey,
+          targetKind,
+          targetGroupId,
+          targetLabel: targetKind === 'group' && targetGroup ? buildGroupLabel(targetGroup) : buildFrameLabel(targetFrameGroupId),
+          targetFrameGroupIds,
+          targetConfiguredFrameGroupIds: [targetFrameGroupId],
+          anchorKind,
+          anchorLabel: anchorLabel || anchorEntityId,
+          anchorPageCornerId: '',
+          anchorGroupId,
+          anchorFrameGroupId,
+          anchorFrameGroupIds,
+          anchorY: targetConfig.anchorY,
+          gapYPx,
+        } as DefinedPositionRelativeRelation;
+      })
+      .filter((relation): relation is DefinedPositionRelativeRelation => Boolean(relation));
+
+    const expandedBaseRelations = baseRelations
+      .flatMap((relation) => {
+        const configuredFrameGroupIds = (
+          relation.targetConfiguredFrameGroupIds.length > 0
+            ? relation.targetConfiguredFrameGroupIds
+            : relation.targetFrameGroupIds
+        )
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter((frameGroupId) => Boolean(frameGroupId));
+        const targetEntityId = relation.targetKind === 'group' ? relation.targetGroupId : readSingleFrameGroupId(relation.targetFrameGroupIds);
+        const anchorEntityId =
+          relation.anchorKind === 'group' ? relation.anchorGroupId : relation.anchorKind === 'frame' ? relation.anchorFrameGroupId : '';
+
+        if (!targetEntityId || !anchorEntityId || configuredFrameGroupIds.length <= 0) {
+          return [] as DefinedPositionRelativeRelation[];
+        }
+
+        return configuredFrameGroupIds.map((configuredFrameGroupId) => ({
+          ...relation,
+          key: `${relation.targetKind}:${targetEntityId}:configured:${configuredFrameGroupId}:${relation.anchorKind}:${anchorEntityId}`,
+          targetConfiguredFrameGroupIds: [configuredFrameGroupId],
+        }));
+      })
+      .filter((relation) => {
+        if (seenRelationKeys.has(relation.key)) {
+          return false;
+        }
+
+        seenRelationKeys.add(relation.key);
+        return true;
+      });
+
+    const rawRelations = [...fallbackRelations, ...expandedBaseRelations];
+    const parentGroupIdByChildGroupId = new Map<string, string>();
+    positionBoxGroups.forEach((group) => {
+      (group.childGroupIds || []).forEach((childGroupId) => {
+        const normalizedChildGroupId = childGroupId.trim();
+        if (normalizedChildGroupId && !parentGroupIdByChildGroupId.has(normalizedChildGroupId)) {
+          parentGroupIdByChildGroupId.set(normalizedChildGroupId, group.id);
+        }
+      });
+    });
+    const resolveTopLevelGroup = (groupId: string) => {
+      let currentGroupId = groupId.trim();
+      const visitedGroupIds = new Set<string>();
+      let currentGroup = currentGroupId ? positionBoxGroupById.get(currentGroupId) || null : null;
+
+      while (currentGroupId && !visitedGroupIds.has(currentGroupId)) {
+        visitedGroupIds.add(currentGroupId);
+        const parentGroupId = parentGroupIdByChildGroupId.get(currentGroupId) || '';
+        const parentGroup = parentGroupId ? positionBoxGroupById.get(parentGroupId) || null : null;
+
+        if (!parentGroup) {
+          break;
+        }
+
+        currentGroupId = parentGroup.id;
+        currentGroup = parentGroup;
+      }
+
+      return currentGroup;
+    };
+    const resolveFrameTopLevelGroup = (frameGroupId: string) => {
+      const normalizedFrameGroupId = frameGroupId.trim();
+      if (!normalizedFrameGroupId) {
+        return null;
+      }
+
+      const containingGroups = positionBoxGroups
+        .filter(
+          (group) =>
+            !group.inferred &&
+            group.frameGroupIds.length > 1 &&
+            group.frameGroupIds.some((memberFrameGroupId) => memberFrameGroupId.trim() === normalizedFrameGroupId)
+        )
+        .sort((left, right) => {
+          if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+            return right.frameGroupIds.length - left.frameGroupIds.length;
+          }
+          return left.id.localeCompare(right.id, 'ko');
+        });
+
+      return containingGroups.length > 0 ? resolveTopLevelGroup(containingGroups[0]?.id || '') : null;
+    };
+    const resolveEntityRect = (entity: {
+      kind: 'group' | 'frame';
+      id: string;
+      frameGroupIds: string[];
+    }) =>
+      entity.kind === 'group'
+        ? readPositionGroupWrapperRect(root, entity.id) || resolveRectFromFrameGroupIds(entity.frameGroupIds)
+        : resolveRectFromFrameGroupIds(entity.frameGroupIds);
+    const buildEntityFromGroup = (group: PositionImpactGroup) => ({
+      kind: 'group' as const,
+      id: group.id,
+      label: buildGroupLabel(group),
+      frameGroupIds: group.frameGroupIds.slice(),
+      rect: resolveEntityRect({
+        kind: 'group' as const,
+        id: group.id,
+        frameGroupIds: group.frameGroupIds,
+      }),
+    });
+    const buildEntityFromFrame = (frameGroupId: string) => {
+      const normalizedFrameGroupId = frameGroupId.trim();
+      const topGroup = resolveFrameTopLevelGroup(normalizedFrameGroupId);
+
+      if (topGroup) {
+        return buildEntityFromGroup(topGroup);
+      }
+
+      return {
+        kind: 'frame' as const,
+        id: normalizedFrameGroupId,
+        label: buildFrameLabel(normalizedFrameGroupId),
+        frameGroupIds: normalizedFrameGroupId ? [normalizedFrameGroupId] : [],
+        rect: resolveEntityRect({
+          kind: 'frame' as const,
+          id: normalizedFrameGroupId,
+          frameGroupIds: normalizedFrameGroupId ? [normalizedFrameGroupId] : [],
+        }),
+      };
+    };
+    const buildEntityFromRelationSide = (
+      kind: 'group' | 'frame',
+      groupId: string,
+      frameGroupId: string,
+      frameGroupIds: string[]
+    ) => {
+      if (kind === 'group') {
+        const topGroup = resolveTopLevelGroup(groupId) || null;
+        if (topGroup) {
+          return buildEntityFromGroup(topGroup);
+        }
+      }
+
+      const firstFrameGroupId =
+        frameGroupId.trim() ||
+        frameGroupIds.find((candidateFrameGroupId) => Boolean(candidateFrameGroupId.trim()))?.trim() ||
+        '';
+      return buildEntityFromFrame(firstFrameGroupId);
+    };
+    const entityContainsFrame = (
+      entity: {
+        frameGroupIds: string[];
+      },
+      frameGroupId: string
+    ) => entity.frameGroupIds.some((memberFrameGroupId) => memberFrameGroupId.trim() === frameGroupId.trim());
+    const mergedByCanonicalPair = new Map<string, DefinedPositionRelativeRelation>();
+
+    rawRelations.forEach((relation) => {
+      if (relation.anchorKind === 'page-corner') {
+        return;
+      }
+
+      const targetEntity = buildEntityFromRelationSide(
+        relation.targetKind,
+        relation.targetGroupId,
+        relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) || '',
+        relation.targetFrameGroupIds
+      );
+      const anchorEntity = buildEntityFromRelationSide(
+        relation.anchorKind,
+        relation.anchorGroupId,
+        relation.anchorFrameGroupId,
+        relation.anchorFrameGroupIds
+      );
+
+      if (
+        !targetEntity.id ||
+        !anchorEntity.id ||
+        !targetEntity.rect ||
+        !anchorEntity.rect ||
+        `${targetEntity.kind}:${targetEntity.id}` === `${anchorEntity.kind}:${anchorEntity.id}`
+      ) {
+        return;
+      }
+
+      const targetBottom = targetEntity.rect.top + targetEntity.rect.height;
+      const anchorBottom = anchorEntity.rect.top + anchorEntity.rect.height;
+      const targetIsBelow = anchorBottom <= targetEntity.rect.top;
+      const anchorIsBelow = targetBottom <= anchorEntity.rect.top;
+      const upperEntity = targetIsBelow ? anchorEntity : anchorIsBelow ? targetEntity : targetEntity.rect.top <= anchorEntity.rect.top ? targetEntity : anchorEntity;
+      const lowerEntity = upperEntity === targetEntity ? anchorEntity : targetEntity;
+      const gapYPx =
+        upperEntity.rect && lowerEntity.rect
+          ? Math.max(0, Math.round(lowerEntity.rect.top - (upperEntity.rect.top + upperEntity.rect.height)))
+          : Math.max(0, Math.round(relation.gapYPx));
+      const canonicalPairKey = `${upperEntity.kind}:${upperEntity.id}->${lowerEntity.kind}:${lowerEntity.id}`;
+      const rawConfiguredFrameGroupIds = relation.targetConfiguredFrameGroupIds.length > 0
+        ? relation.targetConfiguredFrameGroupIds
+        : relation.targetFrameGroupIds;
+      const existing = mergedByCanonicalPair.get(canonicalPairKey);
+      const nextRelation: DefinedPositionRelativeRelation = existing || {
+        key: canonicalPairKey,
+        targetKind: lowerEntity.kind,
+        targetGroupId: lowerEntity.kind === 'group' ? lowerEntity.id : '',
+        targetLabel: lowerEntity.label,
+        targetFrameGroupIds: lowerEntity.frameGroupIds.slice(),
+        targetConfiguredFrameGroupIds: lowerEntity.frameGroupIds.slice(),
+        relationConfiguredFrameGroupIds: [],
+        anchorKind: upperEntity.kind,
+        anchorLabel: upperEntity.label,
+        anchorPageCornerId: '',
+        anchorGroupId: upperEntity.kind === 'group' ? upperEntity.id : '',
+        anchorFrameGroupId: upperEntity.kind === 'frame' ? upperEntity.id : '',
+        anchorFrameGroupIds: upperEntity.frameGroupIds.slice(),
+        anchorY: 'bottom',
+        gapYPx,
+      };
+
+      nextRelation.gapYPx = Math.min(nextRelation.gapYPx, gapYPx);
+      nextRelation.relationConfiguredFrameGroupIds = Array.from(
+        new Set([...(nextRelation.relationConfiguredFrameGroupIds || []), ...rawConfiguredFrameGroupIds])
+      );
+      nextRelation.targetConfiguredFrameGroupIds = Array.from(
+        new Set(
+          nextRelation.targetFrameGroupIds.length > 0
+            ? nextRelation.targetFrameGroupIds
+            : rawConfiguredFrameGroupIds.filter((frameGroupId) => entityContainsFrame(lowerEntity, frameGroupId))
+        )
+      );
+      mergedByCanonicalPair.set(canonicalPairKey, nextRelation);
+    });
+
+    const simplifiedRelations = Array.from(mergedByCanonicalPair.values()).sort((left, right) => {
+      const leftRect =
+        left.targetKind === 'group'
+          ? readPositionGroupWrapperRect(root, left.targetGroupId) || resolveRectFromFrameGroupIds(left.targetFrameGroupIds)
+          : resolveRectFromFrameGroupIds(left.targetFrameGroupIds);
+      const rightRect =
+        right.targetKind === 'group'
+          ? readPositionGroupWrapperRect(root, right.targetGroupId) || resolveRectFromFrameGroupIds(right.targetFrameGroupIds)
+          : resolveRectFromFrameGroupIds(right.targetFrameGroupIds);
+
+      return (leftRect?.top || 0) - (rightRect?.top || 0);
+    });
+    const coveredConfiguredFrameGroupIds = new Set(
+      simplifiedRelations.flatMap((relation) =>
+        relation.relationConfiguredFrameGroupIds && relation.relationConfiguredFrameGroupIds.length > 0
+          ? relation.relationConfiguredFrameGroupIds
+          : relation.targetConfiguredFrameGroupIds
+      )
+    );
+    const simplifiedRelationKeys = new Set(simplifiedRelations.map((relation) => relation.key));
+    const unresolvedBaseRelations = baseRelations.filter((relation) => {
+      if (relation.anchorKind === 'page-corner' || simplifiedRelationKeys.has(relation.key)) {
+        return false;
+      }
+
+      const configuredFrameGroupIds = (
+        relation.targetConfiguredFrameGroupIds.length > 0
+          ? relation.targetConfiguredFrameGroupIds
+          : relation.targetFrameGroupIds
+      )
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter(Boolean);
+
+      if (
+        configuredFrameGroupIds.length <= 0 ||
+        configuredFrameGroupIds.every((frameGroupId) => coveredConfiguredFrameGroupIds.has(frameGroupId))
+      ) {
+        return false;
+      }
+
+      const hasUnresolvedAnchor =
+        (relation.anchorKind === 'group' && !positionBoxGroupById.has(relation.anchorGroupId)) ||
+        (relation.anchorKind === 'frame' && !frameNodeById.has(relation.anchorFrameGroupId));
+      const hasUnresolvedTarget =
+        relation.targetKind === 'group'
+          ? !positionBoxGroupById.has(relation.targetGroupId)
+          : relation.targetFrameGroupIds.some((frameGroupId) => !frameNodeById.has(frameGroupId));
+
+      return hasUnresolvedAnchor || hasUnresolvedTarget;
+    });
+
+    return [...simplifiedRelations, ...unresolvedBaseRelations];
+  }, [
+    definedPositionRelativeRelations,
+    positionBoxGroups,
+    positionBoxGroupByFrameGroupId,
+    positionBoxGroupById,
+    positionOrderLockSelectionMode,
+    positionRelationFrameLabelById,
+    previewDomVersion,
+    renderedPreviewHtml,
+  ]);
+  const positionSpacingSettingRelationDisplayRows = React.useMemo(
     () =>
-      focusedDefinedPositionRelativeRelations.map((relation) => ({
-        key: relation.key,
-        targetLabel:
-          relation.targetKind === 'group'
-            ? relation.targetLabel.replace(/\s*\((이동\s+묶음\s+박스|이동\s+묶음\s+상자|그룹)\s*\d+개\)\s*$/u, '')
-            : relation.targetFrameGroupIds.join(', ') || '-',
-        anchorLabel:
-          relation.anchorKind === 'group'
-            ? relation.anchorLabel.replace(/\s*\((이동\s+묶음\s+박스|이동\s+묶음\s+상자|그룹)\s*\d+개\)\s*$/u, '')
-            : relation.anchorKind === 'frame'
-              ? relation.anchorFrameGroupId
-              : relation.anchorLabel,
-        gapYLabel: `${relation.gapYPx}px`,
-      })),
-    [focusedDefinedPositionRelativeRelations]
+      positionSpacingSettingRelations.map((relation) => {
+        const groupTargetLabel = stripPositionGroupMemberCountSuffix(relation.targetLabel);
+
+        return {
+          key: relation.key,
+          targetLabel:
+            relation.targetKind === 'group'
+              ? groupTargetLabel
+              : relation.targetConfiguredFrameGroupIds.join(', ') || relation.targetFrameGroupIds.join(', ') || '-',
+          anchorLabel:
+            relation.anchorKind === 'group'
+              ? stripPositionGroupMemberCountSuffix(relation.anchorLabel)
+              : relation.anchorFrameGroupId || relation.anchorLabel,
+        };
+      }),
+    [positionSpacingSettingRelations]
   );
-  const shouldShowDefinedPositionRelativeRelations = definedPositionRelativeRelationDisplayRows.length > 0;
+  const existingPositionSpacingByPairKey = React.useMemo(() => {
+    const gapValuesByPairKey = new Map<string, number[]>();
+
+    positionSpacingSettingRelations.forEach((relation) => {
+      if (relation.anchorKind === 'page-corner') {
+        return;
+      }
+
+      const targetEntityId =
+        relation.targetKind === 'group'
+          ? relation.targetGroupId.trim()
+          : (
+              relation.targetConfiguredFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+              relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+              ''
+            ).trim();
+      const anchorEntityId =
+        relation.anchorKind === 'group' ? relation.anchorGroupId.trim() : relation.anchorFrameGroupId.trim();
+
+      if (!targetEntityId || !anchorEntityId || targetEntityId === anchorEntityId) {
+        return;
+      }
+
+      const pairKey = [targetEntityId, anchorEntityId].sort((left, right) => left.localeCompare(right, 'ko')).join('<->');
+      const currentValues = gapValuesByPairKey.get(pairKey) || [];
+      currentValues.push(Math.max(0, Math.round(relation.gapYPx)));
+      gapValuesByPairKey.set(pairKey, currentValues);
+    });
+
+    const nextMap = new Map<
+      string,
+      {
+        gapY: number | null;
+        mixed: boolean;
+        relationCount: number;
+      }
+    >();
+
+    gapValuesByPairKey.forEach((values, pairKey) => {
+      const uniqueValues = Array.from(new Set(values));
+      nextMap.set(pairKey, {
+        gapY: uniqueValues.length === 1 ? uniqueValues[0] : uniqueValues[0] ?? null,
+        mixed: uniqueValues.length > 1,
+        relationCount: values.length,
+      });
+    });
+
+    return nextMap;
+  }, [positionSpacingSettingRelations]);
   React.useEffect(() => {
-    if (focusedDefinedPositionRelativeRelations.length <= 0) {
+    const draftSourceRelations = positionOrderLockSelectionMode
+      ? positionSpacingSettingRelations
+      : focusedDefinedPositionRelativeRelations;
+
+    if (draftSourceRelations.length <= 0) {
       setDefinedPositionRelationGapDraftByKey((previous) => (Object.keys(previous).length > 0 ? {} : previous));
       return;
     }
 
     setDefinedPositionRelationGapDraftByKey((previous) => {
       const next: Record<string, { gapY: string }> = {};
-      focusedDefinedPositionRelativeRelations.forEach((relation) => {
+      draftSourceRelations.forEach((relation) => {
         next[relation.key] = previous[relation.key] || {
           gapY: String(Math.round(relation.gapYPx)),
         };
@@ -10694,7 +11579,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       return hasSameValues ? previous : next;
     });
-  }, [focusedDefinedPositionRelativeRelations]);
+  }, [focusedDefinedPositionRelativeRelations, positionOrderLockSelectionMode, positionSpacingSettingRelations]);
   const applyDefinedPositionRelationGapDraft = React.useCallback(
     (relation: DefinedPositionRelativeRelation, nextGapYRaw: string) => {
       setDefinedPositionRelationGapDraftByKey((previous) => ({
@@ -10822,8 +11707,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const currentGapY = targetRect.top - (anchorRect.top + anchorRect.height);
-      const deltaY = nextGapY - currentGapY;
+      const currentGapY =
+        relation.anchorY === 'bottom'
+          ? targetRect.top - (anchorRect.top + anchorRect.height)
+          : anchorRect.top - (targetRect.top + targetRect.height);
+      const deltaY = relation.anchorY === 'bottom' ? nextGapY - currentGapY : currentGapY - nextGapY;
 
       if (Math.abs(deltaY) <= 0.1) {
         return;
@@ -10847,7 +11735,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         const currentConfig =
           readStoredRelativeAnchorConfig(targetNode) ||
-          readStoredRelativeAnchorConfig(resolveFrameLayoutShell(targetNode));
+          readStoredRelativeAnchorConfig(resolveFrameLayoutShell(targetNode)) ||
+          readStoredRelativeAnchorConfig(resolveFrameContentTarget(targetNode)) ||
+          readStoredRelativeAnchorConfig(targetNode.querySelector<HTMLElement>('[data-template-frame-position-mode="relative"]'));
         const hasSameAnchorIdentity =
           Boolean(currentConfig) &&
           currentConfig.anchorKind === relationAnchorKind &&
@@ -10931,6 +11821,57 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       entityCount: groupIds.length + frameGroupIds.length,
     };
   }, [positionBoxGroups, selectedPositionGroupingFrameGroupIds]);
+  const positionSpacingSettingSelectedEntityKeys = React.useMemo(() => {
+    const nextKeys = new Set<string>();
+
+    selectedPositionEntitySelection.groupIds.forEach((groupId) => {
+      const normalizedGroupId = groupId.trim();
+      if (normalizedGroupId) {
+        nextKeys.add(`group:${normalizedGroupId}`);
+      }
+    });
+    selectedPositionEntitySelection.frameGroupIds.forEach((frameGroupId) => {
+      const normalizedFrameGroupId = frameGroupId.trim();
+      if (normalizedFrameGroupId) {
+        nextKeys.add(`frame:${normalizedFrameGroupId}`);
+      }
+    });
+
+    return nextKeys;
+  }, [selectedPositionEntitySelection]);
+  const highlightedPositionSpacingSettingRelationKeySet = React.useMemo(() => {
+    const selectedRelationKey = selectedPositionSpacingSettingRelationKey.trim();
+    const nextKeys = new Set<string>();
+
+    if (selectedRelationKey) {
+      nextKeys.add(selectedRelationKey);
+    }
+
+    if (positionSpacingSettingSelectedEntityKeys.size <= 0) {
+      return nextKeys;
+    }
+
+    positionSpacingSettingRelations.forEach((relation) => {
+      const targetEntityKey =
+        relation.targetKind === 'group'
+          ? `group:${relation.targetGroupId}`
+          : `frame:${
+              relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+              relation.targetConfiguredFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+              ''
+            }`;
+      const anchorEntityKey =
+        relation.anchorKind === 'group'
+          ? `group:${relation.anchorGroupId}`
+          : `frame:${relation.anchorFrameGroupId}`;
+
+      if (positionSpacingSettingSelectedEntityKeys.has(targetEntityKey) || positionSpacingSettingSelectedEntityKeys.has(anchorEntityKey)) {
+        nextKeys.add(relation.key);
+      }
+    });
+
+    return nextKeys;
+  }, [positionSpacingSettingRelations, positionSpacingSettingSelectedEntityKeys, selectedPositionSpacingSettingRelationKey]);
   const selectedPositionExactMatchedBoxGroup = React.useMemo(() => {
     if (selectionPanelTab !== 'position' || selectedPositionGroupingFrameGroupIds.length <= 1) {
       return null;
@@ -11320,7 +12261,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectedPositionEntitySelection.entityCount >= 2 ||
     selectedPositionGroupingFrameGroupIds.length >= 2 ||
     Boolean(selectedPositionResolvedBoxGroup && selectedPositionResolvedBoxGroup.frameGroupIds.length >= 2);
-  const canStartPositionSpacingLockFromSelection = selectedPositionEntitySelection.entityCount >= 2;
+  const canOpenPositionSpacingSettings = true;
   const canAssignSelectedItemsToGroup =
     explicitPositionBoxGroups.length > 0 && selectedPositionEntitySelection.entityCount > 0;
   const canRemoveSelectedItemsFromGroup = selectedPositionEntitySelection.entityCount > 0;
@@ -11376,28 +12317,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return anchorLabelSet.size === 1 ? Array.from(anchorLabelSet)[0] : '혼합';
   }, [primaryRelativeAnchorLabel, previewDomVersion, renderedPreviewHtml, selectedPositionResolvedFrameGroupIds, selectionPanelTab]);
-  const positionOrderLockConfirmPreviewCount = React.useMemo(() => {
-    const entityKeys = new Set<string>();
-
-    positionOrderLockFrameGroupIds.forEach((frameGroupId) => {
-      const normalizedFrameGroupId = frameGroupId.trim();
-
-      if (!normalizedFrameGroupId) {
-        return;
-      }
-
-      const selectionKind = positionOrderLockSelectionKindByFrameGroupId[normalizedFrameGroupId] || 'frame';
-      if (selectionKind === 'group') {
-        const groupId = positionBoxGroupByFrameGroupId.get(normalizedFrameGroupId)?.id || '';
-        entityKeys.add(groupId ? `group:${groupId}` : `frame:${normalizedFrameGroupId}`);
-        return;
-      }
-
-      entityKeys.add(`frame:${normalizedFrameGroupId}`);
-    });
-
-    return entityKeys.size;
-  }, [positionBoxGroupByFrameGroupId, positionOrderLockFrameGroupIds, positionOrderLockSelectionKindByFrameGroupId]);
   const positionOrderLockSelectionVisualByGroupId = React.useMemo(() => {
     const nextMap = new Map<
       string,
@@ -11431,7 +12350,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      nextMap.set(groupId, resolvePositionOrderLockSelectionVisual(nextSelectionOrder, groupId));
+      nextMap.set(
+        groupId,
+        resolvePositionOrderLockSelectionVisual(
+          nextSelectionOrder,
+          groupId,
+          shouldUseGroup ? group?.label || normalizedFrameGroupId : normalizedFrameGroupId
+        )
+      );
       nextSelectionOrder += 1;
     });
 
@@ -11444,18 +12370,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   ]);
   const resolvePositionOrderLockGroupLabel = React.useCallback(
     (groupId: string, fallbackLabel: string) => {
-      const visual = positionOrderLockSelectionVisualByGroupId.get(groupId);
-
-      if (visual) {
-        return `${visual.colorName} 상자`;
-      }
-
       const normalizedFallback = fallbackLabel.trim();
       return /^(box\s*\d+|그룹\s*\d+)/iu.test(normalizedFallback)
         ? normalizePositionGroupDisplayLabel(normalizedFallback)
-        : '선택 상자';
+        : normalizedFallback || groupId || '선택 상자';
     },
-    [positionOrderLockSelectionVisualByGroupId]
+    []
   );
   const resolvePositionSpacingOrderedGroupMembers = React.useCallback((
     targetFrameGroupIds: string[],
@@ -12081,9 +13001,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => resolvePositionSpacingPairsFromOrderedMembers(positionSpacingAutoOrderedGroupMembers),
     [positionSpacingAutoOrderedGroupMembers, resolvePositionSpacingPairsFromOrderedMembers]
   );
-  const positionSpacingPairSummaries = React.useMemo(
-    () =>
-      positionSpacingResolvedPairs.map((pair) => {
+	  const positionSpacingPairSummaries = React.useMemo(
+	    () =>
+	      positionSpacingResolvedPairs.map((pair) => {
         const anchorMember = pair.anchorMember;
         const targetMember = pair.targetMember;
         const anchorLabel = resolvePositionOrderLockGroupLabel(anchorMember.group.id, anchorMember.group.label);
@@ -12102,64 +13022,77 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           existingGapY: typeof existingRelationInfo?.gapY === 'number' ? existingRelationInfo.gapY : null,
           existingGapMixed: Boolean(existingRelationInfo?.mixed),
         };
-      }),
-    [existingPositionSpacingByPairKey, positionSpacingResolvedPairs, resolvePositionOrderLockGroupLabel]
+	      }),
+	    [existingPositionSpacingByPairKey, positionSpacingResolvedPairs, resolvePositionOrderLockGroupLabel]
+	  );
+  const positionSpacingNewPairSummaries = React.useMemo(
+    () => positionSpacingPairSummaries.filter((pair) => !pair.hasExistingRelation),
+    [positionSpacingPairSummaries]
   );
-  const positionSpacingDuplicatePairKeySet = React.useMemo(() => {
-    const duplicates = new Set<string>();
+  const positionSpacingEntityVisualByKey = React.useMemo(() => {
+    const nextMap = new Map<
+      string,
+      {
+        selectionOrder: number;
+        groupId: string;
+        colorName: string;
+        outlineColor: string;
+        fillColor: string;
+        haloColor: string;
+        badgeColor: string;
+        badgeTextColor: string;
+      }
+    >();
+    let nextOrder = 1;
+    const addEntity = (entityKey: string, visualLookupId = entityKey, visualLabel = '') => {
+      const normalizedEntityKey = entityKey.trim();
+      const normalizedVisualLookupId = visualLookupId.trim();
 
-    positionSpacingPairSummaries.forEach((pair) => {
-      if (!pair.hasExistingRelation || typeof pair.existingGapY !== 'number' || pair.existingGapMixed) {
+      if (!normalizedEntityKey || nextMap.has(normalizedEntityKey)) {
         return;
       }
 
-      const draftGap = Number.parseFloat(positionSpacingDraftByPairKey[pair.pairKey]?.gapY || '');
-      const resolvedGapY = Number.isFinite(draftGap) ? Math.max(0, draftGap) : Math.max(0, pair.defaultGapY);
-      if (Math.abs(resolvedGapY - Math.max(0, pair.existingGapY)) <= 0.1) {
-        duplicates.add(pair.pairKey);
+      const selectedVisual = positionOrderLockSelectionVisualByGroupId.get(normalizedVisualLookupId);
+      if (selectedVisual) {
+        nextMap.set(normalizedEntityKey, selectedVisual);
+        return;
       }
+
+      nextMap.set(
+        normalizedEntityKey,
+        resolvePositionOrderLockSelectionVisual(nextOrder, normalizedVisualLookupId || normalizedEntityKey, visualLabel || normalizedEntityKey)
+      );
+      nextOrder += 1;
+    };
+
+    positionSpacingSettingRelations.forEach((relation) => {
+      addEntity(
+        relation.anchorKind === 'group' ? `group:${relation.anchorGroupId}` : `frame:${relation.anchorFrameGroupId}`,
+        relation.anchorKind === 'group' ? relation.anchorGroupId : `single:${relation.anchorFrameGroupId}`,
+        relation.anchorLabel
+      );
+      addEntity(
+        relation.targetKind === 'group'
+          ? `group:${relation.targetGroupId}`
+          : `frame:${relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) || ''}`,
+        relation.targetKind === 'group'
+          ? relation.targetGroupId
+          : `single:${relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) || ''}`,
+        relation.targetLabel
+      );
+    });
+    positionSpacingNewPairSummaries.forEach((pair) => {
+      addEntity(`selection:${pair.anchorGroupId}`, pair.anchorGroupId, pair.anchorLabel);
+      addEntity(`selection:${pair.targetGroupId}`, pair.targetGroupId, pair.targetLabel);
     });
 
-    return duplicates;
-  }, [positionSpacingDraftByPairKey, positionSpacingPairSummaries]);
-  const hasOnlyDuplicatePositionSpacingPairs = React.useMemo(
-    () =>
-      positionSpacingPairSummaries.length > 0 &&
-      positionSpacingDuplicatePairKeySet.size === positionSpacingPairSummaries.length,
-    [positionSpacingDuplicatePairKeySet, positionSpacingPairSummaries.length]
-  );
-  const positionOrderLockActionButtonLabel = React.useMemo(() => {
-    if (positionOrderLockConfirmPreviewCount <= 0) {
-      return '2개 이상 상자 고르기';
-    }
-
-    if (positionOrderLockConfirmPreviewCount === 1) {
-      return '1개 이상 더 고르기';
-    }
-
-    if (hasOnlyDuplicatePositionSpacingPairs) {
-      return '이미 고정된 간격';
-    }
-
-    return '간격 고정 확정';
-  }, [hasOnlyDuplicatePositionSpacingPairs, positionOrderLockConfirmPreviewCount]);
-  const positionOrderLockActionGuideText = React.useMemo(() => {
-    if (positionOrderLockConfirmPreviewCount <= 0) {
-      return '고정할 상자를 2개 이상 선택하세요.';
-    }
-
-    if (positionOrderLockConfirmPreviewCount === 1) {
-      return '1개 이상 상자를 더 선택하세요.';
-    }
-
-    if (hasOnlyDuplicatePositionSpacingPairs) {
-      return '선택된 상자 간격은 이미 고정되어 있습니다. 다른 간격값으로 변경하거나 선택 대상을 바꾸세요.';
-    }
-
-    return '선택된 상자들 사이 간격을 확인/수정한 뒤 간격 고정 확정을 누르세요.';
-  }, [hasOnlyDuplicatePositionSpacingPairs, positionOrderLockConfirmPreviewCount]);
-  const positionOrderLockConfirmDisabled =
-    positionOrderLockConfirmPreviewCount < 2 || hasOnlyDuplicatePositionSpacingPairs;
+    return nextMap;
+  }, [
+    positionOrderLockSelectionVisualByGroupId,
+    positionSpacingNewPairSummaries,
+    positionSpacingSettingRelations,
+    resolvePositionOrderLockSelectionVisual,
+  ]);
   const positionSpacingGuideRelations = React.useMemo(() => {
     if (!positionOrderLockSelectionMode) {
       return [] as PositionSpacingGuideRelation[];
@@ -12192,28 +13125,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolvePositionOrderLockGroupLabel,
   ]);
   React.useEffect(() => {
-    if (positionSpacingPairSummaries.length <= 0) {
-      setPositionSpacingDraftByPairKey((previous) =>
-        Object.keys(previous).length > 0 ? {} : previous
-      );
-      return;
-    }
+	    if (positionSpacingPairSummaries.length <= 0) {
+	      setPositionSpacingDraftByPairKey((previous) =>
+	        Object.keys(previous).length > 0 ? {} : previous
+	      );
+	      setPositionSpacingDraftErrorByPairKey((previous) => (Object.keys(previous).length > 0 ? {} : previous));
+	      return;
+	    }
 
-    setPositionSpacingDraftByPairKey((previous) => {
-      const next: Record<string, { gapY: string }> = {};
+	    setPositionSpacingDraftByPairKey((previous) => {
+	      const next: Record<string, { gapY: string }> = {};
 
-      positionSpacingPairSummaries.forEach((pair) => {
-        const previousValue = previous[pair.pairKey];
-        next[pair.pairKey] = previousValue || {
-          gapY: String(
-            Math.round(
-              typeof pair.existingGapY === 'number'
-                ? Math.max(0, pair.existingGapY)
-                : Math.max(0, pair.defaultGapY)
-            )
-          ),
-        };
-      });
+	      positionSpacingPairSummaries.forEach((pair) => {
+	        const previousValue = previous[pair.pairKey];
+	        next[pair.pairKey] = previousValue || {
+	          gapY: typeof pair.existingGapY === 'number' ? String(Math.round(Math.max(0, pair.existingGapY))) : '',
+	        };
+	      });
 
       const previousKeys = Object.keys(previous);
       const nextKeys = Object.keys(next);
@@ -12227,9 +13155,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           )
         : false;
 
-      return hasSameValues ? previous : next;
+	      return hasSameValues ? previous : next;
+	    });
+	    setPositionSpacingDraftErrorByPairKey((previous) => {
+	      const activePairKeys = new Set(positionSpacingPairSummaries.map((pair) => pair.pairKey));
+	      const next = Object.fromEntries(Object.entries(previous).filter(([pairKey]) => activePairKeys.has(pairKey)));
+	      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
+	    });
+	  }, [positionSpacingPairSummaries]);
+  React.useEffect(() => {
+    const activeRowKeys = new Set([
+      ...positionSpacingSettingRelations.map((relation) => `existing:${relation.key}`),
+      ...positionSpacingNewPairSummaries.map((pair) => `new:${pair.pairKey}`),
+    ]);
+
+    setPositionSpacingCheckedRowKeys((previous) => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([rowKey]) => activeRowKeys.has(rowKey)));
+      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
     });
-  }, [positionSpacingPairSummaries]);
+  }, [positionSpacingNewPairSummaries, positionSpacingSettingRelations]);
   const previewRelativeGuideFrameGroupId = React.useMemo(() => {
     if (selectionPanelTab === 'position') {
       if (selectedPositionTargetFrameGroupId) {
@@ -13191,10 +14135,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         syncPreviewSurfaceCloneAttrs(node);
         syncPreviewSurfaceSelectionPanelTabAttr(node, selectionPanelTab);
         syncPreviewSurfaceScale(node);
+        const clearedLegacyInferredCount = clearLegacyInferredRelativeAnchors(node);
+        if (clearedLegacyInferredCount > 0) {
+          syncDraftPreviewHtmlRef();
+          setMessage(`허용되지 않는 추론 그룹 간격 ${clearedLegacyInferredCount}개를 제거했습니다.`);
+          return;
+        }
         schedulePreviewEditorState();
       }
     },
-    [renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab, syncPreviewSurfaceScale]
+    [renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab, syncDraftPreviewHtmlRef, syncPreviewSurfaceScale]
   );
 
   const applyRuntimeSelectionUi = React.useCallback(
@@ -13487,10 +14437,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
 
       if (nextEntry.kind === 'group' && nextEntryFrameGroupIds.length > 1) {
+        const visual = positionSpacingEntityVisualByKey.get(`group:${nextEntry.groupId}`);
         proxySelectionByGroupId.set(nextEntry.groupId, {
           groupId: nextEntry.groupId,
           label: nextGroup?.label || nextEntry.groupId,
           frameGroupIds: nextEntryFrameGroupIds,
+          ...(visual
+            ? {
+                selectionOrder: visual.selectionOrder,
+                colorName: visual.colorName,
+                outlineColor: visual.outlineColor,
+                fillColor: visual.fillColor,
+                haloColor: visual.haloColor,
+                badgeColor: visual.badgeColor,
+                badgeTextColor: visual.badgeTextColor,
+              }
+            : {}),
         });
       }
 
@@ -13500,7 +14462,185 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         overridePositionGroupProxySelections: Array.from(proxySelectionByGroupId.values()),
       });
     },
-    [applyFrameBoxSelection, positionBoxGroupById, resolvePositionGroupProxySelections]
+    [applyFrameBoxSelection, positionBoxGroupById, positionSpacingEntityVisualByKey, resolvePositionGroupProxySelections]
+  );
+  const selectDefinedPositionRelationEntities = React.useCallback(
+    (relation: DefinedPositionRelativeRelation) => {
+      setSelectedPositionSpacingSettingRelationKey(relation.key);
+      const selectionIdSet = new Set<string>();
+      const nextSelectionKindByFrameGroupId: Record<string, 'group' | 'frame'> = {};
+      const nextSelectionGroupIdByFrameGroupId: Record<string, string> = {};
+      const proxySelectionsByGroupId = new Map<string, PositionGroupProxySelection>();
+
+      const addFrameSelection = (frameGroupId: string) => {
+        const normalizedFrameGroupId = frameGroupId.trim();
+        if (!normalizedFrameGroupId) {
+          return;
+        }
+        const root = previewRef.current;
+        const hasFrameNode = Boolean(
+          root?.querySelector<HTMLElement>(
+            `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${escapeCssAttributeValue(normalizedFrameGroupId)}"]`
+          )
+        );
+
+        if (!hasFrameNode) {
+          return;
+        }
+
+        selectionIdSet.add(normalizedFrameGroupId);
+        nextSelectionKindByFrameGroupId[normalizedFrameGroupId] = 'frame';
+        delete nextSelectionGroupIdByFrameGroupId[normalizedFrameGroupId];
+      };
+      const addGroupSelection = (groupId: string, fallbackLabel: string, frameGroupIds: string[]) => {
+        const normalizedGroupId = groupId.trim();
+        const resolvedGroup = normalizedGroupId ? positionBoxGroupById.get(normalizedGroupId) || null : null;
+        const resolvedFrameGroupIds = Array.from(
+          new Set(
+            (resolvedGroup?.frameGroupIds.length ? resolvedGroup.frameGroupIds : frameGroupIds)
+              .map((frameGroupId) => frameGroupId.trim())
+              .filter((frameGroupId) => Boolean(frameGroupId))
+          )
+        );
+
+        if (!normalizedGroupId || resolvedFrameGroupIds.length <= 0) {
+          resolvedFrameGroupIds.forEach(addFrameSelection);
+          return;
+        }
+
+        resolvedFrameGroupIds.forEach((frameGroupId) => {
+          selectionIdSet.add(frameGroupId);
+          nextSelectionKindByFrameGroupId[frameGroupId] = 'group';
+          nextSelectionGroupIdByFrameGroupId[frameGroupId] = normalizedGroupId;
+        });
+
+        if (resolvedFrameGroupIds.length > 1) {
+          const visual = positionSpacingEntityVisualByKey.get(`group:${normalizedGroupId}`);
+          proxySelectionsByGroupId.set(normalizedGroupId, {
+            groupId: normalizedGroupId,
+            label: resolvedGroup?.label || fallbackLabel || normalizedGroupId,
+            frameGroupIds: resolvedFrameGroupIds,
+            ...(visual
+              ? {
+                  selectionOrder: visual.selectionOrder,
+                  colorName: visual.colorName,
+                  outlineColor: visual.outlineColor,
+                  fillColor: visual.fillColor,
+                  haloColor: visual.haloColor,
+                  badgeColor: visual.badgeColor,
+                  badgeTextColor: visual.badgeTextColor,
+                }
+              : {}),
+          });
+        }
+      };
+
+      if (relation.anchorKind === 'group') {
+        addGroupSelection(relation.anchorGroupId, relation.anchorLabel, relation.anchorFrameGroupIds);
+      } else if (relation.anchorKind === 'frame') {
+        addFrameSelection(relation.anchorFrameGroupId);
+      }
+
+      if (relation.targetKind === 'group') {
+        addGroupSelection(relation.targetGroupId, relation.targetLabel, relation.targetFrameGroupIds);
+      } else {
+        relation.targetFrameGroupIds.forEach(addFrameSelection);
+      }
+
+      const nextSelectedFrameGroupIds = Array.from(selectionIdSet);
+      setPositionOrderLockFrameGroupIds(nextSelectedFrameGroupIds);
+      setPositionOrderLockSelectionKindByFrameGroupId(nextSelectionKindByFrameGroupId);
+      setPositionOrderLockSelectionGroupIdByFrameGroupId(nextSelectionGroupIdByFrameGroupId);
+      positionGroupProxySelectionShowAllGroupsRef.current = true;
+      applyFrameBoxSelection(nextSelectedFrameGroupIds, {
+        positionGroupProxySelectionGroupId: '',
+        showAllGroupProxySelections: true,
+        overridePositionGroupProxySelections: Array.from(proxySelectionsByGroupId.values()),
+      });
+    },
+    [applyFrameBoxSelection, positionBoxGroupById, positionSpacingEntityVisualByKey]
+  );
+  const deletePositionSpacingSettingRelation = React.useCallback(
+    (relation: DefinedPositionRelativeRelation) => {
+      const root = previewRef.current;
+
+      if (!root) {
+        setMessage('간격 설정을 삭제할 캔버스를 찾지 못했습니다.');
+        return;
+      }
+
+      const targetFrameGroupIds = Array.from(
+        new Set(
+          (relation.targetConfiguredFrameGroupIds.length > 0
+            ? relation.relationConfiguredFrameGroupIds && relation.relationConfiguredFrameGroupIds.length > 0
+              ? relation.relationConfiguredFrameGroupIds
+              : relation.targetConfiguredFrameGroupIds
+            : relation.targetFrameGroupIds
+          )
+            .map((frameGroupId) => frameGroupId.trim())
+            .filter((frameGroupId) => Boolean(frameGroupId))
+        )
+      );
+
+      if (targetFrameGroupIds.length <= 0) {
+        setMessage('삭제할 간격 설정 대상을 찾지 못했습니다.');
+        return;
+      }
+
+      let clearedCount = 0;
+      let skippedCount = 0;
+
+      targetFrameGroupIds.forEach((frameGroupId) => {
+        const frameNode = resolveFrameSelectionAnchor(
+          root.querySelector<HTMLElement>(
+            `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${escapeCssAttributeValue(frameGroupId)}"]`
+          )
+        );
+        const pageInner = frameNode?.closest<HTMLElement>('.page-inner') || null;
+
+        if (!frameNode || !pageInner) {
+          skippedCount += 1;
+          return;
+        }
+
+        const hadRelativeState =
+          readFramePositionMode(frameNode, pageInner) === 'relative' ||
+          hasFrameRelativeAnchorAttrs(frameNode) ||
+          hasLegacyInferredRelativeAnchorAttrs(frameNode);
+
+        if (!hadRelativeState) {
+          return;
+        }
+
+        applyFramePositionMode(frameNode, 'absolute', pageInner);
+        clearedCount += 1;
+      });
+
+      if (clearedCount <= 0) {
+        setMessage('삭제할 상대 간격 설정이 없습니다.');
+        return;
+      }
+
+      setSelectedPositionSpacingSettingRelationKey((previous) => (previous === relation.key ? '' : previous));
+      setDefinedPositionRelationGapDraftByKey((previous) => {
+        if (!previous[relation.key]) {
+          return previous;
+        }
+
+        const next = { ...previous };
+        delete next[relation.key];
+        return next;
+      });
+      applyRelativeAnchoredFrameRectsInRoot(root);
+      normalizeLiveVerticalCohorts(root);
+      syncDraftPreviewHtmlRef();
+      requestPreviewTextFit();
+      setMessage(
+        `간격 설정 ${clearedCount}개를 삭제했습니다.` +
+          (skippedCount > 0 ? ` (${skippedCount}개 제외)` : '')
+      );
+    },
+    [normalizeLiveVerticalCohorts, requestPreviewTextFit, syncDraftPreviewHtmlRef]
   );
 
   const commitCreatedFrameShell = React.useCallback(
@@ -14600,6 +15740,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         disableProxySelection?: boolean;
         commitSelection?: boolean;
         replaceSelectionFromGroupId?: string | null;
+        replaceExistingSelection?: boolean;
       }
     ) => {
       const normalizedNextFrameGroupId = nextFrameGroupId.trim();
@@ -14660,7 +15801,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         return Array.from(nextSelectionIdSet);
       };
-      const mergedSelectionIds = resolveNextSelectionIds(positionOrderLockFrameGroupIds);
+      const baseSelectionSourceIds = options?.replaceExistingSelection ? [] : positionOrderLockFrameGroupIds;
+      const mergedSelectionIds = resolveNextSelectionIds(baseSelectionSourceIds);
 
       applyFrameBoxSelection(mergedSelectionIds, {
         positionGroupProxySelectionGroupId: resolvedProxySelectionGroupId,
@@ -14668,7 +15810,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
       if (options?.commitSelection) {
         setPositionOrderLockFrameGroupIds((previous) => {
-          const nextSelectionIds = resolveNextSelectionIds(previous);
+          const nextSelectionIds = resolveNextSelectionIds(options?.replaceExistingSelection ? [] : previous);
           const normalizedPrevious = previous.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId));
 
           if (
@@ -14740,6 +15882,105 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [applyFrameBoxSelection, positionBoxGroupByFrameGroupId, positionBoxGroups, positionOrderLockFrameGroupIds]
   );
 
+  const applyPositionOrderLockMarqueeSelection = React.useCallback(
+    (nextSelectedFrameGroupIds: string[], proxySelections: PositionGroupProxySelection[] | undefined) => {
+      const normalizedSelectionIds = Array.from(
+        new Set(nextSelectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+      );
+      const normalizedSelectionIdSet = new Set(normalizedSelectionIds);
+      const normalizedProxySelections = (proxySelections || [])
+        .map((proxySelection) => ({
+          ...proxySelection,
+          frameGroupIds: Array.from(
+            new Set(proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+          ),
+        }))
+        .filter(
+          (proxySelection) =>
+            proxySelection.frameGroupIds.length > 1 &&
+            proxySelection.frameGroupIds.every((frameGroupId) => normalizedSelectionIdSet.has(frameGroupId))
+        );
+      const nextSelectionKindByFrameGroupId: Record<string, 'group' | 'frame'> = {};
+      const nextSelectionGroupIdByFrameGroupId: Record<string, string> = {};
+
+      normalizedProxySelections.forEach((proxySelection) => {
+        proxySelection.frameGroupIds.forEach((frameGroupId) => {
+          nextSelectionKindByFrameGroupId[frameGroupId] = 'group';
+          nextSelectionGroupIdByFrameGroupId[frameGroupId] = proxySelection.groupId;
+        });
+      });
+      normalizedSelectionIds.forEach((frameGroupId) => {
+        if (!nextSelectionKindByFrameGroupId[frameGroupId]) {
+          nextSelectionKindByFrameGroupId[frameGroupId] = 'frame';
+        }
+      });
+
+      setPositionOrderLockFrameGroupIds(normalizedSelectionIds);
+      setPositionOrderLockSelectionKindByFrameGroupId(nextSelectionKindByFrameGroupId);
+      setPositionOrderLockSelectionGroupIdByFrameGroupId(nextSelectionGroupIdByFrameGroupId);
+      setPositionOrderLockCandidateFrameGroupId('');
+      setPositionOrderLockCandidateGroupId('');
+      setPositionOrderLockCandidateSelectionStage('');
+      applyFrameBoxSelection(normalizedSelectionIds, {
+        showAllGroupProxySelections: true,
+        overridePositionGroupProxySelections: normalizedProxySelections,
+      });
+    },
+    [applyFrameBoxSelection]
+  );
+
+  const resolvePositionOrderLockClickChainCurrentIndex = React.useCallback(
+    (entries: PositionSelectionClickChainEntry[]) => {
+      const selectedFrameGroupIdSet = new Set(
+        positionOrderLockFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+      );
+      const selectedEntryIndex = entries.findIndex((entry) => {
+        if (entry.kind === 'group') {
+          const frameGroupIds = Array.from(
+            new Set((entry.groupFrameGroupIds || []).map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+          );
+
+          return (
+            frameGroupIds.length > 0 &&
+            frameGroupIds.every(
+              (frameGroupId) =>
+                selectedFrameGroupIdSet.has(frameGroupId) &&
+                (positionOrderLockSelectionKindByFrameGroupId[frameGroupId] || 'frame') === 'group' &&
+                (positionOrderLockSelectionGroupIdByFrameGroupId[frameGroupId] || '').trim() === entry.groupId
+            )
+          );
+        }
+
+        return (
+          selectedFrameGroupIdSet.has(entry.frameGroupId) &&
+          (positionOrderLockSelectionKindByFrameGroupId[entry.frameGroupId] || 'frame') === 'frame'
+        );
+      });
+
+      if (selectedEntryIndex >= 0) {
+        return selectedEntryIndex;
+      }
+
+      const normalizedCandidateFrameGroupId = positionOrderLockCandidateFrameGroupId.trim();
+      const normalizedCandidateGroupId = positionOrderLockCandidateGroupId.trim();
+
+      return entries.findIndex((entry) => {
+        if (entry.kind === 'group') {
+          return normalizedCandidateGroupId.length > 0 && normalizedCandidateGroupId === entry.groupId;
+        }
+
+        return normalizedCandidateGroupId.length === 0 && entry.frameGroupId === normalizedCandidateFrameGroupId;
+      });
+    },
+    [
+      positionOrderLockCandidateFrameGroupId,
+      positionOrderLockCandidateGroupId,
+      positionOrderLockFrameGroupIds,
+      positionOrderLockSelectionGroupIdByFrameGroupId,
+      positionOrderLockSelectionKindByFrameGroupId,
+    ]
+  );
+
   const startPositionOrderLockSelectionFromCurrentCanvasSelection = React.useCallback(() => {
     if (positionOrderLockSelectionMode) {
       return;
@@ -14749,6 +15990,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .map((frameGroupId) => frameGroupId.trim())
       .filter((frameGroupId) => Boolean(frameGroupId));
     const uniqueSelectedFrameGroupIds = Array.from(new Set(selectedFrameGroupIds));
+
+    if (uniqueSelectedFrameGroupIds.length <= 0) {
+      setPositionOrderLockSelectionMode(true);
+      setPositionOrderLockFrameGroupIds([]);
+      setPositionOrderLockSelectionKindByFrameGroupId({});
+      setPositionOrderLockSelectionGroupIdByFrameGroupId({});
+      setSelectedPositionSpacingSettingRelationKey('');
+      setPositionSpacingDraftByPairKey({});
+      setPositionSpacingDraftErrorByPairKey({});
+      setPositionSpacingCheckedRowKeys({});
+      setPositionSpacingBulkGapY('');
+      setPositionSpacingBulkGapError(false);
+      setPositionOrderLockCandidateFrameGroupId('');
+      setPositionOrderLockCandidateGroupId('');
+      setPositionOrderLockCandidateSelectionStage('');
+      positionGroupProxySelectionShowAllGroupsRef.current = false;
+      positionGroupProxySelectionsOverrideRef.current = null;
+      setMessage('현재 템플릿에 적용된 간격 설정을 표시합니다.');
+      return;
+    }
+
     const currentProxySelections = resolvePositionGroupProxySelections(
       uniqueSelectedFrameGroupIds,
       positionGroupProxySelectionGroupIdRef.current.trim()
@@ -14779,11 +16041,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .filter((memberFrameGroupId) => Boolean(memberFrameGroupId));
     });
     const nextSelectedFrameGroupIds = Array.from(new Set(expandedSelectedFrameGroupIds));
-
-    if (nextSelectedFrameGroupIds.length < 2) {
-      setMessage('2개 이상의 상자를 선택해야 합니다.');
-      return;
-    }
 
     const nextSelectionKindByFrameGroupId = nextSelectedFrameGroupIds.reduce<Record<string, 'group' | 'frame'>>(
       (accumulator, frameGroupId) => {
@@ -14817,11 +16074,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
 
     setPositionOrderLockSelectionMode(true);
-    setPositionOrderLockColorSeed(Math.floor(Math.random() * 1_000_000));
     setPositionOrderLockFrameGroupIds(nextSelectedFrameGroupIds);
     setPositionOrderLockSelectionKindByFrameGroupId(nextSelectionKindByFrameGroupId);
     setPositionOrderLockSelectionGroupIdByFrameGroupId(nextSelectionGroupIdByFrameGroupId);
+    setSelectedPositionSpacingSettingRelationKey('');
     setPositionSpacingDraftByPairKey({});
+    setPositionSpacingDraftErrorByPairKey({});
+    setPositionSpacingCheckedRowKeys({});
+    setPositionSpacingBulkGapY('');
+    setPositionSpacingBulkGapError(false);
     setPositionOrderLockCandidateFrameGroupId('');
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
@@ -14838,12 +16099,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolvePositionGroupProxySelections,
   ]);
   const applyPositionSpacingBySelectedFrameGroupIds = React.useCallback(
-    (
-      selectedTargetFrameGroupIdsArg: string[],
-      draftByPairKeyArg: Record<string, { gapY: string }>,
-      selectionKindByFrameGroupIdArg: Record<string, 'group' | 'frame'>,
-      selectionGroupIdByFrameGroupIdArg: Record<string, string>
-    ): {
+	    (
+	      selectedTargetFrameGroupIdsArg: string[],
+	      draftByPairKeyArg: Record<string, { gapY: string }>,
+	      selectionKindByFrameGroupIdArg: Record<string, 'group' | 'frame'>,
+	      selectionGroupIdByFrameGroupIdArg: Record<string, string>,
+	      allowedPairKeysArg?: Set<string>
+	    ): {
       ok: boolean;
       message: string;
       appliedCount: number;
@@ -14874,7 +16136,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (selectedTargetFrameGroupIds.length < 2) {
         return {
           ok: false,
-          message: '간격 고정은 2개 이상 상자를 선택해야 확정할 수 있습니다.',
+          message: '간격 설정은 2개 이상 상자를 선택해야 적용할 수 있습니다.',
           appliedCount: 0,
           skippedCount: 0,
           duplicatePairCount: 0,
@@ -14928,10 +16190,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       let skippedCount = 0;
       let duplicatePairCount = 0;
       let changed = false;
-      const resolvedSpacingPairs = resolvePositionSpacingPairsFromOrderedMembers(orderedGroupMembers);
+	      const resolvedSpacingPairs = resolvePositionSpacingPairsFromOrderedMembers(orderedGroupMembers);
 
-      resolvedSpacingPairs.forEach((pair) => {
-        const anchorGroupMember = pair.anchorMember;
+	      resolvedSpacingPairs.forEach((pair) => {
+	        if (allowedPairKeysArg && !allowedPairKeysArg.has(pair.pairKey)) {
+	          return;
+	        }
+
+	        const anchorGroupMember = pair.anchorMember;
         const targetGroupMember = pair.targetMember;
 
         if (!anchorGroupMember) {
@@ -15036,148 +16302,132 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     ]
   );
 
-  React.useEffect(() => {
-    if (!positionOrderLockSelectionMode || !positionSpacingDraftApplyRequestedRef.current) {
-      return;
-    }
+  const applyNewPositionSpacingPair = React.useCallback(
+    (pair: PositionSpacingPairSummary) => {
+      const nextGapYRaw = (positionSpacingDraftByPairKey[pair.pairKey]?.gapY || '').trim();
+      const nextGapY = Number.parseFloat(nextGapYRaw);
 
-    const selectedTargetFrameGroupIds = [...positionOrderLockFrameGroupIds];
-    positionSpacingDraftApplyRequestedRef.current = false;
-
-    if (selectedTargetFrameGroupIds.length < 2) {
-      return;
-    }
-
-    const result = applyPositionSpacingBySelectedFrameGroupIds(
-      selectedTargetFrameGroupIds,
-      positionSpacingDraftByPairKey,
-      positionOrderLockSelectionKindByFrameGroupId,
-      positionOrderLockSelectionGroupIdByFrameGroupId
-    );
-    if (!result.ok && result.message) {
-      setMessage(result.message);
-    }
-  }, [
-    applyPositionSpacingBySelectedFrameGroupIds,
-    positionOrderLockFrameGroupIds,
-    positionOrderLockSelectionGroupIdByFrameGroupId,
-    positionOrderLockSelectionKindByFrameGroupId,
-    positionOrderLockSelectionMode,
-    positionSpacingDraftByPairKey,
-  ]);
-
-  const confirmPositionOrderLock = React.useCallback(() => {
-    const selectedTargetFrameGroupIds = [...positionOrderLockFrameGroupIds];
-    const result = applyPositionSpacingBySelectedFrameGroupIds(
-      selectedTargetFrameGroupIds,
-      positionSpacingDraftByPairKey,
-      positionOrderLockSelectionKindByFrameGroupId,
-      positionOrderLockSelectionGroupIdByFrameGroupId
-    );
-
-    if (!result.ok) {
-      setMessage(result.message);
-      return;
-    }
-
-    setPositionOrderLockSelectionMode(false);
-    setPositionOrderLockFrameGroupIds([]);
-    setPositionOrderLockSelectionKindByFrameGroupId({});
-    setPositionOrderLockSelectionGroupIdByFrameGroupId({});
-    setPositionOrderLockCandidateFrameGroupId('');
-    setPositionOrderLockCandidateGroupId('');
-    setPositionOrderLockCandidateSelectionStage('');
-    positionGroupProxySelectionShowAllGroupsRef.current = false;
-    setMessage(
-      `상자 간격 고정 완료: ${result.orderedGroupCount}개 그룹 선택, ${result.appliedCount}개 상대 간격 고정` +
-        (result.skippedCount > 0 ? `, ${result.skippedCount}개 제외` : '') +
-        (result.duplicatePairCount > 0 ? `, 중복 간격 ${result.duplicatePairCount}개 건너뜀` : '')
-    );
-  }, [
-    applyPositionSpacingBySelectedFrameGroupIds,
-    positionOrderLockFrameGroupIds,
-    positionOrderLockSelectionGroupIdByFrameGroupId,
-    positionOrderLockSelectionKindByFrameGroupId,
-    positionSpacingDraftByPairKey,
-  ]);
-  const removePositionOrderLockTargetSelection = React.useCallback(
-    (targetSelectionEntityId: string) => {
-      const normalizedTargetSelectionEntityId = targetSelectionEntityId.trim();
-
-      if (!normalizedTargetSelectionEntityId) {
+      if (!nextGapYRaw || !Number.isFinite(nextGapY)) {
+        setPositionSpacingDraftErrorByPairKey((previous) => {
+          const next = { ...previous };
+          delete next[pair.pairKey];
+          return next;
+        });
+        if (typeof window !== 'undefined') {
+          window.setTimeout(() => {
+            setPositionSpacingDraftErrorByPairKey((previous) => ({
+              ...previous,
+              [pair.pairKey]: true,
+            }));
+          }, 0);
+        } else {
+          setPositionSpacingDraftErrorByPairKey((previous) => ({
+            ...previous,
+            [pair.pairKey]: true,
+          }));
+        }
+        setMessage('새 간격을 반영하려면 세로 간격(px)을 입력하세요.');
         return;
       }
 
-      const selectedGroupIds = new Set(
-        positionOrderLockFrameGroupIds
-          .map((frameGroupId) => frameGroupId.trim())
-          .filter((frameGroupId) => Boolean(frameGroupId))
-          .map((frameGroupId) => {
-            const selectionKind = positionOrderLockSelectionKindByFrameGroupId[frameGroupId] || 'frame';
-            if (selectionKind !== 'group') {
-              return '';
-            }
-            return positionBoxGroupByFrameGroupId.get(frameGroupId)?.id || '';
-          })
-          .filter((groupId) => Boolean(groupId))
+      const result = applyPositionSpacingBySelectedFrameGroupIds(
+        [...positionOrderLockFrameGroupIds],
+        {
+          ...positionSpacingDraftByPairKey,
+          [pair.pairKey]: { gapY: nextGapYRaw },
+        },
+        positionOrderLockSelectionKindByFrameGroupId,
+        positionOrderLockSelectionGroupIdByFrameGroupId,
+        new Set([pair.pairKey])
       );
 
-      const shouldRemoveGroupEntity = selectedGroupIds.has(normalizedTargetSelectionEntityId);
-      const frameGroupIdsToRemove = new Set(
-        shouldRemoveGroupEntity
-          ? positionOrderLockFrameGroupIds.filter((frameGroupId) => {
-              const normalizedFrameGroupId = frameGroupId.trim();
-              if (!normalizedFrameGroupId) {
-                return false;
-              }
-              const selectionKind = positionOrderLockSelectionKindByFrameGroupId[normalizedFrameGroupId] || 'frame';
-              if (selectionKind !== 'group') {
-                return false;
-              }
-              return (
-                (positionBoxGroupByFrameGroupId.get(normalizedFrameGroupId)?.id || '') ===
-                normalizedTargetSelectionEntityId
-              );
-            })
-          : [normalizedTargetSelectionEntityId]
-      );
-
-      const nextSelectionIds = positionOrderLockFrameGroupIds
-        .map((frameGroupId) => frameGroupId.trim())
-        .filter((frameGroupId) => Boolean(frameGroupId) && !frameGroupIdsToRemove.has(frameGroupId));
-
-      if (nextSelectionIds.length === positionOrderLockFrameGroupIds.length) {
+      if (!result.ok) {
+        setMessage(result.message);
         return;
       }
 
-      setPositionOrderLockFrameGroupIds(nextSelectionIds);
-      setPositionOrderLockSelectionKindByFrameGroupId((previous) => {
+      setPositionSpacingDraftErrorByPairKey((previous) => {
+        if (!previous[pair.pairKey]) {
+          return previous;
+        }
+
         const next = { ...previous };
-        frameGroupIdsToRemove.forEach((frameGroupId) => {
-          delete next[frameGroupId];
-        });
+        delete next[pair.pairKey];
         return next;
       });
-      setPositionOrderLockSelectionGroupIdByFrameGroupId((previous) => {
-        const next = { ...previous };
-        frameGroupIdsToRemove.forEach((frameGroupId) => {
-          delete next[frameGroupId];
-        });
-        return next;
-      });
-      applyFrameBoxSelection(nextSelectionIds, {
-        positionGroupProxySelectionGroupId: '',
-        showAllGroupProxySelections: true,
-      });
+      setMessage(`새 간격 ${Math.round(Math.max(0, nextGapY))}px를 반영했습니다.`);
     },
     [
-      applyFrameBoxSelection,
-      positionBoxGroupByFrameGroupId,
+      applyPositionSpacingBySelectedFrameGroupIds,
       positionOrderLockFrameGroupIds,
+      positionOrderLockSelectionGroupIdByFrameGroupId,
       positionOrderLockSelectionKindByFrameGroupId,
+      positionSpacingDraftByPairKey,
     ]
   );
+  const applyPositionSpacingBulkGap = React.useCallback(() => {
+    const selectedRowKeys = Object.entries(positionSpacingCheckedRowKeys)
+      .filter(([, checked]) => checked)
+      .map(([rowKey]) => rowKey);
 
+    if (selectedRowKeys.length <= 0) {
+      setMessage('일괄 적용할 간격 항목을 체크하세요.');
+      return;
+    }
+
+    const nextGapYRaw = positionSpacingBulkGapY.trim();
+    const nextGapY = Number.parseFloat(nextGapYRaw);
+
+    if (!nextGapYRaw || !Number.isFinite(nextGapY)) {
+      setPositionSpacingBulkGapError(false);
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => setPositionSpacingBulkGapError(true), 0);
+      } else {
+        setPositionSpacingBulkGapError(true);
+      }
+      setMessage('일괄 적용할 세로 간격(px)을 입력하세요.');
+      return;
+    }
+
+    const selectedRowKeySet = new Set(selectedRowKeys);
+    const selectedNewPairs = positionSpacingNewPairSummaries.filter((pair) => selectedRowKeySet.has(`new:${pair.pairKey}`));
+    const updatedNewDraftCount = selectedNewPairs.length;
+
+    setPositionSpacingBulkGapError(false);
+    positionSpacingSettingRelations.forEach((relation) => {
+      if (!selectedRowKeySet.has(`existing:${relation.key}`)) {
+        return;
+      }
+
+      applyDefinedPositionRelationGapDraft(relation, nextGapYRaw);
+    });
+    setPositionSpacingDraftByPairKey((previous) => {
+      const next = { ...previous };
+      selectedNewPairs.forEach((pair) => {
+        next[pair.pairKey] = { gapY: nextGapYRaw };
+      });
+      return updatedNewDraftCount > 0 ? next : previous;
+    });
+    if (updatedNewDraftCount > 0) {
+      setPositionSpacingDraftErrorByPairKey((previous) => {
+        const next = { ...previous };
+        selectedNewPairs.forEach((pair) => {
+          delete next[pair.pairKey];
+        });
+        return next;
+      });
+    }
+    setMessage(
+      `체크한 간격 ${selectedRowKeys.length}개에 ${Math.round(Math.max(0, nextGapY))}px를 적용했습니다.` +
+        (updatedNewDraftCount > 0 ? ' 신규 항목은 저장 아이콘을 눌러 반영하세요.' : '')
+    );
+  }, [
+    applyDefinedPositionRelationGapDraft,
+    positionSpacingBulkGapY,
+    positionSpacingCheckedRowKeys,
+    positionSpacingNewPairSummaries,
+    positionSpacingSettingRelations,
+  ]);
   const applySelectedPositionGroupRelation = React.useCallback(() => {
     const root = previewRef.current;
 
@@ -15531,6 +16781,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
+    const selectedGroups = collectPositionBoxGroups(root, { includeSingletons: false })
+      .filter((group) => !group.inferred)
+      .filter((group) =>
+        group.frameGroupIds.some((frameGroupId) => selectedTargetFrameGroupIds.includes(frameGroupId))
+      );
+    const spacingDependencies = collectPositionSpacingDependenciesForGroupMutation(
+      root,
+      selectedGroups.map((group) => group.id),
+      selectedTargetFrameGroupIds
+    );
+
+    if (spacingDependencies.dependencyCount > 0) {
+      const blockedMessage = buildBlockedGroupMutationMessage('선택 상자 그룹 제외', spacingDependencies);
+      setMessage(blockedMessage);
+      if (typeof window !== 'undefined') {
+        window.alert(blockedMessage);
+      }
+      return;
+    }
+
     let removedCount = 0;
     let skippedCount = 0;
 
@@ -15610,6 +16880,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     if (targetIds.length === 0) {
       setMessage(`해제할 명시 ${POSITION_GROUP_LABEL_PREFIX}이 없습니다. 먼저 그룹에 속한 상자를 선택하세요.`);
+      return;
+    }
+
+    const spacingDependencies = collectPositionSpacingDependenciesForGroupMutation(root, targetGroupIds, targetIds);
+
+    if (spacingDependencies.dependencyCount > 0) {
+      const blockedMessage = buildBlockedGroupMutationMessage('그룹 해제', spacingDependencies);
+      setMessage(blockedMessage);
+      if (typeof window !== 'undefined') {
+        window.alert(blockedMessage);
+      }
       return;
     }
 
@@ -17756,24 +19037,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const hasSelection =
-        selectedFrameGroupIdsRef.current.length > 0 ||
-        edgeSelectionStateRef.current.tokens.length > 0 ||
-        positionOrderLockSelectionMode;
+	      const hasSelection =
+	        selectedFrameGroupIdsRef.current.length > 0 ||
+	        edgeSelectionStateRef.current.tokens.length > 0 ||
+	        positionOrderLockSelectionMode;
 
       if (!hasSelection) {
         return;
       }
 
-      event.preventDefault();
-      clearFrameSelection();
-    };
+	      event.preventDefault();
+	      if (positionOrderLockSelectionMode) {
+	        const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+	        positionGroupProxySelectionGroupIdRef.current = '';
+	        positionGroupProxySelectionShowAllGroupsRef.current = false;
+	        positionGroupProxySelectionsOverrideRef.current = null;
+	        selectedFrameGroupIdsRef.current = [];
+	        edgeSelectionStateRef.current = emptyEdgeSelection;
+	        setSelectedFrameGroupIds([]);
+	        setEdgeSelectionState(emptyEdgeSelection);
+	        setPositionOrderLockFrameGroupIds([]);
+	        setPositionOrderLockSelectionKindByFrameGroupId({});
+	        setPositionOrderLockSelectionGroupIdByFrameGroupId({});
+	        setSelectedPositionSpacingSettingRelationKey('');
+	        setPositionOrderLockCandidateFrameGroupId('');
+	        setPositionOrderLockCandidateGroupId('');
+	        setPositionOrderLockCandidateSelectionStage('');
+	        setPositionSpacingCheckedRowKeys({});
+	        applyRuntimeSelectionUi([], emptyEdgeSelection, []);
+	        return;
+	      }
+
+	      clearFrameSelection();
+	    };
 
     window.addEventListener('keydown', handleWindowKeyDown);
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [clearFrameSelection, positionOrderLockSelectionMode]);
+	  }, [applyRuntimeSelectionUi, clearFrameSelection, positionOrderLockSelectionMode]);
 
   const handlePreviewPointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -17881,7 +19183,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            .filter((selectionId) => Boolean(selectionId));
 	          const currentSelectedId = currentSelectionIds.length === 1 ? currentSelectionIds[0] || '' : '';
 	          const currentProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
-	          const currentChainIndex = clickChain.entries.findIndex((entry) => {
+	          const currentChainIndex = positionOrderLockSelectionMode
+	            ? resolvePositionOrderLockClickChainCurrentIndex(clickChain.entries)
+	            : clickChain.entries.findIndex((entry) => {
 	            if (entry.kind === 'group') {
 	              if (currentProxyGroupId) {
 	                return entry.groupId === currentProxyGroupId;
@@ -17911,6 +19215,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          const nextEntry = clickChain.entries[nextChainIndex] || null;
 
 	          if (!nextEntry) {
+	            return;
+	          }
+
+	          if (positionOrderLockSelectionMode) {
+	            if (nextEntry.kind === 'group') {
+	              previewPositionOrderLockCandidateSelection(nextEntry.frameGroupId, {
+	                positionGroupProxySelectionGroupId: nextEntry.groupId,
+	                candidateGroupId: nextEntry.groupId,
+	                commitSelection: true,
+	                replaceExistingSelection: !event.shiftKey,
+	              });
+	              return;
+	            }
+
+	            previewPositionOrderLockCandidateSelection(nextEntry.frameGroupId, {
+	              preserveFrameGroupId: true,
+	              disableProxySelection: true,
+	              commitSelection: true,
+	              replaceExistingSelection: !event.shiftKey,
+	            });
 	            return;
 	          }
 
@@ -18101,19 +19425,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ? readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100)
             : null;
           const clickChain = resolvePositionSelectionClickChain(pageInner, frameGroupId, pointerPoint);
-          const normalizedCandidateFrameGroupId = positionOrderLockCandidateFrameGroupId.trim();
-          const normalizedCandidateGroupId = positionOrderLockCandidateGroupId.trim();
-          const currentChainIndex = clickChain.entries.findIndex((entry) => {
-            if (entry.frameGroupId !== normalizedCandidateFrameGroupId) {
-              return false;
-            }
-
-            if (entry.kind === 'group') {
-              return normalizedCandidateGroupId === entry.groupId;
-            }
-
-            return normalizedCandidateGroupId.length === 0;
-          });
+          const currentChainIndex = resolvePositionOrderLockClickChainCurrentIndex(clickChain.entries);
           const nextChainIndex =
             clickChain.entries.length > 0
               ? currentChainIndex >= 0
@@ -18127,6 +19439,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               preserveFrameGroupId: true,
               disableProxySelection: true,
               commitSelection: true,
+              replaceExistingSelection: !event.shiftKey,
             });
             return;
           }
@@ -18136,6 +19449,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	              positionGroupProxySelectionGroupId: nextEntry.groupId,
 	              candidateGroupId: nextEntry.groupId,
 	              commitSelection: true,
+	              replaceExistingSelection: !event.shiftKey,
 	            });
 	            return;
 	          }
@@ -18172,6 +19486,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            disableProxySelection: true,
 	            commitSelection: true,
 	            replaceSelectionFromGroupId: selectedGroupIdToReplace,
+	            replaceExistingSelection: !event.shiftKey,
 	          });
           return;
         }
@@ -18402,6 +19717,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionBoxGroups,
 	      positionBoxGroupByFrameGroupId,
 	      positionOrderLockSelectionMode,
+	      resolvePositionOrderLockClickChainCurrentIndex,
 	      resolvePositionSelectionClickChain,
 	      previewPositionOrderLockCandidateSelection,
       previewZoom,
@@ -19193,6 +20509,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               ) ||
               []
             : undefined;
+          if (positionOrderLockSelectionMode) {
+            applyPositionOrderLockMarqueeSelection(nextSelectionIds, marqueeProxySelections);
+            if (deferredPreviewEditorStateRef.current) {
+              deferredPreviewEditorStateRef.current = false;
+              schedulePreviewEditorState();
+            }
+            return;
+          }
+
           applyFrameBoxSelection(
             nextSelectionIds,
             keepGroupedShiftSelection
@@ -19221,6 +20546,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 nextSelectionIds
               ) || []
             : undefined;
+          if (positionOrderLockSelectionMode) {
+            applyPositionOrderLockMarqueeSelection(nextSelectionIds, marqueeProxySelections);
+            if (deferredPreviewEditorStateRef.current) {
+              deferredPreviewEditorStateRef.current = false;
+              schedulePreviewEditorState();
+            }
+            return;
+          }
+
           applyFrameBoxSelection(
             nextSelectionIds,
             keepGroupedShiftSelection
@@ -19280,6 +20614,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [
       applyFrameBoxSelection,
+      applyPositionOrderLockMarqueeSelection,
       applyRuntimeSelectionUi,
       clearTransientCanvasOverlays,
       commitCreatedFrameShell,
@@ -20048,10 +21383,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           bottom: -6px;
           cursor: nesw-resize;
         }
-        .template-edit-preview [data-template-edit-scope][data-template-edit-enabled="true"] {
-          cursor: text;
-        }
-      `}</style>
+	        .template-edit-preview [data-template-edit-scope][data-template-edit-enabled="true"] {
+	          cursor: text;
+	        }
+	        @keyframes v106-position-spacing-input-shake {
+	          0%, 100% { transform: translateX(0); }
+	          20%, 60% { transform: translateX(-3px); }
+	          40%, 80% { transform: translateX(3px); }
+	        }
+	        .v106-position-spacing-input-error {
+	          animation: v106-position-spacing-input-shake 180ms ease-in-out 0s 2;
+	        }
+	      `}</style>
 
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
@@ -20216,12 +21559,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <button
                 type="button"
                 className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
-                  !canStartPositionSpacingLockFromSelection ? 'opacity-50' : ''
+                  !canOpenPositionSpacingSettings ? 'opacity-50' : ''
                 }`}
                 onClick={startPositionOrderLockSelectionFromCurrentCanvasSelection}
-                disabled={!canStartPositionSpacingLockFromSelection}
+                disabled={!canOpenPositionSpacingSettings}
               >
-                상자 간격 고정
+                간격 설정
               </button>
               <button
                 type="button"
@@ -20255,106 +21598,276 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               </button>
             </CardContent>
           ) : null}
-          {selectionPanelTab === 'position' && positionOrderLockSelectionMode ? (
-            <CardContent className="px-6 pb-3 pt-0">
-              <div className="space-y-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] leading-4 text-amber-900">
-                <div>{positionOrderLockActionGuideText}</div>
-                {positionSpacingPairSummaries.length > 0 ? (
-                  <div className="space-y-1">
-                    {positionSpacingPairSummaries.map((pair) => {
-                      const pairDraft = positionSpacingDraftByPairKey[pair.pairKey] || {
-                        gapY: String(Math.round(pair.defaultGapY)),
-                      };
-                      const anchorVisual = positionOrderLockSelectionVisualByGroupId.get(pair.anchorGroupId);
-                      const targetVisual = positionOrderLockSelectionVisualByGroupId.get(pair.targetGroupId);
+		          {selectionPanelTab === 'position' && positionOrderLockSelectionMode ? (
+		            <CardContent className="px-6 pb-3 pt-0">
+		              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] leading-4 text-amber-900">
+		                <div className="flex items-center justify-between gap-2">
+		                  <div className="font-semibold text-amber-950">간격 설정</div>
+	                  <button
+	                    type="button"
+	                    className="inline-flex h-6 items-center justify-center rounded border border-amber-300 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
+	                    onClick={() => {
+	                      setPositionOrderLockSelectionMode(false);
+	                      setPositionOrderLockFrameGroupIds([]);
+	                      setPositionOrderLockSelectionKindByFrameGroupId({});
+	                      setPositionOrderLockSelectionGroupIdByFrameGroupId({});
+	                      setSelectedPositionSpacingSettingRelationKey('');
+	                      setPositionSpacingDraftByPairKey({});
+	                      setPositionSpacingDraftErrorByPairKey({});
+	                      setPositionSpacingCheckedRowKeys({});
+	                      setPositionSpacingBulkGapY('');
+	                      setPositionSpacingBulkGapError(false);
+	                      setPositionOrderLockCandidateFrameGroupId('');
+	                      setPositionOrderLockCandidateGroupId('');
+	                      setPositionOrderLockCandidateSelectionStage('');
+	                      positionGroupProxySelectionShowAllGroupsRef.current = false;
+	                    }}
+		                  >
+		                    닫기
+		                  </button>
+		                </div>
+		                <div>현재 템플릿에 적용된 상자/그룹 간격을 확인하고, 새 선택 항목은 저장 아이콘으로 추가합니다.</div>
+		                <div className="space-y-1">
+		                  <div className="font-medium text-amber-950">
+		                    적용된 간격 {positionSpacingSettingRelations.length}개
+		                  </div>
+		                  <div className="flex items-center gap-1.5 rounded border border-amber-200 bg-white px-1.5 py-1">
+		                    <span className="shrink-0 text-[10px] font-medium text-amber-900">체크 항목 일괄 적용</span>
+		                    <div className="relative min-w-[8rem] flex-1">
+		                      <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
+		                        세로 간격
+		                      </span>
+		                      <Input
+		                        value={positionSpacingBulkGapY}
+		                        onChange={(event) => {
+		                          setPositionSpacingBulkGapY(event.target.value);
+		                          if (positionSpacingBulkGapError) {
+		                            setPositionSpacingBulkGapError(false);
+		                          }
+		                        }}
+		                        inputMode="decimal"
+		                        className={`h-7 pl-[52px] pr-6 text-[11px] ${
+		                          positionSpacingBulkGapError
+		                            ? 'v106-position-spacing-input-error border-red-500 bg-red-50 text-red-700 focus-visible:ring-red-500'
+		                            : ''
+		                        }`}
+		                      />
+		                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
+		                        px
+		                      </span>
+		                    </div>
+		                    <button
+		                      type="button"
+		                      className="inline-flex h-7 shrink-0 items-center justify-center rounded border border-amber-300 bg-amber-100 px-2 text-[11px] font-medium text-amber-950 hover:bg-amber-200"
+		                      onClick={applyPositionSpacingBulkGap}
+		                    >
+		                      적용
+		                    </button>
+		                  </div>
+		                  {positionSpacingSettingRelations.length > 0 || positionSpacingNewPairSummaries.length > 0 ? (
+		                    <div className="max-h-[13.5rem] space-y-1 overflow-y-auto pr-1">
+		                      {positionSpacingSettingRelations.map((relation) => {
+		                        const displayRow = positionSpacingSettingRelationDisplayRows.find((row) => row.key === relation.key);
+		                        const relationDraft = definedPositionRelationGapDraftByKey[relation.key] || {
+		                          gapY: String(Math.round(relation.gapYPx)),
+		                        };
+		                        const isHighlighted = highlightedPositionSpacingSettingRelationKeySet.has(relation.key);
+		                        const anchorEntityKey =
+		                          relation.anchorKind === 'group' ? `group:${relation.anchorGroupId}` : `frame:${relation.anchorFrameGroupId}`;
+		                        const targetEntityKey =
+		                          relation.targetKind === 'group'
+		                            ? `group:${relation.targetGroupId}`
+		                            : `frame:${relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) || ''}`;
+		                        const anchorVisual = positionSpacingEntityVisualByKey.get(anchorEntityKey);
+		                        const targetVisual = positionSpacingEntityVisualByKey.get(targetEntityKey);
+		                        const rowKey = `existing:${relation.key}`;
 
-                      return (
-                        <div key={pair.pairKey} className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-700">
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                              style={{
-                                backgroundColor: anchorVisual?.badgeColor || 'rgba(15, 23, 42, .92)',
-                                color: anchorVisual?.badgeTextColor || '#fff',
-                              }}
-                            >
-                              {pair.anchorLabel}
-                            </span>
-                            <span>→</span>
-                            <span
-                              className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                              style={{
-                                backgroundColor: targetVisual?.badgeColor || 'rgba(15, 23, 42, .92)',
-                                color: targetVisual?.badgeTextColor || '#fff',
-                              }}
-                            >
-                              {pair.targetLabel}
-                            </span>
-                          </div>
-                          <div className="relative w-48 shrink-0">
-                            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
-                              세로 간격
-                            </span>
-                            <Input
-                              value={pairDraft.gapY}
-                              onChange={(event) => {
-                                positionSpacingDraftApplyRequestedRef.current = true;
-                                setPositionSpacingDraftByPairKey((previous) => ({
-                                  ...previous,
-                                  [pair.pairKey]: {
-                                    gapY: event.target.value,
-                                  },
-                                }));
-                              }}
-                              inputMode="decimal"
-                              className="h-7 pl-[52px] pr-6 text-[11px]"
-                            />
-                            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
-                              px
-                            </span>
-                          </div>
-                          {pair.hasExistingRelation ? (
-                            <span
-                              className={`text-[10px] ${
-                                positionSpacingDuplicatePairKeySet.has(pair.pairKey)
-                                  ? 'font-semibold text-amber-700'
-                                  : 'text-slate-500'
-                              }`}
-                            >
-                              {pair.existingGapMixed
-                                ? '기존 고정 간격: 다중'
-                                : `기존 고정 간격: ${Math.round(Math.max(0, pair.existingGapY || 0))}px`}
-                              {positionSpacingDuplicatePairKeySet.has(pair.pairKey) ? ' (중복)' : ''}
-                            </span>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="ml-auto inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
-                            onClick={() => removePositionOrderLockTargetSelection(pair.targetSelectionEntityId)}
-                            aria-label="선택 상자 취소"
-                            title="선택 상자 취소"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                <div className="pt-0.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={confirmPositionOrderLock}
-                    disabled={positionOrderLockConfirmDisabled}
-                    className="h-7 w-full text-[11px]"
-                  >
-                    {positionOrderLockActionButtonLabel}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          ) : null}
+		                        return (
+		                          <div
+		                            key={relation.key}
+		                            role="button"
+		                            tabIndex={0}
+		                            className={`flex items-center gap-1.5 overflow-x-auto whitespace-nowrap rounded border bg-white px-1.5 py-1 text-[11px] transition ${
+		                              isHighlighted
+		                                ? 'border-amber-500 text-amber-950'
+		                                : 'border-slate-200 text-slate-700 hover:border-amber-300'
+		                            }`}
+		                            onClick={() => selectDefinedPositionRelationEntities(relation)}
+		                            onKeyDown={(event) => {
+	                              if (event.key !== 'Enter' && event.key !== ' ') {
+	                                return;
+	                              }
+	                              event.preventDefault();
+		                              selectDefinedPositionRelationEntities(relation);
+		                            }}
+		                          >
+		                            <input
+		                              type="checkbox"
+		                              checked={Boolean(positionSpacingCheckedRowKeys[rowKey])}
+		                              onChange={(event) => {
+		                                setPositionSpacingCheckedRowKeys((previous) => ({
+		                                  ...previous,
+		                                  [rowKey]: event.target.checked,
+		                                }));
+		                              }}
+		                              onClick={(event) => event.stopPropagation()}
+		                              className="h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+		                              aria-label={`${displayRow?.anchorLabel || relation.anchorLabel}에서 ${displayRow?.targetLabel || relation.targetLabel} 간격 선택`}
+		                            />
+		                            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+		                              <span
+		                                className="inline-flex max-w-[9rem] items-center truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+		                                style={{
+		                                  backgroundColor: anchorVisual?.badgeColor || 'rgba(15, 23, 42, .92)',
+		                                  color: anchorVisual?.badgeTextColor || '#fff',
+		                                }}
+		                              >
+		                                {displayRow?.anchorLabel || relation.anchorLabel}
+		                              </span>
+		                              <span className="shrink-0">→</span>
+		                              <span
+		                                className="inline-flex max-w-[9rem] items-center truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+		                                style={{
+		                                  backgroundColor: targetVisual?.badgeColor || 'rgba(15, 23, 42, .92)',
+		                                  color: targetVisual?.badgeTextColor || '#fff',
+		                                }}
+		                              >
+		                                {displayRow?.targetLabel || relation.targetLabel}
+		                              </span>
+		                            </div>
+		                            <div className="relative w-44 shrink-0" onClick={(event) => event.stopPropagation()}>
+		                              <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
+	                                세로 간격
+	                              </span>
+		                              <Input
+		                                value={relationDraft.gapY}
+		                                onChange={(event) => {
+		                                  applyDefinedPositionRelationGapDraft(relation, event.target.value);
+		                                }}
+		                                inputMode="decimal"
+		                                className="h-7 pl-[52px] pr-6 text-[11px]"
+		                              />
+	                              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
+	                                px
+	                              </span>
+	                            </div>
+	                            <button
+	                              type="button"
+	                              className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-red-200 bg-white text-red-600 hover:bg-red-50"
+	                              onClick={(event) => {
+	                                event.preventDefault();
+	                                event.stopPropagation();
+	                                deletePositionSpacingSettingRelation(relation);
+	                              }}
+	                              aria-label={`${displayRow?.targetLabel || relation.targetLabel} 간격 설정 삭제`}
+	                              title="간격 설정 삭제"
+	                            >
+		                              <Trash2 className="h-3.5 w-3.5" />
+		                            </button>
+		                          </div>
+		                        );
+		                      })}
+		                      {positionSpacingNewPairSummaries.map((pair) => {
+		                        const pairDraft = positionSpacingDraftByPairKey[pair.pairKey] || { gapY: '' };
+		                        const anchorVisual = positionSpacingEntityVisualByKey.get(`selection:${pair.anchorGroupId}`);
+		                        const targetVisual = positionSpacingEntityVisualByKey.get(`selection:${pair.targetGroupId}`);
+		                        const hasDraftError = Boolean(positionSpacingDraftErrorByPairKey[pair.pairKey]);
+		                        const rowKey = `new:${pair.pairKey}`;
+
+		                        return (
+		                          <div
+		                            key={`new:${pair.pairKey}`}
+			                            className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap rounded border border-dashed border-amber-300 bg-white px-1.5 py-1 text-[11px] text-slate-700"
+			                          >
+		                            <input
+		                              type="checkbox"
+		                              checked={Boolean(positionSpacingCheckedRowKeys[rowKey])}
+		                              onChange={(event) => {
+		                                setPositionSpacingCheckedRowKeys((previous) => ({
+		                                  ...previous,
+		                                  [rowKey]: event.target.checked,
+		                                }));
+		                              }}
+		                              className="h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+		                              aria-label={`${pair.anchorLabel}에서 ${pair.targetLabel} 신규 간격 선택`}
+		                            />
+			                            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+		                              <span
+		                                className="inline-flex max-w-[9rem] items-center truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+		                                style={{
+		                                  backgroundColor: anchorVisual?.badgeColor || 'rgba(15, 23, 42, .92)',
+		                                  color: anchorVisual?.badgeTextColor || '#fff',
+		                                }}
+		                              >
+		                                {pair.anchorLabel}
+		                              </span>
+		                              <span className="shrink-0">→</span>
+		                              <span
+		                                className="inline-flex max-w-[9rem] items-center truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+		                                style={{
+		                                  backgroundColor: targetVisual?.badgeColor || 'rgba(15, 23, 42, .92)',
+		                                  color: targetVisual?.badgeTextColor || '#fff',
+		                                }}
+		                              >
+		                                {pair.targetLabel}
+		                              </span>
+		                            </div>
+		                            <div className="relative w-44 shrink-0">
+		                              <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
+		                                세로 간격
+		                              </span>
+		                              <Input
+		                                value={pairDraft.gapY}
+		                                onChange={(event) => {
+		                                  const nextGapY = event.target.value;
+		                                  setPositionSpacingDraftByPairKey((previous) => ({
+		                                    ...previous,
+		                                    [pair.pairKey]: {
+		                                      gapY: nextGapY,
+		                                    },
+		                                  }));
+		                                  if (positionSpacingDraftErrorByPairKey[pair.pairKey]) {
+		                                    setPositionSpacingDraftErrorByPairKey((previous) => {
+		                                      const next = { ...previous };
+		                                      delete next[pair.pairKey];
+		                                      return next;
+		                                    });
+		                                  }
+		                                }}
+		                                inputMode="decimal"
+		                                placeholder={String(Math.round(Math.max(0, pair.defaultGapY)))}
+		                                className={`h-7 pl-[52px] pr-6 text-[11px] ${
+		                                  hasDraftError
+		                                    ? 'v106-position-spacing-input-error border-red-500 bg-red-50 text-red-700 focus-visible:ring-red-500'
+		                                    : ''
+		                                }`}
+		                              />
+		                              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
+		                                px
+		                              </span>
+		                            </div>
+			                            <button
+			                              type="button"
+			                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+			                              onClick={() => applyNewPositionSpacingPair(pair)}
+			                              aria-label={`${pair.anchorLabel}에서 ${pair.targetLabel} 새 간격 저장`}
+			                              title="새 간격 저장"
+			                            >
+			                              <Save className="h-3.5 w-3.5" />
+			                            </button>
+		                          </div>
+		                        );
+		                      })}
+		                    </div>
+		                  ) : (
+		                    <div className="rounded border border-amber-200 bg-white px-2 py-1 text-[11px] text-amber-800">
+		                      아직 설정된 상자/그룹 간격이 없습니다.
+		                    </div>
+		                  )}
+		                </div>
+		              </div>
+		            </CardContent>
+		          ) : null}
           <TemplateEditPreviewSurface
             renderedPreviewHtml={renderedPreviewHtml}
             boxCreationMode={boxCreationMode}
@@ -20823,13 +22336,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 		                  {positionBoxGroups.length > 0 ? (
                     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
                       <div className="font-semibold text-slate-900">전체 그룹 ({positionBoxGroups.length}개)</div>
-                      {positionBoxGroups.map((group) => {
+                      {positionBoxGroupTreeRows.map(({ group, depth }) => {
                         const isSelectedGroup = primarySelectedPositionBoxGroup?.id === group.id;
                         const isExpanded = Boolean(expandedPositionBoxGroupIds[group.id]);
 
                         return (
                           <div
                             key={group.id}
+                            style={{ marginLeft: `${depth * 20}px` }}
                             className={`rounded border p-2 text-xs ${
                               isSelectedGroup
                                 ? 'border-blue-300 bg-blue-50'
@@ -20883,42 +22397,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       })}
                     </div>
                   ) : null}
-
-		                  {shouldShowDefinedPositionRelativeRelations ? (
-                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
-                      <div className="font-semibold text-slate-900">정의된 상자 상대 위치 관계</div>
-                      <div className="mt-1">총 {definedPositionRelativeRelationDisplayRows.length}개</div>
-                      <div className="mt-2 space-y-2">
-                        {focusedDefinedPositionRelativeRelations.map((relation, relationIndex) => {
-                          const displayRow = definedPositionRelativeRelationDisplayRows.find((row) => row.key === relation.key);
-                          const relationDraft = definedPositionRelationGapDraftByKey[relation.key] || {
-                            gapY: String(Math.round(relation.gapYPx)),
-                          };
-
-                          return (
-                            <div key={relation.key} className="space-y-1 rounded border border-slate-200 bg-white p-2">
-                              <div className="break-all text-[11px] text-slate-700">
-                                {relationIndex + 1}. {displayRow?.targetLabel || relation.targetLabel} ←{' '}
-                                {displayRow?.anchorLabel || relation.anchorLabel}
-                              </div>
-                              <label className="flex items-center gap-2 text-[11px] text-slate-600">
-                                <span className="w-20 shrink-0">세로 간격</span>
-                                <Input
-                                  value={relationDraft.gapY}
-                                  onChange={(event) => {
-                                    applyDefinedPositionRelationGapDraft(relation, event.target.value);
-                                  }}
-                                  inputMode="decimal"
-                                  className="h-8 text-xs"
-                                />
-                                <span className="text-[10px] text-slate-500">px</span>
-                              </label>
-                            </div>
-                          );
-                        })}
-	                      </div>
-	                    </div>
-		                  ) : null}
 		                </>
 	              ) : null}
 
