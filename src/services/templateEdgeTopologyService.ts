@@ -23,6 +23,7 @@ const createEdgeDescriptor = (
   edgeId: `${frame.frameGroupId}:${side}`,
   frameGroupId: frame.frameGroupId,
   pageId: frame.pageId,
+  positionGroupId: (frame.positionGroupId || '').trim() || null,
   orientation,
   side,
   lineCoordinate: roundEdgeCoordinate(lineCoordinate),

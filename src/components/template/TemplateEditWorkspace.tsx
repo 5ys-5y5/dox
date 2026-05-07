@@ -166,6 +166,15 @@ type PositionImpactGroup = {
   label: string;
   frameGroupIds: string[];
   inferred: boolean;
+  childGroupIds?: string[];
+  directFrameGroupIds?: string[];
+};
+
+type PositionGroupTreeEntry = {
+  id: string;
+  label?: string;
+  childGroupIds?: string[];
+  frameGroupIds?: string[];
 };
 
 type PositionSelectionClickChainEntry =
@@ -173,6 +182,7 @@ type PositionSelectionClickChainEntry =
       kind: 'group';
       frameGroupId: string;
       groupId: string;
+      groupFrameGroupIds?: string[];
     }
   | {
       kind: 'frame';
@@ -209,6 +219,9 @@ type PositionSpacingPairSummary = {
   targetGroupId: string;
   targetSelectionEntityId: string;
   defaultGapY: number;
+  hasExistingRelation: boolean;
+  existingGapY: number | null;
+  existingGapMixed: boolean;
 };
 
 type PositionSpacingResolvedPair = {
@@ -246,6 +259,7 @@ type DefinedPositionRelativeRelation = {
   anchorGroupId: string;
   anchorFrameGroupId: string;
   anchorFrameGroupIds: string[];
+  anchorY: TemplateFrameRelativeVerticalPin;
   gapYPx: number;
 };
 
@@ -512,6 +526,11 @@ const TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR = 'data-template-frame-position-
 const TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR = 'data-template-frame-position-group-id';
 const TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR = 'data-template-frame-position-group-label';
 const TEMPLATE_FRAME_POSITION_GROUP_MANAGED_ATTR = 'data-template-frame-position-group-managed';
+const TEMPLATE_POSITION_GROUP_TREE_ATTR = 'data-template-position-group-tree';
+const TEMPLATE_POSITION_GROUP_NODE_ATTR = 'data-template-position-group-node';
+const TEMPLATE_POSITION_GROUP_NODE_ID_ATTR = 'data-template-position-group-id';
+const TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR = 'data-template-position-group-label';
+const POSITION_GROUP_LABEL_PREFIX = '그룹';
 const TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR = 'data-template-frame-position-relation-active';
 const TEMPLATE_FRAME_POSITION_RELATION_ANCHOR_ATTR = 'data-template-frame-position-relation-anchor';
 const FRAME_RELATIVE_ANCHOR_GUIDE_CLASS = 'v106-frame-relative-anchor-guide';
@@ -529,7 +548,7 @@ const defaultSelectionSaveProgressState: SelectionSaveProgressState = {
   title: '진행 상태',
   percent: 0,
   stage: '작업 대기 중입니다.',
-  detail: '선택한 박스의 메타데이터와 스타일을 저장하면 진행률이 여기에 표시됩니다.',
+  detail: '선택한 상자의 메타데이터와 스타일을 저장하면 진행률이 여기에 표시됩니다.',
 };
 const POSITION_LOCK_COLOR_PRESETS = [
   {
@@ -646,14 +665,14 @@ const SIGNATURE_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = [
   'signature_status',
 ];
 const FRAME_BOX_KIND_LABELS: Record<TemplateFrameBoxKind, string> = {
-  text: 'text | 텍스트 박스',
-  attachment: 'attachment | 첨부파일 박스',
-  signature: 'signature | 서명 박스',
+  text: 'text | 텍스트 상자',
+  attachment: 'attachment | 첨부파일 상자',
+  signature: 'signature | 서명 상자',
 };
 const FRAME_BOX_KIND_SHORT_LABELS: Record<TemplateFrameBoxKind, string> = {
-  text: '텍스트 박스',
-  attachment: '첨부파일 박스',
-  signature: '서명 박스',
+  text: '텍스트 상자',
+  attachment: '첨부파일 상자',
+  signature: '서명 상자',
 };
 const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
   text: '텍스트',
@@ -662,9 +681,9 @@ const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
 };
 const NULL_MARKER_LABEL = '-';
 const FRAME_BOX_KIND_DESCRIPTIONS: Record<TemplateFrameBoxKind, string> = {
-  text: '문서마다 텍스트를 직접 입력하거나, 고정 라벨처럼 보여주는 박스입니다.',
-  attachment: '문서마다 파일을 업로드하고 파일명 표시, 파일 열기 동작을 연결하는 박스입니다.',
-  signature: '문서마다 서명 컨텍스트를 연결하고 이미지, 이력, 상태 같은 정보를 출력하는 박스입니다.',
+  text: '문서마다 텍스트를 직접 입력하거나, 고정 라벨처럼 보여주는 상자입니다.',
+  attachment: '문서마다 파일을 업로드하고 파일명 표시, 파일 열기 동작을 연결하는 상자입니다.',
+  signature: '문서마다 서명 컨텍스트를 연결하고 이미지, 이력, 상태 같은 정보를 출력하는 상자입니다.',
 };
 const FRAME_ROLE_LABELS: Record<TemplateFrameRole, string> = {
   key: 'key | 상위 키',
@@ -678,9 +697,9 @@ const FRAME_ROLE_SHORT_LABELS: Record<TemplateFrameRole | 'group', string> = {
   key_value: '독립 값',
 };
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
-  key: '다른 value 박스들을 묶는 기준 박스입니다. 보통 라벨이나 제목 역할을 맡습니다.',
-  value: '어떤 key 박스에 속한 실제 입력값 박스입니다. 연결된 key 박스가 필요합니다.',
-  key_value: '상위 key 없이 자기 자신이 하나의 완결된 값이 되는 독립 박스입니다.',
+  key: '다른 value 상자들을 묶는 기준 상자입니다. 보통 라벨이나 제목 역할을 맡습니다.',
+  value: '어떤 key 상자에 속한 실제 입력값 상자입니다. 연결된 key 상자가 필요합니다.',
+  key_value: '상위 key 없이 자기 자신이 하나의 완결된 값이 되는 독립 상자입니다.',
 };
 
 const FrameKindIcon = ({
@@ -756,7 +775,7 @@ const confirmPromoteKeyBoxToText = () => {
     return false;
   }
 
-  return window.confirm('key 박스는 text 박스여야 합니다. text 박스로 업데이트하고 설정을 반영할까요?');
+  return window.confirm('key 상자는 text 상자여야 합니다. text 상자로 업데이트하고 설정을 반영할까요?');
 };
 
 const confirmPromoteRuntimeMode = (frameGroupId: string, currentRuntimeMode: string, nextRuntimeMode: TemplateFrameRuntimeMode) => {
@@ -765,7 +784,7 @@ const confirmPromoteRuntimeMode = (frameGroupId: string, currentRuntimeMode: str
   }
 
   return window.confirm(
-    `${frameGroupId} 의 runtime mode ${currentRuntimeMode} 는 현재 박스 타입과 호환되지 않습니다.\n` +
+    `${frameGroupId} 의 runtime mode ${currentRuntimeMode} 는 현재 상자 타입과 호환되지 않습니다.\n` +
       `호환 가능한 runtime mode(${nextRuntimeMode})로 변경할까요?`
   );
 };
@@ -779,15 +798,15 @@ const MetadataCanvasLegend = () => (
         <div className="mt-2 space-y-1.5 text-[11px] text-slate-700">
           <div className="flex items-center gap-2">
             <FrameKindIcon boxKind="text" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-teal-700" />
-            <span>텍스트 박스</span>
+            <span>텍스트 상자</span>
           </div>
           <div className="flex items-center gap-2">
             <FrameKindIcon boxKind="attachment" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-amber-700" />
-            <span>첨부파일 박스</span>
+            <span>첨부파일 상자</span>
           </div>
           <div className="flex items-center gap-2">
             <FrameKindIcon boxKind="signature" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-rose-700" />
-            <span>서명 박스</span>
+            <span>서명 상자</span>
           </div>
           <div className="flex items-center gap-2">
             <FrameKindIcon boxKind="" className="inline-flex h-4 w-4 items-center justify-center text-base leading-none text-slate-500" />
@@ -835,7 +854,7 @@ const MetadataCanvasLegend = () => (
             <span className="inline-block h-4 w-4 rounded-sm border-2 border-slate-700" />
             <span>현재 선택 관계군</span>
           </div>
-          <div className="text-[10px] leading-4 text-slate-500">같은 그룹의 key/value 박스는 선택 시 함께 선명해집니다.</div>
+          <div className="text-[10px] leading-4 text-slate-500">같은 그룹의 key/value 상자는 선택 시 함께 선명해집니다.</div>
         </div>
       </div>
     </div>
@@ -856,12 +875,12 @@ const FRAME_RUNTIME_MODE_DESCRIPTIONS: Record<TemplateFrameRuntimeMode, string> 
   static_label: '문서에서 수정되지 않는 고정 텍스트 라벨로 사용합니다.',
   editable_text: '문서마다 사용자가 직접 입력하거나 수정하는 텍스트 값으로 사용합니다.',
   file_slot: '문서마다 파일을 업로드해 연결하는 슬롯입니다. 업로드 후에는 파일명과 파일 열기 동작을 가집니다.',
-  signature_image: '서명 이미지만 출력하는 박스입니다. 실제 서명 이미지는 문서별 서명 데이터에서 가져옵니다.',
-  signature_history: '서명 요청, 인증, 완료 같은 이력 로그를 출력하는 박스입니다.',
-  signature_signer_name: '서명한 사람의 이름이나 표시명을 출력하는 박스입니다.',
-  signature_signed_at: '실제 서명이 완료된 시각을 출력하는 박스입니다.',
-  signature_provider: '본인확인 또는 서명 인증에 사용된 제공자 정보를 출력하는 박스입니다.',
-  signature_status: '서명 대기, 완료, 실패 같은 현재 상태를 출력하는 박스입니다.',
+  signature_image: '서명 이미지만 출력하는 상자입니다. 실제 서명 이미지는 문서별 서명 데이터에서 가져옵니다.',
+  signature_history: '서명 요청, 인증, 완료 같은 이력 로그를 출력하는 상자입니다.',
+  signature_signer_name: '서명한 사람의 이름이나 표시명을 출력하는 상자입니다.',
+  signature_signed_at: '실제 서명이 완료된 시각을 출력하는 상자입니다.',
+  signature_provider: '본인확인 또는 서명 인증에 사용된 제공자 정보를 출력하는 상자입니다.',
+  signature_status: '서명 대기, 완료, 실패 같은 현재 상태를 출력하는 상자입니다.',
 };
 const EDGE_DRAG_START_THRESHOLD_PX = 4;
 const EDGE_DRAG_AUTOSNAP_THRESHOLD_PX = 5;
@@ -1399,6 +1418,69 @@ const resolveFrameLayoutTable = (node: HTMLElement) => {
   return shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || node.closest<HTMLTableElement>('table');
 };
 
+const isPositionGroupWrapperElement = (element: HTMLElement | null | undefined) =>
+  element?.getAttribute(TEMPLATE_POSITION_GROUP_NODE_ATTR) === 'true';
+
+const readPositionGroupWrapperId = (element: HTMLElement | null | undefined) =>
+  isPositionGroupWrapperElement(element)
+    ? element?.getAttribute(TEMPLATE_POSITION_GROUP_NODE_ID_ATTR)?.trim() || ''
+    : '';
+
+const normalizePositionGroupDisplayLabel = (label: string, fallbackId = '') => {
+  const normalizedLabel = label.trim();
+  const labelMatch =
+    normalizedLabel.match(/^box\s+(\d+)$/i) ||
+    normalizedLabel.match(/^이동\s+묶음\s+박스\s+(\d+)$/i) ||
+    normalizedLabel.match(/^이동\s+묶음\s+상자\s+(\d+)$/i) ||
+    normalizedLabel.match(/^그룹\s+(\d+)$/i);
+
+  if (labelMatch) {
+    return `${POSITION_GROUP_LABEL_PREFIX} ${Number.parseInt(labelMatch[1] || '0', 10) || labelMatch[1]}`;
+  }
+
+  if (normalizedLabel && !/^position-box-/i.test(normalizedLabel) && !/^inferred:/i.test(normalizedLabel)) {
+    return normalizedLabel;
+  }
+
+  const idMatch =
+    fallbackId.match(/^position-box-(\d+)$/i) ||
+    fallbackId.match(/^box\s+(\d+)$/i) ||
+    fallbackId.match(/^그룹\s+(\d+)$/i);
+
+  if (idMatch) {
+    return `${POSITION_GROUP_LABEL_PREFIX} ${Number.parseInt(idMatch[1] || '0', 10) || idMatch[1]}`;
+  }
+
+  return normalizedLabel || POSITION_GROUP_LABEL_PREFIX;
+};
+
+const readPositionGroupWrapperLabel = (element: HTMLElement | null | undefined) =>
+  normalizePositionGroupDisplayLabel(
+    element?.getAttribute(TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR)?.trim() || '',
+    readPositionGroupWrapperId(element)
+  );
+
+const readPositionedAncestorOffset = (
+  element: HTMLElement,
+  pageInner?: HTMLElement | null
+): { left: number; top: number } => {
+  const resolvedPageInner = pageInner || element.closest<HTMLElement>('.page-inner');
+  let left = 0;
+  let top = 0;
+  let current = element.parentElement;
+
+  while (current && current !== resolvedPageInner) {
+    if (isPositionGroupWrapperElement(current)) {
+      left += parseFramePx(current.style.left);
+      top += parseFramePx(current.style.top);
+    }
+
+    current = current.parentElement;
+  }
+
+  return { left, top };
+};
+
 const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | null): FrameNodeRect => {
   const resolvedPageInner = pageInner || element.closest<HTMLElement>('.page-inner');
   const pageRect = resolvedPageInner?.getBoundingClientRect() || null;
@@ -1408,10 +1490,15 @@ const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | nu
   const hasInlineTop = element.style.top.trim() !== '';
   const hasInlineWidth = element.style.width.trim() !== '';
   const hasInlineHeight = element.style.height.trim() !== '';
+  const ancestorOffset = readPositionedAncestorOffset(element, resolvedPageInner);
 
   return {
-    left: hasInlineLeft ? parseFramePx(element.style.left) : Math.max(0, elementRect.left - (pageRect?.left || 0)),
-    top: hasInlineTop ? parseFramePx(element.style.top) : Math.max(0, elementRect.top - (pageRect?.top || 0)),
+    left: hasInlineLeft
+      ? parseFramePx(element.style.left) + ancestorOffset.left
+      : Math.max(0, elementRect.left - (pageRect?.left || 0)),
+    top: hasInlineTop
+      ? parseFramePx(element.style.top) + ancestorOffset.top
+      : Math.max(0, elementRect.top - (pageRect?.top || 0)),
     width: Math.max(1, hasInlineWidth ? parseFramePx(element.style.width) : parseFramePx(computedStyle.width) || elementRect.width),
     height: Math.max(
       1,
@@ -1421,6 +1508,31 @@ const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | nu
 };
 
 const readFrameMoveRect = (node: HTMLElement): FrameNodeRect => readFrameElementRect(resolveFrameLayoutShell(node));
+
+const writePositionedElementPageRect = (
+  element: HTMLElement,
+  rect: FrameNodeRect,
+  pageInner?: HTMLElement | null,
+  options?: {
+    width?: boolean;
+    height?: boolean;
+    minSize?: number;
+  }
+) => {
+  const resolvedPageInner = pageInner || element.closest<HTMLElement>('.page-inner');
+  const ancestorOffset = readPositionedAncestorOffset(element, resolvedPageInner);
+  const minSize = options?.minSize ?? MIN_FRAME_SIZE_PX;
+  element.style.left = toFrameCssPx(rect.left - ancestorOffset.left);
+  element.style.top = toFrameCssPx(rect.top - ancestorOffset.top);
+
+  if (options?.width !== false) {
+    element.style.width = toFrameCssPx(Math.max(minSize, rect.width));
+  }
+
+  if (options?.height !== false) {
+    element.style.height = toFrameCssPx(Math.max(minSize, rect.height));
+  }
+};
 
 const isAbsolutePositionedShell = (shell: HTMLElement | null | undefined) =>
   shell?.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR) === 'absolute';
@@ -1476,26 +1588,55 @@ const collectTopLevelPositionGroupsWithRects = (pageInner: HTMLElement): Positio
     }
   });
 
-  const rawGroups = collectPositionBoxGroups(pageInner, { includeSingletons: false })
+  const rawGroups = collectPositionBoxGroups(pageInner, {
+    includeSingletons: false,
+    includeExplicitMembersInInferred: true,
+  })
     .map((group) => {
-      const frameGroupIds = Array.from(
+      const normalizedGroupFrameIds = Array.from(
         new Set(
           group.frameGroupIds
             .map((frameGroupId) => frameGroupId.trim())
-            .filter((frameGroupId) => Boolean(frameGroupId) && frameNodeById.has(frameGroupId))
+            .filter((frameGroupId) => Boolean(frameGroupId))
         )
       );
+      let frameGroupIds = normalizedGroupFrameIds.filter((frameGroupId) => frameNodeById.has(frameGroupId));
 
-      if (frameGroupIds.length <= 1) {
+      if (frameGroupIds.length <= 1 && !group.inferred) {
+        const fallbackSourceFrameGroupId = frameGroupIds[0] || normalizedGroupFrameIds[0] || '';
+        const fallbackSourceNode = fallbackSourceFrameGroupId
+          ? frameNodeById.get(fallbackSourceFrameGroupId) || null
+          : null;
+        if (fallbackSourceNode) {
+          const expandedMemberIds = collectPositionImpactGroupCandidateFrameGroupIds(
+            fallbackSourceNode,
+            frameNodes,
+            pageInner
+          );
+          expandedMemberIds.add(fallbackSourceFrameGroupId);
+          frameGroupIds = Array.from(
+            new Set(
+              [...frameGroupIds, ...Array.from(expandedMemberIds)]
+                .map((candidateFrameGroupId) => candidateFrameGroupId.trim())
+                .filter((candidateFrameGroupId) => Boolean(candidateFrameGroupId) && frameNodeById.has(candidateFrameGroupId))
+            )
+          );
+        }
+      }
+
+      if (frameGroupIds.length <= 1 && group.inferred) {
         return null;
       }
 
-      const memberRects = frameGroupIds
-        .map((frameGroupId) => {
-          const frameNode = frameNodeById.get(frameGroupId) || null;
-          return frameNode ? readFrameMoveRect(frameNode) : null;
-        })
-        .filter((rect): rect is FrameNodeRect => Boolean(rect));
+      const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
+      const memberRects = wrapper
+        ? [readFrameElementRect(wrapper, pageInner)]
+        : frameGroupIds
+            .map((frameGroupId) => {
+              const frameNode = frameNodeById.get(frameGroupId) || null;
+              return frameNode ? readFrameMoveRect(frameNode) : null;
+            })
+            .filter((rect): rect is FrameNodeRect => Boolean(rect));
 
       if (memberRects.length <= 0) {
         return null;
@@ -1966,6 +2107,11 @@ const resolveRelativeAnchorRect = (
       return null;
     }
 
+    const wrapper = resolvePositionGroupWrapperElement(pageInner, targetGroupId);
+    if (wrapper) {
+      return readFrameElementRect(wrapper, pageInner);
+    }
+
     const positionGroups = collectPositionBoxGroups(pageInner, { includeSingletons: true });
     const targetGroup = positionGroups.find((group) => group.id === targetGroupId);
 
@@ -2030,15 +2176,19 @@ const buildRelativeAnchorConfigFromRect = ({
   const anchorTop = anchorRect.top;
   const anchorBottom = anchorRect.top + anchorRect.height;
   const anchorX =
-    preferredAnchorX ||
-    (Math.abs(frameRect.left - anchorLeft) <= Math.abs(anchorRight - (frameRect.left + frameRect.width))
+    anchorKind === 'group'
       ? 'left'
-      : 'right');
+      : preferredAnchorX ||
+        (Math.abs(frameRect.left - anchorLeft) <= Math.abs(anchorRight - (frameRect.left + frameRect.width))
+          ? 'left'
+          : 'right');
   const anchorY =
-    preferredAnchorY ||
-    (Math.abs(frameRect.top - anchorTop) <= Math.abs(anchorBottom - (frameRect.top + frameRect.height))
+    anchorKind === 'group'
       ? 'top'
-      : 'bottom');
+      : preferredAnchorY ||
+        (Math.abs(frameRect.top - anchorTop) <= Math.abs(anchorBottom - (frameRect.top + frameRect.height))
+          ? 'top'
+          : 'bottom');
 
   return {
     positionMode: 'relative',
@@ -2204,6 +2354,18 @@ const ensureFrameRelativeAnchorConfig = (frameNode: HTMLElement | null | undefin
       resolveNearestPageCornerRelativeAnchorConfig(frameNode, resolvedPageInner);
   }
 
+  if (positionMode === 'relative' && config?.anchorKind === 'group' && (config.anchorX !== 'left' || config.anchorY !== 'top')) {
+    const anchorRect = resolveRelativeAnchorRect(resolvedPageInner, config);
+    if (anchorRect) {
+      config = buildRelativeAnchorConfigFromRect({
+        frameRect: readFrameMoveRect(frameNode),
+        anchorRect,
+        anchorKind: 'group',
+        anchorId: config.anchorId,
+      });
+    }
+  }
+
   if (config) {
     writeFrameRelativeAnchorAttrs(frameNode, config);
   } else {
@@ -2213,7 +2375,10 @@ const ensureFrameRelativeAnchorConfig = (frameNode: HTMLElement | null | undefin
   return config;
 };
 
-const readRelativeAnchorTargetLabel = (config: TemplateFrameRelativeAnchorConfig | null) => {
+const readRelativeAnchorTargetLabel = (
+  config: TemplateFrameRelativeAnchorConfig | null,
+  scope?: ParentNode | null
+) => {
   if (!config) {
     return null;
   }
@@ -2223,7 +2388,10 @@ const readRelativeAnchorTargetLabel = (config: TemplateFrameRelativeAnchorConfig
   }
 
   if (config.anchorKind === 'group') {
-    return `그룹 기준: ${config.anchorId}`;
+    const groupLabel =
+      collectPositionBoxGroups(scope, { includeSingletons: true }).find((group) => group.id === config.anchorId)?.label ||
+      normalizePositionGroupDisplayLabel('', config.anchorId);
+    return `그룹 좌상단 기준: ${groupLabel}`;
   }
 
   return config.anchorId;
@@ -2416,19 +2584,238 @@ const collectPositionImpactGroupIds = (
   return baseFrameGroupIds;
 };
 
+function readPositionGroupTreeEntries(scope: ParentNode | null | undefined): PositionGroupTreeEntry[] {
+  if (!scope) {
+    return [];
+  }
+
+  const hostElements: HTMLElement[] = [];
+  if (
+    typeof HTMLElement !== 'undefined' &&
+    scope instanceof HTMLElement &&
+    scope.hasAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR)
+  ) {
+    hostElements.push(scope);
+  }
+  hostElements.push(...Array.from(scope.querySelectorAll<HTMLElement>(`[${TEMPLATE_POSITION_GROUP_TREE_ATTR}]`)));
+
+  const entriesById = new Map<string, PositionGroupTreeEntry>();
+  hostElements.forEach((host) => {
+    const rawValue = host.getAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR)?.trim() || '';
+    if (!rawValue) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(rawValue);
+      if (!Array.isArray(parsed)) {
+        return;
+      }
+
+      parsed.forEach((item) => {
+        if (!item || typeof item !== 'object') {
+          return;
+        }
+
+        const id = typeof item.id === 'string' ? item.id.trim() : '';
+        if (!id) {
+          return;
+        }
+
+        const previous = entriesById.get(id) || null;
+        entriesById.set(id, {
+          id,
+          label:
+            (typeof item.label === 'string' ? item.label.trim() : '') ||
+            previous?.label ||
+            '',
+          childGroupIds: Array.from(
+            new Set([
+              ...(previous?.childGroupIds || []),
+              ...(Array.isArray(item.childGroupIds) ? item.childGroupIds : [])
+                .map((groupId) => (typeof groupId === 'string' ? groupId.trim() : ''))
+                .filter(Boolean),
+            ])
+          ),
+          frameGroupIds: Array.from(
+            new Set([
+              ...(previous?.frameGroupIds || []),
+              ...(Array.isArray(item.frameGroupIds) ? item.frameGroupIds : [])
+                .map((frameGroupId) => (typeof frameGroupId === 'string' ? frameGroupId.trim() : ''))
+                .filter(Boolean),
+            ])
+          ),
+        });
+      });
+    } catch {
+      return;
+    }
+  });
+
+  const wrapperElements = Array.from(
+    scope.querySelectorAll<HTMLElement>(`[${TEMPLATE_POSITION_GROUP_NODE_ATTR}="true"][${TEMPLATE_POSITION_GROUP_NODE_ID_ATTR}]`)
+  );
+
+  wrapperElements.forEach((wrapper) => {
+    const id = readPositionGroupWrapperId(wrapper);
+
+    if (!id) {
+      return;
+    }
+
+    const previous = entriesById.get(id) || null;
+    const directFrameGroupIds = Array.from(wrapper.children)
+      .map((child) => (child instanceof HTMLElement ? child : null))
+      .filter((child): child is HTMLElement => Boolean(child))
+      .filter((child) => child.classList.contains('v102-frame-band') || child.matches(FRAME_SELECTION_NODE_SELECTOR))
+      .map((child) => getFrameGroupId(child))
+      .filter((frameGroupId) => Boolean(frameGroupId));
+    const childGroupIds = Array.from(wrapper.children)
+      .map((child) => (child instanceof HTMLElement ? child : null))
+      .filter((child): child is HTMLElement => Boolean(child))
+      .map((child) => readPositionGroupWrapperId(child))
+      .filter((groupId) => Boolean(groupId));
+
+    entriesById.set(id, {
+      id,
+      label: readPositionGroupWrapperLabel(wrapper) || previous?.label || '',
+      childGroupIds: Array.from(new Set([...(previous?.childGroupIds || []), ...childGroupIds])),
+      frameGroupIds: Array.from(new Set([...(previous?.frameGroupIds || []), ...directFrameGroupIds])),
+    });
+  });
+
+  return Array.from(entriesById.values());
+}
+
+const resolvePositionGroupTreeHost = (root: HTMLElement, frameGroupIds: string[]) => {
+  const firstFrameGroupId = frameGroupIds.map((frameGroupId) => frameGroupId.trim()).find(Boolean) || '';
+  const firstNode = firstFrameGroupId
+    ? resolveFrameSelectionAnchor(
+        root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${firstFrameGroupId}"]`)
+      )
+    : null;
+
+  return firstNode?.closest<HTMLElement>('.page-inner') || root.querySelector<HTMLElement>('.page-inner') || root;
+};
+
+const writePositionGroupTreeEntry = (
+  root: HTMLElement,
+  entry: PositionGroupTreeEntry,
+  hostFrameGroupIds: string[]
+) => {
+  const normalizedEntry: PositionGroupTreeEntry = {
+    id: entry.id.trim(),
+    label: (entry.label || '').trim(),
+    childGroupIds: Array.from(new Set((entry.childGroupIds || []).map((groupId) => groupId.trim()).filter(Boolean))),
+    frameGroupIds: Array.from(new Set((entry.frameGroupIds || []).map((frameGroupId) => frameGroupId.trim()).filter(Boolean))),
+  };
+
+  if (!normalizedEntry.id) {
+    return;
+  }
+
+  const host = resolvePositionGroupTreeHost(root, [
+    ...hostFrameGroupIds,
+    ...(normalizedEntry.frameGroupIds || []),
+  ]);
+  const previousEntries = readPositionGroupTreeEntries(host);
+  const nextEntries = [
+    ...previousEntries.filter((previousEntry) => previousEntry.id !== normalizedEntry.id),
+    normalizedEntry,
+  ];
+
+  host.setAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR, JSON.stringify(nextEntries));
+};
+
+const removePositionGroupTreeEntriesByIds = (root: ParentNode | null | undefined, groupIds: string[]) => {
+  if (!root) {
+    return 0;
+  }
+
+  const targetGroupIdSet = new Set(groupIds.map((groupId) => groupId.trim()).filter(Boolean));
+  let removedCount = 0;
+  const hostElements: HTMLElement[] = [];
+
+  if (root instanceof HTMLElement && root.hasAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR)) {
+    hostElements.push(root);
+  }
+  hostElements.push(...Array.from(root.querySelectorAll<HTMLElement>(`[${TEMPLATE_POSITION_GROUP_TREE_ATTR}]`)));
+
+  hostElements.forEach((host) => {
+    const rawValue = host.getAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR)?.trim() || '';
+
+    if (!rawValue) {
+      return;
+    }
+
+    let parsedEntries: PositionGroupTreeEntry[] = [];
+    try {
+      const parsed = JSON.parse(rawValue);
+      parsedEntries = Array.isArray(parsed)
+        ? parsed
+            .map((item) => {
+              if (!item || typeof item !== 'object') {
+                return null;
+              }
+
+              const id = typeof item.id === 'string' ? item.id.trim() : '';
+              if (!id) {
+                return null;
+              }
+
+              return {
+                id,
+                label: typeof item.label === 'string' ? item.label.trim() : '',
+                childGroupIds: Array.isArray(item.childGroupIds)
+                  ? item.childGroupIds.map((groupId) => (typeof groupId === 'string' ? groupId.trim() : '')).filter(Boolean)
+                  : [],
+                frameGroupIds: Array.isArray(item.frameGroupIds)
+                  ? item.frameGroupIds
+                      .map((frameGroupId) => (typeof frameGroupId === 'string' ? frameGroupId.trim() : ''))
+                      .filter(Boolean)
+                  : [],
+              } as PositionGroupTreeEntry;
+            })
+            .filter((entry): entry is PositionGroupTreeEntry => Boolean(entry))
+        : [];
+    } catch {
+      parsedEntries = [];
+    }
+
+    const nextEntries = parsedEntries.filter((entry) => !targetGroupIdSet.has(entry.id));
+    removedCount += Math.max(0, parsedEntries.length - nextEntries.length);
+    if (nextEntries.length > 0) {
+      host.setAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR, JSON.stringify(nextEntries));
+    } else {
+      host.removeAttribute(TEMPLATE_POSITION_GROUP_TREE_ATTR);
+    }
+  });
+
+  return removedCount;
+};
+
 const collectPositionBoxGroups = (
   scope: ParentNode | null | undefined,
   options?: {
     includeSingletons?: boolean;
+    includeExplicitMembersInInferred?: boolean;
   }
 ) => {
   const includeSingletons = options?.includeSingletons ?? false;
+  const includeExplicitMembersInInferred = options?.includeExplicitMembersInInferred ?? false;
 
   if (!scope) {
     return [] as PositionImpactGroup[];
   }
 
   const frameNodes = collectFrameSelectionAnchors(scope);
+  const frameIndexById = new Map<string, number>();
+  frameNodes.forEach((frameNode, index) => {
+    const frameGroupId = getFrameGroupId(frameNode);
+    if (frameGroupId && !frameIndexById.has(frameGroupId)) {
+      frameIndexById.set(frameGroupId, index);
+    }
+  });
   const explicitBuckets = new Map<
     string,
     {
@@ -2462,7 +2849,7 @@ const collectPositionBoxGroups = (
     explicitMemberIds.add(frameGroupId);
   });
 
-  const groupsWithOrder: Array<PositionImpactGroup & { firstIndex: number }> = [];
+  let groupsWithOrder: Array<PositionImpactGroup & { firstIndex: number }> = [];
 
   explicitBuckets.forEach((bucket, groupId) => {
     const frameGroupIds = Array.from(bucket.frameGroupIds).sort((left, right) => left.localeCompare(right, 'ko'));
@@ -2475,6 +2862,8 @@ const collectPositionBoxGroups = (
       label: bucket.label,
       frameGroupIds,
       inferred: false,
+      directFrameGroupIds: frameGroupIds,
+      childGroupIds: [],
       firstIndex: bucket.firstIndex,
     });
   });
@@ -2493,7 +2882,7 @@ const collectPositionBoxGroups = (
     const pageInner = frameNode.closest<HTMLElement>('.page-inner');
     const pageKey = pageInner?.getAttribute('data-page')?.trim() || '1';
 
-    if (!frameGroupId || explicitMemberIds.has(frameGroupId) || !bandSource) {
+    if (!frameGroupId || (!includeExplicitMembersInInferred && explicitMemberIds.has(frameGroupId)) || !bandSource) {
       return;
     }
 
@@ -2520,9 +2909,74 @@ const collectPositionBoxGroups = (
       label: '',
       frameGroupIds,
       inferred: true,
+      directFrameGroupIds: frameGroupIds,
+      childGroupIds: [],
       firstIndex: bucket.firstIndex,
     });
   });
+
+  const treeEntries = readPositionGroupTreeEntries(scope);
+  if (treeEntries.length > 0) {
+    const groupById = new Map(groupsWithOrder.map((group) => [group.id, group] as const));
+    const treeEntryById = new Map(treeEntries.map((entry) => [entry.id, entry] as const));
+    const resolveTreeFrameGroupIds = (groupId: string, visitedGroupIds = new Set<string>()): string[] => {
+      const normalizedGroupId = groupId.trim();
+      if (!normalizedGroupId || visitedGroupIds.has(normalizedGroupId)) {
+        return [];
+      }
+      visitedGroupIds.add(normalizedGroupId);
+
+      const treeEntry = treeEntryById.get(normalizedGroupId) || null;
+      const baseGroup = groupById.get(normalizedGroupId) || null;
+      const frameIds = new Set<string>();
+
+      (baseGroup?.frameGroupIds || []).forEach((frameGroupId) => {
+        const normalizedFrameGroupId = frameGroupId.trim();
+        if (normalizedFrameGroupId) {
+          frameIds.add(normalizedFrameGroupId);
+        }
+      });
+      (treeEntry?.frameGroupIds || []).forEach((frameGroupId) => {
+        const normalizedFrameGroupId = frameGroupId.trim();
+        if (normalizedFrameGroupId) {
+          frameIds.add(normalizedFrameGroupId);
+        }
+      });
+      (treeEntry?.childGroupIds || []).forEach((childGroupId) => {
+        resolveTreeFrameGroupIds(childGroupId, new Set(visitedGroupIds)).forEach((frameGroupId) => {
+          frameIds.add(frameGroupId);
+        });
+      });
+
+      return Array.from(frameIds);
+    };
+
+    treeEntries.forEach((entry) => {
+      const frameGroupIds = resolveTreeFrameGroupIds(entry.id)
+        .filter((frameGroupId) => frameIndexById.has(frameGroupId))
+        .sort((left, right) => left.localeCompare(right, 'ko'));
+
+      if (frameGroupIds.length <= 0) {
+        return;
+      }
+
+      const existingGroup = groupById.get(entry.id) || null;
+      const firstIndex = Math.min(
+        ...frameGroupIds.map((frameGroupId) => frameIndexById.get(frameGroupId) ?? Number.MAX_SAFE_INTEGER)
+      );
+      groupById.set(entry.id, {
+        id: entry.id,
+        label: (entry.label || existingGroup?.label || '').trim(),
+        frameGroupIds,
+        inferred: false,
+        directFrameGroupIds: Array.from(new Set((entry.frameGroupIds || []).map((frameGroupId) => frameGroupId.trim()).filter(Boolean))),
+        childGroupIds: Array.from(new Set((entry.childGroupIds || []).map((groupId) => groupId.trim()).filter(Boolean))),
+        firstIndex: Number.isFinite(firstIndex) ? firstIndex : existingGroup?.firstIndex || 0,
+      });
+    });
+
+    groupsWithOrder = Array.from(groupById.values());
+  }
 
   const groupedMemberIds = new Set(groupsWithOrder.flatMap((group) => group.frameGroupIds));
 
@@ -2559,12 +3013,15 @@ const collectPositionBoxGroups = (
       }
 
       if (group.label.trim()) {
-        return group;
+        return {
+          ...group,
+          label: normalizePositionGroupDisplayLabel(group.label, group.id),
+        };
       }
 
       const labeledGroup = {
         ...group,
-        label: `box ${nextAutoLabelIndex}`,
+        label: `${POSITION_GROUP_LABEL_PREFIX} ${nextAutoLabelIndex}`,
       };
       nextAutoLabelIndex += 1;
       return labeledGroup;
@@ -2583,9 +3040,272 @@ const readSingleFrameGroupId = (frameGroupIds: string[]) => {
   return normalizedFrameGroupIds[0] || '';
 };
 
+const collectFrameGroupUnionRect = (
+  frameGroupIds: string[],
+  frameNodeById: Map<string, HTMLElement>
+): FrameNodeRect | null => {
+  const memberRects = frameGroupIds
+    .map((frameGroupId) => frameNodeById.get(frameGroupId.trim()) || null)
+    .map((node) => (node ? readFrameMoveRect(node) : null))
+    .filter((rect): rect is FrameNodeRect => Boolean(rect));
+
+  if (memberRects.length <= 0) {
+    return null;
+  }
+
+  const minLeft = Math.min(...memberRects.map((rect) => rect.left));
+  const minTop = Math.min(...memberRects.map((rect) => rect.top));
+  const maxRight = Math.max(...memberRects.map((rect) => rect.left + rect.width));
+  const maxBottom = Math.max(...memberRects.map((rect) => rect.top + rect.height));
+
+  return {
+    left: minLeft,
+    top: minTop,
+    width: Math.max(1, maxRight - minLeft),
+    height: Math.max(1, maxBottom - minTop),
+  };
+};
+
+const collectPositionGroupWrapperElements = (scope: ParentNode | null | undefined) =>
+  Array.from(scope?.querySelectorAll<HTMLElement>(`[${TEMPLATE_POSITION_GROUP_NODE_ATTR}="true"]`) || []);
+
+const resolvePositionGroupWrapperElement = (scope: ParentNode | null | undefined, groupId: string) =>
+  collectPositionGroupWrapperElements(scope).find((element) => readPositionGroupWrapperId(element) === groupId.trim()) || null;
+
+const unwrapPositionGroupWrapperElement = (wrapper: HTMLElement, pageInner: HTMLElement) => {
+  const parent = wrapper.parentElement || pageInner;
+  const insertBefore = wrapper.nextSibling;
+  const children = Array.from(wrapper.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
+
+  children.forEach((child) => {
+    const childRect = readFrameElementRect(child, pageInner);
+    parent.insertBefore(child, insertBefore);
+    writePositionedElementPageRect(child, childRect, pageInner);
+  });
+
+  wrapper.remove();
+};
+
+const materializePositionGroupWrappersInPage = (pageInner: HTMLElement): boolean => {
+  const frameNodes = collectFrameSelectionAnchors(pageInner).filter(
+    (node) => node.closest<HTMLElement>('.page-inner') === pageInner
+  );
+
+  if (frameNodes.length <= 1) {
+    return false;
+  }
+
+  const frameNodeById = new Map<string, HTMLElement>();
+  const frameOrderById = new Map<string, number>();
+  frameNodes.forEach((frameNode, index) => {
+    const frameGroupId = getFrameGroupId(frameNode);
+    if (frameGroupId) {
+      frameNodeById.set(frameGroupId, frameNode);
+      frameOrderById.set(frameGroupId, index);
+    }
+  });
+
+  const groups = collectPositionBoxGroups(pageInner, {
+    includeSingletons: false,
+    includeExplicitMembersInInferred: true,
+  }).filter((group) => group.frameGroupIds.filter((frameGroupId) => frameNodeById.has(frameGroupId)).length > 1);
+  const groupById = new Map(groups.map((group) => [group.id, group] as const));
+  const groupMemberSetById = new Map(
+    groups.map((group) => [
+      group.id,
+      new Set(group.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => frameNodeById.has(frameGroupId))),
+    ] as const)
+  );
+  const existingWrapperById = new Map(
+    collectPositionGroupWrapperElements(pageInner)
+      .map((wrapper) => [readPositionGroupWrapperId(wrapper), wrapper] as const)
+      .filter(([groupId]) => Boolean(groupId))
+  );
+  let changed = false;
+
+  existingWrapperById.forEach((wrapper, groupId) => {
+    if (!groupById.has(groupId)) {
+      unwrapPositionGroupWrapperElement(wrapper, pageInner);
+      existingWrapperById.delete(groupId);
+      changed = true;
+    }
+  });
+
+  const childGroupIdsByGroupId = new Map<string, string[]>();
+  const directFrameGroupIdsByGroupId = new Map<string, string[]>();
+
+  groups.forEach((group) => {
+    const memberSet = groupMemberSetById.get(group.id) || new Set<string>();
+    const declaredChildGroupIds = (group.childGroupIds || []).filter((childGroupId) => {
+      const childSet = groupMemberSetById.get(childGroupId);
+      return childSet && Array.from(childSet).every((frameGroupId) => memberSet.has(frameGroupId));
+    });
+    const inferredChildGroupIds = groups
+      .filter((candidate) => candidate.id !== group.id)
+      .filter((candidate) => {
+        const candidateSet = groupMemberSetById.get(candidate.id) || new Set<string>();
+        return (
+          candidateSet.size > 1 &&
+          candidateSet.size < memberSet.size &&
+          Array.from(candidateSet).every((frameGroupId) => memberSet.has(frameGroupId))
+        );
+      })
+      .filter((candidate) => {
+        const candidateSet = groupMemberSetById.get(candidate.id) || new Set<string>();
+        return !groups.some((middle) => {
+          if (middle.id === group.id || middle.id === candidate.id) {
+            return false;
+          }
+
+          const middleSet = groupMemberSetById.get(middle.id) || new Set<string>();
+          return (
+            middleSet.size > candidateSet.size &&
+            middleSet.size < memberSet.size &&
+            Array.from(candidateSet).every((frameGroupId) => middleSet.has(frameGroupId)) &&
+            Array.from(middleSet).every((frameGroupId) => memberSet.has(frameGroupId))
+          );
+        });
+      })
+      .map((candidate) => candidate.id);
+    const childGroupIds = Array.from(new Set([...declaredChildGroupIds, ...inferredChildGroupIds]));
+    const childFrameGroupIds = new Set(
+      childGroupIds.flatMap((childGroupId) => Array.from(groupMemberSetById.get(childGroupId) || []))
+    );
+    const declaredDirectFrameGroupIds = (group.directFrameGroupIds || group.frameGroupIds)
+      .map((frameGroupId) => frameGroupId.trim())
+      .filter((frameGroupId) => frameNodeById.has(frameGroupId));
+    const directFrameGroupIds = Array.from(
+      new Set(
+        declaredDirectFrameGroupIds.length > 0
+          ? declaredDirectFrameGroupIds.filter((frameGroupId) => !childFrameGroupIds.has(frameGroupId))
+          : Array.from(memberSet).filter((frameGroupId) => !childFrameGroupIds.has(frameGroupId))
+      )
+    ).sort((left, right) => (frameOrderById.get(left) ?? Number.MAX_SAFE_INTEGER) - (frameOrderById.get(right) ?? Number.MAX_SAFE_INTEGER));
+
+    childGroupIdsByGroupId.set(group.id, childGroupIds);
+    directFrameGroupIdsByGroupId.set(group.id, directFrameGroupIds);
+  });
+
+  groups
+    .slice()
+    .sort((left, right) => left.frameGroupIds.length - right.frameGroupIds.length)
+    .forEach((group) => {
+      const groupRect = collectFrameGroupUnionRect(group.frameGroupIds, frameNodeById);
+
+      if (!groupRect) {
+        return;
+      }
+
+      let wrapper = existingWrapperById.get(group.id) || null;
+      const wrapperLabel = normalizePositionGroupDisplayLabel(group.label, group.id);
+
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'template-position-group-wrapper';
+        wrapper.setAttribute(TEMPLATE_POSITION_GROUP_NODE_ATTR, 'true');
+        wrapper.setAttribute(TEMPLATE_POSITION_GROUP_NODE_ID_ATTR, group.id);
+        existingWrapperById.set(group.id, wrapper);
+        pageInner.appendChild(wrapper);
+        changed = true;
+      }
+
+      if (wrapper.getAttribute(TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR) !== wrapperLabel) {
+        wrapper.setAttribute(TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR, wrapperLabel);
+        changed = true;
+      }
+
+      const directChildren: HTMLElement[] = [
+        ...(childGroupIdsByGroupId.get(group.id) || [])
+          .map((childGroupId) => existingWrapperById.get(childGroupId) || null)
+          .filter((child): child is HTMLElement => Boolean(child)),
+        ...(directFrameGroupIdsByGroupId.get(group.id) || [])
+          .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
+          .map((node) => (node ? resolveFrameLayoutShell(node) : null))
+          .filter((node): node is HTMLElement => Boolean(node)),
+      ];
+      const childRectByElement = new Map(
+        directChildren.map((child) => [child, readFrameElementRect(child, pageInner)] as const)
+      );
+      const previousRect = readFrameElementRect(wrapper, pageInner);
+      writePositionedElementPageRect(wrapper, groupRect, pageInner, { minSize: 1 });
+      wrapper.style.position = 'absolute';
+      wrapper.style.boxSizing = 'border-box';
+      wrapper.style.background = 'transparent';
+      wrapper.style.pointerEvents = 'auto';
+
+      if (
+        Math.abs(previousRect.left - groupRect.left) > 0.01 ||
+        Math.abs(previousRect.top - groupRect.top) > 0.01 ||
+        Math.abs(previousRect.width - groupRect.width) > 0.01 ||
+        Math.abs(previousRect.height - groupRect.height) > 0.01
+      ) {
+        changed = true;
+      }
+
+      directChildren.forEach((child) => {
+        if (child === wrapper || child.contains(wrapper)) {
+          return;
+        }
+
+        const childRect = childRectByElement.get(child) || readFrameElementRect(child, pageInner);
+        if (child.parentElement !== wrapper) {
+          wrapper?.appendChild(child);
+          changed = true;
+        }
+        writePositionedElementPageRect(child, childRect, pageInner);
+      });
+    });
+
+  return changed;
+};
+
+const materializePositionGroupWrappers = (root: ParentNode | null | undefined): boolean => {
+  if (!root || typeof document === 'undefined') {
+    return false;
+  }
+
+  const pageInners =
+    root instanceof HTMLElement && root.matches('.page-inner')
+      ? [root]
+      : Array.from(root.querySelectorAll<HTMLElement>('.page-inner'));
+
+  return pageInners.reduce((changed, pageInner) => materializePositionGroupWrappersInPage(pageInner) || changed, false);
+};
+
+const removePositionGroupWrappersByIds = (root: ParentNode | null | undefined, groupIds: string[]) => {
+  if (!root) {
+    return 0;
+  }
+
+  const targetGroupIdSet = new Set(groupIds.map((groupId) => groupId.trim()).filter(Boolean));
+  let removedCount = 0;
+
+  collectPositionGroupWrapperElements(root).forEach((wrapper) => {
+    if (!targetGroupIdSet.has(readPositionGroupWrapperId(wrapper))) {
+      return;
+    }
+
+    const pageInner = wrapper.closest<HTMLElement>('.page-inner');
+    if (!pageInner) {
+      wrapper.remove();
+      removedCount += 1;
+      return;
+    }
+
+    unwrapPositionGroupWrapperElement(wrapper, pageInner);
+    removedCount += 1;
+  });
+
+  return removedCount;
+};
+
 const readNextPositionGroupLabel = (groups: PositionImpactGroup[]) => {
   const maxLabelIndex = groups.reduce((maxIndex, group) => {
-    const matched = group.label.trim().match(/^box\s+(\d+)$/i);
+    const matched =
+      group.label.trim().match(/^box\s+(\d+)$/i) ||
+      group.label.trim().match(/^이동\s+묶음\s+박스\s+(\d+)$/i) ||
+      group.label.trim().match(/^이동\s+묶음\s+상자\s+(\d+)$/i) ||
+      group.label.trim().match(/^그룹\s+(\d+)$/i);
 
     if (!matched) {
       return maxIndex;
@@ -2594,7 +3314,7 @@ const readNextPositionGroupLabel = (groups: PositionImpactGroup[]) => {
     return Math.max(maxIndex, Number.parseInt(matched[1] || '0', 10) || 0);
   }, 0);
 
-  return `box ${maxLabelIndex + 1}`;
+  return `${POSITION_GROUP_LABEL_PREFIX} ${maxLabelIndex + 1}`;
 };
 
 const collectPositionImpactGroupsBySourceIds = (
@@ -2693,7 +3413,7 @@ const collectPositionImpactGroupIdsBySourceIds = (
 const readPositionImpactGroupDisplayLabels = (groups: PositionImpactGroup[]) =>
   groups.map((group) => {
     if (group.label.trim()) {
-      return group.label;
+      return normalizePositionGroupDisplayLabel(group.label, group.id);
     }
 
     const singleFrameGroupId = readSingleFrameGroupId(group.frameGroupIds);
@@ -2730,6 +3450,279 @@ const applyFramePositionMode = (
     frameNode,
     defaultConfig || resolveNearestPageCornerRelativeAnchorConfig(frameNode, resolvedPageInner)
   );
+};
+
+const normalizePositionGroupRelativeAnchors = (
+  scope: ParentNode | null | undefined,
+  targetPositionGroupId?: string
+) => {
+  if (!scope) {
+    return {
+      changedCount: 0,
+      convertedCount: 0,
+      clearedInternalCount: 0,
+    };
+  }
+
+  const allGroups = collectPositionBoxGroups(scope, { includeSingletons: true });
+  const explicitGroups = allGroups.filter((group) => !group.inferred && group.frameGroupIds.length > 1);
+  const normalizedTargetPositionGroupId = String(targetPositionGroupId || '').trim();
+  const groupsToNormalize = normalizedTargetPositionGroupId
+    ? explicitGroups.filter((group) => group.id === normalizedTargetPositionGroupId)
+    : explicitGroups;
+
+  if (groupsToNormalize.length <= 0) {
+    return {
+      changedCount: 0,
+      convertedCount: 0,
+      clearedInternalCount: 0,
+    };
+  }
+
+  const frameNodeById = new Map<string, HTMLElement>();
+  collectFrameSelectionAnchors(scope).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    if (frameGroupId) {
+      frameNodeById.set(frameGroupId, node);
+    }
+  });
+
+  const groupById = new Map(allGroups.map((group) => [group.id, group] as const));
+  const groupByFrameGroupId = new Map<string, PositionImpactGroup>();
+  allGroups.forEach((group) => {
+    group.frameGroupIds.forEach((frameGroupId) => {
+      if (!groupByFrameGroupId.has(frameGroupId) || !group.inferred) {
+        groupByFrameGroupId.set(frameGroupId, group);
+      }
+    });
+  });
+
+  const resolveRectFromFrameGroupIds = (frameGroupIds: string[]) => {
+    const rects = frameGroupIds
+      .map((frameGroupId) => frameNodeById.get(frameGroupId.trim()) || null)
+      .map((node) => (node ? readFrameMoveRect(node) : null))
+      .filter((rect): rect is FrameNodeRect => Boolean(rect));
+
+    if (rects.length <= 0) {
+      return null;
+    }
+
+    const minLeft = Math.min(...rects.map((rect) => rect.left));
+    const minTop = Math.min(...rects.map((rect) => rect.top));
+    const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
+    const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
+    return {
+      left: minLeft,
+      top: minTop,
+      width: Math.max(1, maxRight - minLeft),
+      height: Math.max(1, maxBottom - minTop),
+    } as FrameNodeRect;
+  };
+
+  const resolveExternalAnchor = (
+    ownerGroup: PositionImpactGroup,
+    config: TemplateFrameRelativeAnchorConfig | null,
+    pageInner: HTMLElement
+  ):
+    | {
+        config: TemplateFrameRelativeAnchorConfig;
+        anchorKind: TemplateFrameRelativeAnchorKind;
+        anchorId: TemplateFrameRelativeAnchorId;
+        anchorRect: FrameNodeRect;
+        priority: number;
+      }
+    | null => {
+    if (!config) {
+      return null;
+    }
+
+    if (config.anchorKind === 'group') {
+      const anchorGroupId = String(config.anchorId || '').trim();
+      if (!anchorGroupId || anchorGroupId === ownerGroup.id) {
+        return null;
+      }
+
+      const anchorGroup = groupById.get(anchorGroupId) || null;
+      const anchorRect =
+        anchorGroup && anchorGroup.frameGroupIds.length > 0
+          ? resolveRectFromFrameGroupIds(anchorGroup.frameGroupIds)
+          : resolveRelativeAnchorRect(pageInner, config);
+
+      if (!anchorRect) {
+        return null;
+      }
+
+      return {
+        config,
+        anchorKind: 'group',
+        anchorId: anchorGroupId,
+        anchorRect,
+        priority: 0,
+      };
+    }
+
+    if (config.anchorKind === 'frame') {
+      const anchorFrameGroupId = String(config.anchorId || '').trim();
+      if (!anchorFrameGroupId || ownerGroup.frameGroupIds.includes(anchorFrameGroupId)) {
+        return null;
+      }
+
+      const anchorPositionGroup = groupByFrameGroupId.get(anchorFrameGroupId) || null;
+      if (anchorPositionGroup && anchorPositionGroup.frameGroupIds.length > 1 && anchorPositionGroup.id !== ownerGroup.id) {
+        const anchorRect = resolveRectFromFrameGroupIds(anchorPositionGroup.frameGroupIds);
+        if (!anchorRect) {
+          return null;
+        }
+        return {
+          config,
+          anchorKind: 'group',
+          anchorId: anchorPositionGroup.id,
+          anchorRect,
+          priority: 1,
+        };
+      }
+
+      const anchorNode = frameNodeById.get(anchorFrameGroupId) || null;
+      if (!anchorNode) {
+        return null;
+      }
+
+      return {
+        config,
+        anchorKind: 'frame',
+        anchorId: anchorFrameGroupId,
+        anchorRect: readFrameMoveRect(anchorNode),
+        priority: 2,
+      };
+    }
+
+    const anchorRect = resolveRelativeAnchorRect(pageInner, config);
+    if (!anchorRect) {
+      return null;
+    }
+
+    return {
+      config,
+      anchorKind: 'page-corner',
+      anchorId: config.anchorId,
+      anchorRect,
+      priority: 3,
+    };
+  };
+
+  let changedCount = 0;
+  let convertedCount = 0;
+  let clearedInternalCount = 0;
+
+  groupsToNormalize.forEach((group) => {
+    const memberEntries = group.frameGroupIds
+      .map((frameGroupId) => {
+        const node = frameNodeById.get(frameGroupId) || null;
+        const pageInner = node?.closest<HTMLElement>('.page-inner') || null;
+        const config = node ? readFrameRelativeAnchorConfig(node, pageInner) : null;
+        return node && pageInner
+          ? {
+              frameGroupId,
+              node,
+              pageInner,
+              rect: readFrameMoveRect(node),
+              config,
+            }
+          : null;
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          frameGroupId: string;
+          node: HTMLElement;
+          pageInner: HTMLElement;
+          rect: FrameNodeRect;
+          config: TemplateFrameRelativeAnchorConfig | null;
+        } => Boolean(entry)
+      );
+
+    if (memberEntries.length <= 0) {
+      return;
+    }
+
+    const externalAnchor = memberEntries
+      .map((entry, index) => {
+        const anchor = resolveExternalAnchor(group, entry.config, entry.pageInner);
+        return anchor ? { ...anchor, index } : null;
+      })
+      .filter(
+        (
+          anchor
+        ): anchor is {
+          config: TemplateFrameRelativeAnchorConfig;
+          anchorKind: TemplateFrameRelativeAnchorKind;
+          anchorId: TemplateFrameRelativeAnchorId;
+          anchorRect: FrameNodeRect;
+          priority: number;
+          index: number;
+        } => Boolean(anchor)
+      )
+      .sort((left, right) => left.priority - right.priority || left.index - right.index)[0] || null;
+
+    memberEntries.forEach((entry) => {
+      const currentConfig = entry.config;
+      const currentAnchorIsInternal =
+        Boolean(currentConfig) &&
+        ((currentConfig?.anchorKind === 'frame' && group.frameGroupIds.includes(String(currentConfig.anchorId || '').trim())) ||
+          (currentConfig?.anchorKind === 'group' && String(currentConfig.anchorId || '').trim() === group.id));
+
+      if (!externalAnchor) {
+        if (currentAnchorIsInternal) {
+          applyFramePositionMode(entry.node, 'absolute', entry.pageInner);
+          changedCount += 1;
+          clearedInternalCount += 1;
+        }
+        return;
+      }
+
+      const preferredPins = resolvePreferredRelativeAnchorPins(entry.rect, externalAnchor.anchorRect);
+      const nextConfig = buildRelativeAnchorConfigFromRect({
+        frameRect: entry.rect,
+        anchorRect: externalAnchor.anchorRect,
+        anchorKind: externalAnchor.anchorKind,
+        anchorId: externalAnchor.anchorId,
+        preferredAnchorX:
+          currentConfig?.anchorKind === externalAnchor.anchorKind &&
+          String(currentConfig.anchorId || '').trim() === String(externalAnchor.anchorId || '').trim()
+            ? currentConfig.anchorX
+            : preferredPins.preferredAnchorX,
+        preferredAnchorY:
+          currentConfig?.anchorKind === externalAnchor.anchorKind &&
+          String(currentConfig.anchorId || '').trim() === String(externalAnchor.anchorId || '').trim()
+            ? currentConfig.anchorY
+            : externalAnchor.config.anchorY || preferredPins.preferredAnchorY,
+      });
+      const hasSameConfig =
+        currentConfig &&
+        currentConfig.anchorKind === nextConfig.anchorKind &&
+        String(currentConfig.anchorId || '').trim() === String(nextConfig.anchorId || '').trim() &&
+        currentConfig.anchorX === nextConfig.anchorX &&
+        currentConfig.anchorY === nextConfig.anchorY &&
+        Math.abs(currentConfig.offsetX - nextConfig.offsetX) <= 0.1 &&
+        Math.abs(currentConfig.offsetY - nextConfig.offsetY) <= 0.1;
+
+      if (!hasSameConfig) {
+        applyFramePositionMode(entry.node, 'relative', entry.pageInner);
+        writeFrameRelativeAnchorAttrs(entry.node, nextConfig);
+        changedCount += 1;
+        if (currentAnchorIsInternal || currentConfig?.anchorKind !== nextConfig.anchorKind || currentConfig?.anchorId !== nextConfig.anchorId) {
+          convertedCount += 1;
+        }
+      }
+    });
+  });
+
+  return {
+    changedCount,
+    convertedCount,
+    clearedInternalCount,
+  };
 };
 
 const readTableColWidths = (table: HTMLTableElement | null) => {
@@ -4209,7 +5202,10 @@ const shiftShellsBelowBoundary = (
     const shellRect = readFrameElementRect(shell, pageInner);
 
     if (shellRect.top >= boundaryY - FRAME_RESIZE_TOLERANCE_PX) {
-      shell.style.top = toFrameCssPx(shellRect.top + deltaY);
+      writeFrameMoveRect(shell, {
+        ...shellRect,
+        top: shellRect.top + deltaY,
+      });
     }
   });
 };
@@ -5207,10 +6203,7 @@ const pickHeightResizeTargetMember = (
 
 const writeFrameMoveRect = (node: HTMLElement, rect: FrameNodeRect) => {
   const shell = resolveFrameLayoutShell(node);
-  shell.style.left = toFrameCssPx(rect.left);
-  shell.style.top = toFrameCssPx(rect.top);
-  shell.style.width = toFrameCssPx(Math.max(MIN_FRAME_SIZE_PX, rect.width));
-  shell.style.height = toFrameCssPx(Math.max(MIN_FRAME_SIZE_PX, rect.height));
+  writePositionedElementPageRect(shell, rect, shell.closest<HTMLElement>('.page-inner'));
 };
 
 const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
@@ -5264,6 +6257,10 @@ const getNextFrameSelection = (previous: string[], frameGroupId: string, isMulti
 
 const getFrameGroupId = (node: HTMLElement | null) => {
   if (!node) {
+    return '';
+  }
+
+  if (isPositionGroupWrapperElement(node)) {
     return '';
   }
 
@@ -5377,6 +6374,7 @@ const syncFrameRelativeAnchorOffsetsToCurrentRect = (
 };
 
 const applyRelativeAnchoredFrameRects = (pageInner: HTMLElement, excludedFrameGroupIds: string[] = []) => {
+  materializePositionGroupWrappers(pageInner);
   const excludedFrameGroupIdSet = new Set(excludedFrameGroupIds);
   const relativeNodes = collectFrameSelectionAnchors(pageInner).filter((node) =>
     Boolean(ensureFrameRelativeAnchorConfig(node, pageInner))
@@ -5414,6 +6412,7 @@ const applyRelativeAnchoredFrameRects = (pageInner: HTMLElement, excludedFrameGr
 
       writeFrameMoveRect(node, nextRect);
     });
+    materializePositionGroupWrappers(pageInner);
   }
 };
 
@@ -5471,38 +6470,6 @@ const rebaseRelativeAnchorConfigForResizeDirection = (
   writeFrameRelativeAnchorAttrs(frameNode, nextConfig);
 };
 
-const appendRelativeAnchorGuideSegment = (
-  pageInner: HTMLElement,
-  rect: FrameNodeRect,
-  orientation: 'horizontal' | 'vertical'
-) => {
-  const guide = document.createElement('div');
-  guide.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
-  guide.setAttribute('data-frame-editor-ui', 'true');
-  guide.setAttribute('data-relative-guide-orientation', orientation);
-  guide.style.left = toFrameCssPx(rect.left);
-  guide.style.top = toFrameCssPx(rect.top);
-  guide.style.width = toFrameCssPx(Math.max(1, rect.width));
-  guide.style.height = toFrameCssPx(Math.max(1, rect.height));
-  pageInner.appendChild(guide);
-};
-
-const appendRelativeAnchorGuideBadge = (
-  host: HTMLElement,
-  point: { x: number; y: number },
-  text: string,
-  role: 'anchor' | 'source' | 'relation-gap'
-) => {
-  const badge = document.createElement('div');
-  badge.className = FRAME_RELATIVE_ANCHOR_BADGE_CLASS;
-  badge.setAttribute('data-frame-editor-ui', 'true');
-  badge.setAttribute('data-relative-anchor-role', role);
-  badge.textContent = text;
-  badge.style.left = toFrameCssPx(point.x);
-  badge.style.top = toFrameCssPx(point.y);
-  host.appendChild(badge);
-};
-
 const appendFrameKindMarker = (
   frameNode: HTMLElement,
   boxKind: TemplateFrameBoxKind | '',
@@ -5557,46 +6524,6 @@ const renderRelativeAnchorGuides = (
     return;
   }
 
-  const sourceRect = readFrameMoveRect(frameNode);
-  const sourcePoint = {
-    x: config.anchorX === 'left' ? sourceRect.left : sourceRect.left + sourceRect.width,
-    y: config.anchorY === 'top' ? sourceRect.top : sourceRect.top + sourceRect.height,
-  };
-  const anchorPoint = {
-    x: config.anchorX === 'left' ? anchorRect.left : anchorRect.left + anchorRect.width,
-    y: config.anchorY === 'top' ? anchorRect.top : anchorRect.top + anchorRect.height,
-  };
-
-  appendRelativeAnchorGuideSegment(
-    pageInner,
-    {
-      left: Math.min(sourcePoint.x, anchorPoint.x),
-      top: sourcePoint.y,
-      width: Math.abs(anchorPoint.x - sourcePoint.x),
-      height: 1,
-    },
-    'horizontal'
-  );
-  appendRelativeAnchorGuideSegment(
-    pageInner,
-    {
-      left: anchorPoint.x,
-      top: Math.min(sourcePoint.y, anchorPoint.y),
-      width: 1,
-      height: Math.abs(anchorPoint.y - sourcePoint.y),
-    },
-    'vertical'
-  );
-  appendRelativeAnchorGuideBadge(
-    pageInner,
-    {
-      x: sourceRect.left + sourceRect.width / 2,
-      y: sourceRect.top - 8,
-    },
-    `상대 위치: ${readRelativeAnchorTargetLabel(config) || '-'}`,
-    'source'
-  );
-
   if (config.anchorKind === 'frame') {
     const anchorNode = resolveFrameSelectionAnchor(
       pageInner.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${config.anchorId}"]`)
@@ -5607,18 +6534,8 @@ const renderRelativeAnchorGuides = (
     }
 
     anchorNode.setAttribute('data-template-relative-anchor-target', 'true');
-    const anchorBadge = document.createElement('div');
-    anchorBadge.className = FRAME_RELATIVE_ANCHOR_BADGE_CLASS;
-    anchorBadge.setAttribute('data-frame-editor-ui', 'true');
-    anchorBadge.setAttribute('data-relative-anchor-role', 'anchor');
-    anchorBadge.textContent = `기준: ${config.anchorId}`;
-    anchorBadge.style.left = '50%';
-    anchorBadge.style.top = '-4px';
-    anchorNode.appendChild(anchorBadge);
     return;
   }
-
-  appendRelativeAnchorGuideBadge(pageInner, anchorPoint, readRelativeAnchorTargetLabel(config) || config.anchorId, 'anchor');
 };
 
 const isInteractiveTarget = (target: HTMLElement | null) => {
@@ -5746,7 +6663,6 @@ const extractEditorHtml = (root: HTMLElement) => {
   const container = document.createElement('div');
   container.innerHTML = root.innerHTML;
   syncFormControlMarkup(container);
-  denormalizePreviewFrameBands(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
   clearFrameValidationErrorUi(container);
@@ -5916,8 +6832,8 @@ const applyFrameRelationSelectionUi = (
 const applyPositionImpactGroupSelectionUi = (
   root: HTMLElement,
   selectionPanelTab: SelectionPanelTab,
-  _selectedFrameGroupIds: string[] = [],
-  _positionRelationAnchorFrameGroupId: string = ''
+  selectedFrameGroupIds: string[] = [],
+  positionRelationAnchorFrameGroupId: string = ''
 ) => {
   const frameNodes = collectFrameSelectionAnchors(root);
 
@@ -5937,6 +6853,19 @@ const applyPositionImpactGroupSelectionUi = (
     return;
   }
 
+  const normalizedSelectedFrameGroupIds = Array.from(
+    new Set(
+      selectedFrameGroupIds
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
+  const normalizedAnchorFrameGroupId = positionRelationAnchorFrameGroupId.trim();
+
+  if (normalizedSelectedFrameGroupIds.length <= 0 && !normalizedAnchorFrameGroupId) {
+    return;
+  }
+
   const groupIdByFrameGroupId = new Map<string, string>();
   boxGroups.forEach((group) => {
     group.frameGroupIds.forEach((frameGroupId) => {
@@ -5944,11 +6873,29 @@ const applyPositionImpactGroupSelectionUi = (
     });
   });
 
+  const activeGroupIds = new Set<string>();
+  normalizedSelectedFrameGroupIds.forEach((frameGroupId) => {
+    const groupId = groupIdByFrameGroupId.get(frameGroupId);
+    if (groupId) {
+      activeGroupIds.add(groupId);
+    }
+  });
+  if (normalizedAnchorFrameGroupId) {
+    const anchorGroupId = groupIdByFrameGroupId.get(normalizedAnchorFrameGroupId);
+    if (anchorGroupId) {
+      activeGroupIds.add(anchorGroupId);
+    }
+  }
+
+  if (activeGroupIds.size <= 0) {
+    return;
+  }
+
   frameNodes.forEach((node) => {
     const frameGroupId = getFrameGroupId(node);
     const groupId = frameGroupId ? groupIdByFrameGroupId.get(frameGroupId) : '';
 
-    if (!groupId) {
+    if (!groupId || !activeGroupIds.has(groupId)) {
       return;
     }
 
@@ -6007,31 +6954,8 @@ const applyDefinedPositionRelativeRelationUi = (
     };
   };
 
-  const proxySelections: PositionGroupProxySelection[] = [];
-  const proxySelectionOrderByKey = new Map<string, number>();
-  const ensureProxySelection = (relationKey: string, frameGroupIds: string[]) => {
-    if (frameGroupIds.length <= 1) {
-      return;
-    }
-
-    if (proxySelectionOrderByKey.has(relationKey)) {
-      return;
-    }
-
-    const selectionOrder = proxySelectionOrderByKey.size + 1;
-    proxySelectionOrderByKey.set(relationKey, selectionOrder);
-    proxySelections.push({
-      groupId: relationKey,
-      label: relationKey,
-      frameGroupIds: frameGroupIds.slice(),
-      selectionOrder,
-    });
-  };
-
   relations.forEach((relation) => {
-    if (relation.targetKind === 'group') {
-      ensureProxySelection(`target:${relation.targetGroupId || relation.targetFrameGroupIds.join(',')}`, relation.targetFrameGroupIds);
-    } else {
+    if (relation.targetKind !== 'group') {
       relation.targetFrameGroupIds.forEach((frameGroupId) => {
         const targetNode = frameNodeById.get(frameGroupId) || null;
         if (targetNode) {
@@ -6040,9 +6964,7 @@ const applyDefinedPositionRelativeRelationUi = (
       });
     }
 
-    if (relation.anchorKind === 'group') {
-      ensureProxySelection(`anchor:${relation.anchorGroupId || relation.anchorFrameGroupIds.join(',')}`, relation.anchorFrameGroupIds);
-    } else if (relation.anchorKind === 'frame') {
+    if (relation.anchorKind === 'frame') {
       const anchorNode = frameNodeById.get(relation.anchorFrameGroupId) || null;
       if (anchorNode) {
         anchorNode.setAttribute(TEMPLATE_FRAME_POSITION_RELATION_ANCHOR_ATTR, 'true');
@@ -6068,123 +6990,17 @@ const applyDefinedPositionRelativeRelationUi = (
       return;
     }
 
-    const centerX = targetRect.left + targetRect.width / 2;
-    const targetTop = targetRect.top;
-    const anchorBottom = anchorRect.top + anchorRect.height;
-    const centerY = Math.min(targetTop, anchorBottom) + Math.abs(targetTop - anchorBottom) / 2;
-    const badge = document.createElement('div');
-    badge.className = FRAME_RELATIVE_ANCHOR_BADGE_CLASS;
-    badge.setAttribute('data-frame-editor-ui', 'true');
-    badge.setAttribute('data-v106-position-relation-gap', 'true');
-    badge.setAttribute('data-relative-anchor-role', 'relation-gap');
-    badge.textContent = `간격 ${relation.gapYPx}px`;
-    badge.style.left = toFrameCssPx(centerX);
-    badge.style.top = toFrameCssPx(centerY);
-    hostPageInner.appendChild(badge);
   });
 
-  if (proxySelections.length > 0) {
-    appendPositionGroupProxyOverlay(root, proxySelections);
-  }
 };
 
 const applyPositionSpacingGuideUi = (
   root: HTMLElement,
-  selectionPanelTab: SelectionPanelTab,
-  relations: PositionSpacingGuideRelation[] = []
+  _selectionPanelTab: SelectionPanelTab,
+  _relations: PositionSpacingGuideRelation[] = []
 ) => {
   root.querySelectorAll<HTMLElement>('[data-v106-position-spacing-guide="true"]').forEach((element) => {
     element.remove();
-  });
-
-  if (selectionPanelTab !== 'position' || relations.length <= 0) {
-    return;
-  }
-
-  relations.forEach((relation) => {
-    const anchorNode =
-      relation.anchorFrameGroupIds
-        .map((frameGroupId) =>
-          resolveFrameSelectionAnchor(
-            root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
-          )
-        )
-        .find((node): node is HTMLElement => Boolean(node)) || null;
-    const targetNode =
-      relation.targetFrameGroupIds
-        .map((frameGroupId) =>
-          resolveFrameSelectionAnchor(
-            root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
-          )
-        )
-        .find((node): node is HTMLElement => Boolean(node)) || null;
-    const pageInner =
-      anchorNode?.closest<HTMLElement>('.page-inner') ||
-      targetNode?.closest<HTMLElement>('.page-inner') ||
-      null;
-
-    if (!pageInner) {
-      return;
-    }
-
-    const anchorEdgeY =
-      relation.anchorY === 'bottom'
-        ? relation.anchorReferenceRect.top + relation.anchorReferenceRect.height
-        : relation.anchorReferenceRect.top;
-    const targetEdgeY =
-      relation.anchorY === 'bottom'
-        ? relation.targetReferenceRect.top
-        : relation.targetReferenceRect.top + relation.targetReferenceRect.height;
-    const anchorCenterX = relation.anchorReferenceRect.left + relation.anchorReferenceRect.width / 2;
-    const targetCenterX = relation.targetReferenceRect.left + relation.targetReferenceRect.width / 2;
-    const lineX = (anchorCenterX + targetCenterX) / 2;
-    const topY = Math.min(anchorEdgeY, targetEdgeY);
-    const lineHeight = Math.max(1, Math.abs(targetEdgeY - anchorEdgeY));
-    const capWidth = 12;
-    const capHalf = capWidth / 2;
-
-    const verticalLine = document.createElement('div');
-    verticalLine.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
-    verticalLine.setAttribute('data-frame-editor-ui', 'true');
-    verticalLine.setAttribute('data-v106-position-spacing-guide', 'true');
-    verticalLine.setAttribute('data-relative-guide-orientation', 'vertical');
-    verticalLine.style.left = toFrameCssPx(lineX);
-    verticalLine.style.top = toFrameCssPx(topY);
-    verticalLine.style.width = toFrameCssPx(1);
-    verticalLine.style.height = toFrameCssPx(lineHeight);
-    pageInner.appendChild(verticalLine);
-
-    const startCap = document.createElement('div');
-    startCap.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
-    startCap.setAttribute('data-frame-editor-ui', 'true');
-    startCap.setAttribute('data-v106-position-spacing-guide', 'true');
-    startCap.setAttribute('data-relative-guide-orientation', 'horizontal');
-    startCap.style.left = toFrameCssPx(lineX - capHalf);
-    startCap.style.top = toFrameCssPx(anchorEdgeY);
-    startCap.style.width = toFrameCssPx(capWidth);
-    startCap.style.height = toFrameCssPx(1);
-    pageInner.appendChild(startCap);
-
-    const endCap = document.createElement('div');
-    endCap.className = FRAME_RELATIVE_ANCHOR_GUIDE_CLASS;
-    endCap.setAttribute('data-frame-editor-ui', 'true');
-    endCap.setAttribute('data-v106-position-spacing-guide', 'true');
-    endCap.setAttribute('data-relative-guide-orientation', 'horizontal');
-    endCap.style.left = toFrameCssPx(lineX - capHalf);
-    endCap.style.top = toFrameCssPx(targetEdgeY);
-    endCap.style.width = toFrameCssPx(capWidth);
-    endCap.style.height = toFrameCssPx(1);
-    pageInner.appendChild(endCap);
-
-    const labelBadge = document.createElement('div');
-    labelBadge.className = FRAME_RELATIVE_ANCHOR_BADGE_CLASS;
-    labelBadge.setAttribute('data-frame-editor-ui', 'true');
-    labelBadge.setAttribute('data-v106-position-spacing-guide', 'true');
-    labelBadge.setAttribute('data-relative-anchor-role', 'spacing-gap');
-    labelBadge.textContent = `${relation.anchorLabel} ↔ ${relation.targetLabel} · ${Math.round(relation.gapYPx)}px`;
-    labelBadge.style.left = toFrameCssPx(lineX + 10);
-    labelBadge.style.top = toFrameCssPx(topY + lineHeight / 2);
-    pageInner.appendChild(labelBadge);
   });
 };
 
@@ -7209,8 +8025,8 @@ const appendPositionGroupProxyOverlay = (
       badge.style.fontSize = '10px';
       badge.style.fontWeight = '700';
       badge.textContent = Number.isFinite(positionGroupProxySelection.selectionOrder)
-        ? `${positionGroupProxySelection.colorName || '선택'} 박스`
-        : '선택 박스';
+        ? `${positionGroupProxySelection.colorName || '선택'} 상자`
+        : '선택 상자';
       overlay.appendChild(badge);
 
       pageInner.appendChild(overlay);
@@ -7223,7 +8039,10 @@ const appendPositionGroupCatalogOverlay = (root: HTMLElement) => {
     return;
   }
 
-  const groups = collectPositionBoxGroups(root, { includeSingletons: false }).filter(
+  const groups = collectPositionBoxGroups(root, {
+    includeSingletons: false,
+    includeExplicitMembersInInferred: true,
+  }).filter(
     (group) => group.frameGroupIds.length > 1
   );
 
@@ -7305,7 +8124,7 @@ const appendPositionGroupCatalogOverlay = (root: HTMLElement) => {
       badge.style.color = '#fff';
       badge.style.fontSize = '11px';
       badge.style.fontWeight = '700';
-      badge.textContent = group.label || group.id;
+      badge.textContent = normalizePositionGroupDisplayLabel(group.label, group.id);
       overlay.appendChild(badge);
 
       pageInner.appendChild(overlay);
@@ -7411,7 +8230,6 @@ const applyFrameSelectionUi = (
   });
 
   appendConnectedFrameClusterOutlines(root);
-  appendPositionGroupCatalogOverlay(root);
   appendPositionGroupProxyOverlay(root, positionGroupProxySelections);
   renderRelativeAnchorGuides(root, selectedIds, relativeGuideFrameGroupId);
 };
@@ -7519,6 +8337,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [positionOrderLockCandidateSelectionStage, setPositionOrderLockCandidateSelectionStage] = React.useState<
     'group' | 'frame' | ''
   >('');
+  const [moveGroupAssignmentTargetGroupId, setMoveGroupAssignmentTargetGroupId] = React.useState('');
   const [expandedPositionBoxGroupIds, setExpandedPositionBoxGroupIds] = React.useState<Record<string, boolean>>({});
   const [positionSpacingDraftByPairKey, setPositionSpacingDraftByPairKey] = React.useState<Record<string, { gapY: string }>>(
     {}
@@ -7546,6 +8365,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
+  const previousSelectionPanelTabRef = React.useRef<SelectionPanelTab>('summary');
   const draftPreviewHtmlRef = React.useRef('');
   const selectedFrameGroupIdsRef = React.useRef<string[]>([]);
   const edgeSelectionStateRef = React.useRef<TemplateEdgeSelectionStateDto>(TemplateEdgeSelectionService.createEmptyState());
@@ -7570,6 +8390,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const canvasHistoryEntriesRef = React.useRef<CanvasHistoryEntry[]>([]);
   const canvasHistoryIndexRef = React.useRef(-1);
   const canvasHistoryNavigationInProgressRef = React.useRef(false);
+  const autoPersistDraftTimerRef = React.useRef<number | null>(null);
+  const autoPersistDraftInFlightRef = React.useRef(false);
+  const queuedAutoPersistDraftHtmlRef = React.useRef('');
+  const lastPersistedDraftHtmlRef = React.useRef('');
 
   const templateOptions = React.useMemo<TemplateOption[]>(
     () =>
@@ -7629,7 +8453,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return `${FRAME_BOX_KIND_LABELS[frameMetadataDraft.boxKind]}에 맞는 동작 방식을 선택하세요.`;
       }
 
-      return '아직 특정 동작을 고르지 않았습니다. 박스가 문서에서 어떻게 동작하고 무엇을 출력할지 정합니다.';
+      return '아직 특정 동작을 고르지 않았습니다. 상자가 문서에서 어떻게 동작하고 무엇을 출력할지 정합니다.';
     }
 
     return FRAME_RUNTIME_MODE_DESCRIPTIONS[frameMetadataDraft.runtimeMode];
@@ -7670,18 +8494,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const count = metadataRelationSelectionMode.sourceFrameGroupIds.length;
 
       return count > 1
-        ? `현재 value 박스 ${count}개가 선택된 상태입니다. 이제 이 값들을 묶는 key 박스를 캔버스에서 1개 선택해주세요.`
-        : '현재 value 박스 1개가 선택된 상태입니다. 이제 이 값의 key 박스를 캔버스에서 1개 선택해주세요.';
+        ? `현재 value 상자 ${count}개가 선택된 상태입니다. 이제 이 값들을 묶는 key 상자를 캔버스에서 1개 선택해주세요.`
+        : '현재 value 상자 1개가 선택된 상태입니다. 이제 이 값의 key 상자를 캔버스에서 1개 선택해주세요.';
     }
 
-    return '먼저 value로 만들 박스를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 박스들의 key가 될 text 박스 1개를 선택합니다.';
+    return '먼저 value로 만들 상자를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 상자들의 key가 될 text 상자 1개를 선택합니다.';
   }, [metadataRelationSelectionMode]);
   const valueBoxSelectionHelpText = React.useMemo(() => {
     if (metadataRelationSelectionMode.kind === 'value') {
-      return '현재 key 박스가 선택된 상태입니다. 이제 이 key에 연결할 value 박스들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.';
+      return '현재 key 상자가 선택된 상태입니다. 이제 이 key에 연결할 value 상자들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.';
     }
 
-    return '먼저 기준이 될 key 박스 1개를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 key에 연결할 value 박스들을 선택합니다.';
+    return '먼저 기준이 될 key 상자 1개를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 key에 연결할 value 상자들을 선택합니다.';
   }, [metadataRelationSelectionMode]);
   const canStartValueBoxSelection =
     canEditSingleSelection &&
@@ -7714,7 +8538,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       )
     );
     const config = readFrameRelativeAnchorConfig(frameNode);
-    return readRelativeAnchorTargetLabel(config);
+    return readRelativeAnchorTargetLabel(config, previewRef.current);
   }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
   const primaryRelativeImpactGroups = React.useMemo(() => {
     if (!primarySelectedFrameGroupId || !previewRef.current) {
@@ -7801,6 +8625,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   React.useEffect(() => {
     if (selectionPanelTab !== 'metadata' && metadataRelationSelectionModeRef.current.kind !== 'idle') {
       setMetadataRelationSelectionMode({ kind: 'idle' });
+    }
+  }, [selectionPanelTab]);
+
+  React.useEffect(() => {
+    const previousSelectionPanelTab = previousSelectionPanelTabRef.current;
+    previousSelectionPanelTabRef.current = selectionPanelTab;
+
+    if (selectionPanelTab === 'position' && previousSelectionPanelTab !== 'position') {
+      setShowMetadataIcons(false);
     }
   }, [selectionPanelTab]);
 
@@ -7939,6 +8772,114 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     restoreCanvasHistoryAtIndex(currentIndex + 1, '다시 실행하기');
   }, [restoreCanvasHistoryAtIndex]);
+  const resolveActiveTemplateId = React.useCallback(
+    () => selectedTemplateId.trim() || templateDetail?.template.id || '',
+    [selectedTemplateId, templateDetail?.template.id]
+  );
+  const cancelScheduledAutoPersistDraft = React.useCallback(() => {
+    if (typeof window === 'undefined') {
+      autoPersistDraftTimerRef.current = null;
+      return;
+    }
+
+    if (autoPersistDraftTimerRef.current !== null) {
+      window.clearTimeout(autoPersistDraftTimerRef.current);
+      autoPersistDraftTimerRef.current = null;
+    }
+  }, []);
+  const flushQueuedAutoPersistDraft = React.useCallback(async () => {
+    const templateId = resolveActiveTemplateId();
+    const queuedDraftHtml = queuedAutoPersistDraftHtmlRef.current.trim();
+
+    if (!templateId || !queuedDraftHtml) {
+      return;
+    }
+
+    if (queuedDraftHtml === lastPersistedDraftHtmlRef.current.trim()) {
+      queuedAutoPersistDraftHtmlRef.current = '';
+      return;
+    }
+
+    if (autoPersistDraftInFlightRef.current) {
+      return;
+    }
+
+    autoPersistDraftInFlightRef.current = true;
+
+    try {
+      const response = await fetch(`/api/templates/${templateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          draftHtml: queuedDraftHtml,
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || '자동 저장에 실패했습니다.');
+      }
+
+      const updatedTemplate = result.data?.template as TemplateRecordDto | undefined;
+      if (updatedTemplate) {
+        setTemplates((previous) =>
+          [updatedTemplate, ...previous.filter((item) => item.id !== updatedTemplate.id)].slice(0, 64)
+        );
+      }
+      setTemplateDetail((previous) =>
+        previous
+          ? {
+              ...previous,
+              template: {
+                ...previous.template,
+                draftHtml: queuedDraftHtml,
+              },
+            }
+          : previous
+      );
+      lastPersistedDraftHtmlRef.current = queuedDraftHtml;
+      queuedAutoPersistDraftHtmlRef.current = '';
+    } catch (error) {
+      const nextMessage =
+        error instanceof Error ? error.message : '위치 자동 저장에 실패했습니다.';
+      setMessage(nextMessage);
+    } finally {
+      autoPersistDraftInFlightRef.current = false;
+    }
+  }, [resolveActiveTemplateId]);
+  const scheduleAutoPersistDraft = React.useCallback(
+    (nextDraftHtml: string) => {
+      const normalizedDraftHtml = nextDraftHtml.trim();
+      const templateId = resolveActiveTemplateId();
+
+      if (!templateId || !normalizedDraftHtml) {
+        return;
+      }
+
+      if (normalizedDraftHtml === lastPersistedDraftHtmlRef.current.trim()) {
+        queuedAutoPersistDraftHtmlRef.current = '';
+        return;
+      }
+
+      queuedAutoPersistDraftHtmlRef.current = normalizedDraftHtml;
+      cancelScheduledAutoPersistDraft();
+
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      autoPersistDraftTimerRef.current = window.setTimeout(() => {
+        autoPersistDraftTimerRef.current = null;
+        void flushQueuedAutoPersistDraft();
+      }, 350);
+    },
+    [cancelScheduledAutoPersistDraft, flushQueuedAutoPersistDraft, resolveActiveTemplateId]
+  );
+  React.useEffect(() => {
+    return () => {
+      cancelScheduledAutoPersistDraft();
+    };
+  }, [cancelScheduledAutoPersistDraft]);
 
   const syncDraftPreviewHtmlRef = React.useCallback(() => {
     const root = previewRef.current;
@@ -7947,6 +8888,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return '';
     }
 
+    materializePositionGroupWrappers(root);
     const nextDraftHtml = extractEditorHtml(root);
     const nextRenderHtml = extractPreviewRenderHtml(root);
     draftPreviewHtmlRef.current = nextDraftHtml;
@@ -7961,8 +8903,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         showAllGroupProxySelections: positionGroupProxySelectionShowAllGroupsRef.current,
       });
     }
+    scheduleAutoPersistDraft(nextDraftHtml);
     return nextDraftHtml;
-  }, [pushCanvasHistoryEntry]);
+  }, [pushCanvasHistoryEntry, scheduleAutoPersistDraft]);
 
   const requestPreviewTextFit = React.useCallback(() => {
     const root = previewRef.current;
@@ -8039,20 +8982,47 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const availableFrameGroupIds = React.useMemo(() => {
-    const root = previewRef.current;
+    let root: ParentNode | null = previewRef.current;
 
-    if (!root) {
-      return [];
+    if (!root && typeof document !== 'undefined' && renderedPreviewHtml) {
+      const container = document.createElement('div');
+      container.innerHTML = renderedPreviewHtml;
+      root = container;
     }
 
-    return getFrameNodes(root)
+    if (!root) {
+      return [] as string[];
+    }
+
+    return collectFrameSelectionAnchors(root)
       .map((node) => getFrameGroupId(node))
       .filter((frameGroupId) => Boolean(frameGroupId))
       .sort((left, right) => left.localeCompare(right, 'ko'));
-  }, [getFrameNodes, previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
+  }, [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
   const positionBoxGroups = React.useMemo(
-    () => (previewRef.current ? collectPositionBoxGroups(previewRef.current, { includeSingletons: false }) : []),
+    () => {
+      const collectOptions = {
+        includeSingletons: false,
+        includeExplicitMembersInInferred: true,
+      };
+
+      if (previewRef.current) {
+        return collectPositionBoxGroups(previewRef.current, collectOptions);
+      }
+
+      if (typeof document === 'undefined' || !renderedPreviewHtml) {
+        return [] as PositionImpactGroup[];
+      }
+
+      const container = document.createElement('div');
+      container.innerHTML = renderedPreviewHtml;
+      return collectPositionBoxGroups(container, collectOptions);
+    },
     [previewDomVersion, renderedPreviewHtml]
+  );
+  const explicitPositionBoxGroups = React.useMemo(
+    () => positionBoxGroups.filter((group) => group.frameGroupIds.length > 0),
+    [positionBoxGroups]
   );
   const positionBoxGroupByFrameGroupId = React.useMemo(() => {
     const nextMap = new Map<string, PositionImpactGroup>();
@@ -8065,6 +9035,120 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return nextMap;
   }, [positionBoxGroups]);
+  React.useEffect(() => {
+    const normalizedCurrentTargetGroupId = moveGroupAssignmentTargetGroupId.trim();
+    if (explicitPositionBoxGroups.length <= 0) {
+      if (normalizedCurrentTargetGroupId) {
+        setMoveGroupAssignmentTargetGroupId('');
+      }
+      return;
+    }
+
+    const hasCurrentTarget =
+      normalizedCurrentTargetGroupId &&
+      explicitPositionBoxGroups.some((group) => group.id === normalizedCurrentTargetGroupId);
+
+    if (hasCurrentTarget) {
+      return;
+    }
+
+    setMoveGroupAssignmentTargetGroupId(explicitPositionBoxGroups[0]?.id || '');
+  }, [explicitPositionBoxGroups, moveGroupAssignmentTargetGroupId]);
+  const createTabPeerCandidatePreview = React.useMemo(() => {
+    const root = previewRef.current;
+
+    if (!root) {
+      return null;
+    }
+
+    const selectedSourceFrameGroupIds = Array.from(
+      new Set(
+        selectedFrameGroupIds
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter((frameGroupId) => Boolean(frameGroupId))
+      )
+    );
+
+    if (selectedSourceFrameGroupIds.length <= 0) {
+      return null;
+    }
+
+    const pages = Array.from(root.querySelectorAll<HTMLElement>('section.page'));
+    const positionGroupIdByFrameGroupId = new Map<string, string>();
+    collectPositionBoxGroups(root, { includeSingletons: true }).forEach((group) => {
+      group.frameGroupIds.forEach((frameGroupId) => {
+        const normalizedFrameGroupId = frameGroupId.trim();
+        if (normalizedFrameGroupId) {
+          positionGroupIdByFrameGroupId.set(normalizedFrameGroupId, group.id);
+        }
+      });
+    });
+    const frames: TemplateEdgeFrameDto[] = getFrameNodes(root).map((node) => {
+      const pageElement = node.closest<HTMLElement>('section.page');
+      const pageIndex = Math.max(0, pages.indexOf(pageElement || pages[0] || node));
+      const frameGroupId = getFrameGroupId(node);
+      const positionGroupId = positionGroupIdByFrameGroupId.get(frameGroupId) || '';
+
+      return {
+        frameGroupId,
+        pageId: `page-${pageIndex + 1}`,
+        rect: readFrameNodeRect(node),
+        positionGroupId: positionGroupId || null,
+      };
+    });
+    const snapshot = TemplateEdgeTopologyService.createSnapshot({
+      frames,
+      tolerancePx: FRAME_RESIZE_TOLERANCE_PX,
+    });
+    const sourceIdSet = new Set(selectedSourceFrameGroupIds);
+    const sourceEdges = snapshot.edges.filter((edge) => sourceIdSet.has(edge.frameGroupId));
+    const sourceEdgeIds = sourceEdges.map((edge) => edge.edgeId);
+    const sourcePositionGroupIds = Array.from(
+      new Set(
+        sourceEdges
+          .map((edge) => (edge.positionGroupId || '').trim())
+          .filter((positionGroupId) => Boolean(positionGroupId))
+      )
+    );
+    const peerEdgeIds = TemplateEdgeResizeIntentService.collectPeerCandidateEdgeIds(
+      snapshot,
+      sourceEdgeIds,
+      sourceEdgeIds
+    );
+    const edgeById = new Map(snapshot.edges.map((edge) => [edge.edgeId, edge]));
+    const peerFrameGroupIds = Array.from(
+      new Set(
+        peerEdgeIds
+          .map((edgeId) => edgeById.get(edgeId)?.frameGroupId || '')
+          .filter((frameGroupId) => Boolean(frameGroupId) && !sourceIdSet.has(frameGroupId))
+      )
+    ).sort((left, right) => left.localeCompare(right, 'ko'));
+
+    const summarizeFrameGroupIds = (frameGroupIds: string[]) =>
+      frameGroupIds.map((frameGroupId) => {
+        const group = positionBoxGroupByFrameGroupId.get(frameGroupId) || null;
+        if (group && group.frameGroupIds.length > 1) {
+          return `${group.label}(${frameGroupId})`;
+        }
+        return frameGroupId;
+      });
+
+    return {
+      sourceFrameGroupIds: selectedSourceFrameGroupIds,
+      sourcePositionGroupIds,
+      sourceEdgeCount: sourceEdgeIds.length,
+      peerEdgeIds,
+      peerFrameGroupIds,
+      sourceSummaryLabels: summarizeFrameGroupIds(selectedSourceFrameGroupIds),
+      peerSummaryLabels: summarizeFrameGroupIds(peerFrameGroupIds),
+    };
+  }, [
+    getFrameNodes,
+    positionBoxGroupByFrameGroupId,
+    previewDomVersion,
+    renderedPreviewHtml,
+    selectedFrameGroupIds,
+  ]);
   React.useEffect(() => {
     const activeGroupIdSet = new Set(positionBoxGroups.map((group) => group.id));
 
@@ -8117,30 +9201,72 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         };
       }
 
+      const allFrameNodes = collectFrameSelectionAnchors(pageInner);
       const frameNodeById = new Map<string, HTMLElement>();
-      collectFrameSelectionAnchors(pageInner).forEach((node) => {
+      allFrameNodes.forEach((node) => {
         const candidateFrameGroupId = getFrameGroupId(node);
         if (candidateFrameGroupId) {
           frameNodeById.set(candidateFrameGroupId, node);
         }
       });
 
-      const selectableGroups = collectPositionBoxGroups(pageInner, { includeSingletons: false })
-        .filter((group) => group.frameGroupIds.length > 1)
-        .filter((group) => group.frameGroupIds.includes(normalizedFrameGroupId))
+      const selectableGroups = collectPositionBoxGroups(pageInner, {
+        includeSingletons: false,
+        includeExplicitMembersInInferred: true,
+      })
+        .filter((group) => group.frameGroupIds.length > 1 || !group.inferred)
         .map((group) => {
-          const rectEntries = group.frameGroupIds
-            .map((candidateFrameGroupId) => {
-              const candidateNode = frameNodeById.get(candidateFrameGroupId) || null;
-              if (!candidateNode) {
-                return null;
-              }
-              const shell = resolveFrameLayoutShell(candidateNode);
-              return readFrameElementRect(shell, pageInner);
-            })
-            .filter((rect): rect is FrameNodeRect => Boolean(rect));
+          const normalizedGroupFrameIds = Array.from(
+            new Set(group.frameGroupIds.map((candidateFrameGroupId) => candidateFrameGroupId.trim()).filter(Boolean))
+          );
+          let resolvedFrameGroupIds = normalizedGroupFrameIds.filter((candidateFrameGroupId) =>
+            frameNodeById.has(candidateFrameGroupId)
+          );
 
-          if (rectEntries.length <= 1) {
+          if (resolvedFrameGroupIds.length <= 1) {
+            const includesClickedFrameGroupId =
+              normalizedGroupFrameIds.includes(normalizedFrameGroupId) ||
+              resolvedFrameGroupIds.includes(normalizedFrameGroupId);
+            const fallbackSourceFrameGroupId =
+              (includesClickedFrameGroupId && frameNodeById.has(normalizedFrameGroupId)
+                ? normalizedFrameGroupId
+                : '') ||
+              (resolvedFrameGroupIds[0] || '');
+            const fallbackSourceNode = fallbackSourceFrameGroupId
+              ? frameNodeById.get(fallbackSourceFrameGroupId) || null
+              : null;
+            if (fallbackSourceNode) {
+              const expandedMemberIds = collectPositionImpactGroupCandidateFrameGroupIds(
+                fallbackSourceNode,
+                allFrameNodes,
+                pageInner
+              );
+              expandedMemberIds.add(fallbackSourceFrameGroupId);
+              resolvedFrameGroupIds = Array.from(
+                new Set(
+                  [...resolvedFrameGroupIds, ...Array.from(expandedMemberIds)]
+                    .map((candidateFrameGroupId) => candidateFrameGroupId.trim())
+                    .filter((candidateFrameGroupId) => Boolean(candidateFrameGroupId) && frameNodeById.has(candidateFrameGroupId))
+                )
+              );
+            }
+          }
+
+          const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
+          const rectEntries = wrapper
+            ? [readFrameElementRect(wrapper, pageInner)]
+            : resolvedFrameGroupIds
+                .map((candidateFrameGroupId) => {
+                  const candidateNode = frameNodeById.get(candidateFrameGroupId) || null;
+                  if (!candidateNode) {
+                    return null;
+                  }
+                  const shell = resolveFrameLayoutShell(candidateNode);
+                  return readFrameElementRect(shell, pageInner);
+                })
+                .filter((rect): rect is FrameNodeRect => Boolean(rect));
+
+          if (rectEntries.length <= 0) {
             return null;
           }
 
@@ -8157,6 +9283,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return {
             group,
             rect,
+            resolvedFrameGroupIds,
           };
         })
         .filter(
@@ -8165,8 +9292,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ): candidate is {
             group: PositionImpactGroup;
             rect: FrameNodeRect;
+            resolvedFrameGroupIds: string[];
           } => Boolean(candidate)
         );
+      const memberScopedGroups = selectableGroups
+        .filter((candidate) => candidate.resolvedFrameGroupIds.includes(normalizedFrameGroupId))
+        .map((candidate) => candidate);
 
       const tolerance = FRAME_RESIZE_TOLERANCE_PX;
       const pointCandidates =
@@ -8184,11 +9315,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             });
 
       const clickedMemberGroup = positionBoxGroupByFrameGroupId.get(normalizedFrameGroupId) || null;
-      const fallbackCandidates = clickedMemberGroup
-        ? selectableGroups.filter((candidate) => candidate.group.id === clickedMemberGroup.id)
-        : [];
+      const fallbackCandidates = clickedMemberGroup ? memberScopedGroups.filter((candidate) => candidate.group.id === clickedMemberGroup.id) : [];
+      const candidatePool =
+        pointCandidates.length > 0
+          ? pointCandidates
+          : [...memberScopedGroups, ...fallbackCandidates];
       const sortedCandidates = Array.from(new Map(
-        [...pointCandidates, ...fallbackCandidates].map((candidate) => [candidate.group.id, candidate])
+        candidatePool.map((candidate) => [candidate.group.id, candidate])
       ).values()).sort((left, right) => {
         const leftArea = left.rect.width * left.rect.height;
         const rightArea = right.rect.width * right.rect.height;
@@ -8197,8 +9330,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return rightArea - leftArea;
         }
 
-        if (left.group.frameGroupIds.length !== right.group.frameGroupIds.length) {
-          return right.group.frameGroupIds.length - left.group.frameGroupIds.length;
+        if (left.resolvedFrameGroupIds.length !== right.resolvedFrameGroupIds.length) {
+          return right.resolvedFrameGroupIds.length - left.resolvedFrameGroupIds.length;
         }
 
         return left.group.id.localeCompare(right.group.id, 'ko');
@@ -8214,6 +9347,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           kind: 'group',
           frameGroupId: normalizedFrameGroupId,
           groupId: candidate.group.id,
+          groupFrameGroupIds: candidate.resolvedFrameGroupIds.slice(),
         });
       });
 
@@ -8227,6 +9361,46 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
     },
     [positionBoxGroupByFrameGroupId]
+  );
+  const resolveTopLevelPositionGroupHitAtPoint = React.useCallback(
+    (
+      pageInner: HTMLElement | null,
+      point: { x: number; y: number } | null
+    ): PositionGroupWithRect | null => {
+      if (!pageInner || !point) {
+        return null;
+      }
+
+      const tolerance = FRAME_RESIZE_TOLERANCE_PX;
+      const hitCandidates = collectTopLevelPositionGroupsWithRects(pageInner)
+        .filter((groupWithRect) => {
+          const right = groupWithRect.rect.left + groupWithRect.rect.width;
+          const bottom = groupWithRect.rect.top + groupWithRect.rect.height;
+          return (
+            point.x >= groupWithRect.rect.left - tolerance &&
+            point.x <= right + tolerance &&
+            point.y >= groupWithRect.rect.top - tolerance &&
+            point.y <= bottom + tolerance
+          );
+        })
+        .sort((left, right) => {
+          const leftArea = left.rect.width * left.rect.height;
+          const rightArea = right.rect.width * right.rect.height;
+
+          if (Math.abs(leftArea - rightArea) > 0.1) {
+            return rightArea - leftArea;
+          }
+
+          if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+            return right.frameGroupIds.length - left.frameGroupIds.length;
+          }
+
+          return left.group.id.localeCompare(right.group.id, 'ko');
+        });
+
+      return hitCandidates[0] || null;
+    },
+    []
   );
   const resolvePositionOrderLockSelectionVisual = React.useCallback(
     (selectionOrder: number, groupId: string) => {
@@ -8555,7 +9729,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const buildGroupLabel = (group: PositionImpactGroup) => {
       if (group.frameGroupIds.length > 1) {
-        return `${group.label} (묶음 ${group.frameGroupIds.length}개)`;
+        return `${normalizePositionGroupDisplayLabel(group.label, group.id)} (${POSITION_GROUP_LABEL_PREFIX} ${group.frameGroupIds.length}개)`;
       }
 
       const singleFrameGroupId = readSingleFrameGroupId(group.frameGroupIds);
@@ -8597,7 +9771,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const groupRectById = new Map<string, FrameNodeRect>();
     allPositionGroups.forEach((group) => {
-      const groupRect = resolveRectFromFrameGroupIds(group.frameGroupIds);
+      const groupPageInner =
+        group.frameGroupIds
+          .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
+          .map((node) => node?.closest<HTMLElement>('.page-inner') || null)
+          .find((pageInner): pageInner is HTMLElement => Boolean(pageInner)) || null;
+      const wrapper = groupPageInner ? resolvePositionGroupWrapperElement(groupPageInner, group.id) : null;
+      const groupRect = wrapper ? readFrameElementRect(wrapper, groupPageInner) : resolveRectFromFrameGroupIds(group.frameGroupIds);
       if (groupRect) {
         groupRectById.set(group.id, groupRect);
       }
@@ -8702,7 +9882,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         const gapYPx =
           targetRect && anchorRect
-            ? Math.round(targetRect.top - (anchorRect.top + anchorRect.height))
+            ? Math.round(
+                targetConfig.anchorY === 'bottom'
+                  ? targetRect.top - (anchorRect.top + anchorRect.height)
+                  : anchorRect.top - (targetRect.top + targetRect.height)
+              )
             : Math.round(targetConfig.offsetY);
 
         return {
@@ -8718,6 +9902,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           anchorGroupId,
           anchorFrameGroupId,
           anchorFrameGroupIds,
+          anchorY: targetConfig.anchorY,
           gapYPx,
           targetSortTop: targetRect.top,
         };
@@ -8751,6 +9936,121 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .sort((left, right) => left.targetSortTop - right.targetSortTop)
       .map(({ targetSortTop: _targetSortTop, ...relation }) => relation);
   }, [positionRelationFrameLabelById, previewDomVersion, renderedPreviewHtml]);
+  const existingPositionSpacingByPairKey = React.useMemo(() => {
+    const root = previewRef.current;
+    const nextMap = new Map<
+      string,
+      {
+        gapY: number | null;
+        mixed: boolean;
+        relationCount: number;
+      }
+    >();
+
+    if (!root) {
+      return nextMap;
+    }
+
+    const frameNodeById = new Map<string, HTMLElement>();
+    collectFrameSelectionAnchors(root).forEach((node) => {
+      const frameGroupId = getFrameGroupId(node).trim();
+      if (frameGroupId) {
+        frameNodeById.set(frameGroupId, node);
+      }
+    });
+    const resolveRectFromFrameGroupIds = (frameGroupIds: string[]) => {
+      const rects = frameGroupIds
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId))
+        .map((frameGroupId) => {
+          const node = frameNodeById.get(frameGroupId) || null;
+          return node ? readFrameMoveRect(node) : null;
+        })
+        .filter((rect): rect is FrameNodeRect => Boolean(rect));
+
+      if (rects.length <= 0) {
+        return null;
+      }
+
+      const minLeft = Math.min(...rects.map((rect) => rect.left));
+      const minTop = Math.min(...rects.map((rect) => rect.top));
+      const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
+      const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
+
+      return {
+        left: minLeft,
+        top: minTop,
+        width: Math.max(1, maxRight - minLeft),
+        height: Math.max(1, maxBottom - minTop),
+      } as FrameNodeRect;
+    };
+    const resolveVerticalGap = (firstRect: FrameNodeRect, secondRect: FrameNodeRect) => {
+      const firstTop = firstRect.top;
+      const firstBottom = firstRect.top + firstRect.height;
+      const secondTop = secondRect.top;
+      const secondBottom = secondRect.top + secondRect.height;
+
+      if (firstBottom <= secondTop) {
+        return secondTop - firstBottom;
+      }
+
+      if (secondBottom <= firstTop) {
+        return firstTop - secondBottom;
+      }
+
+      return 0;
+    };
+
+    const gapValuesByPairKey = new Map<string, number[]>();
+
+    definedPositionRelativeRelations.forEach((relation) => {
+      if (relation.anchorKind === 'page-corner') {
+        return;
+      }
+
+      const targetEntityId =
+        relation.targetKind === 'group'
+          ? relation.targetGroupId.trim()
+          : (
+              relation.targetConfiguredFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+              relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+              ''
+            ).trim();
+      const anchorEntityId =
+        relation.anchorKind === 'group' ? relation.anchorGroupId.trim() : relation.anchorFrameGroupId.trim();
+
+      if (!targetEntityId || !anchorEntityId || targetEntityId === anchorEntityId) {
+        return;
+      }
+
+      const targetRect = resolveRectFromFrameGroupIds(relation.targetFrameGroupIds);
+      const anchorRect =
+        relation.anchorKind === 'group'
+          ? resolveRectFromFrameGroupIds(relation.anchorFrameGroupIds)
+          : resolveRectFromFrameGroupIds([relation.anchorFrameGroupId]);
+
+      if (!targetRect || !anchorRect) {
+        return;
+      }
+
+      const pairKey = [targetEntityId, anchorEntityId].sort((left, right) => left.localeCompare(right, 'ko')).join('<->');
+      const normalizedGap = Math.max(0, Math.round(resolveVerticalGap(targetRect, anchorRect)));
+      const currentValues = gapValuesByPairKey.get(pairKey) || [];
+      currentValues.push(normalizedGap);
+      gapValuesByPairKey.set(pairKey, currentValues);
+    });
+
+    gapValuesByPairKey.forEach((values, pairKey) => {
+      const uniqueValues = Array.from(new Set(values));
+      nextMap.set(pairKey, {
+        gapY: uniqueValues.length === 1 ? uniqueValues[0] : uniqueValues[0] ?? null,
+        mixed: uniqueValues.length > 1,
+        relationCount: values.length,
+      });
+    });
+
+    return nextMap;
+  }, [definedPositionRelativeRelations, previewDomVersion, renderedPreviewHtml]);
   const focusedDefinedPositionRelativeRelations = React.useMemo(() => {
     if (definedPositionRelativeRelations.length <= 0) {
       return definedPositionRelativeRelations;
@@ -8843,17 +10143,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return relation.anchorKind !== 'page-corner' && visited.has(anchorEntityKey);
     });
   }, [definedPositionRelativeRelations, positionBoxGroupByFrameGroupId, selectedFrameGroupIds]);
+  const highlightedDefinedPositionRelativeRelations = React.useMemo(
+    () => (selectedFrameGroupIds.length > 0 ? focusedDefinedPositionRelativeRelations : []),
+    [focusedDefinedPositionRelativeRelations, selectedFrameGroupIds.length]
+  );
   const definedPositionRelativeRelationDisplayRows = React.useMemo(
     () =>
       focusedDefinedPositionRelativeRelations.map((relation) => ({
         key: relation.key,
         targetLabel:
           relation.targetKind === 'group'
-            ? relation.targetLabel.replace(/\s*\(묶음\s*\d+개\)\s*$/u, '')
+            ? relation.targetLabel.replace(/\s*\((이동\s+묶음\s+박스|이동\s+묶음\s+상자|그룹)\s*\d+개\)\s*$/u, '')
             : relation.targetFrameGroupIds.join(', ') || '-',
         anchorLabel:
           relation.anchorKind === 'group'
-            ? relation.anchorLabel.replace(/\s*\(묶음\s*\d+개\)\s*$/u, '')
+            ? relation.anchorLabel.replace(/\s*\((이동\s+묶음\s+박스|이동\s+묶음\s+상자|그룹)\s*\d+개\)\s*$/u, '')
             : relation.anchorKind === 'frame'
               ? relation.anchorFrameGroupId
               : relation.anchorLabel,
@@ -9085,6 +10389,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return orderedIds;
   }, [selectedFrameGroupIds]);
+  const selectedPositionEntitySelection = React.useMemo(() => {
+    const selectedFrameGroupIdSet = new Set(selectedPositionGroupingFrameGroupIds);
+    const coveredFrameGroupIds = new Set<string>();
+    const groupIds: string[] = [];
+
+    positionBoxGroups
+      .filter(
+        (group) =>
+          group.frameGroupIds.length > 1 &&
+          group.frameGroupIds.every((frameGroupId) => selectedFrameGroupIdSet.has(frameGroupId))
+      )
+      .sort((left, right) => {
+        if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+          return right.frameGroupIds.length - left.frameGroupIds.length;
+        }
+        return left.id.localeCompare(right.id, 'ko');
+      })
+      .forEach((group) => {
+        const hasUncoveredMember = group.frameGroupIds.some((frameGroupId) => !coveredFrameGroupIds.has(frameGroupId));
+        if (!hasUncoveredMember) {
+          return;
+        }
+
+        groupIds.push(group.id);
+        group.frameGroupIds.forEach((frameGroupId) => {
+          coveredFrameGroupIds.add(frameGroupId);
+        });
+      });
+
+    const frameGroupIds = selectedPositionGroupingFrameGroupIds.filter(
+      (frameGroupId) => !coveredFrameGroupIds.has(frameGroupId)
+    );
+
+    return {
+      groupIds,
+      frameGroupIds,
+      entityCount: groupIds.length + frameGroupIds.length,
+    };
+  }, [positionBoxGroups, selectedPositionGroupingFrameGroupIds]);
   const selectedPositionExactMatchedBoxGroup = React.useMemo(() => {
     if (selectionPanelTab !== 'position' || selectedPositionGroupingFrameGroupIds.length <= 1) {
       return null;
@@ -9235,6 +10578,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectedPositionCurrentBoxGroups = React.useMemo(() => {
     const activeProxyGroupId = positionGroupProxySelectionGroupIdRef.current.trim();
 
+    if (selectionPanelTab === 'position' && activeProxyGroupId) {
+      const activeProxyGroup = positionBoxGroups.find((group) => group.id === activeProxyGroupId) || null;
+
+      if (activeProxyGroup) {
+        const activeMemberIds = new Set(activeProxyGroup.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
+        const containingGroups = positionBoxGroups
+          .filter((group) => {
+            if (group.frameGroupIds.length <= 1) {
+              return false;
+            }
+
+            return Array.from(activeMemberIds).every((frameGroupId) =>
+              group.frameGroupIds.some((memberFrameGroupId) => memberFrameGroupId.trim() === frameGroupId)
+            );
+          })
+          .sort((left, right) => {
+            if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+              return right.frameGroupIds.length - left.frameGroupIds.length;
+            }
+            return left.id.localeCompare(right.id, 'ko');
+          });
+
+        return containingGroups.length > 0 ? containingGroups : [activeProxyGroup];
+      }
+    }
+
     if (selectionPanelTab === 'position' && selectedPositionGroupingFrameGroupIds.length === 1) {
       const nestedChainGroups = selectedPositionSelectionChainEntries
         .filter(
@@ -9296,7 +10665,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     return selectedPositionCurrentBoxGroups.map(
-      (group) => `${group.label || group.id} [${group.id}] · ${group.frameGroupIds.length}개`
+      (group) => `${normalizePositionGroupDisplayLabel(group.label, group.id)} · ${group.frameGroupIds.length}개`
     );
   }, [selectedPositionCurrentBoxGroups, selectionPanelTab]);
   const selectedPositionCurrentBoxGroupLabels = React.useMemo(
@@ -9330,11 +10699,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
   const hasSelectedPositionBoxes = selectedFrameGroupIds.length > 0;
   const canClearSelectedPositionGroups = selectedExplicitPositionCurrentBoxGroups.length > 0;
+  const canCreatePositionGroupFromSelection = selectedPositionEntitySelection.entityCount >= 2;
+  const canStartPositionSpacingLockFromSelection = selectedPositionEntitySelection.entityCount >= 2;
+  const canAssignSelectedItemsToGroup =
+    explicitPositionBoxGroups.length > 0 && selectedPositionEntitySelection.entityCount > 0;
+  const canRemoveSelectedItemsFromGroup = selectedPositionEntitySelection.entityCount > 0;
   const selectedPositionInfoCount =
     selectionPanelTab === 'position' ? selectedPositionDisplayIds.length : selectedFrameGroupIds.length;
   const selectedPositionInfoTitle = hasSelectedPositionBoxes
-    ? `${selectedPositionInfoCount}개의 선택된 박스 정보`
-    : '템플렛 박스 정보';
+    ? `${selectedPositionInfoCount}개의 선택된 상자 정보`
+    : '템플렛 상자 정보';
   const selectedPositionModeLabel = React.useMemo(() => {
     if (selectionPanelTab !== 'position' || !previewRef.current || selectedPositionResolvedFrameGroupIds.length <= 0) {
       return primarySelectedFramePositionMode || '-';
@@ -9372,7 +10746,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         )
       );
       const config = readFrameRelativeAnchorConfig(frameNode);
-      const anchorLabel = readRelativeAnchorTargetLabel(config) || '-';
+      const anchorLabel = readRelativeAnchorTargetLabel(config, previewRef.current) || '-';
       anchorLabelSet.add(anchorLabel);
     });
 
@@ -9404,28 +10778,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return entityKeys.size;
   }, [positionBoxGroupByFrameGroupId, positionOrderLockFrameGroupIds, positionOrderLockSelectionKindByFrameGroupId]);
-  const positionOrderLockConfirmButtonLabel = React.useMemo(() => {
-    if (positionOrderLockConfirmPreviewCount <= 0) {
-      return '2개 이상 박스 고르기';
-    }
-
-    if (positionOrderLockConfirmPreviewCount === 1) {
-      return '1개 이상 더 고르기';
-    }
-
-    return '간격 고정 확정';
-  }, [positionOrderLockConfirmPreviewCount]);
-  const positionOrderLockSelectionGuideText = React.useMemo(() => {
-    if (positionOrderLockConfirmPreviewCount <= 0) {
-      return '고정할 박스를 2개 이상 선택하세요.';
-    }
-
-    if (positionOrderLockConfirmPreviewCount === 1) {
-      return '1개 이상 박스를 더 선택하세요.';
-    }
-
-    return '선택된 박스들 사이 간격을 확인/수정한 뒤 간격 고정 확정을 누르세요.';
-  }, [positionOrderLockConfirmPreviewCount]);
   const positionOrderLockSelectionVisualByGroupId = React.useMemo(() => {
     const nextMap = new Map<
       string,
@@ -9475,11 +10827,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const visual = positionOrderLockSelectionVisualByGroupId.get(groupId);
 
       if (visual) {
-        return `${visual.colorName} 박스`;
+        return `${visual.colorName} 상자`;
       }
 
       const normalizedFallback = fallbackLabel.trim();
-      return /^box\s*\d+/iu.test(normalizedFallback) ? normalizedFallback : '선택 박스';
+      return /^(box\s*\d+|그룹\s*\d+)/iu.test(normalizedFallback)
+        ? normalizePositionGroupDisplayLabel(normalizedFallback)
+        : '선택 상자';
     },
     [positionOrderLockSelectionVisualByGroupId]
   );
@@ -9634,16 +10988,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return null;
         }
 
-        const minLeft = Math.min(...normalizedMemberEntries.map((entry) => entry.rect.left));
-        const minTop = Math.min(...normalizedMemberEntries.map((entry) => entry.rect.top));
-        const maxRight = Math.max(...normalizedMemberEntries.map((entry) => entry.rect.left + entry.rect.width));
-        const maxBottom = Math.max(...normalizedMemberEntries.map((entry) => entry.rect.top + entry.rect.height));
-        const groupRect = {
-          left: minLeft,
-          top: minTop,
-          width: Math.max(1, maxRight - minLeft),
-          height: Math.max(1, maxBottom - minTop),
-        };
+        const wrapper =
+          selectedEntry.selectionKind === 'group' && resolvedPageInner
+            ? resolvePositionGroupWrapperElement(resolvedPageInner, group.id)
+            : null;
+        const groupRect = wrapper
+          ? readFrameElementRect(wrapper, resolvedPageInner)
+          : (() => {
+              const minLeft = Math.min(...normalizedMemberEntries.map((entry) => entry.rect.left));
+              const minTop = Math.min(...normalizedMemberEntries.map((entry) => entry.rect.top));
+              const maxRight = Math.max(...normalizedMemberEntries.map((entry) => entry.rect.left + entry.rect.width));
+              const maxBottom = Math.max(...normalizedMemberEntries.map((entry) => entry.rect.top + entry.rect.height));
+              return {
+                left: minLeft,
+                top: minTop,
+                width: Math.max(1, maxRight - minLeft),
+                height: Math.max(1, maxBottom - minTop),
+              };
+            })();
         const spacingReferenceRects =
           selectedEntry.selectionKind === 'group'
             ? [groupRect]
@@ -9956,10 +11318,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       selectedEdges.forEach((edge) => {
         const leftMember = orderedMembers[edge.leftIndex];
         const rightMember = orderedMembers[edge.rightIndex];
+        const directionTolerance = 0.5;
+        const leftRectTop = leftMember.groupRect.top;
+        const leftRectBottom = leftMember.groupRect.top + leftMember.groupRect.height;
+        const rightRectTop = rightMember.groupRect.top;
+        const rightRectBottom = rightMember.groupRect.top + rightMember.groupRect.height;
+        const leftIsAboveRight = leftRectBottom <= rightRectTop - directionTolerance;
+        const rightIsAboveLeft = rightRectBottom <= leftRectTop - directionTolerance;
         const preferLeftToRight =
-          edge.leftToRight.isClearVertical !== edge.rightToLeft.isClearVertical
-            ? edge.leftToRight.isClearVertical
-            : edge.leftToRight.preferredGapMagnitude <= edge.rightToLeft.preferredGapMagnitude + 0.1;
+          leftIsAboveRight || rightIsAboveLeft
+            ? leftIsAboveRight
+            : edge.leftToRight.isClearVertical !== edge.rightToLeft.isClearVertical
+              ? edge.leftToRight.isClearVertical
+              : edge.leftToRight.preferredGapMagnitude <= edge.rightToLeft.preferredGapMagnitude + 0.1;
         const anchorMember = preferLeftToRight ? leftMember : rightMember;
         const targetMember = preferLeftToRight ? rightMember : leftMember;
         const directedRelation = preferLeftToRight ? edge.leftToRight : edge.rightToLeft;
@@ -9991,6 +11362,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const targetMember = pair.targetMember;
         const anchorLabel = resolvePositionOrderLockGroupLabel(anchorMember.group.id, anchorMember.group.label);
         const targetLabel = resolvePositionOrderLockGroupLabel(targetMember.group.id, targetMember.group.label);
+        const existingRelationInfo = existingPositionSpacingByPairKey.get(pair.pairKey);
 
         return {
           pairKey: pair.pairKey,
@@ -10000,10 +11372,68 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           targetGroupId: targetMember.group.id,
           targetSelectionEntityId: targetMember.selectionEntityId,
           defaultGapY: pair.defaultGapY,
+          hasExistingRelation: Boolean(existingRelationInfo),
+          existingGapY: typeof existingRelationInfo?.gapY === 'number' ? existingRelationInfo.gapY : null,
+          existingGapMixed: Boolean(existingRelationInfo?.mixed),
         };
       }),
-    [positionSpacingResolvedPairs, resolvePositionOrderLockGroupLabel]
+    [existingPositionSpacingByPairKey, positionSpacingResolvedPairs, resolvePositionOrderLockGroupLabel]
   );
+  const positionSpacingDuplicatePairKeySet = React.useMemo(() => {
+    const duplicates = new Set<string>();
+
+    positionSpacingPairSummaries.forEach((pair) => {
+      if (!pair.hasExistingRelation || typeof pair.existingGapY !== 'number' || pair.existingGapMixed) {
+        return;
+      }
+
+      const draftGap = Number.parseFloat(positionSpacingDraftByPairKey[pair.pairKey]?.gapY || '');
+      const resolvedGapY = Number.isFinite(draftGap) ? Math.max(0, draftGap) : Math.max(0, pair.defaultGapY);
+      if (Math.abs(resolvedGapY - Math.max(0, pair.existingGapY)) <= 0.1) {
+        duplicates.add(pair.pairKey);
+      }
+    });
+
+    return duplicates;
+  }, [positionSpacingDraftByPairKey, positionSpacingPairSummaries]);
+  const hasOnlyDuplicatePositionSpacingPairs = React.useMemo(
+    () =>
+      positionSpacingPairSummaries.length > 0 &&
+      positionSpacingDuplicatePairKeySet.size === positionSpacingPairSummaries.length,
+    [positionSpacingDuplicatePairKeySet, positionSpacingPairSummaries.length]
+  );
+  const positionOrderLockActionButtonLabel = React.useMemo(() => {
+    if (positionOrderLockConfirmPreviewCount <= 0) {
+      return '2개 이상 상자 고르기';
+    }
+
+    if (positionOrderLockConfirmPreviewCount === 1) {
+      return '1개 이상 더 고르기';
+    }
+
+    if (hasOnlyDuplicatePositionSpacingPairs) {
+      return '이미 고정된 간격';
+    }
+
+    return '간격 고정 확정';
+  }, [hasOnlyDuplicatePositionSpacingPairs, positionOrderLockConfirmPreviewCount]);
+  const positionOrderLockActionGuideText = React.useMemo(() => {
+    if (positionOrderLockConfirmPreviewCount <= 0) {
+      return '고정할 상자를 2개 이상 선택하세요.';
+    }
+
+    if (positionOrderLockConfirmPreviewCount === 1) {
+      return '1개 이상 상자를 더 선택하세요.';
+    }
+
+    if (hasOnlyDuplicatePositionSpacingPairs) {
+      return '선택된 상자 간격은 이미 고정되어 있습니다. 다른 간격값으로 변경하거나 선택 대상을 바꾸세요.';
+    }
+
+    return '선택된 상자들 사이 간격을 확인/수정한 뒤 간격 고정 확정을 누르세요.';
+  }, [hasOnlyDuplicatePositionSpacingPairs, positionOrderLockConfirmPreviewCount]);
+  const positionOrderLockConfirmDisabled =
+    positionOrderLockConfirmPreviewCount < 2 || hasOnlyDuplicatePositionSpacingPairs;
   const positionSpacingGuideRelations = React.useMemo(() => {
     if (!positionOrderLockSelectionMode) {
       return [] as PositionSpacingGuideRelation[];
@@ -10049,7 +11479,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionSpacingPairSummaries.forEach((pair) => {
         const previousValue = previous[pair.pairKey];
         next[pair.pairKey] = previousValue || {
-          gapY: String(Math.round(pair.defaultGapY)),
+          gapY: String(
+            Math.round(
+              typeof pair.existingGapY === 'number'
+                ? Math.max(0, pair.existingGapY)
+                : Math.max(0, pair.defaultGapY)
+            )
+          ),
         };
       });
 
@@ -10319,14 +11755,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const buildLiveEdgeTopologySnapshot = React.useCallback((root: HTMLElement): TemplateEdgeTopologySnapshotDto => {
     const pages = Array.from(root.querySelectorAll<HTMLElement>('section.page'));
+    const positionGroupIdByFrameGroupId = new Map<string, string>();
+    collectPositionBoxGroups(root, { includeSingletons: true }).forEach((group) => {
+      group.frameGroupIds.forEach((frameGroupId) => {
+        const normalizedFrameGroupId = frameGroupId.trim();
+        if (normalizedFrameGroupId) {
+          positionGroupIdByFrameGroupId.set(normalizedFrameGroupId, group.id);
+        }
+      });
+    });
     const frames: TemplateEdgeFrameDto[] = getFrameNodes(root).map((node) => {
       const pageElement = node.closest<HTMLElement>('section.page');
       const pageIndex = Math.max(0, pages.indexOf(pageElement || pages[0] || node));
+      const frameGroupId = getFrameGroupId(node);
+      const positionGroupId = positionGroupIdByFrameGroupId.get(frameGroupId) || '';
 
       return {
-        frameGroupId: getFrameGroupId(node),
+        frameGroupId,
         pageId: `page-${pageIndex + 1}`,
         rect: readFrameNodeRect(node),
+        positionGroupId: positionGroupId || null,
       };
     });
 
@@ -10884,10 +12332,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
       applyPreviewEditPermissions(root);
       applyFrameCanvasVisualHints(root);
+      const materializedPositionGroups = materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
+      normalizePositionGroupRelativeAnchors(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
       syncPreviewSurfaceScale(root);
-      const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
+      const nextRenderHtml = normalized || materializedPositionGroups ? extractPreviewRenderHtml(root) : '';
 
       if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
         setPreviewHtml(nextRenderHtml);
@@ -10921,7 +12371,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
-      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
@@ -10948,7 +12398,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolvePositionGroupProxySelections,
     selectionPanelTab,
     positionRelationAnchorFrameGroupId,
-    focusedDefinedPositionRelativeRelations,
+    highlightedDefinedPositionRelativeRelations,
     positionSpacingGuideRelations,
     syncPreviewSurfaceScale,
   ]);
@@ -10982,7 +12432,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       applyPreviewEditPermissions(root);
+      materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
+      normalizePositionGroupRelativeAnchors(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
       applyFrameCanvasVisualHints(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
@@ -11001,7 +12453,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
@@ -11017,7 +12469,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvePositionGroupProxySelections,
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
-      focusedDefinedPositionRelativeRelations,
+      highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
     ]
   );
@@ -11033,6 +12485,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       applyPreviewEditPermissions(root);
+      materializePositionGroupWrappers(root);
       applyFrameCanvasVisualHints(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
       const snapshot = buildLiveEdgeTopologySnapshot(root);
@@ -11049,7 +12502,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     },
     [
@@ -11060,7 +12513,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvePositionGroupProxySelections,
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
-      focusedDefinedPositionRelativeRelations,
+      highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
     ]
   );
@@ -11169,6 +12622,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const frameNodesInPage = getFrameNodes(pageInner).filter(
         (node) => node.closest<HTMLElement>('.page-inner') === pageInner
       );
+      const frameNodeById = new Map<string, HTMLElement>();
+      frameNodesInPage.forEach((node) => {
+        const frameGroupId = getFrameGroupId(node);
+
+        if (frameGroupId) {
+          frameNodeById.set(frameGroupId, node);
+        }
+      });
       const hits = frameNodesInPage
         .filter((node) => {
           const rect = readFrameMoveRect(node);
@@ -11178,36 +12639,84 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .filter((frameGroupId) => Boolean(frameGroupId));
 
       if (selectionPanelTab === 'position') {
-        const topLevelGroups = collectTopLevelPositionGroupsWithRects(pageInner);
-        const topLevelGroupMemberIds = new Set<string>();
-        const selectedTopLevelGroupMemberIds = new Set<string>();
+        const matchedGroups = collectPositionBoxGroups(pageInner, {
+          includeSingletons: false,
+          includeExplicitMembersInInferred: true,
+        })
+          .map((group) => {
+            const frameGroupIds = Array.from(
+              new Set(
+                group.frameGroupIds
+                  .map((frameGroupId) => frameGroupId.trim())
+                  .filter((frameGroupId) => Boolean(frameGroupId) && frameNodeById.has(frameGroupId))
+              )
+            );
 
-        topLevelGroups.forEach((groupWithRect) => {
-          groupWithRect.frameGroupIds.forEach((frameGroupId) => {
-            topLevelGroupMemberIds.add(frameGroupId);
+            if (frameGroupIds.length <= 1) {
+              return null;
+            }
+
+            const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
+            const rect = wrapper ? readFrameElementRect(wrapper, pageInner) : collectFrameGroupUnionRect(frameGroupIds, frameNodeById);
+
+            if (!rect) {
+              return null;
+            }
+
+            const matched = mode === 'contained' ? rectContainsRect(selectionRect, rect) : rectIntersectsRect(selectionRect, rect);
+
+            if (!matched) {
+              return null;
+            }
+
+            return {
+              group,
+              frameGroupIds,
+              frameGroupIdSet: new Set(frameGroupIds),
+              rect,
+            };
+          })
+          .filter(
+            (
+              groupWithRect
+            ): groupWithRect is {
+              group: PositionImpactGroup;
+              frameGroupIds: string[];
+              frameGroupIdSet: Set<string>;
+              rect: FrameNodeRect;
+            } => Boolean(groupWithRect)
+          )
+          .sort((left, right) => {
+            const leftArea = left.rect.width * left.rect.height;
+            const rightArea = right.rect.width * right.rect.height;
+
+            if (Math.abs(leftArea - rightArea) > 0.1) {
+              return rightArea - leftArea;
+            }
+
+            if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+              return right.frameGroupIds.length - left.frameGroupIds.length;
+            }
+
+            return left.group.id.localeCompare(right.group.id, 'ko');
           });
+        const selectedGroups: typeof matchedGroups = [];
 
-          const matched =
-            mode === 'contained'
-              ? rectContainsRect(selectionRect, groupWithRect.rect)
-              : rectIntersectsRect(selectionRect, groupWithRect.rect);
+        matchedGroups.forEach((candidate) => {
+          const isCoveredBySelectedParent = selectedGroups.some((selectedGroup) =>
+            candidate.frameGroupIds.every((frameGroupId) => selectedGroup.frameGroupIdSet.has(frameGroupId))
+          );
 
-          if (!matched) {
-            return;
+          if (!isCoveredBySelectedParent) {
+            selectedGroups.push(candidate);
           }
-
-          groupWithRect.frameGroupIds.forEach((frameGroupId) => {
-            selectedTopLevelGroupMemberIds.add(frameGroupId);
-          });
         });
 
-        const ungroupedHitSelectionIds =
-          mode === 'contained'
-            ? hits.filter((frameGroupId) => !selectedTopLevelGroupMemberIds.has(frameGroupId))
-            : hits.filter((frameGroupId) => !topLevelGroupMemberIds.has(frameGroupId));
+        const selectedGroupMemberIds = new Set(selectedGroups.flatMap((groupWithRect) => groupWithRect.frameGroupIds));
+        const ungroupedHitSelectionIds = hits.filter((frameGroupId) => !selectedGroupMemberIds.has(frameGroupId));
         const nextSelectionIds = [
           ...baseSelectionIds,
-          ...Array.from(selectedTopLevelGroupMemberIds),
+          ...Array.from(selectedGroupMemberIds),
           ...ungroupedHitSelectionIds,
         ];
 
@@ -11228,14 +12737,41 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const selectedFrameGroupIdSet = new Set(
         selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
       );
-      const topLevelGroups = collectTopLevelPositionGroupsWithRects(pageInner);
-      const proxies = topLevelGroups
-        .filter((groupWithRect) => groupWithRect.frameGroupIds.every((frameGroupId) => selectedFrameGroupIdSet.has(frameGroupId)))
-        .map((groupWithRect) => ({
-          groupId: groupWithRect.group.id,
-          label: groupWithRect.group.label,
-          frameGroupIds: groupWithRect.frameGroupIds.slice(),
-        }));
+      const proxies: PositionGroupProxySelection[] = [];
+      const selectedProxyMemberIds = new Set<string>();
+
+      collectPositionBoxGroups(pageInner, {
+        includeSingletons: false,
+        includeExplicitMembersInInferred: true,
+      })
+        .filter((group) => group.frameGroupIds.length > 1)
+        .filter((group) => group.frameGroupIds.every((frameGroupId) => selectedFrameGroupIdSet.has(frameGroupId)))
+        .sort((left, right) => {
+          if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+            return right.frameGroupIds.length - left.frameGroupIds.length;
+          }
+
+          return left.id.localeCompare(right.id, 'ko');
+        })
+        .forEach((group) => {
+          const frameGroupIds = group.frameGroupIds
+            .map((frameGroupId) => frameGroupId.trim())
+            .filter((frameGroupId) => Boolean(frameGroupId));
+          const isCoveredBySelectedParent = frameGroupIds.every((frameGroupId) => selectedProxyMemberIds.has(frameGroupId));
+
+          if (isCoveredBySelectedParent) {
+            return;
+          }
+
+          frameGroupIds.forEach((frameGroupId) => {
+            selectedProxyMemberIds.add(frameGroupId);
+          });
+          proxies.push({
+            groupId: group.id,
+            label: group.label,
+            frameGroupIds,
+          });
+        });
 
       return proxies;
     },
@@ -11337,6 +12873,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setSelectionValidationIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
         draftPreviewHtmlRef.current = '';
+        lastPersistedDraftHtmlRef.current = '';
+        queuedAutoPersistDraftHtmlRef.current = '';
+        cancelScheduledAutoPersistDraft();
         resetCanvasHistory(null);
         syncTemplateQuery('');
         return;
@@ -11370,6 +12909,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setSelectionValidationIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
         draftPreviewHtmlRef.current = detail.template.draftHtml;
+        lastPersistedDraftHtmlRef.current = detail.template.draftHtml.trim();
+        queuedAutoPersistDraftHtmlRef.current = '';
+        cancelScheduledAutoPersistDraft();
         resetCanvasHistory({
           renderHtml: detail.template.draftHtml.trim(),
           draftHtml: detail.template.draftHtml.trim(),
@@ -11386,7 +12928,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setLoading(false);
       }
     },
-    [resetCanvasHistory, syncTemplateQuery]
+    [cancelScheduledAutoPersistDraft, resetCanvasHistory, syncTemplateQuery]
   );
 
   const handleDeleteTemplateOption = React.useCallback(
@@ -11432,6 +12974,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           setSelectionValidationIssues([]);
           setSelectionSaveProgress(defaultSelectionSaveProgressState);
           draftPreviewHtmlRef.current = '';
+          lastPersistedDraftHtmlRef.current = '';
+          queuedAutoPersistDraftHtmlRef.current = '';
+          cancelScheduledAutoPersistDraft();
           resetCanvasHistory(null);
           syncTemplateQuery('');
         }
@@ -11442,7 +12987,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setMessage(nextMessage);
       }
     },
-    [resetCanvasHistory, selectedTemplateId, syncTemplateQuery, templateDetail?.template.id]
+    [cancelScheduledAutoPersistDraft, resetCanvasHistory, selectedTemplateId, syncTemplateQuery, templateDetail?.template.id]
   );
 
   const handleSelectedTemplateChange = React.useCallback(
@@ -11637,10 +13182,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
       applyPreviewEditPermissions(root);
       applyFrameCanvasVisualHints(root);
+      const materializedPositionGroups = materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
+      normalizePositionGroupRelativeAnchors(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
       syncPreviewSurfaceScale(root);
-      const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
+      const nextRenderHtml = normalized || materializedPositionGroups ? extractPreviewRenderHtml(root) : '';
 
       if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
         setPreviewHtml(nextRenderHtml);
@@ -11674,7 +13221,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
-      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
@@ -11695,7 +13242,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       requestPreviewTextFit,
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
-      focusedDefinedPositionRelativeRelations,
+      highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
       resolveEdgeRolePresentation,
       syncPreviewSurfaceScale,
@@ -11744,7 +13291,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
     applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIds);
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-    applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+    applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
     applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     setEdgeRoleDiagnostics((previous) =>
       edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
@@ -11766,7 +13313,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionRelationAnchorFrameGroupId,
       previewRelativeGuideFrameGroupId,
       resolvePositionGroupProxySelections,
-      focusedDefinedPositionRelativeRelations,
+      highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
       showMetadataIcons,
   ]);
@@ -11811,7 +13358,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     applyFrameRelationSelectionUi(root, frameRelationPreviewMode, selectedFrameGroupIds);
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-    applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+    applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
     applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
   }, [
       frameRelationPreviewMode,
@@ -11819,7 +13366,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       selectedFrameGroupIds,
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
-      focusedDefinedPositionRelativeRelations,
+      highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
   ]);
 
@@ -12016,7 +13563,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
     if (activeSelectionIds.length === 0) {
-      setMessage('먼저 key로 묶을 value 박스를 선택하세요.');
+      setMessage('먼저 key로 묶을 value 상자를 선택하세요.');
       return;
     }
 
@@ -12027,8 +13574,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
     setMessage(
       activeSelectionIds.length > 1
-        ? `현재 value 박스 ${activeSelectionIds.length}개가 선택된 상태입니다. 이제 이 값들을 묶는 key 박스를 캔버스에서 1개 선택해주세요.`
-        : '현재 value 박스 1개가 선택된 상태입니다. 이제 이 값의 key 박스를 캔버스에서 1개 선택해주세요.'
+        ? `현재 value 상자 ${activeSelectionIds.length}개가 선택된 상태입니다. 이제 이 값들을 묶는 key 상자를 캔버스에서 1개 선택해주세요.`
+        : '현재 value 상자 1개가 선택된 상태입니다. 이제 이 값의 key 상자를 캔버스에서 1개 선택해주세요.'
     );
   }, [clearTransientCanvasOverlays]);
 
@@ -12037,7 +13584,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const sourceKeyFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIdsRef.current);
 
     if (!root || selectedFrameGroupIdsRef.current.length !== 1 || !sourceKeyFrameGroupId) {
-      setMessage('먼저 기준이 될 key 박스 1개를 선택하세요.');
+      setMessage('먼저 기준이 될 key 상자 1개를 선택하세요.');
       return;
     }
 
@@ -12047,7 +13594,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const sourceMetadata = sourceNode ? resolveNextFrameMetadata(sourceNode, {}) : null;
 
     if (!sourceNode || !sourceMetadata) {
-      setMessage('먼저 기준이 될 key 박스 1개를 선택하세요.');
+      setMessage('먼저 기준이 될 key 상자 1개를 선택하세요.');
       return;
     }
 
@@ -12055,7 +13602,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const approved = confirmPromoteKeyBoxToText();
 
       if (!approved) {
-        setMessage('key 박스 선택을 취소했습니다.');
+        setMessage('key 상자 선택을 취소했습니다.');
         return;
       }
 
@@ -12064,7 +13611,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         role: 'key',
       });
       syncDraftPreviewHtmlRef();
-      setMessage(`key 박스 ${sourceKeyFrameGroupId}를 text 박스로 업데이트하고 설정을 계속합니다.`);
+      setMessage(`key 상자 ${sourceKeyFrameGroupId}를 text 상자로 업데이트하고 설정을 계속합니다.`);
     }
 
     const existingTargetFrameGroupIds = getFrameNodes(root)
@@ -12084,7 +13631,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       sourceKeyFrameGroupId,
       targetFrameGroupIds: existingTargetFrameGroupIds,
     });
-    setMessage('현재 key 박스가 선택된 상태입니다. 이제 이 key에 연결할 value 박스들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.');
+    setMessage('현재 key 상자가 선택된 상태입니다. 이제 이 key에 연결할 value 상자들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.');
   }, [clearTransientCanvasOverlays, getFrameNodes, syncDraftPreviewHtmlRef]);
 
   const clearParentKeySelectionDraft = React.useCallback(() => {
@@ -12096,7 +13643,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     if (metadataRelationSelectionModeRef.current.kind === 'parent') {
       setMetadataRelationSelectionMode({ kind: 'idle' });
     }
-    setMessage('연결할 key 박스를 비웠습니다.');
+    setMessage('연결할 key 상자를 비웠습니다.');
   }, []);
 
   const upsertVirtualDefinition = React.useCallback(
@@ -12222,7 +13769,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (relationMode.kind === 'parent') {
         if (relationMode.sourceFrameGroupIds.includes(frameGroupId)) {
-          setMessage('선택된 박스 자신을 key 박스로 지정할 수 없습니다.');
+          setMessage('선택된 상자 자신을 key 상자로 지정할 수 없습니다.');
           return true;
         }
 
@@ -12232,7 +13779,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           const approved = confirmPromoteKeyBoxToText();
 
           if (!approved) {
-            setMessage('key 박스 선택을 취소했습니다.');
+            setMessage('key 상자 선택을 취소했습니다.');
             return true;
           }
 
@@ -12252,12 +13799,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }));
         setMetadataRelationSelectionMode({ kind: 'idle' });
         applyRuntimeSelectionVisuals(relationMode.sourceFrameGroupIds, edgeSelectionStateRef.current);
-        setMessage(`key 박스를 ${frameGroupId} 로 지정했습니다. 저장하면 선택된 박스들에 반영됩니다.`);
+        setMessage(`key 상자를 ${frameGroupId} 로 지정했습니다. 저장하면 선택된 상자들에 반영됩니다.`);
         return true;
       }
 
       if (frameGroupId === relationMode.sourceKeyFrameGroupId) {
-        setMessage('현재 선택된 key 박스 자신은 value 박스로 선택할 수 없습니다.');
+        setMessage('현재 선택된 key 상자 자신은 value 상자로 선택할 수 없습니다.');
         return true;
       }
 
@@ -12272,8 +13819,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
       setMessage(
         nextTargetFrameGroupIds.length > 0
-          ? `현재 key 박스가 선택된 상태입니다. value 박스 ${nextTargetFrameGroupIds.length}개가 연결 예정입니다. 계속 선택하거나 저장하세요.`
-          : '현재 key 박스가 선택된 상태입니다. 아직 연결 예정인 value 박스가 없습니다.'
+          ? `현재 key 상자가 선택된 상태입니다. value 상자 ${nextTargetFrameGroupIds.length}개가 연결 예정입니다. 계속 선택하거나 저장하세요.`
+          : '현재 key 상자가 선택된 상태입니다. 아직 연결 예정인 value 상자가 없습니다.'
       );
       return true;
     },
@@ -12299,7 +13846,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
       if (!root || activeSelectionIds.length === 0) {
-        setMessage('편집할 박스를 먼저 선택하세요.');
+        setMessage('편집할 상자를 먼저 선택하세요.');
         return;
       }
 
@@ -12357,21 +13904,28 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
+      const isFrameInPositionGroup = (frameGroupId: string, groupId: string) => {
+        const normalizedFrameGroupId = frameGroupId.trim();
+        const normalizedGroupId = groupId.trim();
+        if (!normalizedFrameGroupId || !normalizedGroupId) {
+          return false;
+        }
+
+        const group = positionBoxGroups.find((candidateGroup) => candidateGroup.id === normalizedGroupId) || null;
+        return Boolean(group?.frameGroupIds.some((memberFrameGroupId) => memberFrameGroupId.trim() === normalizedFrameGroupId));
+      };
+
       const resolveNextSelectionIds = (sourceFrameGroupIds: string[]) => {
         const normalizedSourceIds = sourceFrameGroupIds
           .map((frameGroupId) => frameGroupId.trim())
           .filter((frameGroupId) => Boolean(frameGroupId));
         const filteredSourceIdsByReplacement =
           replaceSelectionFromGroupId.length > 0
-            ? normalizedSourceIds.filter(
-                (frameGroupId) => (positionBoxGroupByFrameGroupId.get(frameGroupId)?.id || '') !== replaceSelectionFromGroupId
-              )
+            ? normalizedSourceIds.filter((frameGroupId) => !isFrameInPositionGroup(frameGroupId, replaceSelectionFromGroupId))
             : normalizedSourceIds;
         const filteredSourceIds =
           nextSelectionKind === 'group' && resolvedSelectionGroupId
-            ? filteredSourceIdsByReplacement.filter(
-                (frameGroupId) => (positionBoxGroupByFrameGroupId.get(frameGroupId)?.id || '') !== resolvedSelectionGroupId
-              )
+            ? filteredSourceIdsByReplacement.filter((frameGroupId) => !isFrameInPositionGroup(frameGroupId, resolvedSelectionGroupId))
             : filteredSourceIdsByReplacement;
         const nextSelectionIdSet = new Set(filteredSourceIds);
 
@@ -12406,7 +13960,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
           if (replaceSelectionFromGroupId.length > 0) {
             Object.keys(next).forEach((frameGroupId) => {
-              if ((positionBoxGroupByFrameGroupId.get(frameGroupId)?.id || '') === replaceSelectionFromGroupId) {
+              if (isFrameInPositionGroup(frameGroupId, replaceSelectionFromGroupId)) {
                 delete next[frameGroupId];
               }
             });
@@ -12414,7 +13968,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
           if (nextSelectionKind === 'group' && resolvedSelectionGroupId) {
             Object.keys(next).forEach((frameGroupId) => {
-              if ((positionBoxGroupByFrameGroupId.get(frameGroupId)?.id || '') === resolvedSelectionGroupId) {
+              if (isFrameInPositionGroup(frameGroupId, resolvedSelectionGroupId)) {
                 delete next[frameGroupId];
               }
             });
@@ -12453,7 +14007,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const nextSelectedFrameGroupIds = Array.from(new Set(expandedSelectedFrameGroupIds));
 
     if (nextSelectedFrameGroupIds.length < 2) {
-      setMessage('2개 이상의 박스를 선택해야 합니다.');
+      setMessage('2개 이상의 상자를 선택해야 합니다.');
       return;
     }
 
@@ -12490,6 +14044,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       message: string;
       appliedCount: number;
       skippedCount: number;
+      duplicatePairCount: number;
       orderedGroupCount: number;
     } => {
       const root = previewRef.current;
@@ -12507,6 +14062,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           message: '캔버스를 먼저 로드하세요.',
           appliedCount: 0,
           skippedCount: 0,
+          duplicatePairCount: 0,
           orderedGroupCount: 0,
         };
       }
@@ -12514,9 +14070,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (selectedTargetFrameGroupIds.length < 2) {
         return {
           ok: false,
-          message: '간격 고정은 2개 이상 박스를 선택해야 확정할 수 있습니다.',
+          message: '간격 고정은 2개 이상 상자를 선택해야 확정할 수 있습니다.',
           appliedCount: 0,
           skippedCount: 0,
+          duplicatePairCount: 0,
           orderedGroupCount: 0,
         };
       }
@@ -12529,9 +14086,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (orderedGroupMembers.length < 2) {
         return {
           ok: false,
-          message: '선택한 박스를 캔버스에서 찾지 못했습니다. 다시 선택 후 시도하세요.',
+          message: '선택한 상자를 캔버스에서 찾지 못했습니다. 다시 선택 후 시도하세요.',
           appliedCount: 0,
           skippedCount: 0,
+          duplicatePairCount: 0,
           orderedGroupCount: 0,
         };
       }
@@ -12563,6 +14121,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       let appliedCount = 0;
       let skippedCount = 0;
+      let duplicatePairCount = 0;
       let changed = false;
       const resolvedSpacingPairs = resolvePositionSpacingPairsFromOrderedMembers(orderedGroupMembers);
 
@@ -12584,6 +14143,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const pairDraft = draftByPairKeyArg[pairKey];
         const draftGapY = Number.parseFloat(pairDraft?.gapY || '');
         const resolvedGapY = Number.isFinite(draftGapY) ? Math.max(0, draftGapY) : Math.max(0, pair.defaultGapY);
+        const existingRelationInfo = existingPositionSpacingByPairKey.get(pairKey);
+
+        if (
+          existingRelationInfo &&
+          !existingRelationInfo.mixed &&
+          typeof existingRelationInfo.gapY === 'number' &&
+          Math.abs(resolvedGapY - Math.max(0, existingRelationInfo.gapY)) <= 0.1
+        ) {
+          duplicatePairCount += 1;
+          return;
+        }
+
         const anchorReferenceBottom = pair.anchorReferenceRect.top + pair.anchorReferenceRect.height;
         const targetReferenceBottom = pair.targetReferenceRect.top + pair.targetReferenceRect.height;
         const deltaY =
@@ -12624,11 +14195,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return {
           ok: false,
           message:
-            skippedCount > 0
-              ? `박스 간격을 고정하지 못했습니다. (${skippedCount}개 제외됨)`
-              : '박스 간격을 고정할 수 없습니다.',
+            duplicatePairCount > 0
+              ? `이미 동일한 상자 간격 ${duplicatePairCount}개가 고정되어 있어 중복 적용하지 않았습니다.`
+              : skippedCount > 0
+                ? `상자 간격을 고정하지 못했습니다. (${skippedCount}개 제외됨)`
+                : '상자 간격을 고정할 수 없습니다.',
           appliedCount,
           skippedCount,
+          duplicatePairCount,
           orderedGroupCount: orderedGroupMembers.length,
         };
       }
@@ -12644,10 +14218,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         message: '',
         appliedCount,
         skippedCount,
+        duplicatePairCount,
         orderedGroupCount: orderedGroupMembers.length,
       };
     },
     [
+      existingPositionSpacingByPairKey,
       requestPreviewTextFit,
       resolvePositionSpacingOrderedGroupMembers,
       resolvePositionSpacingPairsFromOrderedMembers,
@@ -12704,8 +14280,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockCandidateSelectionStage('');
     positionGroupProxySelectionShowAllGroupsRef.current = false;
     setMessage(
-      `박스 간격 고정 완료: ${result.orderedGroupCount}개 그룹 선택, ${result.appliedCount}개 상대 간격 고정` +
-        (result.skippedCount > 0 ? `, ${result.skippedCount}개 제외` : '')
+      `상자 간격 고정 완료: ${result.orderedGroupCount}개 그룹 선택, ${result.appliedCount}개 상대 간격 고정` +
+        (result.skippedCount > 0 ? `, ${result.skippedCount}개 제외` : '') +
+        (result.duplicatePairCount > 0 ? `, 중복 간격 ${result.duplicatePairCount}개 건너뜀` : '')
     );
   }, [
     applyPositionSpacingBySelectedFrameGroupIds,
@@ -12792,12 +14369,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    if (selectedPositionGroupingFrameGroupIds.length < 2) {
-      setMessage('하나의 박스 그룹으로 묶을 박스를 2개 이상 선택하세요.');
+    if (selectedPositionEntitySelection.entityCount < 2) {
+      setMessage(`하나의 ${POSITION_GROUP_LABEL_PREFIX}으로 묶을 그룹 또는 상자를 2개 이상 선택하세요.`);
       return;
     }
 
-    const selectedMembers = selectedPositionGroupingFrameGroupIds
+    const allGroups = collectPositionBoxGroups(root, { includeSingletons: false });
+    const groupById = new Map(allGroups.map((group) => [group.id, group] as const));
+    const selectedChildGroupIds = selectedPositionEntitySelection.groupIds.filter((groupId) => groupById.has(groupId));
+    const selectedDirectFrameGroupIds = selectedPositionEntitySelection.frameGroupIds.slice();
+    const regroupTargetFrameGroupIds = Array.from(
+      new Set(
+        [
+          ...selectedDirectFrameGroupIds,
+          ...selectedChildGroupIds.flatMap((groupId) => groupById.get(groupId)?.frameGroupIds || []),
+        ].map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+      )
+    );
+
+    const selectedMembers = regroupTargetFrameGroupIds
       .map((frameGroupId) => {
         const node = resolveFrameSelectionAnchor(
           root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
@@ -12826,7 +14416,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
 
     if (selectedMembers.length < 2) {
-      setMessage('선택된 박스를 찾지 못했습니다. 다시 선택 후 시도하세요.');
+      setMessage('선택된 상자를 찾지 못했습니다. 다시 선택 후 시도하세요.');
       return;
     }
 
@@ -12836,16 +14426,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const parentFrameGroupId = parentCandidate?.frameGroupId || '';
 
     if (!parentFrameGroupId) {
-      setMessage('묶을 박스를 먼저 선택하세요.');
+      setMessage('묶을 상자를 먼저 선택하세요.');
       return;
     }
 
-    const parentNode = parentCandidate.node;
     const parentPageInner = parentCandidate.pageInner;
-    const parentRect = parentCandidate.rect;
 
-    if (!parentNode || !parentPageInner || !parentRect) {
-      setMessage('선택된 기준 박스를 찾지 못했습니다. 캔버스를 다시 로드한 뒤 다시 시도하세요.');
+    if (!parentPageInner) {
+      setMessage('선택된 기준 상자를 찾지 못했습니다. 캔버스를 다시 로드한 뒤 다시 시도하세요.');
       return;
     }
 
@@ -12873,77 +14461,215 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      writeFramePositionGroupAttrs(childNode, {
-        groupId: nextGroupId,
-        label: nextGroupLabel,
-        managed: false,
-      });
-
-      if (frameGroupId === parentFrameGroupId) {
-        appliedCount += 1;
-        return;
-      }
-
-      const childRect = member.rect;
-
-      if (!childRect) {
-        skippedCount += 1;
-        return;
-      }
-
-      const anchorMember = orderedGroupMembers[Math.max(0, memberIndex - 1)];
-      const anchorFrameGroupId = anchorMember?.frameGroupId || parentFrameGroupId;
-      const anchorRect = anchorMember?.rect || parentRect;
-      const preferredPins = resolvePreferredRelativeAnchorPins(childRect, anchorRect);
-      const nextConfig = buildRelativeAnchorConfigFromRect({
-        frameRect: childRect,
-        anchorRect,
-        anchorKind: 'frame',
-        anchorId: anchorFrameGroupId,
-        preferredAnchorX: preferredPins.preferredAnchorX,
-        preferredAnchorY: preferredPins.preferredAnchorY,
-      });
-      applyFramePositionMode(childNode, 'relative', parentPageInner);
-      writeFrameRelativeAnchorAttrs(childNode, nextConfig);
-      syncFrameRelativeAnchorOffsetsToCurrentRect(childNode, parentPageInner);
-      writeFramePositionGroupAttrs(childNode, {
-        groupId: nextGroupId,
-        label: nextGroupLabel,
-        managed: true,
-      });
       appliedCount += 1;
     });
 
     if (appliedCount === 0) {
       setMessage(
         skippedCount > 0
-          ? `선택 박스 그룹을 만들지 못했습니다. (${skippedCount}개 제외됨)`
-          : '선택 박스 그룹을 만들 박스가 없습니다.'
+          ? `선택 ${POSITION_GROUP_LABEL_PREFIX}을 만들지 못했습니다. (${skippedCount}개 제외됨)`
+          : `선택 ${POSITION_GROUP_LABEL_PREFIX}을 만들 상자가 없습니다.`
       );
       return;
     }
 
+    writePositionGroupTreeEntry(
+      root,
+      {
+        id: nextGroupId,
+        label: nextGroupLabel,
+        childGroupIds: selectedChildGroupIds,
+        frameGroupIds: selectedDirectFrameGroupIds,
+      },
+      regroupTargetFrameGroupIds
+    );
+    materializePositionGroupWrappers(root);
+    normalizePositionGroupRelativeAnchors(root, nextGroupId);
     ensureRelativeAnchorConfigs(root);
     applyRelativeAnchoredFrameRectsInRoot(root);
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
     setMessage(
-      `박스 묶기 완료: ${nextGroupLabel} (${appliedCount}개 박스)` +
+      `${POSITION_GROUP_LABEL_PREFIX} 만들기 완료: ${nextGroupLabel} (${appliedCount}개 상자)` +
         (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
     );
   }, [
     requestPreviewTextFit,
-    selectedPositionGroupingFrameGroupIds,
+    selectedPositionEntitySelection,
     syncDraftPreviewHtmlRef,
   ]);
   const applySelectedPositionGroupRelationFromCanvasSelection = React.useCallback(() => {
     if (selectedFrameGroupIdsRef.current.length < 2) {
-      setMessage('2개 이상의 박스를 선택해야 합니다.');
+      setMessage('2개 이상의 상자를 선택해야 합니다.');
       return;
     }
 
     applySelectedPositionGroupRelation();
   }, [applySelectedPositionGroupRelation]);
+  const assignSelectedBoxesToMoveGroup = React.useCallback(() => {
+    const root = previewRef.current;
+
+    if (!root) {
+      setMessage('캔버스를 먼저 로드하세요.');
+      return;
+    }
+
+    const targetGroupId = moveGroupAssignmentTargetGroupId.trim();
+    if (!targetGroupId) {
+      setMessage('귀속할 그룹을 먼저 선택하세요.');
+      return;
+    }
+
+    const selectedChildGroupIds = selectedPositionEntitySelection.groupIds
+      .map((groupId) => groupId.trim())
+      .filter((groupId) => Boolean(groupId) && groupId !== targetGroupId);
+    const selectedDirectFrameGroupIds = selectedPositionEntitySelection.frameGroupIds
+      .map((frameGroupId) => frameGroupId.trim())
+      .filter(Boolean);
+
+    if (selectedChildGroupIds.length + selectedDirectFrameGroupIds.length <= 0) {
+      setMessage('귀속할 그룹 또는 상자를 먼저 선택하세요.');
+      return;
+    }
+
+    const allGroups = collectPositionBoxGroups(root, { includeSingletons: false });
+    const targetGroup = allGroups.find((group) => group.id === targetGroupId) || null;
+
+    if (!targetGroup) {
+      setMessage('선택한 그룹을 찾지 못했습니다. 목록을 다시 확인하세요.');
+      return;
+    }
+
+    const materializedTargetGroupId = targetGroup.inferred
+      ? `position-box-${Date.now().toString(36)}`
+      : targetGroup.id;
+    const materializedTargetGroupLabel = targetGroup.label.trim() || readNextPositionGroupLabel(allGroups);
+    const existingTreeEntry = readPositionGroupTreeEntries(root).find((entry) => entry.id === materializedTargetGroupId) || null;
+    const assignmentSourceFrameGroupIds = Array.from(
+      new Set(
+        [
+          ...selectedDirectFrameGroupIds,
+          ...selectedChildGroupIds.flatMap((groupId) => allGroups.find((group) => group.id === groupId)?.frameGroupIds || []),
+        ]
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter(Boolean)
+      )
+    );
+    const nextChildGroupIds = Array.from(
+      new Set([...(existingTreeEntry?.childGroupIds || []), ...selectedChildGroupIds].filter(Boolean))
+    );
+    const nextFrameGroupIds = Array.from(
+      new Set([
+        ...(existingTreeEntry?.frameGroupIds || []),
+        ...(targetGroup.inferred ? targetGroup.frameGroupIds : []),
+        ...selectedDirectFrameGroupIds,
+      ].map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+    );
+    const appliedCount = selectedChildGroupIds.length + selectedDirectFrameGroupIds.length;
+    const skippedCount = 0;
+
+    if (appliedCount <= 0) {
+      setMessage(
+        skippedCount > 0
+          ? `그룹 귀속할 항목이 없습니다. (${skippedCount}개 제외됨)`
+          : '그룹 귀속에 실패했습니다.'
+      );
+      return;
+    }
+
+    writePositionGroupTreeEntry(
+      root,
+      {
+        id: materializedTargetGroupId,
+        label: materializedTargetGroupLabel,
+        childGroupIds: nextChildGroupIds,
+        frameGroupIds: nextFrameGroupIds,
+      },
+      [...assignmentSourceFrameGroupIds, ...nextFrameGroupIds]
+    );
+    materializePositionGroupWrappers(root);
+    normalizePositionGroupRelativeAnchors(root, materializedTargetGroupId);
+    applyRelativeAnchoredFrameRectsInRoot(root);
+    syncDraftPreviewHtmlRef();
+    requestPreviewTextFit();
+    schedulePreviewEditorState();
+    setMessage(
+      `그룹 귀속 완료: ${materializedTargetGroupLabel} (${appliedCount}개 상자)` +
+        (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
+    );
+  }, [
+    moveGroupAssignmentTargetGroupId,
+    requestPreviewTextFit,
+    schedulePreviewEditorState,
+    selectedPositionEntitySelection,
+    syncDraftPreviewHtmlRef,
+  ]);
+  const removeSelectedBoxesFromMoveGroupOnly = React.useCallback(() => {
+    const root = previewRef.current;
+
+    if (!root) {
+      setMessage('캔버스를 먼저 로드하세요.');
+      return;
+    }
+
+    const selectedTargetFrameGroupIds = Array.from(
+      new Set(
+        selectedPositionGroupingFrameGroupIds
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter((frameGroupId) => Boolean(frameGroupId))
+      )
+    );
+
+    if (selectedTargetFrameGroupIds.length <= 0) {
+      setMessage('그룹에서 제외할 상자를 먼저 선택하세요.');
+      return;
+    }
+
+    let removedCount = 0;
+    let skippedCount = 0;
+
+    selectedTargetFrameGroupIds.forEach((frameGroupId) => {
+      const targetNode = resolveFrameSelectionAnchor(
+        root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
+      );
+
+      if (!targetNode) {
+        skippedCount += 1;
+        return;
+      }
+
+      const currentConfig = readFramePositionGroupConfig(targetNode);
+      if (!currentConfig?.groupId) {
+        skippedCount += 1;
+        return;
+      }
+
+      writeFramePositionGroupAttrs(targetNode, null);
+      removedCount += 1;
+    });
+
+    if (removedCount <= 0) {
+      setMessage(
+        skippedCount > 0
+          ? `선택 항목을 그룹에서 제외하지 못했습니다. (${skippedCount}개 제외됨)`
+          : '제외할 그룹 소속 항목이 없습니다.'
+      );
+      return;
+    }
+
+    syncDraftPreviewHtmlRef();
+    requestPreviewTextFit();
+    schedulePreviewEditorState();
+    setMessage(
+      `선택 항목 그룹 제외 완료: ${removedCount}개 상자` +
+        (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
+    );
+  }, [
+    requestPreviewTextFit,
+    schedulePreviewEditorState,
+    selectedPositionGroupingFrameGroupIds,
+    syncDraftPreviewHtmlRef,
+  ]);
 
   const clearSelectedPositionGroupRelation = React.useCallback(() => {
     const root = previewRef.current;
@@ -12960,6 +14686,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         explicitGroupByFrameGroupId.set(frameGroupId, group);
       });
     });
+    const targetGroupIds = Array.from(
+      new Set(
+        selectedPositionGroupingFrameGroupIds
+          .map((frameGroupId) => explicitGroupByFrameGroupId.get(frameGroupId)?.id || '')
+          .filter((groupId) => Boolean(groupId))
+      )
+    );
     const targetIds = Array.from(
       new Set(
         selectedPositionGroupingFrameGroupIds.flatMap((frameGroupId) => {
@@ -12970,7 +14703,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
 
     if (targetIds.length === 0) {
-      setMessage('해제할 명시 박스 그룹이 없습니다. 먼저 그룹에 속한 박스를 선택하세요.');
+      setMessage(`해제할 명시 ${POSITION_GROUP_LABEL_PREFIX}이 없습니다. 먼저 그룹에 속한 상자를 선택하세요.`);
       return;
     }
 
@@ -12994,11 +14727,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       clearedCount += 1;
     });
 
+    removePositionGroupTreeEntriesByIds(root, targetGroupIds);
+    removePositionGroupWrappersByIds(root, targetGroupIds);
     if (clearedCount === 0) {
       setMessage(
         skippedCount > 0
-          ? `해제할 박스를 찾지 못해 반영되지 않았습니다. (${skippedCount}개 제외됨)`
-          : '해제할 박스가 없습니다.'
+          ? `해제할 상자를 찾지 못해 반영되지 않았습니다. (${skippedCount}개 제외됨)`
+          : '해제할 상자가 없습니다.'
       );
       return;
     }
@@ -13006,7 +14741,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyRelativeAnchoredFrameRectsInRoot(root);
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
-    setMessage(`선택 박스 그룹 해제 완료: ${clearedCount}개 박스` + (skippedCount > 0 ? `, ${skippedCount}개 제외` : ''));
+    setMessage(`선택 ${POSITION_GROUP_LABEL_PREFIX} 해제 완료: ${clearedCount}개 상자` + (skippedCount > 0 ? `, ${skippedCount}개 제외` : ''));
   }, [requestPreviewTextFit, selectedPositionGroupingFrameGroupIds, syncDraftPreviewHtmlRef]);
 
   const readSelectionStyleDraftFromControls = React.useCallback((): SelectionStyleDraft => {
@@ -13038,7 +14773,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const applySelectionStyleDraft = React.useCallback(() => {
     if (selectedFrameGroupIdsRef.current.length === 0) {
-      setMessage('스타일을 적용할 박스를 먼저 선택하세요.');
+      setMessage('스타일을 적용할 상자를 먼저 선택하세요.');
       return false;
     }
 
@@ -13101,7 +14836,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
     if (!root || activeSelectionIds.length === 0) {
-      setMessage('텍스트를 적용할 박스를 먼저 선택하세요.');
+      setMessage('텍스트를 적용할 상자를 먼저 선택하세요.');
       return;
     }
 
@@ -13127,8 +14862,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setSelectionTextMixed(false);
     setMessage(
       activeSelectionIds.length > 1
-        ? `선택한 ${activeSelectionIds.length}개 박스 텍스트를 일괄 반영했습니다.`
-        : '선택 박스 텍스트를 반영했습니다.'
+        ? `선택한 ${activeSelectionIds.length}개 상자 텍스트를 일괄 반영했습니다.`
+        : '선택 상자 텍스트를 반영했습니다.'
     );
   }, [getFrameNodes, requestPreviewTextFit, selectionTextDraft, syncDraftPreviewHtmlRef]);
 
@@ -13158,7 +14893,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
     if (!root || activeSelectionIds.length === 0) {
-      setMessage('메타데이터를 적용할 박스를 먼저 선택하세요.');
+      setMessage('메타데이터를 적용할 상자를 먼저 선택하세요.');
       return {
         ok: false,
         skipped: false,
@@ -13273,7 +15008,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           issues: [
             {
               frameGroupId: parentGroupId,
-              message: `${parentGroupId} 의 key 박스 text 보정이 취소되어 저장을 중단했습니다.`,
+              message: `${parentGroupId} 의 key 상자 text 보정이 취소되어 저장을 중단했습니다.`,
             },
           ],
         };
@@ -13363,14 +15098,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (nextMetadata.boxKind && nextMetadata.boxKind !== 'text' && nextMetadata.role === 'key') {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 ${nextMetadata.boxKind} 박스라 key 역할을 가질 수 없습니다.`,
+          message: `${frameGroupId} 는 ${nextMetadata.boxKind} 상자라 key 역할을 가질 수 없습니다.`,
         });
       }
 
       if (nextMetadata.role === 'value' && !nextMetadata.parentGroupId) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 value 역할이라 연결된 key 박스가 필요합니다.`,
+          message: `${frameGroupId} 는 value 역할이라 연결된 key 상자가 필요합니다.`,
         });
       }
 
@@ -13381,14 +15116,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       ) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+          message: `${frameGroupId} 의 key 상자 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
         });
       }
 
       if (nextMetadata.parentGroupId === frameGroupId) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 자기 자신을 key 박스로 가질 수 없습니다.`,
+          message: `${frameGroupId} 는 자기 자신을 key 상자로 가질 수 없습니다.`,
         });
       }
 
@@ -13399,12 +15134,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         if (!parentMetadata && !isVirtualParent) {
           issues.push({
             frameGroupId,
-            message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+            message: `${frameGroupId} 의 key 상자 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
           });
         } else if (parentMetadata && !isVirtualParent && (parentMetadata.boxKind !== 'text' || parentMetadata.role !== 'key')) {
           issues.push({
             frameGroupId,
-            message: `${frameGroupId} 의 key 박스 ${nextMetadata.parentGroupId} 는 text key 박스여야 합니다.`,
+            message: `${frameGroupId} 의 key 상자 ${nextMetadata.parentGroupId} 는 text key 상자여야 합니다.`,
           });
         }
       }
@@ -13427,7 +15162,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       ) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 의 runtime mode ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 박스와 호환되지 않습니다.`,
+          message: `${frameGroupId} 의 runtime mode ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 상자와 호환되지 않습니다.`,
         });
       }
     });
@@ -13540,13 +15275,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
     if (activeSelectionIds.length === 0) {
-      setMessage('저장할 박스를 먼저 선택하세요.');
+      setMessage('저장할 상자를 먼저 선택하세요.');
       setSelectionSaveProgress({
         phase: 'failed',
         title: '선택 항목 저장',
         percent: 100,
-        stage: '선택 박스가 없습니다.',
-        detail: '박스 편집 캔버스에서 먼저 박스를 선택한 뒤 다시 저장하세요.',
+        stage: '선택 상자가 없습니다.',
+        detail: '상자 편집 캔버스에서 먼저 상자를 선택한 뒤 다시 저장하세요.',
       });
       return;
     }
@@ -13556,8 +15291,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       phase: 'running',
       title: '선택 항목 저장',
       percent: 12,
-      stage: '선택 박스 확인 중',
-      detail: `${activeSelectionIds.length}개 박스의 메타데이터와 스타일 저장 가능 여부를 확인하고 있습니다.`,
+      stage: '선택 상자 확인 중',
+      detail: `${activeSelectionIds.length}개 상자의 메타데이터와 스타일 저장 가능 여부를 확인하고 있습니다.`,
     });
     await waitForNextPaint();
 
@@ -13574,7 +15309,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stage: '메타데이터 저장 실패',
         detail:
           errorCount > 0
-            ? `${errorCount}개 오류를 모두 수집했습니다. 빨간 박스와 상세 사유를 확인하세요.`
+            ? `${errorCount}개 오류를 모두 수집했습니다. 빨간 상자와 상세 사유를 확인하세요.`
             : '메타데이터를 저장할 수 없습니다.',
       });
       setMessage(
@@ -13593,7 +15328,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       stage: metadataResult.skipped ? '메타데이터 변경 없음' : '메타데이터 반영 중',
       detail: metadataResult.skipped
         ? '메타데이터 변경은 없어 스타일 저장 단계로 바로 넘어갑니다.'
-        : '선택한 박스의 메타데이터를 캔버스에 반영했습니다.',
+        : '선택한 상자의 메타데이터를 캔버스에 반영했습니다.',
     });
     await waitForNextPaint();
 
@@ -13602,7 +15337,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       title: '선택 항목 저장',
       percent: 82,
       stage: '스타일 반영 중',
-      detail: `${activeSelectionIds.length}개 박스의 스타일을 일괄 적용하고 있습니다.`,
+      detail: `${activeSelectionIds.length}개 상자의 스타일을 일괄 적용하고 있습니다.`,
     });
     await waitForNextPaint();
 
@@ -13624,13 +15359,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       stage: '선택 항목 저장 완료',
       detail:
         activeSelectionIds.length > 1
-          ? `선택한 ${activeSelectionIds.length}개 박스에 메타데이터와 스타일을 반영했습니다.`
-          : '선택 박스의 메타데이터와 스타일을 반영했습니다.',
+          ? `선택한 ${activeSelectionIds.length}개 상자에 메타데이터와 스타일을 반영했습니다.`
+          : '선택 상자의 메타데이터와 스타일을 반영했습니다.',
     });
     setMessage(
       activeSelectionIds.length > 1
-        ? `선택한 ${activeSelectionIds.length}개 박스에 설정을 일괄 반영했습니다.`
-        : '선택 박스 설정을 반영했습니다.'
+        ? `선택한 ${activeSelectionIds.length}개 상자에 설정을 일괄 반영했습니다.`
+        : '선택 상자 설정을 반영했습니다.'
     );
   }, [applySelectionMetadataDraft, applySelectionStyleDraft, waitForNextPaint]);
 
@@ -13692,6 +15427,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       applyFramePositionMode(frameNode, nextMode, pageInner);
       ensureRelativeAnchorConfigs(root);
+      normalizePositionGroupRelativeAnchors(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
       normalizeLiveVerticalCohorts(root);
       const snapshot = buildLiveEdgeTopologySnapshot(root);
@@ -13709,7 +15445,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         )
       );
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
-      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current.slice());
       syncDraftPreviewHtmlRef();
@@ -13728,7 +15464,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       syncSelectionStyleDraft,
       positionRelationAnchorFrameGroupId,
       selectionPanelTab,
-      focusedDefinedPositionRelativeRelations,
+      highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
     ]
   );
@@ -13743,7 +15479,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
 
     if (!root || selectedIds.length <= 0) {
-      setMessage('먼저 박스를 선택하세요.');
+      setMessage('먼저 상자를 선택하세요.');
       return;
     }
 
@@ -13770,11 +15506,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
 
     if (clearedCount <= 0) {
-      setMessage('선택한 박스 중 상대 위치가 설정된 항목이 없습니다.');
+      setMessage('선택한 상자 중 상대 위치가 설정된 항목이 없습니다.');
       return;
     }
 
     ensureRelativeAnchorConfigs(root);
+    normalizePositionGroupRelativeAnchors(root);
     applyRelativeAnchoredFrameRectsInRoot(root);
     normalizeLiveVerticalCohorts(root);
     const snapshot = buildLiveEdgeTopologySnapshot(root);
@@ -13792,14 +15529,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       )
     );
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
-    applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+    applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
     applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     setSelectedFrameGroupIds(selectedFrameGroupIdsRef.current.slice());
     syncDraftPreviewHtmlRef();
     syncSelectionStyleDraft();
     requestPreviewTextFit();
     setMessage(
-      `선택한 ${clearedCount}개 박스의 상대 위치를 해제했습니다.` +
+      `선택한 ${clearedCount}개 상자의 상대 위치를 해제했습니다.` +
         (skippedCount > 0 ? ` (${skippedCount}개 제외)` : '')
     );
   }, [
@@ -13812,7 +15549,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolvePositionGroupProxySelections,
     selectionPanelTab,
     positionRelationAnchorFrameGroupId,
-    focusedDefinedPositionRelativeRelations,
+    highlightedDefinedPositionRelativeRelations,
     positionSpacingGuideRelations,
     syncDraftPreviewHtmlRef,
     syncSelectionStyleDraft,
@@ -14791,6 +16528,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             }
           : previous
       );
+      lastPersistedDraftHtmlRef.current = currentHtml.trim();
+      queuedAutoPersistDraftHtmlRef.current = '';
+      cancelScheduledAutoPersistDraft();
       setMessage(`템플릿 ${normalizedTemplateId} 저장을 완료했습니다.`);
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : '템플릿 저장에 실패했습니다.';
@@ -14802,6 +16542,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     layoutResizeMode,
     selectedTemplateId,
     sourceDocumentName,
+    cancelScheduledAutoPersistDraft,
     syncDraftPreviewHtmlRef,
     templateDetail?.template.id,
     templateName,
@@ -14891,7 +16632,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           selectedFrameGroupIdsRef.current,
           positionRelationAnchorFrameGroupId
         );
-        applyDefinedPositionRelativeRelationUi(previewRef.current, selectionPanelTab, focusedDefinedPositionRelativeRelations);
+        applyDefinedPositionRelativeRelationUi(previewRef.current, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
         applyPositionSpacingGuideUi(previewRef.current, selectionPanelTab, positionSpacingGuideRelations);
       }
       setEdgeRoleDiagnostics((previous) =>
@@ -14921,7 +16662,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvePositionGroupProxySelections,
       selectionPanelTab,
       positionRelationAnchorFrameGroupId,
-      focusedDefinedPositionRelativeRelations,
+      highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
       requestPreviewTextFit,
       schedulePreviewEditorState,
@@ -14930,43 +16671,39 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     ]
   );
 
-  const cancelPositionOrderLockSelection = React.useCallback(() => {
-    if (!positionOrderLockSelectionMode) {
-      return;
+  const clearFrameSelection = React.useCallback(() => {
+    const hasInteractionInProgress = Boolean(
+      dragStateRef.current ||
+        resizeStateRef.current ||
+        edgePressStateRef.current ||
+        marqueeSelectionStateRef.current ||
+        createBoxStateRef.current
+    );
+
+    if (hasInteractionInProgress) {
+      stopPointerInteraction();
     }
 
-    setPositionOrderLockSelectionMode(false);
-    setPositionOrderLockFrameGroupIds([]);
-    setPositionOrderLockSelectionKindByFrameGroupId({});
-    setPositionOrderLockCandidateFrameGroupId('');
-    setPositionOrderLockCandidateGroupId('');
-    setPositionOrderLockCandidateSelectionStage('');
-    positionGroupProxySelectionShowAllGroupsRef.current = false;
-    positionGroupProxySelectionsOverrideRef.current = null;
-    applyFrameBoxSelection(selectedFrameGroupIdsRef.current.slice(), {
-      positionGroupProxySelectionGroupId: '',
-      showAllGroupProxySelections: false,
-    });
-    setMessage('박스 간격 고정하기를 취소했습니다.');
-  }, [applyFrameBoxSelection, positionOrderLockSelectionMode]);
-
-  const clearFrameSelection = React.useCallback(() => {
-    stopPointerInteraction();
+    const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
     positionGroupProxySelectionGroupIdRef.current = '';
     positionGroupProxySelectionShowAllGroupsRef.current = false;
     positionGroupProxySelectionsOverrideRef.current = null;
+    selectedFrameGroupIdsRef.current = [];
+    edgeSelectionStateRef.current = emptyEdgeSelection;
     setPositionOrderLockSelectionMode(false);
     setPositionOrderLockFrameGroupIds([]);
     setPositionOrderLockSelectionKindByFrameGroupId({});
     setPositionOrderLockCandidateFrameGroupId('');
     setPositionOrderLockCandidateGroupId('');
     setPositionOrderLockCandidateSelectionStage('');
+    setPositionSelectionClickChainSnapshot(null);
     setSelectionValidationIssues([]);
     setSelectionSaveProgress(defaultSelectionSaveProgressState);
     setSelectedFrameGroupIds([]);
-    setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
+    setEdgeSelectionState(emptyEdgeSelection);
     setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
-  }, [stopPointerInteraction]);
+    applyRuntimeSelectionUi([], emptyEdgeSelection, []);
+  }, [applyRuntimeSelectionUi, stopPointerInteraction]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -14978,16 +16715,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      if (positionOrderLockSelectionMode) {
-        event.preventDefault();
-        cancelPositionOrderLockSelection();
+      const hasSelection =
+        selectedFrameGroupIdsRef.current.length > 0 ||
+        edgeSelectionStateRef.current.tokens.length > 0 ||
+        positionOrderLockSelectionMode;
+
+      if (!hasSelection) {
         return;
       }
 
-      if (selectedFrameGroupIdsRef.current.length === 0 && edgeSelectionStateRef.current.tokens.length === 0) {
-        return;
-      }
-
+      event.preventDefault();
       clearFrameSelection();
     };
 
@@ -14995,7 +16732,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [cancelPositionOrderLockSelection, clearFrameSelection, positionOrderLockSelectionMode]);
+  }, [clearFrameSelection, positionOrderLockSelectionMode]);
 
   const handlePreviewPointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -15046,7 +16783,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         if (boxCreationPositionMode === 'relative' && !anchorFrameGroupId) {
           setBoxCreationPositionMode('absolute');
-          setMessage('상대 기준 박스 1개가 없어 이번 생성은 절대 위치 모드로 전환합니다.');
+          setMessage('상대 기준 상자 1개가 없어 이번 생성은 절대 위치 모드로 전환합니다.');
         }
 
         event.preventDefault();
@@ -15067,11 +16804,34 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
+      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle && pageInner && !frameNode) {
+        const pointerPoint = readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100);
+        const hitGroup = resolveTopLevelPositionGroupHitAtPoint(pageInner, pointerPoint);
+
+        if (hitGroup) {
+          const groupSelectionIds = hitGroup.frameGroupIds
+            .map((frameGroupId) => frameGroupId.trim())
+            .filter((frameGroupId) => Boolean(frameGroupId));
+
+          if (groupSelectionIds.length > 0) {
+            event.preventDefault();
+            applyFrameBoxSelection(groupSelectionIds, {
+              positionGroupProxySelectionGroupId: hitGroup.group.id,
+              showAllGroupProxySelections: true,
+            });
+            return;
+          }
+        }
+      }
+
       const shouldStartMarqueeSelection =
-        !edgeButton && !resizeHandle && Boolean(pageInner) && (event.shiftKey || !frameNode);
+        !edgeButton &&
+        !resizeHandle &&
+        Boolean(pageInner) &&
+        (!frameNode || (event.shiftKey && selectionPanelTab !== 'position'));
 
       if (shouldStartMarqueeSelection && pageInner) {
-        const useGroupedShiftSelection = selectionPanelTab === 'position';
+        const useGroupedShiftSelection = selectionPanelTab === 'position' && positionOrderLockSelectionMode;
         const shouldAccumulateSelection = Boolean(event.shiftKey);
         const rawAnchorFrameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
         const resolvedAnchorFrameGroupId = rawAnchorFrameGroupId;
@@ -15105,7 +16865,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           anchorFrameGroupId: resolvedAnchorFrameGroupId || null,
           baseSelectionIds,
           lastSelectionIds: baseSelectionIds.slice(),
-          lastProxySelections: useGroupedShiftSelection
+        lastProxySelections: selectionPanelTab === 'position'
             ? resolvePositionMarqueeProxySelections(pageInner, baseSelectionIds)
             : undefined,
           origin: readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100),
@@ -15117,6 +16877,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       if (!frameNode) {
+        if (
+          !edgeButton &&
+          !resizeHandle &&
+          !pageInner &&
+          (selectedFrameGroupIdsRef.current.length > 0 || edgeSelectionStateRef.current.tokens.length > 0)
+        ) {
+          event.preventDefault();
+          clearFrameSelection();
+        }
         return;
       }
 
@@ -15127,67 +16896,84 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
-        const selectedPositionBoxGroup = positionBoxGroupByFrameGroupId.get(frameGroupId) || null;
-        const selectedPositionBoxGroupIds = selectedPositionBoxGroup?.frameGroupIds || [];
-
         if (positionOrderLockSelectionMode) {
-          if (selectedPositionBoxGroupIds.length > 1) {
-            const groupSelectionFrameGroupId = frameGroupId;
-            const selectedGroupId = selectedPositionBoxGroup?.id || '';
-            const normalizedCandidateFrameGroupId = positionOrderLockCandidateFrameGroupId.trim();
-            const normalizedCandidateGroupId = positionOrderLockCandidateGroupId.trim();
-            const isSameCandidateGroup = Boolean(selectedGroupId) && normalizedCandidateGroupId === selectedGroupId;
-            const isCandidateGroupProxySelection =
-              isSameCandidateGroup && normalizedCandidateFrameGroupId === groupSelectionFrameGroupId;
-            const selectedGroupSelectionFrameGroupId =
-              positionOrderLockFrameGroupIds.find((selectedId) => {
-                const normalizedSelectedId = selectedId.trim();
-                if (!normalizedSelectedId) {
-                  return false;
-                }
-
-                return (
-                  (positionBoxGroupByFrameGroupId.get(normalizedSelectedId)?.id || '') === selectedGroupId &&
-                  (positionOrderLockSelectionKindByFrameGroupId[normalizedSelectedId] || 'frame') === 'group'
-                );
-              }) || '';
-            const canConvertExistingGroupSelectionToFrame =
-              Boolean(selectedGroupSelectionFrameGroupId) &&
-              frameGroupId !== selectedGroupSelectionFrameGroupId;
-
-            event.preventDefault();
-            if (canConvertExistingGroupSelectionToFrame) {
-              previewPositionOrderLockCandidateSelection(frameGroupId, {
-                preserveFrameGroupId: true,
-                candidateGroupId: selectedGroupId,
-                disableProxySelection: true,
-                commitSelection: true,
-                replaceSelectionFromGroupId: selectedGroupId,
-              });
-              return;
+          event.preventDefault();
+          const pointerPoint = pageInner
+            ? readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100)
+            : null;
+          const clickChain = resolvePositionSelectionClickChain(pageInner, frameGroupId, pointerPoint);
+          const normalizedCandidateFrameGroupId = positionOrderLockCandidateFrameGroupId.trim();
+          const normalizedCandidateGroupId = positionOrderLockCandidateGroupId.trim();
+          const currentChainIndex = clickChain.entries.findIndex((entry) => {
+            if (entry.frameGroupId !== normalizedCandidateFrameGroupId) {
+              return false;
             }
 
-            if (!isCandidateGroupProxySelection) {
-              previewPositionOrderLockCandidateSelection(groupSelectionFrameGroupId, {
-                positionGroupProxySelectionGroupId: selectedGroupId,
-                candidateGroupId: selectedGroupId,
-                commitSelection: true,
-              });
-              return;
+            if (entry.kind === 'group') {
+              return normalizedCandidateGroupId === entry.groupId;
             }
 
+            return normalizedCandidateGroupId.length === 0;
+          });
+          const nextChainIndex =
+            clickChain.entries.length > 0
+              ? currentChainIndex >= 0
+                ? (currentChainIndex + 1) % clickChain.entries.length
+                : 0
+              : -1;
+          const nextEntry = nextChainIndex >= 0 ? clickChain.entries[nextChainIndex] : null;
+
+          if (!nextEntry) {
             previewPositionOrderLockCandidateSelection(frameGroupId, {
               preserveFrameGroupId: true,
-              candidateGroupId: selectedGroupId,
               disableProxySelection: true,
               commitSelection: true,
-              replaceSelectionFromGroupId: selectedGroupId,
             });
             return;
           }
 
-          event.preventDefault();
-          previewPositionOrderLockCandidateSelection(frameGroupId, { commitSelection: true });
+          if (nextEntry.kind === 'group') {
+            previewPositionOrderLockCandidateSelection(frameGroupId, {
+              positionGroupProxySelectionGroupId: nextEntry.groupId,
+              candidateGroupId: nextEntry.groupId,
+              commitSelection: true,
+            });
+            return;
+          }
+
+          const groupIdsToReplace = clickChain.entries
+            .filter(
+              (
+                entry
+              ): entry is {
+                kind: 'group';
+                frameGroupId: string;
+                groupId: string;
+                groupFrameGroupIds?: string[];
+              } => entry.kind === 'group'
+            )
+            .map((entry) => entry.groupId);
+          const selectedGroupIdToReplace =
+            groupIdsToReplace.find((groupId) => {
+              const group = positionBoxGroups.find((candidateGroup) => candidateGroup.id === groupId) || null;
+              if (!group) {
+                return false;
+              }
+
+              return group.frameGroupIds.some(
+                (memberFrameGroupId) =>
+                  positionOrderLockFrameGroupIds.includes(memberFrameGroupId) &&
+                  (positionOrderLockSelectionKindByFrameGroupId[memberFrameGroupId] || 'frame') === 'group'
+              );
+            }) || '';
+
+          previewPositionOrderLockCandidateSelection(frameGroupId, {
+            preserveFrameGroupId: true,
+            candidateGroupId: selectedGroupIdToReplace,
+            disableProxySelection: true,
+            commitSelection: true,
+            replaceSelectionFromGroupId: selectedGroupIdToReplace,
+          });
           return;
         }
 
@@ -15211,7 +16997,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             if (currentProxyGroupId) {
               return entry.groupId === currentProxyGroupId;
             }
-            return entry.frameGroupId === currentSelectedId;
+
+            if (currentSelectionIds.length > 1 && (entry.groupFrameGroupIds?.length || 0) > 1) {
+              const entrySelectionIds = Array.from(
+                new Set(
+                  (entry.groupFrameGroupIds || [])
+                    .map((candidateFrameGroupId) => candidateFrameGroupId.trim())
+                    .filter((candidateFrameGroupId) => Boolean(candidateFrameGroupId))
+                )
+              );
+              if (entrySelectionIds.length === currentSelectionIds.length) {
+                const currentSelectionIdSet = new Set(currentSelectionIds);
+                return entrySelectionIds.every((candidateFrameGroupId) => currentSelectionIdSet.has(candidateFrameGroupId));
+              }
+            }
+
+            return false;
           }
 
           return entry.frameGroupId === currentSelectedId && currentProxyGroupId.length === 0;
@@ -15231,12 +17032,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         if (nextEntry.kind === 'group') {
           const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
+          const nextSelectionIdsFromEntry = Array.from(
+            new Set(
+              (nextEntry.groupFrameGroupIds || [])
+                .map((candidateFrameGroupId) => candidateFrameGroupId.trim())
+                .filter((candidateFrameGroupId) => Boolean(candidateFrameGroupId))
+            )
+          );
           const nextSelectionIds =
-            nextGroup?.frameGroupIds
-              .map((frameGroupId) => frameGroupId.trim())
-              .filter((frameGroupId) => Boolean(frameGroupId)) || [];
+            nextSelectionIdsFromEntry.length > 0
+              ? nextSelectionIdsFromEntry
+              : nextGroup?.frameGroupIds
+                  .map((candidateFrameGroupId) => candidateFrameGroupId.trim())
+                  .filter((candidateFrameGroupId) => Boolean(candidateFrameGroupId)) || [];
+          const proxySelection =
+            nextSelectionIds.length > 1
+              ? [
+                  {
+                    groupId: nextEntry.groupId,
+                    label: nextGroup?.label || nextEntry.groupId,
+                    frameGroupIds: nextSelectionIds,
+                  },
+                ]
+              : undefined;
           applyFrameBoxSelection(nextSelectionIds.length > 0 ? nextSelectionIds : [nextEntry.frameGroupId], {
             positionGroupProxySelectionGroupId: nextEntry.groupId,
+            overridePositionGroupProxySelections: proxySelection,
           });
           return;
         }
@@ -15354,6 +17175,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       boxCreationPositionMode,
       buildLiveEdgeTopologySnapshot,
       applyFrameBoxSelection,
+      clearFrameSelection,
       getFrameNodes,
       handleMetadataRelationFramePick,
       lockPreviewEditorStateDuringInteraction,
@@ -15365,6 +17187,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionBoxGroupByFrameGroupId,
       positionOrderLockSelectionMode,
       resolvePositionSelectionClickChain,
+      resolveTopLevelPositionGroupHitAtPoint,
       previewPositionOrderLockCandidateSelection,
       previewZoom,
       selectionPanelTab,
@@ -15416,10 +17239,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         nextMode,
         marqueeSelectionState.baseSelectionIds
       );
-      const marqueeProxySelections = resolvePositionMarqueeProxySelections(
-        marqueeSelectionState.pageInner,
-        nextSelectionIds
-      );
+      const shouldShowMarqueeProxySelections = selectionPanelTab === 'position';
+      const marqueeProxySelections = shouldShowMarqueeProxySelections
+        ? resolvePositionMarqueeProxySelections(
+            marqueeSelectionState.pageInner,
+            nextSelectionIds
+          )
+        : undefined;
       marqueeSelectionState.lastSelectionIds = nextSelectionIds;
       marqueeSelectionState.lastProxySelections = marqueeProxySelections;
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
@@ -16046,6 +17872,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolveLiveEdgeResizeTargets,
     resolveMarqueeSelectionIds,
     resolvePositionMarqueeProxySelections,
+    selectionPanelTab,
+    positionOrderLockSelectionMode,
     stabilizeLiveVerticalEdgeTargetsToAppliedDelta,
     syncLiveAppliedEdgeDeltas,
   ]);
@@ -16887,7 +18715,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           <div className="space-y-1">
             <h1 className="text-3xl font-semibold text-slate-950">템플릿 편집</h1>
             <p className="max-w-3xl text-sm text-slate-600">
-              추출 페이지에서 저장한 템플릿을 불러와 div 박스를 여러 개 선택하고, 너비·높이·텍스트 크기·여백·정렬을
+              추출 페이지에서 저장한 템플릿을 불러와 div 상자를 여러 개 선택하고, 너비·높이·텍스트 크기·여백·정렬을
               한 번에 조정합니다.
             </p>
           </div>
@@ -16982,7 +18810,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         <Card className="border-slate-200 min-w-0 overflow-hidden">
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
-              <CardTitle>박스 편집 캔버스</CardTitle>
+              <CardTitle>상자 편집 캔버스</CardTitle>
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
@@ -17018,32 +18846,64 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <MetadataCanvasLegend />
             </CardContent>
           ) : null}
-          {selectionPanelTab === 'position' && hasSelectedPositionBoxes && !positionOrderLockSelectionMode ? (
-            <CardContent className="grid grid-cols-2 gap-1.5 px-6 pb-3 pt-0">
+          {selectionPanelTab === 'position' && !positionOrderLockSelectionMode ? (
+            <CardContent className="grid grid-cols-2 gap-1.5 px-6 pb-3 pt-0 md:grid-cols-3">
               <button
                 type="button"
                 className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
-                  selectedPositionGroupingFrameGroupIds.length < 2 ? 'opacity-50' : ''
+                  !canCreatePositionGroupFromSelection ? 'opacity-50' : ''
                 }`}
                 onClick={applySelectedPositionGroupRelationFromCanvasSelection}
+                disabled={!canCreatePositionGroupFromSelection}
               >
-                박스 묶기
+                그룹 만들기
               </button>
               <button
                 type="button"
                 className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
-                  selectedPositionGroupingFrameGroupIds.length < 2 ? 'opacity-50' : ''
+                  !canStartPositionSpacingLockFromSelection ? 'opacity-50' : ''
                 }`}
                 onClick={startPositionOrderLockSelectionFromCurrentCanvasSelection}
+                disabled={!canStartPositionSpacingLockFromSelection}
               >
-                박스 간격 고정
+                상자 간격 고정
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
+                  !canClearSelectedPositionGroups ? 'opacity-50' : ''
+                }`}
+                onClick={clearSelectedPositionGroupRelation}
+                disabled={!canClearSelectedPositionGroups}
+              >
+                그룹 해제
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
+                  !canRemoveSelectedItemsFromGroup ? 'opacity-50' : ''
+                }`}
+                onClick={removeSelectedBoxesFromMoveGroupOnly}
+                disabled={!canRemoveSelectedItemsFromGroup}
+              >
+                선택 상자 그룹에서 제외
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 ${
+                  !canAssignSelectedItemsToGroup ? 'opacity-50' : ''
+                }`}
+                onClick={assignSelectedBoxesToMoveGroup}
+                disabled={!canAssignSelectedItemsToGroup}
+              >
+                선택 항목 그룹에 포함
               </button>
             </CardContent>
           ) : null}
           {selectionPanelTab === 'position' && positionOrderLockSelectionMode ? (
             <CardContent className="px-6 pb-3 pt-0">
               <div className="space-y-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] leading-4 text-amber-900">
-                <div>{positionOrderLockSelectionGuideText}</div>
+                <div>{positionOrderLockActionGuideText}</div>
                 {positionSpacingPairSummaries.length > 0 ? (
                   <div className="space-y-1">
                     {positionSpacingPairSummaries.map((pair) => {
@@ -17098,12 +18958,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                               px
                             </span>
                           </div>
+                          {pair.hasExistingRelation ? (
+                            <span
+                              className={`text-[10px] ${
+                                positionSpacingDuplicatePairKeySet.has(pair.pairKey)
+                                  ? 'font-semibold text-amber-700'
+                                  : 'text-slate-500'
+                              }`}
+                            >
+                              {pair.existingGapMixed
+                                ? '기존 고정 간격: 다중'
+                                : `기존 고정 간격: ${Math.round(Math.max(0, pair.existingGapY || 0))}px`}
+                              {positionSpacingDuplicatePairKeySet.has(pair.pairKey) ? ' (중복)' : ''}
+                            </span>
+                          ) : null}
                           <button
                             type="button"
                             className="ml-auto inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
                             onClick={() => removePositionOrderLockTargetSelection(pair.targetSelectionEntityId)}
-                            aria-label="선택 박스 취소"
-                            title="선택 박스 취소"
+                            aria-label="선택 상자 취소"
+                            title="선택 상자 취소"
                           >
                             <X className="h-3.5 w-3.5" />
                           </button>
@@ -17117,10 +18991,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     size="sm"
                     variant="outline"
                     onClick={confirmPositionOrderLock}
-                    disabled={positionOrderLockConfirmPreviewCount < 2}
+                    disabled={positionOrderLockConfirmDisabled}
                     className="h-7 w-full text-[11px]"
                   >
-                    {positionOrderLockConfirmButtonLabel}
+                    {positionOrderLockActionButtonLabel}
                   </Button>
                 </div>
               </div>
@@ -17207,12 +19081,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="mt-3 text-sm font-semibold">{selectionSaveProgress.stage}</div>
                 <div className="mt-1 text-[11px] leading-5 opacity-90">
                   {selectionSaveProgress.phase === 'idle'
-                    ? '선택 박스의 메타데이터와 스타일을 점검하고, 저장 중에는 진행률과 결과를 이곳에 표시합니다.'
+                    ? '선택 상자의 메타데이터와 스타일을 점검하고, 저장 중에는 진행률과 결과를 이곳에 표시합니다.'
                     : selectionSaveProgress.detail}
                 </div>
                 {selectionValidationIssues.length > 0 ? (
                   <div className="mt-3 rounded-md border border-rose-200 bg-white/80 p-3 text-[11px] text-rose-950">
-                    <div className="font-semibold">문제가 된 박스</div>
+                    <div className="font-semibold">문제가 된 상자</div>
                     <ul className="mt-2 space-y-1">
                       {selectionValidationIssues.map((issue, index) => (
                         <li key={`${issue.frameGroupId}-${index}`}>
@@ -17224,12 +19098,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 ) : null}
                 </div>
               ) : null}
-              <UnderlineTabs
+              <UnderlineTabs<SelectionPanelTab>
                 tabs={[
                   { key: 'summary', label: '요약' },
-                  { key: 'create', label: '박스 생성' },
+                  { key: 'create', label: '상자 생성' },
                   { key: 'metadata', label: '메타데이터' },
-                  { key: 'position', label: '박스 위치' },
+                  { key: 'position', label: '상자 위치' },
                   { key: 'text', label: '텍스트' },
                   { key: 'style', label: '스타일' },
                 ]}
@@ -17240,10 +19114,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               {selectionPanelTab === 'create' ? (
                 <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-800">박스 생성</label>
+                    <label className="text-sm font-medium text-slate-800">상자 생성</label>
                     <p className="text-xs text-slate-500">
-                      캔버스에서 drag 해서 박스를 추가합니다. `relative` 는 먼저 선택한 박스 1개를 기준 anchor 로 삼고,
-                      `absolute` 는 다른 박스의 resize 전파에서 제외됩니다.
+                      캔버스에서 drag 해서 상자를 추가합니다. `relative` 는 먼저 선택한 상자 1개를 기준 anchor 로 삼고,
+                      `absolute` 는 다른 상자의 resize 전파에서 제외됩니다.
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -17260,13 +19134,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                           selectedFrameGroupIdsRef.current.length !== 1
                         ) {
                           setBoxCreationPositionMode('absolute');
-                          setMessage('상대 기준 박스 1개가 없어 박스 생성은 절대 위치 모드로 시작합니다.');
+                          setMessage('상대 기준 상자 1개가 없어 상자 생성은 절대 위치 모드로 시작합니다.');
                         }
 
                         setBoxCreationMode(nextMode);
                       }}
                     >
-                      {boxCreationMode ? '박스 생성 종료' : '박스 생성'}
+                      {boxCreationMode ? '상자 생성 종료' : '상자 생성'}
                     </Button>
                     <select
                       value={boxCreationPositionMode}
@@ -17281,7 +19155,69 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
                     <div>현재 생성 모드: {boxCreationMode ? '활성' : '비활성'}</div>
                     <div className="mt-1">위치 모드: {boxCreationPositionMode}</div>
-                    <div className="mt-1">상대 기준 박스: {relativeCreateAnchorFrameGroupId || '미선택'}</div>
+                    <div className="mt-1">상대 기준 상자: {relativeCreateAnchorFrameGroupId || '미선택'}</div>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+                    <div className="font-semibold text-slate-900">peer 후보 미리보기</div>
+                    {createTabPeerCandidatePreview ? (
+                      <>
+                        <div className="mt-1 break-all">
+                          선택 상자: {createTabPeerCandidatePreview.sourceSummaryLabels.join(', ') || '-'}
+                        </div>
+                        <div className="mt-1">
+                          선택 엣지 수: {createTabPeerCandidatePreview.sourceEdgeCount}
+                        </div>
+                        <div className="mt-1">선택 그룹 수: {createTabPeerCandidatePreview.sourcePositionGroupIds.length}</div>
+                        <div className="mt-1">peer 후보 엣지 수: {createTabPeerCandidatePreview.peerEdgeIds.length}</div>
+                        <div className="mt-1 break-all">
+                          peer 후보 상자: {createTabPeerCandidatePreview.peerSummaryLabels.join(', ') || '-'}
+                        </div>
+                        {createTabPeerCandidatePreview.sourcePositionGroupIds.length <= 0 ? (
+                          <div className="mt-1 text-amber-700">현재 선택 상자에 소속 그룹이 없어 peer 후보를 찾지 않습니다.</div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="mt-1">상자를 선택하면 같은 그룹 내부의 peer 후보를 미리 표시합니다.</div>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+                    <div className="font-semibold text-slate-900">그룹 귀속</div>
+                    <div className="mt-1">선택한 상자 또는 다른 그룹을 대상 그룹으로 귀속합니다.</div>
+                    <div className="mt-2 flex flex-col gap-2">
+                      <select
+                        value={moveGroupAssignmentTargetGroupId}
+                        onChange={(event) => setMoveGroupAssignmentTargetGroupId(event.target.value)}
+                        className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        disabled={explicitPositionBoxGroups.length <= 0}
+                      >
+                        {explicitPositionBoxGroups.length <= 0 ? <option value="">귀속할 그룹 없음</option> : null}
+                        {explicitPositionBoxGroups.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.label} ({group.frameGroupIds.length}개)
+                          </option>
+                        ))}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={assignSelectedBoxesToMoveGroup}
+                          className="w-full"
+                          disabled={explicitPositionBoxGroups.length <= 0 || selectedPositionGroupingFrameGroupIds.length <= 0}
+                        >
+                          선택 항목 귀속하기
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={removeSelectedBoxesFromMoveGroupOnly}
+                          className="w-full"
+                          disabled={selectedPositionGroupingFrameGroupIds.length <= 0}
+                        >
+                          선택 항목 제외하기
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -17289,20 +19225,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               {selectionPanelTab === 'summary' ? (
                 <>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                    <div>선택 박스 수: {selectedFrameGroupIds.length}</div>
+                    <div>선택 상자 수: {selectedFrameGroupIds.length}</div>
                     <div className="mt-1 break-all">선택 ID: {selectedFrameGroupIds.join(', ') || '-'}</div>
                     <div className="mt-1">위치 관계: {primarySelectedFramePositionMode || '-'}</div>
                     <div className="mt-1">상대 기준 라벨: {primaryRelativeAnchorLabel || '-'}</div>
                     <div className="mt-1">
-                      소속 박스 그룹:{' '}
+                      소속 그룹:{' '}
                       {primarySelectedPositionBoxGroup
                         ? `${primarySelectedPositionBoxGroup.label} (${primarySelectedPositionBoxGroup.frameGroupIds.length}개)`
                         : '-'}
                     </div>
                     <div className="mt-1">위치 영향 대상 수: {primaryRelativeAffectedFrameGroupIds.length}</div>
-                    <div className="mt-1 break-all">
-                      위치 영향 대상 그룹: {primaryRelativeImpactGroupLabels.join(', ') || '-'}
-                    </div>
+                    <div className="mt-1 break-all">위치 영향 대상 그룹: {primaryRelativeImpactGroupLabels.join(', ') || '-'}</div>
                     <div className="mt-1 break-all">
                       위치 영향 대상: {primaryRelativeAffectedFrameGroupIds.join(', ') || '-'}
                     </div>
@@ -17323,7 +19257,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     <div className="mt-1 break-all">
                       movement mismatch edge: {edgeRoleDiagnostics.mismatchEdgeIds.join(', ') || '-'}
                     </div>
-                    <div className="mt-1">프레임 박스 수: {frameNodesAvailable}</div>
+                    <div className="mt-1">프레임 상자 수: {frameNodesAvailable}</div>
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
@@ -17385,7 +19319,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               {selectionPanelTab === 'metadata' ? (
                 <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-800">박스 메타데이터</label>
+                    <label className="text-sm font-medium text-slate-800">상자 메타데이터</label>
                     <p className="text-xs text-slate-500">
                       템플릿은 슬롯 정의만 저장하고, 실제 파일/서명 값은 템플릿을 사용하는 문서가 소유합니다.
                     </p>
@@ -17550,9 +19484,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               {selectionPanelTab === 'position' ? (
                 <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-800">박스 위치 관계</label>
+                    <label className="text-sm font-medium text-slate-800">상자 위치 관계</label>
                     <p className="text-xs text-slate-500">
-                      박스(또는 div) 사이 세로 간격을 고정합니다. 높이상 위/아래 관계가 명확한 박스 연결을 우선 적용합니다.
+                      상자(또는 div) 사이 세로 간격을 고정합니다. 높이상 위/아래 관계가 명확한 상자 연결을 우선 적용합니다.
                     </p>
                   </div>
                   <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
@@ -17567,28 +19501,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                               onClick={clearSelectedPositionGroupRelation}
                               className="w-full"
                             >
-                              선택 박스 그룹 해제
+                              선택 그룹 해제
                             </Button>
                           </div>
                         ) : null}
-                        <div className="mt-1">선택 박스 수: {selectedPositionInfoCount}</div>
+                        <div className="mt-1">선택 상자 수: {selectedPositionInfoCount}</div>
                         <div className="mt-1 break-all">선택 ID: {selectedPositionDisplayIds.join(', ') || '-'}</div>
                         <div className="mt-1">위치 관계: {selectedPositionModeLabel || '-'}</div>
                         <div className="mt-1">상대 기준 라벨: {selectedPositionAnchorLabel || '-'}</div>
-                        <div className="mt-1">
-                          소속 박스 그룹:{' '}
-                          {selectedPositionCurrentBoxGroupLabels.join(', ') || '-'}
-                        </div>
-                        <div className="mt-1 break-all">
-                          중첩 박스 그룹 정보: {selectedPositionNestedGroupInfoLines.join(' | ') || '-'}
-                        </div>
+                        <div className="mt-1">소속 그룹: {selectedPositionCurrentBoxGroupLabels.join(', ') || '-'}</div>
+                        <div className="mt-1 break-all">중첩 그룹 정보: {selectedPositionNestedGroupInfoLines.join(' | ') || '-'}</div>
                         <div className="mt-1">위치 영향 대상 수: {selectedPositionImpactFrameGroupIds.length}</div>
                         <div className="mt-1 break-all">위치 영향 대상 그룹: {selectedPositionImpactGroupLabels.join(', ') || '-'}</div>
                         <div className="mt-1 break-all">위치 영향 대상: {selectedPositionImpactFrameGroupIds.join(', ') || '-'}</div>
                       </>
                     ) : (
                       <>
-                        <div className="mt-1">템플렛 박스 수: {availableFrameGroupIds.length}</div>
+                        <div className="mt-1">템플렛 상자 수: {availableFrameGroupIds.length}</div>
                         <div className="mt-1">정의된 상대 위치 관계 수: {definedPositionRelativeRelationDisplayRows.length}</div>
                       </>
                     )}
@@ -17596,7 +19525,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     {hasSelectedPositionBoxes && selectedRelativeFrameGroupIds.length > 0 ? (
                       <div className="mt-2 space-y-1 rounded border border-slate-200 bg-white p-2">
                         <div>
-                          선택한 {selectedFrameGroupIds.length}개의 박스 중 {selectedRelativeFrameGroupIds.length}개의 상대 위치를
+                          선택한 {selectedFrameGroupIds.length}개의 상자 중 {selectedRelativeFrameGroupIds.length}개의 상대 위치를
                           해제할 수 있습니다.
                         </div>
                         <Button size="sm" variant="outline" onClick={clearSelectedRelativeFramePositions}>
@@ -17604,12 +19533,49 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         </Button>
                       </div>
                     ) : null}
+                    <div className="mt-2 space-y-2 rounded border border-slate-200 bg-white p-2">
+                      <div className="font-medium text-slate-900">그룹 귀속</div>
+                      <div>선택한 상자 또는 다른 그룹을 대상 그룹으로 귀속합니다.</div>
+                      <select
+                        value={moveGroupAssignmentTargetGroupId}
+                        onChange={(event) => setMoveGroupAssignmentTargetGroupId(event.target.value)}
+                        className="flex h-8 w-full rounded-md border border-input bg-white px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        disabled={explicitPositionBoxGroups.length <= 0}
+                      >
+                        {explicitPositionBoxGroups.length <= 0 ? <option value="">귀속할 그룹 없음</option> : null}
+                        {explicitPositionBoxGroups.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.label} ({group.frameGroupIds.length}개)
+                          </option>
+                        ))}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={assignSelectedBoxesToMoveGroup}
+                          disabled={explicitPositionBoxGroups.length <= 0 || selectedPositionGroupingFrameGroupIds.length <= 0}
+                          className="w-full"
+                        >
+                          선택 항목 귀속하기
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={removeSelectedBoxesFromMoveGroupOnly}
+                          disabled={selectedPositionGroupingFrameGroupIds.length <= 0}
+                          className="w-full"
+                        >
+                          선택 항목 제외하기
+                        </Button>
+                      </div>
+                    </div>
 
                   </div>
 
                   {positionBoxGroups.length > 0 ? (
                     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
-                      <div className="font-semibold text-slate-900">전체 박스 그룹 ({positionBoxGroups.length}개)</div>
+                      <div className="font-semibold text-slate-900">전체 그룹 ({positionBoxGroups.length}개)</div>
                       {positionBoxGroups.map((group) => {
                         const isSelectedGroup = primarySelectedPositionBoxGroup?.id === group.id;
                         const isExpanded = Boolean(expandedPositionBoxGroupIds[group.id]);
@@ -17673,7 +19639,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
                   {shouldShowDefinedPositionRelativeRelations ? (
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
-                      <div className="font-semibold text-slate-900">정의된 박스 상대 위치 관계</div>
+                      <div className="font-semibold text-slate-900">정의된 상자 상대 위치 관계</div>
                       <div className="mt-1">총 {definedPositionRelativeRelationDisplayRows.length}개</div>
                       <div className="mt-2 space-y-2">
                         {focusedDefinedPositionRelativeRelations.map((relation, relationIndex) => {
@@ -17712,9 +19678,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               {selectionPanelTab === 'text' ? (
                 <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-800">박스 텍스트</label>
+                    <label className="text-sm font-medium text-slate-800">상자 텍스트</label>
                     <p className="text-xs text-slate-500">
-                      현재 선택한 박스의 텍스트를 편집합니다. 여러 박스를 선택하면 같은 값으로 일괄 반영됩니다.
+                      현재 선택한 상자의 텍스트를 편집합니다. 여러 상자를 선택하면 같은 값으로 일괄 반영됩니다.
                     </p>
                   </div>
                   <textarea
@@ -17723,11 +19689,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       setSelectionTextDraft(event.target.value);
                       setSelectionTextMixed(false);
                     }}
-                    placeholder={selectionTextMixed ? '여러 박스의 텍스트가 서로 다릅니다.' : '선택한 박스 텍스트'}
+                    placeholder={selectionTextMixed ? '여러 상자의 텍스트가 서로 다릅니다.' : '선택한 상자 텍스트'}
                     className="min-h-40 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus-visible:ring-1 focus-visible:ring-slate-300"
                   />
                   <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
-                    <span>{selectedFrameGroupIds.length > 0 ? `${selectedFrameGroupIds.length}개 박스 선택됨` : '선택된 박스 없음'}</span>
+                    <span>{selectedFrameGroupIds.length > 0 ? `${selectedFrameGroupIds.length}개 상자 선택됨` : '선택된 상자 없음'}</span>
                     <Button size="sm" onClick={() => applySelectionTextDraft()} disabled={selectedFrameGroupIds.length === 0}>
                       텍스트 반영
                     </Button>

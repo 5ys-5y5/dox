@@ -14,7 +14,7 @@ const RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
 
 /**
  * 프레임 노드 간 연결 관계(band alignment + relative anchor)를 분석하여
- * 함께 움직이는 그룹에 별칭("box 1", "box 2" 등)을 할당합니다.
+ * 함께 움직이는 그룹에 별칭("그룹 1", "그룹 2" 등)을 할당합니다.
  * 2개 이상의 프레임으로 구성된 연결 컴포넌트만 별칭으로 정의됩니다.
  * peer_edge 데이터와는 완전히 독립적입니다.
  */
@@ -146,7 +146,7 @@ export const computePositionGroupAliases = (scope: ParentNode): PositionGroupAli
 
       const frameGroupIds = Array.from(component).sort((a, b) => a.localeCompare(b));
       if (frameGroupIds.length >= 2) {
-        aliases.push({ alias: `box ${boxIndex}`, frameGroupIds });
+        aliases.push({ alias: `그룹 ${boxIndex}`, frameGroupIds });
         boxIndex++;
       }
     });
@@ -193,7 +193,7 @@ export const writePositionGroupAliases = (scope: ParentNode, aliases: PositionGr
 /**
  * 프레임 ID 목록을 저장된 별칭을 사용해 간결한 표시 목록으로 변환합니다.
  * 예: ["band-3-cell-1", ..., "band-19-cell-2", "band-20-footer", "band-21-footer", "band-22-footer"]
- *     → ["box 1", "box 2", "band-22-footer"]
+ *     → ["그룹 1", "그룹 2", "band-22-footer"]
  */
 export const buildPositionImpactDisplayList = (
   frameGroupIds: string[],

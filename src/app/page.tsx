@@ -45,7 +45,7 @@ const pageGroups = [
       {
         href: '/templates/edit',
         title: '템플릿 편집',
-        summary: '저장된 템플릿의 div 박스를 다중 선택해 크기와 스타일을 일괄 조정합니다.',
+        summary: '저장된 템플릿의 div 상자를 다중 선택해 크기와 스타일을 일괄 조정합니다.',
         status: '구현중',
       },
       {

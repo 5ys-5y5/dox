@@ -15,6 +15,10 @@ import {
   TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS,
   toPublicTemplateExtractFrameGroupVersion,
 } from '../../../lib/templateExtractDtos';
+import {
+  computePositionGroupAliases,
+  writePositionGroupAliases,
+} from '../../../lib/templatePositionGroupAliasUtils';
 import type {
   TemplateExtractCandidateDto,
   TemplateExtractDetailResult,
@@ -397,7 +401,13 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-halign',
   'data-template-frame-valign',
   'data-v106-band-source',
+  'data-template-frame-position-group-id',
+  'data-template-frame-position-group-label',
+  'data-template-frame-position-group-managed',
 ] as const;
+const TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR = 'data-template-frame-position-group-id';
+const TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR = 'data-template-frame-position-group-label';
+const TEMPLATE_FRAME_POSITION_GROUP_MANAGED_ATTR = 'data-template-frame-position-group-managed';
 const FRAME_EDITOR_SUPPORTED_VERSIONS = ['fv1.06', 'fv1.07', 'fv1.08', 'fv1.09', 'fv1.10', 'fv1.11'] as const;
 const FRAME_PROFILE_STORAGE_KEY = 'template-extract-frame-profiles-v109';
 const NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
@@ -663,6 +673,84 @@ const stripDraftPreviewUiState = (html: string) => {
   });
   TemplateFrameEditHtmlService.stripEditorUiState(container);
 
+  return container.innerHTML;
+};
+
+const applyFramePositionGroupAttrs = (
+  frameNode: HTMLElement,
+  config:
+    | {
+        groupId: string;
+        label: string;
+        managed?: boolean;
+      }
+    | null
+) => {
+  const shell = frameNode.closest<HTMLElement>('.v102-frame-band') || frameNode;
+  const textarea = frameNode.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+  const targets = [frameNode, shell, textarea].filter((element): element is HTMLElement => Boolean(element));
+
+  if (!config) {
+    targets.forEach((target) => {
+      target.removeAttribute(TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR);
+      target.removeAttribute(TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR);
+      target.removeAttribute(TEMPLATE_FRAME_POSITION_GROUP_MANAGED_ATTR);
+    });
+    return;
+  }
+
+  targets.forEach((target) => {
+    target.setAttribute(TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR, config.groupId);
+    if (config.label.trim()) {
+      target.setAttribute(TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR, config.label.trim());
+    } else {
+      target.removeAttribute(TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR);
+    }
+    target.setAttribute(TEMPLATE_FRAME_POSITION_GROUP_MANAGED_ATTR, config.managed ? 'true' : 'false');
+  });
+};
+
+const embedExtractPositionGroupAttrs = (html: string) => {
+  if (!html.trim() || typeof document === 'undefined') {
+    return html;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  const aliases = computePositionGroupAliases(container);
+  const aliasByFrameGroupId = new Map<string, { alias: string; index: number }>();
+
+  aliases.forEach((groupAlias, index) => {
+    groupAlias.frameGroupIds.forEach((frameGroupId) => {
+      const normalizedFrameGroupId = frameGroupId.trim();
+      if (normalizedFrameGroupId) {
+        aliasByFrameGroupId.set(normalizedFrameGroupId, { alias: groupAlias.alias.trim(), index });
+      }
+    });
+  });
+
+  container.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR).forEach((frameNode) => {
+    const frameGroupId = frameNode.getAttribute('data-template-frame-group')?.trim() || '';
+    const alias = frameGroupId ? aliasByFrameGroupId.get(frameGroupId) : null;
+
+    if (!alias?.alias) {
+      applyFramePositionGroupAttrs(frameNode, null);
+      return;
+    }
+
+    const normalizedAliasId = alias.alias
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const stableGroupId = normalizedAliasId || `box-${alias.index + 1}`;
+    applyFramePositionGroupAttrs(frameNode, {
+      groupId: `extract:${stableGroupId}`,
+      label: alias.alias,
+      managed: true,
+    });
+  });
+
+  writePositionGroupAliases(container, aliases);
   return container.innerHTML;
 };
 
@@ -3768,7 +3856,9 @@ export default function TemplateExtractPage() {
         frameExtractedTextState,
         frameExtractedTextMetaState
       );
-      return replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel);
+      return embedExtractPositionGroupAttrs(
+        replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel)
+      );
     }
 
     const fallbackHtml = draftPreviewHtmlRef.current || previewDraftBaseHtml;
@@ -3778,7 +3868,9 @@ export default function TemplateExtractPage() {
       frameExtractedTextState,
       frameExtractedTextMetaState
     );
-    return replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel);
+    return embedExtractPositionGroupAttrs(
+      replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel)
+    );
   }, [
     appliedImageFrameTextRenderModel,
     flattenedFramePreview,
@@ -3796,9 +3888,10 @@ export default function TemplateExtractPage() {
     }
 
     const normalizedHtml = stripFrameExtractedTextStateFromHtml(stripDraftPreviewUiState(root.innerHTML));
-    draftPreviewHtmlRef.current = flattenedFramePreview
+    const baseHtml = flattenedFramePreview
       ? `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedHtml}`
       : normalizedHtml;
+    draftPreviewHtmlRef.current = embedExtractPositionGroupAttrs(baseHtml);
     setFrameExtractedTextState((previous) => (Object.keys(previous).length > 0 ? {} : previous));
     setFrameExtractedTextMetaState((previous) => (Object.keys(previous).length > 0 ? {} : previous));
     setFrameTextExtractionCompleted(false);
@@ -7101,7 +7194,7 @@ export default function TemplateExtractPage() {
         <h1 className="text-3xl font-semibold text-slate-950">템플릿 추출</h1>
         <p className="max-w-3xl text-sm text-slate-600">
           이 페이지는 PDF를 버전별로 추출하고 결과를 확인한 뒤, 템플릿 관리에 1차 저장하는 용도로만 사용합니다.
-          저장 후의 박스 편집은 별도 <code>/templates/edit</code> 페이지에서 수행합니다.
+          저장 후의 상자 편집은 별도 <code>/templates/edit</code> 페이지에서 수행합니다.
         </p>
       </div>
 
@@ -7704,7 +7797,7 @@ export default function TemplateExtractPage() {
                 {selectedFrameGroupIds.length > 1 && !frameMergePromptDismissed ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
                     <p className="font-medium">복수 프레임이 선택되었습니다.</p>
-                    <p className="mt-1">선택한 박스를 그대로 유지하거나 바로 병합할 수 있습니다.</p>
+                    <p className="mt-1">선택한 상자를 그대로 유지하거나 바로 병합할 수 있습니다.</p>
                     <div className="mt-3 flex gap-2">
                       <Button size="sm" variant="outline" onClick={mergeSelectedFrameGroups}>
                         선택 병합

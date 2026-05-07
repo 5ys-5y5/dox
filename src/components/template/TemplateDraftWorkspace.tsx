@@ -1269,7 +1269,7 @@ const TemplateDraftWorkspace = React.forwardRef<TemplateDraftWorkspaceHandle, Te
                 {selectedFrameGroupIds.length > 1 && !frameMergePromptDismissed ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <div className="font-medium">복수 프레임이 선택되었습니다.</div>
-                    <div className="mt-1">현재 선택한 박스를 하나로 합칠지 바로 결정할 수 있습니다.</div>
+                    <div className="mt-1">현재 선택한 상자를 하나로 합칠지 바로 결정할 수 있습니다.</div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button type="button" size="sm" onClick={mergeSelectedFrameGroups}>
                         선택 병합

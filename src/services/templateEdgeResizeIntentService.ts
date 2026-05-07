@@ -39,6 +39,10 @@ const readEdgeOverlapLength = (
   right: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'spanStart' | 'spanEnd'>
 ) => Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
 
+const readEdgePositionGroupId = (
+  edge: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'positionGroupId'> | null | undefined
+) => (edge?.positionGroupId || '').trim();
+
 const collectPeerConstrainedSameSideEdgeIds = (
   snapshot: TemplateEdgeSelectionClickDto['snapshot'],
   referenceEdgeId: string | undefined,
@@ -46,8 +50,9 @@ const collectPeerConstrainedSameSideEdgeIds = (
   excludedEdgeIds: string[]
 ) => {
   const referenceEdge = referenceEdgeId ? TemplateEdgeTopologyService.getEdgeById(snapshot, referenceEdgeId) : null;
+  const referencePositionGroupId = readEdgePositionGroupId(referenceEdge);
 
-  if (!referenceEdge || peerEdgeIds.length === 0) {
+  if (!referenceEdge || !referencePositionGroupId || peerEdgeIds.length === 0) {
     return [];
   }
 
@@ -55,8 +60,9 @@ const collectPeerConstrainedSameSideEdgeIds = (
     new Set(
       peerEdgeIds.flatMap((peerEdgeId) => {
         const peerEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, peerEdgeId);
+        const peerPositionGroupId = readEdgePositionGroupId(peerEdge);
 
-        if (!peerEdge) {
+        if (!peerEdge || peerPositionGroupId !== referencePositionGroupId) {
           return [];
         }
 
@@ -68,6 +74,7 @@ const collectPeerConstrainedSameSideEdgeIds = (
 
             if (
               candidate.pageId !== referenceEdge.pageId ||
+              readEdgePositionGroupId(candidate) !== referencePositionGroupId ||
               candidate.orientation !== referenceEdge.orientation ||
               candidate.side !== referenceEdge.side
             ) {
@@ -98,8 +105,9 @@ const collectPeerEdgeIds = (
     new Set(
       sourceEdgeIds.flatMap((edgeId) => {
         const sourceEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId);
+        const sourcePositionGroupId = readEdgePositionGroupId(sourceEdge);
 
-        if (!sourceEdge) {
+        if (!sourceEdge || !sourcePositionGroupId) {
           return [];
         }
 
@@ -113,6 +121,7 @@ const collectPeerEdgeIds = (
 
             if (
               candidate.pageId !== sourceEdge.pageId ||
+              readEdgePositionGroupId(candidate) !== sourcePositionGroupId ||
               candidate.orientation !== sourceEdge.orientation ||
               candidate.side !== peerSide
             ) {
@@ -132,6 +141,25 @@ const collectPeerEdgeIds = (
       })
     )
   );
+
+const collectPeerCandidateEdgeIds = (
+  snapshot: TemplateEdgeSelectionClickDto['snapshot'],
+  sourceEdgeIds: string[],
+  excludedEdgeIds: string[] = sourceEdgeIds
+) => {
+  const normalizedSourceEdgeIds = Array.from(
+    new Set(sourceEdgeIds.map((edgeId) => edgeId.trim()).filter((edgeId) => Boolean(edgeId)))
+  );
+  const normalizedExcludedEdgeIds = Array.from(
+    new Set(excludedEdgeIds.map((edgeId) => edgeId.trim()).filter((edgeId) => Boolean(edgeId)))
+  );
+
+  if (normalizedSourceEdgeIds.length <= 0) {
+    return [];
+  }
+
+  return collectPeerEdgeIds(snapshot, normalizedSourceEdgeIds, normalizedExcludedEdgeIds);
+};
 
 const describeSelectionRoles = (
   snapshot: TemplateEdgeSelectionClickDto['snapshot'],
@@ -248,6 +276,7 @@ const resolveResizeIntent = (input: TemplateEdgeSelectionClickDto): TemplateEdge
 };
 
 export const TemplateEdgeResizeIntentService = {
+  collectPeerCandidateEdgeIds,
   describeSelectionRoles,
   resolveResizeIntent,
 };

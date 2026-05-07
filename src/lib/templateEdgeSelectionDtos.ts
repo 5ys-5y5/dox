@@ -17,12 +17,14 @@ export type TemplateEdgeFrameDto = {
   frameGroupId: string;
   pageId: string;
   rect: TemplateEdgeRectDto;
+  positionGroupId?: string | null;
 };
 
 export type TemplateEdgeDescriptorDto = {
   edgeId: string;
   frameGroupId: string;
   pageId: string;
+  positionGroupId: string | null;
   orientation: TemplateEdgeOrientation;
   side: TemplateEdgeSide;
   lineCoordinate: number;
