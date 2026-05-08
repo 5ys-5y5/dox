@@ -834,6 +834,11 @@ const FRAME_BOX_KIND_SHORT_LABELS: Record<TemplateFrameBoxKind, string> = {
   attachment: '첨부파일 상자',
   signature: '서명 상자',
 };
+const FRAME_BOX_KIND_BUTTON_LABELS: Record<TemplateFrameBoxKind, string> = {
+  text: '텍스트',
+  attachment: '첨부파일',
+  signature: '서명',
+};
 const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
   text: '텍스트',
   attachment: '첨부',
@@ -7581,6 +7586,9 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
 };
 
 const clearFrameMetadataRelationOutlineUi = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
+    element.remove();
+  });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR);
     element.removeAttribute(TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR);
@@ -7637,6 +7645,8 @@ const applyMetadataRelationOutlineEdges = (
       return;
     }
 
+    const shouldRenderConnectors =
+      root instanceof HTMLElement && root.getAttribute('data-selection-panel-tab') === 'metadata';
     const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
     const minTop = Math.min(...entries.map((entry) => entry.rect.top));
     const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
@@ -7763,6 +7773,60 @@ const applyMetadataRelationOutlineEdges = (
 
       addNearestUnionBoundarySide(entry, sides);
     };
+    const readRectCenter = (rect: FrameNodeRect) => ({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+    const appendRelationDot = (entry: (typeof entries)[number]) => {
+      const center = readRectCenter(entry.rect);
+      const dot = document.createElement('div');
+      dot.className = FRAME_RELATION_BADGE_CLASS;
+      dot.setAttribute('data-frame-editor-ui', 'true');
+      dot.setAttribute('aria-hidden', 'true');
+      dot.setAttribute('data-v106-metadata-relation-connector', 'dot');
+      dot.setAttribute('data-v106-metadata-relation-role', entry.relationRole);
+      dot.style.position = 'absolute';
+      dot.style.pointerEvents = 'none';
+      dot.style.zIndex = '27';
+      dot.style.left = toFrameCssPx(center.x - 2.5);
+      dot.style.top = toFrameCssPx(center.y - 2.5);
+      dot.style.width = '5px';
+      dot.style.height = '5px';
+      dot.style.borderRadius = '999px';
+      dot.style.background =
+        entry.relationRole === 'key' ? 'rgba(217, 119, 6, .98)' : 'rgba(37, 99, 235, .98)';
+      dot.style.boxShadow = 'none';
+      entry.pageInner.appendChild(dot);
+    };
+    const appendRelationLine = (source: (typeof entries)[number], target: (typeof entries)[number]) => {
+      const sourceCenter = readRectCenter(source.rect);
+      const targetCenter = readRectCenter(target.rect);
+      const deltaX = targetCenter.x - sourceCenter.x;
+      const deltaY = targetCenter.y - sourceCenter.y;
+      const length = Math.hypot(deltaX, deltaY);
+
+      if (!Number.isFinite(length) || length < 1) {
+        return;
+      }
+
+      const line = document.createElement('div');
+      line.className = FRAME_RELATION_BADGE_CLASS;
+      line.setAttribute('data-frame-editor-ui', 'true');
+      line.setAttribute('aria-hidden', 'true');
+      line.setAttribute('data-v106-metadata-relation-connector', 'line');
+      line.style.position = 'absolute';
+      line.style.pointerEvents = 'none';
+      line.style.zIndex = '26';
+      line.style.left = toFrameCssPx(sourceCenter.x);
+      line.style.top = toFrameCssPx(sourceCenter.y);
+      line.style.width = toFrameCssPx(length);
+      line.style.height = '0';
+      line.style.borderTop = '1.5px dotted rgba(71, 85, 105, .72)';
+      line.style.transformOrigin = '0 0';
+      line.style.transform = `rotate(${Math.atan2(deltaY, deltaX)}rad)`;
+      line.style.boxShadow = 'none';
+      source.pageInner.appendChild(line);
+    };
 
     entries.forEach((entry) => {
       const rectRight = readRectRight(entry.rect);
@@ -7794,6 +7858,20 @@ const applyMetadataRelationOutlineEdges = (
       entry.node.setAttribute(TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR, sides.join(' '));
       entry.node.setAttribute(TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR, entry.relationRole);
     });
+
+    if (shouldRenderConnectors) {
+      const keyEntries = entries.filter((entry) => entry.relationRole === 'key');
+      const valueEntries = entries.filter((entry) => entry.relationRole === 'value');
+
+      if (keyEntries.length > 0) {
+        const keyEntry = keyEntries[0];
+        valueEntries.forEach((valueEntry) => appendRelationLine(keyEntry, valueEntry));
+      } else {
+        entries.slice(1).forEach((entry, index) => appendRelationLine(entries[index], entry));
+      }
+
+      entries.forEach((entry) => appendRelationDot(entry));
+    }
   });
 };
 
@@ -21872,153 +21950,150 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ) : null}
           </div>
         ) : null}
-        <div className="grid grid-cols-3 gap-2 xl:grid-cols-6">
-          {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
-            const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
+        <div className="grid gap-2 xl:grid-cols-2">
+          <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-2">
+              {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
+                const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
 
-            return (
-              <button
-                key={`metadata-canvas-box-kind:${boxKind}`}
-                type="button"
-                disabled={!hasSelectedMetadataTarget}
-                onClick={() => stageMetadataBoxKind(boxKind)}
-                className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-                  isActive
-                    ? 'border-teal-600 bg-teal-600 text-white'
-                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-                }`}
-              >
-                {FRAME_BOX_KIND_LABELS[boxKind]}
-              </button>
-            );
-          })}
-          {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
-            const isActive = hasSelectedMetadataTarget && frameMetadataDraft.role === role;
+                return (
+                  <button
+                    key={`metadata-canvas-box-kind:${boxKind}`}
+                    type="button"
+                    disabled={!hasSelectedMetadataTarget}
+                    onClick={() => stageMetadataBoxKind(boxKind)}
+                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                      isActive
+                        ? 'border-teal-600 bg-teal-600 text-white'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                    }`}
+                  >
+                    {FRAME_BOX_KIND_BUTTON_LABELS[boxKind]}
+                  </button>
+                );
+              })}
+            </div>
 
-            return (
-              <button
-                key={`metadata-canvas-role:${role}`}
-                type="button"
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-800">Runtime Mode</label>
+              <select
+                value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
                 disabled={!hasSelectedMetadataTarget}
-                onClick={() => stageMetadataRole(role)}
-                className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-                  isActive
-                    ? 'border-amber-600 bg-amber-500 text-white'
-                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-                }`}
+                onChange={(event) =>
+                  setFrameMetadataDraft((previous) => ({
+                    ...previous,
+                    runtimeMode: event.target.value as FrameMetadataDraft['runtimeMode'],
+                  }))
+                }
+                className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {FRAME_ROLE_SHORT_LABELS[role]}
-              </button>
-            );
-          })}
+                <option value="">{hasSelectedMetadataTarget ? '혼합 / 자동 기본값 사용' : '-'}</option>
+                {runtimeModeOptions.map((runtimeMode) => (
+                  <option key={`metadata-canvas-runtime:${runtimeMode}`} value={runtimeMode}>
+                    {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
+                  </option>
+                ))}
+              </select>
+              <div className="text-[11px] leading-4 text-slate-600">{frameRuntimeModeHelpText}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 self-start">
+            {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
+              const isActive = hasSelectedMetadataTarget && frameMetadataDraft.role === role;
+
+              return (
+                <button
+                  key={`metadata-canvas-role:${role}`}
+                  type="button"
+                  disabled={!hasSelectedMetadataTarget}
+                  onClick={() => stageMetadataRole(role)}
+                  className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                    isActive
+                      ? 'border-amber-600 bg-amber-500 text-white'
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                  }`}
+                >
+                  {FRAME_ROLE_SHORT_LABELS[role]}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.7fr)]">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-800">Runtime Mode</label>
-            <select
-              value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
+        <div>
+          {metadataVirtualConnectionDraft.mode === 'idle' ? (
+            <Button
+              type="button"
+              className="w-full"
+              onClick={applySelectedMetadataBoxConnection}
               disabled={!hasSelectedMetadataTarget}
-              onChange={(event) =>
-                setFrameMetadataDraft((previous) => ({
-                  ...previous,
-                  runtimeMode: event.target.value as FrameMetadataDraft['runtimeMode'],
-                }))
-              }
-              className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <option value="">{hasSelectedMetadataTarget ? '혼합 / 자동 기본값 사용' : '-'}</option>
-              {runtimeModeOptions.map((runtimeMode) => (
-                <option key={`metadata-canvas-runtime:${runtimeMode}`} value={runtimeMode}>
-                  {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
-                </option>
-              ))}
-            </select>
-            <div className="text-[11px] leading-4 text-slate-600">{frameRuntimeModeHelpText}</div>
-          </div>
-
-          <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-700">
-            <div className="flex items-center justify-between gap-2">
-              <div className="font-semibold text-slate-900">박스 연결</div>
-              <div className="text-[11px] text-slate-500">key 1개와 value 1개 이상</div>
-            </div>
-            <div className="space-y-1 text-[11px] leading-5">
-              <div>Key Box: {hasSelectedMetadataTarget && currentParentKeyBoxLabel !== 'null' ? currentParentKeyBoxLabel : '-'}</div>
-              <div>Value Box: {hasSelectedMetadataTarget ? valueBoxPickerSummary : '-'}</div>
-            </div>
-            {metadataVirtualConnectionDraft.mode === 'idle' ? (
-              <Button
-                type="button"
-                className="w-full"
-                onClick={applySelectedMetadataBoxConnection}
-                disabled={!hasSelectedMetadataTarget}
-              >
-                박스 연결하기
-              </Button>
-            ) : (
-              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
-                <div className="text-[11px] font-semibold text-amber-900">
-                  {metadataVirtualConnectionDraft.mode === 'key'
-                    ? '새 key 정의를 만들고 선택한 value 상자에 연결합니다.'
-                    : '새 입력값 정의를 만들고 선택한 key 상자와 연결할 준비를 합니다.'}
-                </div>
-                <Input
-                  value={metadataVirtualConnectionDraft.label}
-                  onChange={(event) =>
-                    setMetadataVirtualConnectionDraft((previous) => ({
-                      ...previous,
-                      label: event.target.value,
-                      error: '',
-                    }))
-                  }
-                  onBlur={() =>
-                    setMetadataVirtualConnectionDraft((previous) => {
-                      if (previous.idTouched && previous.id.trim()) {
-                        return previous;
-                      }
-
-                      return {
-                        ...previous,
-                        id: normalizeVirtualDefinitionId(previous.label),
-                      };
-                    })
-                  }
-                  placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자명 입력' : '입력값 상자명 입력'}
-                  className={metadataVirtualConnectionDraft.error && !metadataVirtualConnectionDraft.label.trim() ? 'border-red-500' : ''}
-                />
-                <Input
-                  value={metadataVirtualConnectionDraft.id}
-                  onChange={(event) =>
-                    setMetadataVirtualConnectionDraft((previous) => ({
-                      ...previous,
-                      id: event.target.value,
-                      idTouched: true,
-                      error: '',
-                    }))
-                  }
-                  onBlur={() =>
-                    setMetadataVirtualConnectionDraft((previous) => ({
-                      ...previous,
-                      id: normalizeVirtualDefinitionId(previous.id || previous.label),
-                    }))
-                  }
-                  placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자 아이디 입력' : '입력값 상자 아이디 입력'}
-                  className={metadataVirtualConnectionDraft.error ? 'border-red-500 bg-red-50' : ''}
-                />
-                {metadataVirtualConnectionDraft.error ? (
-                  <div className="text-[11px] font-medium text-red-700">{metadataVirtualConnectionDraft.error}</div>
-                ) : null}
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" variant="outline" onClick={resetMetadataVirtualConnectionDraft}>
-                    취소
-                  </Button>
-                  <Button type="button" onClick={saveMetadataVirtualConnectionDefinition}>
-                    저장
-                  </Button>
-                </div>
+              박스 연결하기
+            </Button>
+          ) : (
+            <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+              <div className="text-[11px] font-semibold text-amber-900">
+                {metadataVirtualConnectionDraft.mode === 'key'
+                  ? '새 key 정의를 만들고 선택한 value 상자에 연결합니다.'
+                  : '새 입력값 정의를 만들고 선택한 key 상자와 연결할 준비를 합니다.'}
               </div>
-            )}
-          </div>
+              <Input
+                value={metadataVirtualConnectionDraft.label}
+                onChange={(event) =>
+                  setMetadataVirtualConnectionDraft((previous) => ({
+                    ...previous,
+                    label: event.target.value,
+                    error: '',
+                  }))
+                }
+                onBlur={() =>
+                  setMetadataVirtualConnectionDraft((previous) => {
+                    if (previous.idTouched && previous.id.trim()) {
+                      return previous;
+                    }
+
+                    return {
+                      ...previous,
+                      id: normalizeVirtualDefinitionId(previous.label),
+                    };
+                  })
+                }
+                placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자명 입력' : '입력값 상자명 입력'}
+                className={metadataVirtualConnectionDraft.error && !metadataVirtualConnectionDraft.label.trim() ? 'border-red-500' : ''}
+              />
+              <Input
+                value={metadataVirtualConnectionDraft.id}
+                onChange={(event) =>
+                  setMetadataVirtualConnectionDraft((previous) => ({
+                    ...previous,
+                    id: event.target.value,
+                    idTouched: true,
+                    error: '',
+                  }))
+                }
+                onBlur={() =>
+                  setMetadataVirtualConnectionDraft((previous) => ({
+                    ...previous,
+                    id: normalizeVirtualDefinitionId(previous.id || previous.label),
+                  }))
+                }
+                placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자 아이디 입력' : '입력값 상자 아이디 입력'}
+                className={metadataVirtualConnectionDraft.error ? 'border-red-500 bg-red-50' : ''}
+              />
+              {metadataVirtualConnectionDraft.error ? (
+                <div className="text-[11px] font-medium text-red-700">{metadataVirtualConnectionDraft.error}</div>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="outline" onClick={resetMetadataVirtualConnectionDraft}>
+                  취소
+                </Button>
+                <Button type="button" onClick={saveMetadataVirtualConnectionDefinition}>
+                  저장
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </CardContent>
@@ -22230,74 +22305,92 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="group"] {
-          background-image: linear-gradient(90deg, rgba(148, 163, 184, .78) 0 4px, transparent 4px) !important;
+          background-image: none !important;
           background-color: rgba(148, 163, 184, .03) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"] {
-          background-image: linear-gradient(90deg, rgba(245, 158, 11, .92) 0 4px, transparent 4px) !important;
+          background-image: none !important;
           background-color: rgba(245, 158, 11, .04) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"] {
-          background-image: linear-gradient(90deg, rgba(59, 130, 246, .92) 0 4px, transparent 4px) !important;
+          background-image: none !important;
           background-color: rgba(59, 130, 246, .04) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
-          background-image: linear-gradient(90deg, rgba(16, 185, 129, .92) 0 4px, transparent 4px) !important;
+          background-image: none !important;
           background-color: rgba(16, 185, 129, .04) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
           position: relative;
-          --v106-metadata-relation-color: rgba(100, 116, 139, .92);
-          --v106-metadata-relation-edge-size: 3px;
-          --v106-metadata-relation-edge-top: transparent;
-          --v106-metadata-relation-edge-right: transparent;
-          --v106-metadata-relation-edge-bottom: transparent;
-          --v106-metadata-relation-edge-left: transparent;
-          background-image:
-            linear-gradient(var(--v106-metadata-relation-edge-top), var(--v106-metadata-relation-edge-top)),
-            linear-gradient(var(--v106-metadata-relation-edge-right), var(--v106-metadata-relation-edge-right)),
-            linear-gradient(var(--v106-metadata-relation-edge-bottom), var(--v106-metadata-relation-edge-bottom)),
-            linear-gradient(var(--v106-metadata-relation-edge-left), var(--v106-metadata-relation-edge-left)) !important;
+          --v106-metadata-relation-rgb: 100 116 139;
+          --v106-metadata-relation-opacity: .1;
+          --v106-metadata-relation-offset-top: 0px;
+          --v106-metadata-relation-offset-right: 0px;
+          --v106-metadata-relation-offset-bottom: 0px;
+          --v106-metadata-relation-offset-left: 0px;
+          --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-rgb) / var(--v106-metadata-relation-opacity));
+          background-color: transparent !important;
+          background-image: linear-gradient(var(--v106-metadata-relation-fill-color), var(--v106-metadata-relation-fill-color)) !important;
           background-repeat: no-repeat !important;
-          background-position: top left, top right, bottom left, top left !important;
+          background-position:
+            left var(--v106-metadata-relation-offset-left) top var(--v106-metadata-relation-offset-top) !important;
           background-size:
-            100% var(--v106-metadata-relation-edge-size),
-            var(--v106-metadata-relation-edge-size) 100%,
-            100% var(--v106-metadata-relation-edge-size),
-            var(--v106-metadata-relation-edge-size) 100% !important;
+            calc(100% - var(--v106-metadata-relation-offset-left) - var(--v106-metadata-relation-offset-right))
+            calc(100% - var(--v106-metadata-relation-offset-top) - var(--v106-metadata-relation-offset-bottom)) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="key"] {
-          --v106-metadata-relation-color: rgba(217, 119, 6, .98);
-          background-color: rgba(245, 158, 11, .04) !important;
+          --v106-metadata-relation-rgb: 217 119 6;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="value"] {
-          --v106-metadata-relation-color: rgba(37, 99, 235, .98);
-          background-color: rgba(59, 130, 246, .04) !important;
+          --v106-metadata-relation-rgb: 37 99 235;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="top"] {
-          --v106-metadata-relation-edge-top: var(--v106-metadata-relation-color);
+          --v106-metadata-relation-offset-top: 5px;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="right"] {
-          --v106-metadata-relation-edge-right: var(--v106-metadata-relation-color);
+          --v106-metadata-relation-offset-right: 5px;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="bottom"] {
-          --v106-metadata-relation-edge-bottom: var(--v106-metadata-relation-color);
+          --v106-metadata-relation-offset-bottom: 5px;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="left"] {
-          --v106-metadata-relation-edge-left: var(--v106-metadata-relation-color);
+          --v106-metadata-relation-offset-left: 5px;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"],
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
-          --v106-metadata-relation-edge-size: 4px;
+          --v106-metadata-relation-opacity: .3;
           outline: none !important;
           outline-offset: 0;
           box-shadow: none !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] {
-          background-color: rgba(245, 158, 11, .10) !important;
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][data-template-selected="true"] {
+          --v106-metadata-relation-opacity: 1;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
-          background-color: rgba(59, 130, 246, .10) !important;
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          background-image: none !important;
+          outline: none !important;
+          box-shadow: none !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          background-color: rgb(217 119 6 / .1) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          background-color: rgb(37 99 235 / .1) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          background-color: rgb(217 119 6 / .3) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          background-color: rgb(37 99 235 / .3) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          background-color: rgb(217 119 6 / 1) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          background-color: rgb(37 99 235 / 1) !important;
         }
         .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(37, 99, 235, .42) !important;
