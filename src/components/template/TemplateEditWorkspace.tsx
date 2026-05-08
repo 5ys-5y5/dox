@@ -6,7 +6,6 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
-  CheckCircle2,
   CircleDot,
   CornerDownRight,
   FileText,
@@ -11480,7 +11479,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
   }, [cancelScheduledAutoPersistDraft]);
 
-  const syncDraftPreviewHtmlRef = React.useCallback((options?: { materializePositionGroups?: boolean }) => {
+  const syncDraftPreviewHtmlRef = React.useCallback((options?: {
+    materializePositionGroups?: boolean;
+    updateRenderedHtml?: boolean;
+  }) => {
     const root = previewRef.current;
 
     if (!root) {
@@ -11495,7 +11497,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const nextRenderHtml = extractPreviewRenderHtml(root);
     draftPreviewHtmlRef.current = nextDraftHtml;
     setPreviewDomVersion((previous) => previous + 1);
-    setPreviewHtml(nextRenderHtml);
+    if (options?.updateRenderedHtml !== false) {
+      setPreviewHtml(nextRenderHtml);
+    }
     if (!canvasHistoryNavigationInProgressRef.current) {
       pushCanvasHistoryEntry({
         renderHtml: nextRenderHtml,
@@ -18448,10 +18452,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
       syncDraftPreviewHtmlRef({ materializePositionGroups: shouldUpdateGeometry });
+      if (!shouldUpdateGeometry) {
+        schedulePreviewEditorState();
+      }
       syncSelectionStyleDraft();
       requestPreviewTextFit();
     },
-    [requestPreviewTextFit, resolveSelectionAppearanceStyleTargets, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
+    [
+      requestPreviewTextFit,
+      resolveSelectionAppearanceStyleTargets,
+      schedulePreviewEditorState,
+      syncDraftPreviewHtmlRef,
+      syncSelectionStyleDraft,
+    ]
   );
 
   const previewPositionOrderLockCandidateSelection = React.useCallback(
@@ -20354,7 +20367,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       if (status === 'saved') {
-        return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-label="반영 완료" />;
+        return null;
       }
 
       return null;
@@ -24351,21 +24364,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const stopInlineControlEvent = (event: React.MouseEvent<HTMLElement>) => {
       event.stopPropagation();
     };
+    const resolveInlineStyleFieldStateClass = (field: StyleFieldKey) => {
+      const applyStatus = styleFieldApplyStatus[field];
+
+      if (applyStatus === 'saved') {
+        return 'border-emerald-400 bg-emerald-50 text-slate-900 hover:bg-emerald-100';
+      }
+
+      if (applyStatus === 'failed') {
+        return 'border-red-400 bg-red-50 text-red-950 hover:bg-red-100';
+      }
+
+      if (applyStatus === 'saving') {
+        return 'border-sky-300 bg-sky-50 text-slate-900 hover:bg-sky-100';
+      }
+
+      return 'border-slate-300 bg-white text-slate-800 hover:bg-slate-50';
+    };
     const renderInlineNumericInput = (
       field: StyleFieldKey,
       ariaLabel: string,
       widthClassName = 'w-32',
       shortLabel = ariaLabel
     ) => {
-      const applyStatus = styleFieldApplyStatus[field];
-      const inputStateClass =
-        applyStatus === 'saved'
-          ? 'border-emerald-400 bg-emerald-50'
-          : applyStatus === 'failed'
-            ? 'border-red-400 bg-red-50'
-            : applyStatus === 'saving'
-              ? 'border-sky-300 bg-sky-50'
-              : 'border-slate-300 bg-white';
+      const inputStateClass = resolveInlineStyleFieldStateClass(field);
 
       return (
         <span
@@ -24384,7 +24406,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             aria-label={ariaLabel}
             title={ariaLabel}
             placeholder=""
-            className={`h-8 w-full rounded-md border pl-[20px] pr-[16px] text-center text-[11px] font-semibold text-slate-900 sm:pl-[50px] sm:pr-5 ${inputStateClass}`}
+            className={`h-8 w-full rounded-md border pl-[20px] pr-[16px] text-center text-[11px] font-semibold sm:pl-[50px] sm:pr-5 ${inputStateClass}`}
             onFocus={() => {
               const nextTarget = appearanceTargetByStyleField[field];
               if (nextTarget) {
@@ -24507,7 +24529,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           <input data-style-field={field} type="hidden" value={selectionStyleDraft[field]} readOnly />
           <button
             type="button"
-            className="inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border border-slate-300 bg-white px-1 text-[11px] font-semibold text-slate-800 sm:gap-1 sm:px-1.5"
+            className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass(field)}`}
             aria-label={label}
           >
             <span
@@ -24529,7 +24551,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               </span>
               {shortLabel ? <span className="sm:hidden">{shortLabel}</span> : null}
             </span>
-            {renderStyleApplyStatusIcon(field)}
           </button>
           {isOpen && showInlinePanel ? renderInlineColorPickerPanel(field, placementClassName) : null}
         </div>
@@ -24562,7 +24583,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         <input data-style-field="borderAlign" type="hidden" value={selectionStyleDraft.borderAlign} readOnly />
         <button
           type="button"
-          className="inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border border-slate-300 bg-white px-1 text-[11px] font-semibold text-slate-800 sm:gap-1 sm:px-1.5"
+          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderAlign')}`}
           onClick={() => {
             setAppearanceBoxModelTarget('border');
             cycleBorderAlignValue();
@@ -24573,7 +24594,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             <span className="hidden sm:inline">{currentLabel}</span>
             <span className="sm:hidden">{currentShortLabel}</span>
           </span>
-          {renderStyleApplyStatusIcon('borderAlign')}
         </button>
       </div>
       );
@@ -24587,7 +24607,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         <input data-style-field="borderStyle" type="hidden" value={selectionStyleDraft.borderStyle} readOnly />
         <button
           type="button"
-          className="inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border border-slate-300 bg-white px-1 text-[11px] font-semibold text-slate-800 sm:gap-1 sm:px-1.5"
+          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderStyle')}`}
           onClick={() => {
             setAppearanceBoxModelTarget('border');
             setBorderStylePickerOpen((previous) => !previous);
@@ -24603,7 +24623,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             <span className="sm:hidden">LT</span>
           </span>
           {selectionStyleDraft.borderStyle ? renderBorderStylePreview(selectionStyleDraft.borderStyle, 'hidden sm:block w-10') : null}
-          {renderStyleApplyStatusIcon('borderStyle')}
         </button>
         {borderStylePickerOpen ? (
           <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">

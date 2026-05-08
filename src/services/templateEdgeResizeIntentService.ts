@@ -39,9 +39,26 @@ const readEdgeOverlapLength = (
   right: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'spanStart' | 'spanEnd'>
 ) => Math.min(left.spanEnd, right.spanEnd) - Math.max(left.spanStart, right.spanStart);
 
-const readEdgePositionGroupId = (
-  edge: Pick<NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>, 'positionGroupId'> | null | undefined
-) => (edge?.positionGroupId || '').trim();
+const edgesSharePeerBoundary = (
+  sourceEdge: NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>,
+  candidateEdge: NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>
+) =>
+  candidateEdge.pageId === sourceEdge.pageId &&
+  candidateEdge.orientation === sourceEdge.orientation &&
+  candidateEdge.side === resolvePeerSide(sourceEdge.side) &&
+  Math.abs(candidateEdge.lineCoordinate - sourceEdge.lineCoordinate) <= EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX &&
+  readEdgeOverlapLength(sourceEdge, candidateEdge) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
+
+const edgesShareSameSidePeerSpan = (
+  referenceEdge: NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>,
+  peerEdge: NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>,
+  candidateEdge: NonNullable<TemplateEdgeSelectionClickDto['snapshot']['edges'][number]>
+) =>
+  candidateEdge.pageId === referenceEdge.pageId &&
+  candidateEdge.orientation === referenceEdge.orientation &&
+  candidateEdge.side === referenceEdge.side &&
+  Math.abs(candidateEdge.lineCoordinate - referenceEdge.lineCoordinate) <= EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX &&
+  readEdgeOverlapLength(peerEdge, candidateEdge) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
 
 const collectPeerConstrainedSameSideEdgeIds = (
   snapshot: TemplateEdgeSelectionClickDto['snapshot'],
@@ -50,9 +67,8 @@ const collectPeerConstrainedSameSideEdgeIds = (
   excludedEdgeIds: string[]
 ) => {
   const referenceEdge = referenceEdgeId ? TemplateEdgeTopologyService.getEdgeById(snapshot, referenceEdgeId) : null;
-  const referencePositionGroupId = readEdgePositionGroupId(referenceEdge);
 
-  if (!referenceEdge || !referencePositionGroupId || peerEdgeIds.length === 0) {
+  if (!referenceEdge || peerEdgeIds.length === 0) {
     return [];
   }
 
@@ -60,9 +76,8 @@ const collectPeerConstrainedSameSideEdgeIds = (
     new Set(
       peerEdgeIds.flatMap((peerEdgeId) => {
         const peerEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, peerEdgeId);
-        const peerPositionGroupId = readEdgePositionGroupId(peerEdge);
 
-        if (!peerEdge || peerPositionGroupId !== referencePositionGroupId) {
+        if (!peerEdge) {
           return [];
         }
 
@@ -73,22 +88,12 @@ const collectPeerConstrainedSameSideEdgeIds = (
             }
 
             if (
-              candidate.pageId !== referenceEdge.pageId ||
-              readEdgePositionGroupId(candidate) !== referencePositionGroupId ||
-              candidate.orientation !== referenceEdge.orientation ||
-              candidate.side !== referenceEdge.side
+              !edgesShareSameSidePeerSpan(referenceEdge, peerEdge, candidate)
             ) {
               return false;
             }
 
-            if (
-              Math.abs(candidate.lineCoordinate - referenceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
-              return false;
-            }
-
-            return readEdgeOverlapLength(peerEdge, candidate) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
+            return true;
           })
           .map((candidate) => candidate.edgeId);
       })
@@ -105,13 +110,10 @@ const collectPeerEdgeIds = (
     new Set(
       sourceEdgeIds.flatMap((edgeId) => {
         const sourceEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId);
-        const sourcePositionGroupId = readEdgePositionGroupId(sourceEdge);
 
-        if (!sourceEdge || !sourcePositionGroupId) {
+        if (!sourceEdge) {
           return [];
         }
-
-        const peerSide = resolvePeerSide(sourceEdge.side);
 
         return snapshot.edges
           .filter((candidate) => {
@@ -119,23 +121,7 @@ const collectPeerEdgeIds = (
               return false;
             }
 
-            if (
-              candidate.pageId !== sourceEdge.pageId ||
-              readEdgePositionGroupId(candidate) !== sourcePositionGroupId ||
-              candidate.orientation !== sourceEdge.orientation ||
-              candidate.side !== peerSide
-            ) {
-              return false;
-            }
-
-            if (
-              Math.abs(candidate.lineCoordinate - sourceEdge.lineCoordinate) >
-              EDGE_ROLE_LINE_ALIGNMENT_TOLERANCE_PX
-            ) {
-              return false;
-            }
-
-            return readEdgeOverlapLength(sourceEdge, candidate) > EDGE_ROLE_OVERLAP_NOISE_FLOOR_PX;
+            return edgesSharePeerBoundary(sourceEdge, candidate);
           })
           .map((candidate) => candidate.edgeId);
       })
