@@ -23981,6 +23981,44 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
+  const renderStyleNumericInput = (field: StyleFieldKey, label: string, unit = 'px') => (
+    <div className="space-y-2">
+      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+        {label}
+        {renderStyleApplyStatusIcon(field)}
+      </label>
+      <div className="relative">
+        <Input
+          data-style-field={field}
+          value={selectionStyleDraft[field]}
+          inputMode="decimal"
+          placeholder="혼합"
+          className={unit ? 'pr-8' : undefined}
+          onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
+          onBlur={() => applyStyleFieldOnBlur(field)}
+        />
+        {unit ? (
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">
+            {unit}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  const renderBorderStylePreview = (borderStyle: string, className = 'w-16') => (
+    <span
+      className={`block shrink-0 ${className}`}
+      style={{
+        borderTop:
+          normalizeFrameBorderStyleValue(borderStyle, borderStyle === 'none' ? 0 : 1) === 'none'
+            ? '0'
+            : `2px ${normalizeFrameBorderStyleValue(borderStyle)} rgba(15, 23, 42, .85)`,
+      }}
+      aria-hidden="true"
+    />
+  );
+
   const renderSelectionAppearanceControls = () => (
     <div className="space-y-3 rounded-xl border border-slate-200 p-4">
       <div className="space-y-1">
@@ -24024,86 +24062,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            너비 (px)
-            {renderStyleApplyStatusIcon('width')}
-          </label>
-          <Input
-            data-style-field="width"
-            value={selectionStyleDraft.width}
-            placeholder="혼합"
-            onChange={(event) => setStyleFieldDraftValue('width', event.target.value)}
-            onBlur={() => applyStyleFieldOnBlur('width')}
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            높이 (px)
-            {renderStyleApplyStatusIcon('height')}
-          </label>
-          <Input
-            data-style-field="height"
-            value={selectionStyleDraft.height}
-            placeholder="혼합"
-            onChange={(event) => setStyleFieldDraftValue('height', event.target.value)}
-            onBlur={() => applyStyleFieldOnBlur('height')}
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            좌우 여백
-            {renderStyleApplyStatusIcon('paddingX')}
-          </label>
-          <Input
-            data-style-field="paddingX"
-            value={selectionStyleDraft.paddingX}
-            placeholder="혼합"
-            onChange={(event) => setStyleFieldDraftValue('paddingX', event.target.value)}
-            onBlur={() => applyStyleFieldOnBlur('paddingX')}
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            상하 여백
-            {renderStyleApplyStatusIcon('paddingY')}
-          </label>
-          <Input
-            data-style-field="paddingY"
-            value={selectionStyleDraft.paddingY}
-            placeholder="혼합"
-            onChange={(event) => setStyleFieldDraftValue('paddingY', event.target.value)}
-            onBlur={() => applyStyleFieldOnBlur('paddingY')}
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            모서리 반경
-            {renderStyleApplyStatusIcon('borderRadius')}
-          </label>
-          <Input
-            data-style-field="borderRadius"
-            value={selectionStyleDraft.borderRadius}
-            placeholder="혼합"
-            onChange={(event) => setStyleFieldDraftValue('borderRadius', event.target.value)}
-            onBlur={() => applyStyleFieldOnBlur('borderRadius')}
-          />
-        </div>
+        {renderStyleNumericInput('width', '너비')}
+        {renderStyleNumericInput('height', '높이')}
+        {renderStyleNumericInput('paddingX', '좌우 여백')}
+        {renderStyleNumericInput('paddingY', '상하 여백')}
+        {renderStyleNumericInput('borderRadius', '모서리 반경')}
         {renderStyleColorPicker('backgroundColor', '배경 색')}
         {renderStyleColorPicker('borderColor', '외곽선 색')}
-        <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            외곽선 굵기
-            {renderStyleApplyStatusIcon('borderWidth')}
-          </label>
-          <Input
-            data-style-field="borderWidth"
-            value={selectionStyleDraft.borderWidth}
-            placeholder="혼합"
-            onChange={(event) => setStyleFieldDraftValue('borderWidth', event.target.value)}
-            onBlur={() => applyStyleFieldOnBlur('borderWidth')}
-          />
-        </div>
+        {renderStyleNumericInput('borderWidth', '외곽선 굵기')}
         <div className="space-y-2">
           <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
             외곽선 정렬
@@ -24166,12 +24132,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               onClick={() => setBorderStylePickerOpen((previous) => !previous)}
               onBlur={() => window.setTimeout(() => setBorderStylePickerOpen(false), 120)}
             >
-              <span className="truncate">
+              <span className="min-w-0 truncate">
                 {selectionStyleDraft.borderStyle
                   ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(selectionStyleDraft.borderStyle) || selectionStyleDraft.borderStyle
                   : '혼합'}
               </span>
-              <span className="shrink-0 text-xs text-slate-500">선택</span>
+              <span className="ml-auto flex shrink-0 items-center gap-2">
+                {selectionStyleDraft.borderStyle ? renderBorderStylePreview(selectionStyleDraft.borderStyle) : null}
+                <span className="text-xs text-slate-500">선택</span>
+              </span>
             </button>
             {borderStylePickerOpen ? (
               <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
@@ -24193,16 +24162,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     >
                       <span className="min-w-0 truncate">{option.label}</span>
                       <span className="ml-auto flex shrink-0 items-center gap-2">
-                        <span
-                          className="block w-16"
-                          style={{
-                            borderTop:
-                              option.value === 'none'
-                                ? '0'
-                                : `2px ${option.value} rgba(15, 23, 42, .85)`,
-                          }}
-                          aria-hidden="true"
-                        />
+                        {renderBorderStylePreview(option.value)}
                         {isSelected ? (
                           <span className="rounded-full bg-slate-950 px-1.5 py-0.5 text-[10px] text-white">
                             선택됨
