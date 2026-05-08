@@ -412,6 +412,7 @@ const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
 const EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP = [
   'data-template-frame-role',
   'data-template-frame-role-visual',
+  'data-template-frame-outline-style',
   'data-template-frame-value-key',
   'data-template-frame-parent-group',
   'data-template-frame-chain-key',
@@ -698,6 +699,51 @@ const stripDraftPreviewUiState = (html: string) => {
   return container.innerHTML;
 };
 
+const normalizeExtractTransparentFrameGuides = (container: HTMLElement) => {
+  container.querySelectorAll<HTMLElement>('.v102-frame-band, .v202-cell-box[data-v106-frame-node="true"]').forEach((shell) => {
+    const table = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
+    const tableStyle = table?.getAttribute('style') || '';
+    const shellStyle = shell.getAttribute('style') || '';
+    const isLegacyDashedGuide =
+      /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(tableStyle) ||
+      /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(shellStyle) ||
+      shell.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) === 'none';
+
+    if (!isLegacyDashedGuide) {
+      return;
+    }
+
+    shell.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
+    shell.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, '0');
+    shell.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, 'none');
+    shell.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, 'transparent');
+    shell.style.borderWidth = '0px';
+    shell.style.borderStyle = 'none';
+    shell.style.borderColor = 'transparent';
+    shell.style.outline = 'none';
+    shell.style.outlineOffset = '0px';
+    shell.removeAttribute('data-template-frame-outline-style');
+
+    if (table) {
+      table.style.borderWidth = '0px';
+      table.style.borderStyle = 'none';
+      table.style.borderColor = 'transparent';
+      table.removeAttribute('data-template-frame-outline-style');
+    }
+  });
+};
+
+const normalizeExtractTransparentFrameGuidesInHtml = (html: string) => {
+  if (!html.trim() || typeof document === 'undefined') {
+    return html;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  normalizeExtractTransparentFrameGuides(container);
+  return container.innerHTML;
+};
+
 const stripExtractOutputFrameAttrs = (html: string) => {
   if (!html.trim()) {
     return '';
@@ -712,6 +758,7 @@ const stripExtractOutputFrameAttrs = (html: string) => {
 
   const container = document.createElement('div');
   container.innerHTML = html;
+  normalizeExtractTransparentFrameGuides(container);
   container.querySelectorAll<HTMLElement>('*').forEach((element) => {
     EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP.forEach((attrName) => {
       element.removeAttribute(attrName);
@@ -908,16 +955,20 @@ const normalizeFrameOutlineStyle = (value: string | null | undefined): FrameOutl
   String(value || '').trim().toLowerCase() === 'dashed' ? 'dashed' : 'solid';
 
 const applyFrameNodeOutlineStyle = (node: HTMLElement, outlineStyle: FrameOutlineStyle) => {
-  const nextBorderStyle = outlineStyle === 'dashed' ? 'dashed' : 'solid';
-  node.style.borderWidth = '1px';
+  const isTransparentGuide = outlineStyle === 'dashed';
+  const nextBorderStyle = isTransparentGuide ? 'none' : 'solid';
+  const nextBorderWidth = isTransparentGuide ? '0' : '1';
+  const nextBorderColor = isTransparentGuide ? 'transparent' : '#0f172a';
+
+  node.style.borderWidth = `${nextBorderWidth}px`;
   node.style.borderStyle = nextBorderStyle;
-  node.style.borderColor = 'rgb(15, 23, 42)';
+  node.style.borderColor = nextBorderColor;
   node.style.outline = 'none';
   node.style.outlineOffset = '0px';
   node.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
-  node.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, '1');
+  node.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, nextBorderWidth);
   node.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, nextBorderStyle);
-  node.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, '#0f172a');
+  node.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, nextBorderColor);
 };
 
 const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
@@ -3624,6 +3675,7 @@ export default function TemplateExtractPage() {
   const [crossValidationPreview, setCrossValidationPreview] =
     React.useState<CrossValidationPreviewState | null>(null);
   const [crossValidationReferenceVisible, setCrossValidationReferenceVisible] = React.useState(false);
+  const [transparentFrameGuideVisible, setTransparentFrameGuideVisible] = React.useState(true);
   const [crossValidationViewMode, setCrossValidationViewMode] =
     React.useState<CrossValidationViewMode>('side_by_side');
   const [crossValidationPageIndex, setCrossValidationPageIndex] = React.useState(0);
@@ -4228,15 +4280,25 @@ export default function TemplateExtractPage() {
     });
   }, [draftDetail?.draft.generatedDraftHtml, reviewedFields, selectedCandidateKey, selectedFrameGroupIds]);
 
-  React.useEffect(() => {
-    const root = draftPreviewRef.current;
+	  React.useEffect(() => {
+	    const root = draftPreviewRef.current;
 
-    if (!root) {
-      return;
-    }
+	    if (!root) {
+	      return;
+	    }
 
-    applyDraftPreviewEditPermissions(root, draftPreviewEditRole);
-  }, [draftDetail?.draft.generatedDraftHtml, draftPreviewEditRole]);
+	    normalizeExtractTransparentFrameGuides(root);
+	  }, [flattenedFramePreview, renderedDraftHtml]);
+
+	  React.useEffect(() => {
+	    const root = draftPreviewRef.current;
+
+	    if (!root) {
+	      return;
+	    }
+
+	    applyDraftPreviewEditPermissions(root, draftPreviewEditRole);
+	  }, [draftDetail?.draft.generatedDraftHtml, draftPreviewEditRole]);
 
   const syncFrameEditorSelectionState = React.useCallback(() => {
     const root = draftPreviewRef.current;
@@ -7082,7 +7144,14 @@ export default function TemplateExtractPage() {
   };
 
   const previewSourceKind = draftDetail?.draft.sourceKind || sourceKind;
-  const previewSourceContent = draftDetail?.draft.sourceContent || sourceContent;
+  const rawPreviewSourceContent = draftDetail?.draft.sourceContent || sourceContent;
+  const previewSourceContent = React.useMemo(
+    () =>
+      previewSourceKind === 'html'
+        ? normalizeExtractTransparentFrameGuidesInHtml(rawPreviewSourceContent)
+        : rawPreviewSourceContent,
+    [previewSourceKind, rawPreviewSourceContent]
+  );
   const hasGeneratedDraftHtml = Boolean((draftDetail?.draft.generatedDraftHtml || '').trim());
   const activePreviewPaneMode = previewPaneMode === 'draft' && !hasGeneratedDraftHtml ? 'source' : previewPaneMode;
   const pipelineTrace = draftDetail?.pipelineTrace || null;
@@ -7208,6 +7277,26 @@ export default function TemplateExtractPage() {
         }
         .template-extract-draft-preview [data-v106-frame-node="true"] {
           cursor: pointer;
+        }
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]),
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) {
+          outline: 1px dashed rgba(15, 23, 42, .34) !important;
+          outline-offset: -1px !important;
+          background-color: transparent !important;
+          background-image: repeating-linear-gradient(
+            135deg,
+            rgba(15, 23, 42, .08) 0,
+            rgba(15, 23, 42, .08) 4px,
+            transparent 4px,
+            transparent 9px
+          ) !important;
+        }
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table,
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table,
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table td,
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table td {
+          border-color: transparent !important;
+          background-color: transparent !important;
         }
         .template-extract-draft-preview [data-v106-frame-node="true"] [data-template-frame-input="true"] {
           cursor: text;
@@ -7633,25 +7722,22 @@ export default function TemplateExtractPage() {
                 >
                   추출된 템플릿 초안
                 </Button>
-                {activePreviewPaneMode === 'draft' ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCrossValidationReferenceVisible((previous) => !previous)}
-                      disabled={!crossValidationPreview || !activeCrossValidationPdfPageUrl}
-                      title={
-                        crossValidationPreview && activeCrossValidationPdfPageUrl
-                          ? crossValidationReferenceVisible
-                            ? '문서 미리보기의 원본 문서 배경을 숨깁니다.'
-                            : '문서 미리보기의 원본 문서 배경을 표시합니다.'
-                          : '교차 검증 실행 이후에 활성화됩니다.'
-                      }
-                      aria-label={crossValidationReferenceVisible ? '원본 문서 배경 숨기기' : '원본 문서 배경 표시'}
-                    >
-                      {crossValidationReferenceVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                    <label className="ml-2 text-xs font-medium text-slate-500">편집 권한</label>
+	                {activePreviewPaneMode === 'draft' ? (
+	                  <>
+	                    <Button
+	                      variant="outline"
+	                      size="sm"
+	                      onClick={() => setTransparentFrameGuideVisible((previous) => !previous)}
+	                      title={
+	                        transparentFrameGuideVisible
+	                          ? '투명 상자 시각화를 끄고 실제 출력 상태로 봅니다.'
+	                          : '투명 상자 시각화를 켭니다.'
+	                      }
+	                      aria-label={transparentFrameGuideVisible ? '투명 상자 시각화 끄기' : '투명 상자 시각화 켜기'}
+	                    >
+	                      {transparentFrameGuideVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+	                    </Button>
+	                    <label className="ml-2 text-xs font-medium text-slate-500">편집 권한</label>
                     <select
                       value={draftPreviewEditRole}
                       onChange={(event) => setDraftPreviewEditRole(event.target.value as DraftPreviewEditRole)}
@@ -7666,10 +7752,11 @@ export default function TemplateExtractPage() {
             </CardHeader>
             {activePreviewPaneMode === 'source' ? (
               previewSourceKind === 'html' ? (
-                <CardContent
-                  className="template-extract-preview-surface template-extract-html-preview !p-0"
-                  dangerouslySetInnerHTML={{ __html: previewSourceContent }}
-                />
+	                <CardContent
+	                  className="template-extract-preview-surface template-extract-html-preview !p-0"
+	                  data-transparent-frame-guide-visible={transparentFrameGuideVisible ? 'true' : undefined}
+	                  dangerouslySetInnerHTML={{ __html: previewSourceContent }}
+	                />
               ) : (
                 <CardContent className="template-extract-preview-surface template-extract-text-preview !p-0">
                   {previewSourceContent.trim() || '표시할 내용이 없습니다.'}
@@ -7682,9 +7769,10 @@ export default function TemplateExtractPage() {
                   flattenedFramePreview ? ' template-clone template-clone--raster-first-v2-structured' : ''
                 }`}
                 data-template-extraction-stage={flattenedFramePreview?.extractionStage || undefined}
-                data-template-frame-group-version={flattenedFramePreview?.frameGroupVersion || undefined}
-                data-template-clone-id={flattenedFramePreview?.cloneId || undefined}
-                data-cross-validation-reference-visible={crossValidationReferenceVisible && activeCrossValidationPdfPageUrl ? 'true' : undefined}
+	                data-template-frame-group-version={flattenedFramePreview?.frameGroupVersion || undefined}
+	                data-template-clone-id={flattenedFramePreview?.cloneId || undefined}
+	                data-transparent-frame-guide-visible={transparentFrameGuideVisible ? 'true' : undefined}
+	                data-cross-validation-reference-visible={crossValidationReferenceVisible && activeCrossValidationPdfPageUrl ? 'true' : undefined}
                 onFocusCapture={handleDraftPreviewSelect}
                 onInput={(event) => syncPreviewEditTarget(event.target)}
                 onPasteCapture={handleDraftPreviewPaste}

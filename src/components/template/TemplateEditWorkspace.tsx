@@ -8886,6 +8886,20 @@ const formatFrameBorderWidthValue = (value: number) => {
   return String(Number(Math.max(0, value).toFixed(2)));
 };
 
+const hasLegacyTransparentFrameGuide = (element: HTMLElement) => {
+  const shell = resolveFrameLayoutShell(element);
+  const candidates = [
+    shell,
+    ...Array.from(shell.querySelectorAll<HTMLElement>('table.v102-frame-band-table, .v202-frame-group[data-template-frame-group]')),
+  ];
+
+  return candidates.some((candidate) => {
+    const outlineStyle = candidate.getAttribute('data-template-frame-outline-style')?.trim().toLowerCase();
+    const inlineStyle = candidate.getAttribute('style') || '';
+    return outlineStyle === 'dashed' || /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(inlineStyle);
+  });
+};
+
 const readElementBorderAppearance = (element: HTMLElement) => {
   const computedStyle = getComputedStyle(element);
   const hasStoredBorderAppearance =
@@ -8893,6 +8907,16 @@ const readElementBorderAppearance = (element: HTMLElement) => {
     element.hasAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR) ||
     element.hasAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
     element.hasAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
+
+  if (!hasStoredBorderAppearance && hasLegacyTransparentFrameGuide(element)) {
+    return {
+      align: 'inside',
+      color: 'transparent',
+      style: 'none',
+      width: 0,
+    };
+  }
+
   const align = normalizeFrameBorderAlignValue(element.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR));
   const storedWidth = normalizeFrameBorderWidthValue(element.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR));
   const borderWidth = parseFramePx(computedStyle.borderTopWidth);
@@ -9069,11 +9093,30 @@ const normalizeFrameBorderAppearanceLayersInPage = (pageInner: HTMLElement) => {
       shell.hasAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
       shell.hasAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) ||
       shell.hasAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
+    const hasLegacyTransparentGuide = !hasShellBorderAppearance && hasLegacyTransparentFrameGuide(shell);
+
+    if (hasLegacyTransparentGuide) {
+      applyElementBorderAppearanceStylePatch(shell, {
+        borderAlign: 'inside',
+        borderColor: 'transparent',
+        borderStyle: 'none',
+        borderWidth: '0',
+      });
+      clearNestedFrameBorderAppearanceStyles(shell);
+      changed = true;
+      return;
+    }
 
     if (!hasShellBorderAppearance) {
       return;
     }
 
+    const shellAppearance = readElementBorderAppearance(shell);
+    if (shellAppearance.width > 0 && shellAppearance.style !== 'none') {
+      shell.setAttribute('data-template-frame-outline-style', shellAppearance.style);
+    } else {
+      shell.removeAttribute('data-template-frame-outline-style');
+    }
     clearNestedFrameBorderAppearanceStyles(shell);
     changed = true;
   });
@@ -24007,16 +24050,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const renderBorderStylePreview = (borderStyle: string, className = 'w-16') => (
-    <span
-      className={`block shrink-0 ${className}`}
-      style={{
-        borderTop:
-          normalizeFrameBorderStyleValue(borderStyle, borderStyle === 'none' ? 0 : 1) === 'none'
-            ? '0'
-            : `2px ${normalizeFrameBorderStyleValue(borderStyle)} rgba(15, 23, 42, .85)`,
-      }}
-      aria-hidden="true"
-    />
+    normalizeFrameBorderStyleValue(borderStyle, borderStyle === 'none' ? 0 : 1) === 'none' ? (
+      <span
+        className={`block h-4 shrink-0 rounded border border-dashed border-slate-400 ${className}`}
+        style={{
+          backgroundImage:
+            'repeating-linear-gradient(135deg, rgba(15, 23, 42, .12) 0, rgba(15, 23, 42, .12) 4px, transparent 4px, transparent 9px)',
+        }}
+        aria-hidden="true"
+      />
+    ) : (
+      <span
+        className={`block shrink-0 ${className}`}
+        style={{
+          borderTop: `2px ${normalizeFrameBorderStyleValue(borderStyle)} rgba(15, 23, 42, .85)`,
+        }}
+        aria-hidden="true"
+      />
+    )
   );
 
   const renderSelectionAppearanceControls = () => (
@@ -24552,6 +24603,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview[data-frame-create-mode="true"] [data-template-edit-scope][data-template-edit-enabled="true"] {
           cursor: crosshair;
+        }
+        .template-edit-preview .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]),
+        .template-edit-preview .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) {
+          outline: 1px dashed rgba(15, 23, 42, .34) !important;
+          outline-offset: -1px !important;
+          background-color: transparent !important;
+          background-image: repeating-linear-gradient(
+            135deg,
+            rgba(15, 23, 42, .08) 0,
+            rgba(15, 23, 42, .08) 4px,
+            transparent 4px,
+            transparent 9px
+          ) !important;
         }
         .template-edit-preview [data-template-selected="true"] {
           position: relative;
