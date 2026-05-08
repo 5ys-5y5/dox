@@ -544,6 +544,8 @@ const TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR = 'data-template-frame-relative-anch
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR = 'data-template-frame-relative-offset-x';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR = 'data-template-frame-relative-offset-y';
 const TEMPLATE_FRAME_RELATION_SELECTION_ATTR = 'data-template-frame-relation-selection';
+const TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR = 'data-template-metadata-relation-outline';
+const TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR = 'data-template-metadata-relation-role';
 const TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR = 'data-template-frame-position-impact-group';
 const TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR = 'data-template-frame-position-group-id';
 const TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR = 'data-template-frame-position-group-label';
@@ -7438,6 +7440,7 @@ const stripSelectionAttrs = (
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
   });
+  clearFrameMetadataRelationOutlineUi(root);
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
   });
@@ -7535,6 +7538,223 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
   });
 };
 
+const clearFrameMetadataRelationOutlineUi = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR);
+    element.removeAttribute(TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR);
+  });
+};
+
+const applyMetadataRelationOutlineEdges = (
+  root: ParentNode,
+  members: Array<{
+    node: HTMLElement;
+    relationRole: 'key' | 'value';
+  }>
+) => {
+  if (members.length <= 1) {
+    return;
+  }
+
+  const memberEntries = members
+    .map(({ node, relationRole }) => {
+      const shell = resolveFrameLayoutShell(node);
+      const pageInner = shell.closest<HTMLElement>('.page-inner') || node.closest<HTMLElement>('.page-inner') || null;
+
+      if (!pageInner || !root.contains(shell)) {
+        return null;
+      }
+
+      return {
+        node,
+        relationRole,
+        pageInner,
+        rect: readFrameElementRect(shell, pageInner),
+      };
+    })
+    .filter(
+      (
+        entry
+      ): entry is {
+        node: HTMLElement;
+        relationRole: 'key' | 'value';
+        pageInner: HTMLElement;
+        rect: FrameNodeRect;
+      } => Boolean(entry)
+    );
+
+  const entriesByPage = new Map<HTMLElement, typeof memberEntries>();
+  memberEntries.forEach((entry) => {
+    const current = entriesByPage.get(entry.pageInner) || [];
+    current.push(entry);
+    entriesByPage.set(entry.pageInner, current);
+  });
+
+  entriesByPage.forEach((entries) => {
+    if (entries.length <= 1) {
+      return;
+    }
+
+    const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
+    const minTop = Math.min(...entries.map((entry) => entry.rect.top));
+    const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
+    const maxBottom = Math.max(...entries.map((entry) => entry.rect.top + entry.rect.height));
+    const tolerance = Math.max(2.5, FRAME_RESIZE_TOLERANCE_PX);
+    const addSide = (sides: string[], side: 'left' | 'top' | 'right' | 'bottom') => {
+      if (!sides.includes(side)) {
+        sides.push(side);
+      }
+    };
+    const readRectRight = (rect: FrameNodeRect) => rect.left + rect.width;
+    const readRectBottom = (rect: FrameNodeRect) => rect.top + rect.height;
+    const readRangeOverlap = (firstStart: number, firstEnd: number, secondStart: number, secondEnd: number) =>
+      Math.max(0, Math.min(firstEnd, secondEnd) - Math.max(firstStart, secondStart));
+    const findSameRowEntries = (entry: (typeof entries)[number]) =>
+      entries.filter((candidate) => {
+        const overlap = readRangeOverlap(
+          entry.rect.top,
+          readRectBottom(entry.rect),
+          candidate.rect.top,
+          readRectBottom(candidate.rect)
+        );
+        return overlap >= Math.min(entry.rect.height, candidate.rect.height) * 0.45 || overlap > tolerance;
+      });
+    const findSameColumnEntries = (entry: (typeof entries)[number]) =>
+      entries.filter((candidate) => {
+        const overlap = readRangeOverlap(
+          entry.rect.left,
+          readRectRight(entry.rect),
+          candidate.rect.left,
+          readRectRight(candidate.rect)
+        );
+        return overlap >= Math.min(entry.rect.width, candidate.rect.width) * 0.45 || overlap > tolerance;
+      });
+    const addRowBoundarySide = (entry: (typeof entries)[number], sides: string[]) => {
+      const entryBottom = readRectBottom(entry.rect);
+      const alignedRowEntries = entries.filter((candidate) => {
+        const candidateBottom = readRectBottom(candidate.rect);
+        return (
+          (sides.includes('top') && Math.abs(candidate.rect.top - entry.rect.top) <= tolerance) ||
+          (sides.includes('bottom') && Math.abs(candidateBottom - entryBottom) <= tolerance)
+        );
+      });
+      const rowEntries = alignedRowEntries.length > 1 ? alignedRowEntries : findSameRowEntries(entry);
+      const rowMinLeft = Math.min(...rowEntries.map((candidate) => candidate.rect.left));
+      const rowMaxRight = Math.max(...rowEntries.map((candidate) => readRectRight(candidate.rect)));
+      const entryRight = readRectRight(entry.rect);
+
+      if (Math.abs(entry.rect.left - rowMinLeft) <= tolerance) {
+        addSide(sides, 'left');
+        return;
+      }
+
+      if (Math.abs(entryRight - rowMaxRight) <= tolerance) {
+        addSide(sides, 'right');
+        return;
+      }
+
+      const rowCenterX = rowMinLeft + (rowMaxRight - rowMinLeft) / 2;
+      addSide(sides, entry.rect.left + entry.rect.width / 2 <= rowCenterX ? 'left' : 'right');
+    };
+    const addColumnBoundarySide = (entry: (typeof entries)[number], sides: string[]) => {
+      const entryRight = readRectRight(entry.rect);
+      const alignedColumnEntries = entries.filter((candidate) => {
+        const candidateRight = readRectRight(candidate.rect);
+        return (
+          (sides.includes('left') && Math.abs(candidate.rect.left - entry.rect.left) <= tolerance) ||
+          (sides.includes('right') && Math.abs(candidateRight - entryRight) <= tolerance)
+        );
+      });
+      const columnEntries = alignedColumnEntries.length > 1 ? alignedColumnEntries : findSameColumnEntries(entry);
+      const columnMinTop = Math.min(...columnEntries.map((candidate) => candidate.rect.top));
+      const columnMaxBottom = Math.max(...columnEntries.map((candidate) => readRectBottom(candidate.rect)));
+      const entryBottom = readRectBottom(entry.rect);
+
+      if (Math.abs(entry.rect.top - columnMinTop) <= tolerance) {
+        addSide(sides, 'top');
+        return;
+      }
+
+      if (Math.abs(entryBottom - columnMaxBottom) <= tolerance) {
+        addSide(sides, 'bottom');
+        return;
+      }
+
+      const columnCenterY = columnMinTop + (columnMaxBottom - columnMinTop) / 2;
+      addSide(sides, entry.rect.top + entry.rect.height / 2 <= columnCenterY ? 'top' : 'bottom');
+    };
+    const addNearestUnionBoundarySide = (entry: (typeof entries)[number], sides: string[]) => {
+      const rectRight = readRectRight(entry.rect);
+      const rectBottom = readRectBottom(entry.rect);
+      const nearestSide = [
+        { side: 'left' as const, distance: Math.abs(entry.rect.left - minLeft) },
+        { side: 'top' as const, distance: Math.abs(entry.rect.top - minTop) },
+        { side: 'right' as const, distance: Math.abs(rectRight - maxRight) },
+        { side: 'bottom' as const, distance: Math.abs(rectBottom - maxBottom) },
+      ].sort((left, right) => left.distance - right.distance)[0]?.side;
+
+      if (nearestSide) {
+        addSide(sides, nearestSide);
+      }
+    };
+    const ensureRelationMemberIsIdentifiable = (entry: (typeof entries)[number], sides: string[]) => {
+      if (sides.length <= 0) {
+        addNearestUnionBoundarySide(entry, sides);
+      }
+
+      if (sides.length >= 2) {
+        return;
+      }
+
+      const hasVerticalSide = sides.includes('left') || sides.includes('right');
+      const hasHorizontalSide = sides.includes('top') || sides.includes('bottom');
+
+      if (hasHorizontalSide && !hasVerticalSide) {
+        addRowBoundarySide(entry, sides);
+        return;
+      }
+
+      if (hasVerticalSide && !hasHorizontalSide) {
+        addColumnBoundarySide(entry, sides);
+        return;
+      }
+
+      addNearestUnionBoundarySide(entry, sides);
+    };
+
+    entries.forEach((entry) => {
+      const rectRight = readRectRight(entry.rect);
+      const rectBottom = readRectBottom(entry.rect);
+      const sides: string[] = [];
+
+      if (Math.abs(entry.rect.left - minLeft) <= tolerance) {
+        addSide(sides, 'left');
+      }
+
+      if (Math.abs(entry.rect.top - minTop) <= tolerance) {
+        addSide(sides, 'top');
+      }
+
+      if (Math.abs(rectRight - maxRight) <= tolerance) {
+        addSide(sides, 'right');
+      }
+
+      if (Math.abs(rectBottom - maxBottom) <= tolerance) {
+        addSide(sides, 'bottom');
+      }
+
+      ensureRelationMemberIsIdentifiable(entry, sides);
+
+      if (sides.length <= 0) {
+        return;
+      }
+
+      entry.node.setAttribute(TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR, sides.join(' '));
+      entry.node.setAttribute(TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR, entry.relationRole);
+    });
+  });
+};
+
 const applyFrameRelationSelectionUi = (
   root: HTMLElement,
   relationMode: FrameRelationPreviewMode,
@@ -7544,6 +7764,7 @@ const applyFrameRelationSelectionUi = (
   root.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
     element.remove();
   });
+  clearFrameMetadataRelationOutlineUi(root);
 
   frameNodes.forEach((node) => {
     node.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
@@ -7555,11 +7776,16 @@ const applyFrameRelationSelectionUi = (
 
   const valueIdsByKeyId = new Map<string, string[]>();
   const keyIdsByValueId = new Map<string, string>();
+  const frameNodeById = new Map<string, HTMLElement>();
 
   frameNodes.forEach((node) => {
     const frameGroupId = getFrameGroupId(node);
     const role = readFrameRole(node);
     const parentGroupId = readFrameParentGroupId(node);
+
+    if (frameGroupId) {
+      frameNodeById.set(frameGroupId, node);
+    }
 
     if (role === 'value' && parentGroupId) {
       const current = valueIdsByKeyId.get(parentGroupId) || [];
@@ -7567,6 +7793,19 @@ const applyFrameRelationSelectionUi = (
       valueIdsByKeyId.set(parentGroupId, current);
       keyIdsByValueId.set(frameGroupId, parentGroupId);
     }
+  });
+
+  valueIdsByKeyId.forEach((valueIds, keyId) => {
+    const keyNode = frameNodeById.get(keyId) || null;
+    const relationMembers = [
+      ...(keyNode ? [{ node: keyNode, relationRole: 'key' as const }] : []),
+      ...valueIds
+        .map((valueId) => frameNodeById.get(valueId) || null)
+        .filter((node): node is HTMLElement => Boolean(node))
+        .map((node) => ({ node, relationRole: 'value' as const })),
+    ];
+
+    applyMetadataRelationOutlineEdges(root, relationMembers);
   });
 
   const activeRelationFrameIds = new Set<string>();
@@ -7591,7 +7830,7 @@ const applyFrameRelationSelectionUi = (
   frameNodes.forEach((node) => {
     const frameGroupId = getFrameGroupId(node);
     const role = readFrameRole(node);
-    const hasLinkedValues = role === 'key' && (valueIdsByKeyId.get(frameGroupId)?.length || 0) > 0;
+    const hasLinkedValues = (valueIdsByKeyId.get(frameGroupId)?.length || 0) > 0;
     const isLinkedValue = role === 'value' && Boolean(keyIdsByValueId.get(frameGroupId));
     const isActive = activeRelationFrameIds.has(frameGroupId);
 
@@ -21356,17 +21595,71 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background-image: linear-gradient(90deg, rgba(16, 185, 129, .92) 0 4px, transparent 4px) !important;
           background-color: rgba(16, 185, 129, .04) !important;
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"] {
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
+          position: relative;
+          --v106-metadata-relation-color: rgba(100, 116, 139, .92);
+          --v106-metadata-relation-edge-size: 3px;
+          --v106-metadata-relation-edge-top: transparent;
+          --v106-metadata-relation-edge-right: transparent;
+          --v106-metadata-relation-edge-bottom: transparent;
+          --v106-metadata-relation-edge-left: transparent;
+          background-image:
+            linear-gradient(var(--v106-metadata-relation-edge-top), var(--v106-metadata-relation-edge-top)),
+            linear-gradient(var(--v106-metadata-relation-edge-right), var(--v106-metadata-relation-edge-right)),
+            linear-gradient(var(--v106-metadata-relation-edge-bottom), var(--v106-metadata-relation-edge-bottom)),
+            linear-gradient(var(--v106-metadata-relation-edge-left), var(--v106-metadata-relation-edge-left)) !important;
+          background-repeat: no-repeat !important;
+          background-position: top left, top right, bottom left, top left !important;
+          background-size:
+            100% var(--v106-metadata-relation-edge-size),
+            var(--v106-metadata-relation-edge-size) 100%,
+            100% var(--v106-metadata-relation-edge-size),
+            var(--v106-metadata-relation-edge-size) 100% !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="key"] {
+          --v106-metadata-relation-color: rgba(217, 119, 6, .98);
+          background-color: rgba(245, 158, 11, .04) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="value"] {
+          --v106-metadata-relation-color: rgba(37, 99, 235, .98);
+          background-color: rgba(59, 130, 246, .04) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="top"] {
+          --v106-metadata-relation-edge-top: var(--v106-metadata-relation-color);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="right"] {
+          --v106-metadata-relation-edge-right: var(--v106-metadata-relation-color);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="bottom"] {
+          --v106-metadata-relation-edge-bottom: var(--v106-metadata-relation-color);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="left"] {
+          --v106-metadata-relation-edge-left: var(--v106-metadata-relation-color);
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"],
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
+          --v106-metadata-relation-edge-size: 4px;
+          outline: none !important;
+          outline-offset: 0;
+          box-shadow: none !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] {
+          background-color: rgba(245, 158, 11, .10) !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
+          background-color: rgba(59, 130, 246, .10) !important;
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(37, 99, 235, .42) !important;
           outline-offset: -1px;
           box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .24);
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"] {
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(217, 119, 6, .42) !important;
           outline-offset: -1px;
           box-shadow: inset 0 0 0 1px rgba(217, 119, 6, .24);
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: -1px;
           box-shadow:
@@ -21378,7 +21671,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           outline-offset: -1px;
           background-image: linear-gradient(180deg, rgba(245, 158, 11, .03), rgba(245, 158, 11, .08));
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] {
+        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 2px solid rgba(217, 119, 6, .96) !important;
           outline-offset: -1px;
           box-shadow:
