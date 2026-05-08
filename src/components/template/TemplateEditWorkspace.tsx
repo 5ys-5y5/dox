@@ -841,6 +841,11 @@ const FRAME_BOX_KIND_BUTTON_LABELS: Record<TemplateFrameBoxKind, string> = {
   attachment: '첨부파일',
   signature: '서명',
 };
+const FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameBoxKind, string> = {
+  text: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  attachment: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  signature: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+};
 const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
   text: '텍스트',
   attachment: '첨부',
@@ -862,6 +867,11 @@ const FRAME_ROLE_SHORT_LABELS: Record<TemplateFrameRole | 'group', string> = {
   key: '상위 키',
   value: '하위 값',
   key_value: '독립 값',
+};
+const FRAME_ROLE_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameRole, string> = {
+  key: 'border-amber-200 bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  value: 'border-sky-200 bg-sky-50 text-sky-700 ring-1 ring-sky-200',
+  key_value: 'border-emerald-200 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
 };
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
   key: '다른 value 상자를 묶을 수 있는 기준 역할입니다. 연결이 없어도 key 역할 자체는 유지됩니다.',
@@ -7637,24 +7647,39 @@ const applyFrameValidationErrorUi = (root: HTMLElement, frameGroupIds: string[])
 const appendFrameReviewWarningOverlay = (frameNode: HTMLElement, messages: string[]) => {
   const shell = resolveFrameLayoutShell(frameNode);
   const pageInner = shell.closest<HTMLElement>('.page-inner') || frameNode.closest<HTMLElement>('.page-inner') || null;
+  const previewSurface = shell.closest<HTMLElement>('.template-edit-preview');
+  const overlayRoot = previewSurface || pageInner;
   const frameGroupId = getFrameGroupId(frameNode);
   const normalizedMessages = Array.from(new Set(messages.map((message) => message.trim()).filter(Boolean)));
 
-  if (!pageInner || !frameGroupId || normalizedMessages.length <= 0) {
+  if (!pageInner || !overlayRoot || !frameGroupId || normalizedMessages.length <= 0) {
     return;
   }
 
   const closePopover = () => {
-    pageInner.querySelectorAll<HTMLElement>(`.${FRAME_REVIEW_WARNING_POPOVER_CLASS}`).forEach((element) => {
+    overlayRoot.querySelectorAll<HTMLElement>(`.${FRAME_REVIEW_WARNING_POPOVER_CLASS}`).forEach((element) => {
       element.remove();
     });
   };
   const openPopover = () => {
     closePopover();
-    const shellRect = readFrameElementRect(shell, pageInner);
-    const pageWidth = pageInner.clientWidth || pageInner.getBoundingClientRect().width || shellRect.left + shellRect.width;
-    const popoverWidth = Math.min(320, Math.max(220, pageWidth));
-    const popoverLeft = Math.max(0, Math.min(shellRect.left + shellRect.width - popoverWidth, pageWidth - popoverWidth));
+    const shellViewportRect = shell.getBoundingClientRect();
+    const rootViewportRect = overlayRoot.getBoundingClientRect();
+    const rootScrollLeft = overlayRoot.scrollLeft || 0;
+    const rootScrollTop = overlayRoot.scrollTop || 0;
+    const rootWidth = overlayRoot.clientWidth || rootViewportRect.width || shellViewportRect.right - rootViewportRect.left;
+    const rootHeight = overlayRoot.clientHeight || rootViewportRect.height || shellViewportRect.bottom - rootViewportRect.top;
+    const visibleLeft = rootScrollLeft;
+    const visibleTop = rootScrollTop;
+    const visibleRight = visibleLeft + rootWidth;
+    const visibleBottom = visibleTop + rootHeight;
+    const shellLeft = shellViewportRect.left - rootViewportRect.left + rootScrollLeft;
+    const shellTop = shellViewportRect.top - rootViewportRect.top + rootScrollTop;
+    const shellWidth = shellViewportRect.width;
+    const shellHeight = shellViewportRect.height;
+    const inset = 8;
+    const popoverWidth = Math.min(320, Math.max(220, rootWidth - inset * 2));
+    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, Math.max(min, max)));
 
     const popover = document.createElement('div');
     popover.className = FRAME_REVIEW_WARNING_POPOVER_CLASS;
@@ -7662,9 +7687,9 @@ const appendFrameReviewWarningOverlay = (frameNode: HTMLElement, messages: strin
     popover.setAttribute('role', 'dialog');
     popover.setAttribute('aria-label', `${frameGroupId} 메타데이터 확인 필요`);
     popover.style.position = 'absolute';
-    popover.style.left = toFrameCssPx(popoverLeft);
-    popover.style.top = toFrameCssPx(shellRect.top - 8);
-    popover.style.transform = 'translateY(-100%)';
+    popover.style.left = '0';
+    popover.style.top = '0';
+    popover.style.visibility = 'hidden';
     popover.style.zIndex = '2147483647';
     popover.style.width = toFrameCssPx(popoverWidth);
     popover.style.maxWidth = toFrameCssPx(popoverWidth);
@@ -7771,7 +7796,25 @@ const appendFrameReviewWarningOverlay = (frameNode: HTMLElement, messages: strin
       event.stopPropagation();
     });
 
-    pageInner.appendChild(popover);
+    overlayRoot.appendChild(popover);
+
+    const measuredPopoverHeight = popover.offsetHeight || popover.getBoundingClientRect().height || 120;
+    const preferredTopAbove = shellTop - measuredPopoverHeight - inset;
+    const preferredTopBelow = shellTop + shellHeight + inset;
+    const canPlaceAbove = preferredTopAbove >= visibleTop + inset;
+    const canPlaceBelow = preferredTopBelow + measuredPopoverHeight <= visibleBottom - inset;
+    const nextTop = canPlaceAbove || !canPlaceBelow
+      ? clamp(preferredTopAbove, visibleTop + inset, visibleBottom - measuredPopoverHeight - inset)
+      : clamp(preferredTopBelow, visibleTop + inset, visibleBottom - measuredPopoverHeight - inset);
+    const nextLeft = clamp(
+      shellLeft + shellWidth - popoverWidth,
+      visibleLeft + inset,
+      visibleRight - popoverWidth - inset
+    );
+
+    popover.style.left = toFrameCssPx(nextLeft);
+    popover.style.top = toFrameCssPx(nextTop);
+    popover.style.visibility = 'visible';
   };
 
   const button = document.createElement('button');
@@ -7928,7 +7971,10 @@ const applyMetadataRelationOutlineEdges = (
   members: Array<{
     node: HTMLElement;
     relationRole: 'key' | 'value';
-  }>
+  }>,
+  options: {
+    renderConnectors?: boolean;
+  } = {}
 ) => {
   if (members.length <= 1) {
     return;
@@ -7974,7 +8020,9 @@ const applyMetadataRelationOutlineEdges = (
     }
 
     const shouldRenderConnectors =
-      root instanceof HTMLElement && root.getAttribute('data-selection-panel-tab') === 'metadata';
+      root instanceof HTMLElement &&
+      root.getAttribute('data-selection-panel-tab') === 'metadata' &&
+      (options.renderConnectors ?? true);
     const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
     const minTop = Math.min(...entries.map((entry) => entry.rect.top));
     const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
@@ -8122,7 +8170,7 @@ const applyMetadataRelationOutlineEdges = (
       dot.style.height = '5px';
       dot.style.borderRadius = '999px';
       dot.style.background =
-        entry.relationRole === 'key' ? 'rgba(217, 119, 6, .98)' : 'rgba(37, 99, 235, .98)';
+        entry.relationRole === 'key' ? 'rgba(217, 119, 6, .98)' : 'rgba(3, 105, 161, .98)';
       dot.style.boxShadow = 'none';
       entry.pageInner.appendChild(dot);
     };
@@ -8132,6 +8180,7 @@ const applyMetadataRelationOutlineEdges = (
       const deltaX = targetCenter.x - sourceCenter.x;
       const deltaY = targetCenter.y - sourceCenter.y;
       const length = Math.hypot(deltaX, deltaY);
+      const lineThickness = 1;
 
       if (!Number.isFinite(length) || length < 1) {
         return;
@@ -8146,11 +8195,15 @@ const applyMetadataRelationOutlineEdges = (
       line.style.pointerEvents = 'none';
       line.style.zIndex = '26';
       line.style.left = toFrameCssPx(sourceCenter.x);
-      line.style.top = toFrameCssPx(sourceCenter.y);
+      line.style.top = toFrameCssPx(sourceCenter.y - lineThickness / 2);
       line.style.width = toFrameCssPx(length);
-      line.style.height = '0';
-      line.style.borderTop = '1.5px dotted rgba(71, 85, 105, .72)';
-      line.style.transformOrigin = '0 0';
+      line.style.height = toFrameCssPx(lineThickness);
+      line.style.borderTop = '0';
+      line.style.backgroundImage =
+        'repeating-linear-gradient(90deg, rgba(71, 85, 105, .72) 0 9px, transparent 9px 13px)';
+      line.style.backgroundRepeat = 'repeat-x';
+      line.style.backgroundSize = `13px ${toFrameCssPx(lineThickness)}`;
+      line.style.transformOrigin = '0 50%';
       line.style.transform = `rotate(${Math.atan2(deltaY, deltaX)}rad)`;
       line.style.boxShadow = 'none';
       source.pageInner.appendChild(line);
@@ -8243,19 +8296,6 @@ const applyFrameRelationSelectionUi = (
     }
   });
 
-  valueIdsByKeyId.forEach((valueIds, keyId) => {
-    const keyNode = frameNodeById.get(keyId) || null;
-    const relationMembers = [
-      ...(keyNode ? [{ node: keyNode, relationRole: 'key' as const }] : []),
-      ...valueIds
-        .map((valueId) => frameNodeById.get(valueId) || null)
-        .filter((node): node is HTMLElement => Boolean(node))
-        .map((node) => ({ node, relationRole: 'value' as const })),
-    ];
-
-    applyMetadataRelationOutlineEdges(root, relationMembers);
-  });
-
   const activeRelationFrameIds = new Set<string>();
   selectedFrameGroupIds.forEach((frameGroupId) => {
     const linkedValueIds = valueIdsByKeyId.get(frameGroupId) || [];
@@ -8273,6 +8313,25 @@ const applyFrameRelationSelectionUi = (
     activeRelationFrameIds.add(frameGroupId);
     activeRelationFrameIds.add(parentGroupId);
     (valueIdsByKeyId.get(parentGroupId) || []).forEach((linkedValueId) => activeRelationFrameIds.add(linkedValueId));
+  });
+  const hasSelectedMetadataFrames = selectedFrameGroupIds.length > 0;
+
+  valueIdsByKeyId.forEach((valueIds, keyId) => {
+    const keyNode = frameNodeById.get(keyId) || null;
+    const relationMembers = [
+      ...(keyNode ? [{ node: keyNode, relationRole: 'key' as const }] : []),
+      ...valueIds
+        .map((valueId) => frameNodeById.get(valueId) || null)
+        .filter((node): node is HTMLElement => Boolean(node))
+        .map((node) => ({ node, relationRole: 'value' as const })),
+    ];
+    const shouldRenderRelationConnectors =
+      !hasSelectedMetadataFrames ||
+      relationMembers.some((member) => activeRelationFrameIds.has(getFrameGroupId(member.node)));
+
+    applyMetadataRelationOutlineEdges(root, relationMembers, {
+      renderConnectors: shouldRenderRelationConnectors,
+    });
   });
 
   frameNodes.forEach((node) => {
@@ -10207,6 +10266,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [moveGroupAssignmentTargetGroupId, setMoveGroupAssignmentTargetGroupId] = React.useState('');
   const [expandedPositionBoxGroupIds, setExpandedPositionBoxGroupIds] = React.useState<Record<string, boolean>>({});
   const [expandedPositionSummarySections, setExpandedPositionSummarySections] = React.useState<Record<string, boolean>>({});
+  const [expandedSelectionSummaryTabs, setExpandedSelectionSummaryTabs] = React.useState<
+    Partial<Record<SelectionPanelTab, boolean>>
+  >({});
   const [positionSpacingDraftByPairKey, setPositionSpacingDraftByPairKey] = React.useState<Record<string, { gapY: string }>>(
     {}
   );
@@ -22164,6 +22226,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       [sectionKey]: !previous[sectionKey],
     }));
   }, []);
+  const toggleSelectionSummaryBox = React.useCallback(() => {
+    setExpandedSelectionSummaryTabs((previous) => ({
+      ...previous,
+      [selectionPanelTab]: !previous[selectionPanelTab],
+    }));
+  }, [selectionPanelTab]);
 
   const selectPositionGroupFromGroupList = React.useCallback(
     (group: PositionImpactGroup) => {
@@ -22298,6 +22366,279 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
+  const formatCollapsedSummaryValues = (values: string[]) => {
+    const normalizedValues = values.map((value) => value.trim()).filter((value) => Boolean(value));
+
+    if (normalizedValues.length <= 0) {
+      return '-';
+    }
+
+    if (normalizedValues.length <= 3) {
+      return normalizedValues.join(', ');
+    }
+
+    return `${normalizedValues.slice(0, 3).join(', ')} 외 ${normalizedValues.length - 3}개`;
+  };
+
+  const formatCollapsedFrameSummaryLabel = (frameGroupId: string) => {
+    const normalizedFrameGroupId = frameGroupId.trim();
+    const frameLabel = positionRelationFrameLabelById.get(normalizedFrameGroupId)?.trim() || '';
+
+    if (!normalizedFrameGroupId) {
+      return '';
+    }
+
+    if (!frameLabel || frameLabel === normalizedFrameGroupId) {
+      return normalizedFrameGroupId;
+    }
+
+    return `${frameLabel} (${normalizedFrameGroupId})`;
+  };
+
+  const renderSelectionSummaryBox = () => {
+    const isSelectionSummaryExpanded = Boolean(expandedSelectionSummaryTabs[selectionPanelTab]);
+    const collapsedSummaryRows = selectedPositionActiveGroup
+      ? [
+          {
+            label: '그룹명',
+            value: normalizePositionGroupDisplayLabel(selectedPositionActiveGroup.label, selectedPositionActiveGroup.id),
+          },
+          { label: '그룹 ID', value: selectedPositionActiveGroup.id },
+        ]
+      : selectedFrameGroupIds.length > 0
+        ? [
+            {
+              label: selectedFrameGroupIds.length > 1 ? '선택 상자' : '상자명',
+              value:
+                selectedFrameGroupIds.length > 1
+                  ? `${selectedFrameGroupIds.length}개`
+                  : formatCollapsedFrameSummaryLabel(selectedFrameGroupIds[0] || ''),
+            },
+            {
+              label: '상자 ID',
+              value: formatCollapsedSummaryValues(selectedFrameGroupIds),
+            },
+          ]
+        : [
+            {
+              label: '템플릿',
+              value: templateName.trim() || sourceDocumentName.trim() || selectedTemplateId.trim() || '현재 템플릿',
+            },
+            { label: '상자 수', value: `${frameNodesAvailable}개` },
+          ];
+
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-slate-900">{selectedPositionInfoTitle}</div>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+              {collapsedSummaryRows.map((row) => (
+                <span key={row.label} className="min-w-0">
+                  <span className="font-medium text-slate-800">{row.label}</span>
+                  <span className="mx-1 text-slate-400">·</span>
+                  <span className="break-all">{row.value}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-semibold leading-none text-slate-700 hover:bg-slate-100"
+            onClick={toggleSelectionSummaryBox}
+            aria-label={isSelectionSummaryExpanded ? '요약박스 접기' : '요약박스 펼치기'}
+            title={isSelectionSummaryExpanded ? '요약박스 접기' : '요약박스 펼치기'}
+          >
+            {isSelectionSummaryExpanded ? '−' : '+'}
+          </button>
+        </div>
+        {isSelectionSummaryExpanded ? (
+          <div className="mt-3 space-y-2">
+            {renderPositionSummarySection(
+              selectedPositionActiveGroup ? '선택 그룹' : '선택 상자',
+              selectedPositionActiveGroup
+                ? [
+                    renderPositionSummaryTextRow(
+                      'position-summary-selected-entity-kind',
+                      '선택 대상',
+                      '그룹'
+                    ),
+                    renderPositionSummaryTextRow(
+                      'position-summary-selected-group-label',
+                      '그룹 이름',
+                      normalizePositionGroupDisplayLabel(
+                        selectedPositionActiveGroup.label,
+                        selectedPositionActiveGroup.id
+                      )
+                    ),
+                    renderPositionSummaryTextRow(
+                      'position-summary-selected-group-id',
+                      '그룹 ID',
+                      selectedPositionActiveGroup.id
+                    ),
+                    renderPositionSummaryListRow(
+                      'position-summary-selected-group-child-groups',
+                      '하위 그룹',
+                      selectedPositionActiveGroupChildGroupLabels
+                    ),
+                    renderPositionSummaryListRow(
+                      'position-summary-selected-group-child-group-ids',
+                      '하위 그룹 ID',
+                      selectedPositionActiveGroupChildGroupIds
+                    ),
+                    renderPositionSummaryListRow(
+                      'position-summary-selected-group-direct-boxes',
+                      '하위 상자 ID',
+                      selectedPositionActiveGroupDirectFrameGroupIds
+                    ),
+                    renderPositionSummaryListRow(
+                      'position-summary-selected-group-all-boxes',
+                      '포함 전체 상자 ID',
+                      selectedPositionActiveGroup.frameGroupIds
+                    ),
+                  ]
+                : [
+                    renderPositionSummaryTextRow(
+                      'position-summary-selected-entity-kind',
+                      '선택 대상',
+                      selectedFrameGroupIds.length > 0 ? '상자' : ''
+                    ),
+                    renderPositionSummaryCountRow('position-summary-selected-count', '선택 상자', selectedFrameGroupIds.length),
+                    renderPositionSummaryListRow('position-summary-selected-ids', '선택 상자 ID', selectedFrameGroupIds),
+                    renderPositionSummaryListRow(
+                      'position-summary-parent-groups',
+                      '상위 그룹',
+                      selectedPositionParentGroupLabels
+                    ),
+                    renderPositionSummaryListRow(
+                      'position-summary-parent-group-ids',
+                      '상위 그룹 ID',
+                      selectedPositionParentGroupIds
+                    ),
+                  ]
+            )}
+            {renderPositionSummarySection(
+              '그룹 / 위치 영향',
+              [
+                renderPositionSummaryTextRow(
+                  'position-summary-current-group',
+                  '소속 그룹',
+                  primarySelectedPositionBoxGroup
+                    ? `${normalizePositionGroupDisplayLabel(
+                        primarySelectedPositionBoxGroup.label,
+                        primarySelectedPositionBoxGroup.id
+                      )} (${primarySelectedPositionBoxGroup.frameGroupIds.length}개)`
+                    : ''
+                ),
+                ...selectedPositionGroupDetailRows.flatMap((groupDetail) => [
+                  renderPositionSummaryTextRow(
+                    `position-summary-group-detail-id-${groupDetail.groupId}`,
+                    groupDetail.isSelectedGroup
+                      ? '선택 그룹 ID'
+                      : '상위 그룹 ID',
+                    groupDetail.groupId
+                  ),
+                  renderPositionSummaryListRow(
+                    `position-summary-group-detail-members-${groupDetail.groupId}`,
+                    `${groupDetail.label} 소속 상자 ID`,
+                    groupDetail.frameGroupIds
+                  ),
+                ]),
+                renderPositionSummaryListRow(
+                  'position-summary-impact-groups',
+                  '위치 영향 대상 그룹',
+                  primaryRelativeImpactGroupLabels
+                ),
+                renderPositionSummaryListRow(
+                  'position-summary-impact-ids',
+                  '위치 영향 대상',
+                  primaryRelativeAffectedFrameGroupIds
+                ),
+              ]
+            )}
+            {renderPositionSummarySection(
+              '선택 엣지',
+              [
+                renderPositionSummaryCountRow('position-summary-edge-token-count', '선택 엣지 토큰', edgeSelectionState.tokens.length),
+                renderPositionSummaryCountRow('position-summary-edge-member-count', '선택 엣지', selectedEdgeMemberCount),
+                renderPositionSummaryTextRow('position-summary-edge-mode', '선택 엣지 모드', selectedEdgeMode || ''),
+                renderPositionSummaryListRow(
+                  'position-summary-edge-anchors',
+                  '선택 엣지 앵커',
+                  selectedEdgeAnchorIds
+                ),
+              ]
+            )}
+            {renderPositionSummarySection(
+              '엣지 진단',
+              [
+                renderPositionSummaryListRow(
+                  'position-summary-selected-edge-clicked',
+                  'selected_edge_clicked',
+                  edgeRoleDiagnostics.selectedEdgeClickedIds
+                ),
+                renderPositionSummaryListRow(
+                  'position-summary-selected-edge-auto-multi',
+                  'selected_edge_auto_multi',
+                  edgeRoleDiagnostics.selectedEdgeAutoMultiIds
+                ),
+                renderPositionSummaryListRow(
+                  'position-summary-peer-edge',
+                  'peer_edge',
+                  edgeRoleDiagnostics.peerEdgeIds
+                ),
+                renderPositionSummaryListRow(
+                  'position-summary-mismatch-edge',
+                  'movement mismatch edge',
+                  edgeRoleDiagnostics.mismatchEdgeIds
+                ),
+              ]
+            )}
+            {renderPositionSummarySection(
+              '메타데이터 요약',
+              [
+                renderPositionSummaryTextRow(
+                  'position-summary-box-kind',
+                  'Box Kind',
+                  frameMetadataDraft.boxKind ? FRAME_BOX_KIND_LABELS[frameMetadataDraft.boxKind] : ''
+                ),
+                renderPositionSummaryTextRow(
+                  'position-summary-role',
+                  'Role',
+                  frameMetadataDraft.role ? FRAME_ROLE_LABELS[frameMetadataDraft.role] : ''
+                ),
+                renderPositionSummaryTextRow(
+                  'position-summary-runtime-mode',
+                  'Runtime Mode',
+                  frameMetadataDraft.runtimeMode ? FRAME_RUNTIME_MODE_LABELS[frameMetadataDraft.runtimeMode] : ''
+                ),
+                renderPositionSummaryTextRow(
+                  'position-summary-key-box',
+                  'Key Box',
+                  currentParentKeyBoxLabel !== 'null' ? currentParentKeyBoxLabel : ''
+                ),
+                renderPositionSummaryListRow(
+                  'position-summary-value-boxes',
+                  'Value Box',
+                  valueBoxPickerSummary !== '-'
+                    ? valueBoxPickerSummary
+                        .split(',')
+                        .map((summaryItem) => summaryItem.trim())
+                        .filter((summaryItem) => Boolean(summaryItem))
+                    : []
+                ),
+              ]
+            )}
+            {renderPositionSummarySection(
+              '템플릿',
+              renderPositionSummaryCountRow('position-summary-frame-node-count', '프레임 상자', frameNodesAvailable)
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderMetadataCanvasActionControls = () => (
     <CardContent className="px-6 pb-3 pt-0">
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -22328,12 +22669,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     key={`metadata-canvas-box-kind:${boxKind}`}
                     type="button"
                     disabled={!hasSelectedMetadataTarget}
-                    onClick={() => stageMetadataBoxKind(boxKind)}
-                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-                      isActive
-                        ? 'border-teal-600 bg-teal-600 text-white'
-                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-                    }`}
+	                    onClick={() => stageMetadataBoxKind(boxKind)}
+	                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+	                      isActive
+	                        ? FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES[boxKind]
+	                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+	                    }`}
                   >
                     {FRAME_BOX_KIND_BUTTON_LABELS[boxKind]}
                   </button>
@@ -22374,12 +22715,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   key={`metadata-canvas-role:${role}`}
                   type="button"
                   disabled={!hasSelectedMetadataTarget}
-                  onClick={() => stageMetadataRole(role)}
-                  className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-                    isActive
-                      ? 'border-amber-600 bg-amber-500 text-white'
-                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-                  }`}
+	                  onClick={() => stageMetadataRole(role)}
+	                  className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+	                    isActive
+	                      ? FRAME_ROLE_ACTIVE_BUTTON_CLASSES[role]
+	                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+	                  }`}
                 >
                   {FRAME_ROLE_SHORT_LABELS[role]}
                 </button>
@@ -22652,24 +22993,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="group"] {
           background-image: none !important;
-          background-color: rgba(148, 163, 184, .03) !important;
+          background-color: rgb(241, 245, 249) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"] {
           background-image: none !important;
-          background-color: rgba(245, 158, 11, .04) !important;
+          background-color: rgb(255, 251, 235) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"] {
           background-image: none !important;
-          background-color: rgba(59, 130, 246, .04) !important;
+          background-color: rgb(240, 249, 255) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
           background-image: none !important;
-          background-color: rgba(16, 185, 129, .04) !important;
+          background-color: rgb(236, 253, 245) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
           position: relative;
-          --v106-metadata-relation-rgb: 100 116 139;
-          --v106-metadata-relation-opacity: .1;
+          --v106-metadata-relation-rgb: 241 245 249;
+          --v106-metadata-relation-bg-rgb: 241 245 249;
+          --v106-metadata-relation-strong-rgb: 100 116 139;
+          --v106-metadata-relation-opacity: 1;
+          --v106-metadata-relation-inner-border: transparent;
           --v106-metadata-relation-offset-top: 0px;
           --v106-metadata-relation-offset-right: 0px;
           --v106-metadata-relation-offset-bottom: 0px;
@@ -22685,10 +23029,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             calc(100% - var(--v106-metadata-relation-offset-top) - var(--v106-metadata-relation-offset-bottom)) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="key"] {
-          --v106-metadata-relation-rgb: 217 119 6;
+          --v106-metadata-relation-rgb: 255 251 235;
+          --v106-metadata-relation-bg-rgb: 255 251 235;
+          --v106-metadata-relation-strong-rgb: 217 119 6;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="value"] {
-          --v106-metadata-relation-rgb: 37 99 235;
+          --v106-metadata-relation-rgb: 240 249 255;
+          --v106-metadata-relation-bg-rgb: 240 249 255;
+          --v106-metadata-relation-strong-rgb: 3 105 161;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="top"] {
           --v106-metadata-relation-offset-top: 5px;
@@ -22704,13 +23052,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"],
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
-          --v106-metadata-relation-opacity: .3;
+          --v106-metadata-relation-opacity: 1;
+          --v106-metadata-relation-inner-border: rgb(148 163 184);
+          --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
           outline: none !important;
           outline-offset: 0;
-          box-shadow: none !important;
+          box-shadow: inset 0 0 0 2px var(--v106-metadata-relation-inner-border) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][data-template-selected="true"] {
           --v106-metadata-relation-opacity: 1;
+          --v106-metadata-relation-inner-border: rgb(var(--v106-metadata-relation-strong-rgb));
+          --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
+          box-shadow: inset 0 0 0 2px var(--v106-metadata-relation-inner-border) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
@@ -22721,34 +23074,38 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           box-shadow: none !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          background-color: rgb(217 119 6 / .1) !important;
+          background-color: rgb(255 251 235) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          background-color: rgb(37 99 235 / .1) !important;
+          background-color: rgb(240 249 255) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          background-color: rgb(217 119 6 / .3) !important;
+          background-color: rgb(255 251 235) !important;
+          box-shadow: inset 0 0 0 2px rgb(148 163 184) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          background-color: rgb(37 99 235 / .3) !important;
+          background-color: rgb(240 249 255) !important;
+          box-shadow: inset 0 0 0 2px rgb(148 163 184) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          background-color: rgb(217 119 6 / 1) !important;
+          background-color: rgb(255 251 235) !important;
+          box-shadow: inset 0 0 0 2px rgb(217 119 6) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          background-color: rgb(37 99 235 / 1) !important;
+          background-color: rgb(240 249 255) !important;
+          box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(37, 99, 235, .42) !important;
           outline-offset: -1px;
           box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .24);
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(217, 119, 6, .42) !important;
           outline-offset: -1px;
           box-shadow: inset 0 0 0 1px rgba(217, 119, 6, .24);
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: -1px;
           box-shadow:
@@ -22760,7 +23117,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           outline-offset: -1px;
           background-image: linear-gradient(180deg, rgba(245, 158, 11, .03), rgba(245, 158, 11, .08));
         }
-        .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 2px solid rgba(217, 119, 6, .96) !important;
           outline-offset: -1px;
           box-shadow:
@@ -22876,9 +23233,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           border-color: rgba(253, 230, 138, .76);
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="value"] {
-          color: rgba(37, 99, 235, .98);
-          background: rgba(239, 246, 255, .98);
-          border-color: rgba(147, 197, 253, .76);
+          color: rgba(3, 105, 161, .98);
+          background: rgba(240, 249, 255, .98);
+          border-color: rgba(186, 230, 253, .76);
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="key_value"],
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} [data-marker-pill="role"][data-frame-role="group"] {
@@ -22893,6 +23250,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview [data-template-frame-input="true"][${TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR}="true"] {
           opacity: 0;
+        }
+        .template-edit-preview {
+          position: relative;
         }
         .template-edit-preview .${FRAME_RICHTEXT_PREVIEW_CLASS} {
           user-select: none;
@@ -23724,229 +24084,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 onSelect={setSelectionPanelTab}
               />
 
-              {selectionPanelTab === 'position' ? (
-	                <>
-	                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-	                    <div className="space-y-2">
-		                      {renderPositionSummarySection(
-		                        selectedPositionActiveGroup ? '선택 그룹' : '선택 상자',
-		                        selectedPositionActiveGroup
-		                          ? [
-		                              renderPositionSummaryTextRow(
-		                                'position-summary-selected-entity-kind',
-		                                '선택 대상',
-		                                '그룹'
-		                              ),
-		                              renderPositionSummaryTextRow(
-		                                'position-summary-selected-group-label',
-		                                '그룹 이름',
-		                                normalizePositionGroupDisplayLabel(
-		                                  selectedPositionActiveGroup.label,
-		                                  selectedPositionActiveGroup.id
-		                                )
-		                              ),
-		                              renderPositionSummaryTextRow(
-		                                'position-summary-selected-group-id',
-		                                '그룹 ID',
-		                                selectedPositionActiveGroup.id
-		                              ),
-		                              renderPositionSummaryListRow(
-		                                'position-summary-selected-group-child-groups',
-		                                '하위 그룹',
-		                                selectedPositionActiveGroupChildGroupLabels
-		                              ),
-		                              renderPositionSummaryListRow(
-		                                'position-summary-selected-group-child-group-ids',
-		                                '하위 그룹 ID',
-		                                selectedPositionActiveGroupChildGroupIds
-		                              ),
-		                              renderPositionSummaryListRow(
-		                                'position-summary-selected-group-direct-boxes',
-		                                '하위 상자 ID',
-		                                selectedPositionActiveGroupDirectFrameGroupIds
-		                              ),
-		                              renderPositionSummaryListRow(
-		                                'position-summary-selected-group-all-boxes',
-		                                '포함 전체 상자 ID',
-		                                selectedPositionActiveGroup.frameGroupIds
-		                              ),
-		                            ]
-		                          : [
-		                              renderPositionSummaryTextRow(
-		                                'position-summary-selected-entity-kind',
-		                                '선택 대상',
-		                                selectedFrameGroupIds.length > 0 ? '상자' : ''
-		                              ),
-		                              renderPositionSummaryCountRow('position-summary-selected-count', '선택 상자', selectedFrameGroupIds.length),
-		                              renderPositionSummaryListRow('position-summary-selected-ids', '선택 상자 ID', selectedFrameGroupIds),
-		                              renderPositionSummaryListRow(
-		                                'position-summary-parent-groups',
-		                                '상위 그룹',
-		                                selectedPositionParentGroupLabels
-		                              ),
-		                              renderPositionSummaryListRow(
-		                                'position-summary-parent-group-ids',
-		                                '상위 그룹 ID',
-		                                selectedPositionParentGroupIds
-		                              ),
-		                            ]
-		                      )}
-	                      {renderPositionSummarySection(
-	                        '그룹 / 위치 영향',
-	                        [
-	                          renderPositionSummaryTextRow(
-	                            'position-summary-current-group',
-	                            '소속 그룹',
-	                            primarySelectedPositionBoxGroup
-	                              ? `${normalizePositionGroupDisplayLabel(
-	                                  primarySelectedPositionBoxGroup.label,
-	                                  primarySelectedPositionBoxGroup.id
-	                                )} (${primarySelectedPositionBoxGroup.frameGroupIds.length}개)`
-	                              : ''
-	                          ),
-	                          ...selectedPositionGroupDetailRows.flatMap((groupDetail) => [
-	                            renderPositionSummaryTextRow(
-	                              `position-summary-group-detail-id-${groupDetail.groupId}`,
-	                              groupDetail.isSelectedGroup
-	                                ? '선택 그룹 ID'
-	                                : '상위 그룹 ID',
-	                              groupDetail.groupId
-	                            ),
-	                            renderPositionSummaryListRow(
-	                              `position-summary-group-detail-members-${groupDetail.groupId}`,
-	                              `${groupDetail.label} 소속 상자 ID`,
-	                              groupDetail.frameGroupIds
-	                            ),
-	                          ]),
-	                          renderPositionSummaryListRow(
-	                            'position-summary-impact-groups',
-	                            '위치 영향 대상 그룹',
-	                            primaryRelativeImpactGroupLabels
-	                          ),
-	                          renderPositionSummaryListRow(
-	                            'position-summary-impact-ids',
-	                            '위치 영향 대상',
-	                            primaryRelativeAffectedFrameGroupIds
-	                          ),
-	                        ]
-	                      )}
-	                      {renderPositionSummarySection(
-	                        '선택 엣지',
-	                        [
-	                          renderPositionSummaryCountRow('position-summary-edge-token-count', '선택 엣지 토큰', edgeSelectionState.tokens.length),
-	                          renderPositionSummaryCountRow('position-summary-edge-member-count', '선택 엣지', selectedEdgeMemberCount),
-	                          renderPositionSummaryTextRow('position-summary-edge-mode', '선택 엣지 모드', selectedEdgeMode || ''),
-	                          renderPositionSummaryListRow(
-	                            'position-summary-edge-anchors',
-	                            '선택 엣지 앵커',
-	                            selectedEdgeAnchorIds
-	                          ),
-	                        ]
-	                      )}
-	                      {renderPositionSummarySection(
-	                        '엣지 진단',
-	                        [
-	                          renderPositionSummaryListRow(
-	                            'position-summary-selected-edge-clicked',
-	                            'selected_edge_clicked',
-	                            edgeRoleDiagnostics.selectedEdgeClickedIds
-	                          ),
-	                          renderPositionSummaryListRow(
-	                            'position-summary-selected-edge-auto-multi',
-	                            'selected_edge_auto_multi',
-	                            edgeRoleDiagnostics.selectedEdgeAutoMultiIds
-	                          ),
-	                          renderPositionSummaryListRow(
-	                            'position-summary-peer-edge',
-	                            'peer_edge',
-	                            edgeRoleDiagnostics.peerEdgeIds
-	                          ),
-	                          renderPositionSummaryListRow(
-	                            'position-summary-mismatch-edge',
-	                            'movement mismatch edge',
-	                            edgeRoleDiagnostics.mismatchEdgeIds
-	                          ),
-	                        ]
-	                      )}
-	                      {renderPositionSummarySection(
-	                        '메타데이터 요약',
-	                        [
-	                          renderPositionSummaryTextRow(
-	                            'position-summary-box-kind',
-	                            'Box Kind',
-	                            frameMetadataDraft.boxKind ? FRAME_BOX_KIND_LABELS[frameMetadataDraft.boxKind] : ''
-	                          ),
-	                          renderPositionSummaryTextRow(
-	                            'position-summary-role',
-	                            'Role',
-	                            frameMetadataDraft.role ? FRAME_ROLE_LABELS[frameMetadataDraft.role] : ''
-	                          ),
-	                          renderPositionSummaryTextRow(
-	                            'position-summary-runtime-mode',
-	                            'Runtime Mode',
-	                            frameMetadataDraft.runtimeMode ? FRAME_RUNTIME_MODE_LABELS[frameMetadataDraft.runtimeMode] : ''
-	                          ),
-	                          renderPositionSummaryTextRow(
-	                            'position-summary-key-box',
-	                            'Key Box',
-	                            currentParentKeyBoxLabel !== 'null' ? currentParentKeyBoxLabel : ''
-	                          ),
-	                          renderPositionSummaryListRow(
-	                            'position-summary-value-boxes',
-	                            'Value Box',
-	                            valueBoxPickerSummary !== '-'
-	                              ? valueBoxPickerSummary
-	                                  .split(',')
-	                                  .map((summaryItem) => summaryItem.trim())
-	                                  .filter((summaryItem) => Boolean(summaryItem))
-	                              : []
-	                          ),
-	                        ]
-	                      )}
-	                      {renderPositionSummarySection(
-	                        '템플릿',
-	                        renderPositionSummaryCountRow('position-summary-frame-node-count', '프레임 상자', frameNodesAvailable)
-	                      )}
-	                    </div>
-	                  </div>
-
-	                </>
-	              ) : null}
+              {selectionPanelTab === 'position' ? renderSelectionSummaryBox() : null}
 
               {selectionPanelTab === 'metadata' ? (
-                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-800">상자 메타데이터</label>
-                    <p className="text-xs text-slate-500">
-                      Box Kind, Role, Runtime Mode, 박스 연결은 상자 편집 캔버스 상단 버튼에서 설정합니다.
-                    </p>
+                <>
+                  {renderSelectionSummaryBox()}
+                  <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-slate-800">상자 메타데이터</label>
+                      <p className="text-xs text-slate-500">
+                        Box Kind, Role, Runtime Mode, 박스 연결은 상자 편집 캔버스 상단 버튼에서 설정합니다.
+                      </p>
+                    </div>
+                    <input type="hidden" data-metadata-field="valueKey" value={frameMetadataDraft.valueKey} readOnly />
+                    <input
+                      type="hidden"
+                      data-metadata-field="boxKind"
+                      value={hasSelectedMetadataTarget ? frameMetadataDraft.boxKind : ''}
+                      readOnly
+                    />
+                    <input
+                      type="hidden"
+                      data-metadata-field="role"
+                      value={hasSelectedMetadataTarget ? frameMetadataDraft.role : ''}
+                      readOnly
+                    />
+                    <input
+                      type="hidden"
+                      data-metadata-field="runtimeMode"
+                      value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
+                      readOnly
+                    />
+                    <input
+                      type="hidden"
+                      data-metadata-field="parentGroupId"
+                      value={frameMetadataDraft.parentGroupId}
+                      readOnly
+                    />
                   </div>
-                  <input type="hidden" data-metadata-field="valueKey" value={frameMetadataDraft.valueKey} readOnly />
-                  <input
-                    type="hidden"
-                    data-metadata-field="boxKind"
-                    value={hasSelectedMetadataTarget ? frameMetadataDraft.boxKind : ''}
-                    readOnly
-                  />
-                  <input
-                    type="hidden"
-                    data-metadata-field="role"
-                    value={hasSelectedMetadataTarget ? frameMetadataDraft.role : ''}
-                    readOnly
-                  />
-                  <input
-                    type="hidden"
-                    data-metadata-field="runtimeMode"
-                    value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
-                    readOnly
-                  />
-                  <input
-                    type="hidden"
-                    data-metadata-field="parentGroupId"
-                    value={frameMetadataDraft.parentGroupId}
-                    readOnly
-                  />
-                </div>
+                </>
               ) : null}
 
 		              {selectionPanelTab === 'position' ? (
