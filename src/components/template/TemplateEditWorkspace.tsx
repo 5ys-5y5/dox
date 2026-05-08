@@ -122,6 +122,8 @@ type SelectionSaveProgressState = {
 
 type StyleFieldKey = keyof SelectionStyleDraft;
 type StyleFieldApplyState = 'idle' | 'saving' | 'saved' | 'failed';
+type AppearanceBoxModelTarget = 'content' | 'border' | 'corner';
+type AppearanceColorPickerField = 'backgroundColor' | 'borderColor';
 
 type SelectionMetadataApplyResult = {
   ok: boolean;
@@ -9228,6 +9230,7 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
         : 0
     : 0;
 
+  element.style.boxSizing = 'border-box';
   element.style.borderWidth = `${insideWidth}px`;
   element.style.borderStyle = hasVisibleBorder && insideWidth > 0 ? nextStyle : 'none';
   element.style.borderColor = nextColor || '';
@@ -9256,6 +9259,7 @@ const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
   shell
     .querySelectorAll<HTMLElement>('table.v102-frame-band-table, .v202-frame-group[data-template-frame-group]')
     .forEach((element) => {
+      element.style.boxSizing = 'border-box';
       element.style.borderWidth = '0px';
       element.style.borderStyle = 'none';
       element.style.borderColor = 'transparent';
@@ -10953,6 +10957,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [styleFieldApplyStatus, setStyleFieldApplyStatus] =
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
+  const [appearanceBoxModelTarget, setAppearanceBoxModelTarget] =
+    React.useState<AppearanceBoxModelTarget>('content');
   const [positionAppearanceTargetMode, setPositionAppearanceTargetMode] =
     React.useState<PositionAppearanceTargetMode>('frame');
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
@@ -11002,7 +11008,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [metadataConnectionPickerOpen, setMetadataConnectionPickerOpen] = React.useState(false);
   const [styleColorPickerOpen, setStyleColorPickerOpen] = React.useState<null | 'color' | 'backgroundColor' | 'borderColor'>(null);
   const [borderStylePickerOpen, setBorderStylePickerOpen] = React.useState(false);
-  const [borderAlignPickerOpen, setBorderAlignPickerOpen] = React.useState(false);
   const [selectionSaveProgress, setSelectionSaveProgress] =
     React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
   const [hasSelectionProgressHistory, setHasSelectionProgressHistory] = React.useState(false);
@@ -11313,7 +11318,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setMetadataConnectionPickerOpen(false);
     setStyleColorPickerOpen(null);
     setBorderStylePickerOpen(false);
-    setBorderAlignPickerOpen(false);
   }, [selectedFrameGroupIds, selectionPanelTab]);
 
   React.useEffect(() => {
@@ -11476,14 +11480,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
   }, [cancelScheduledAutoPersistDraft]);
 
-  const syncDraftPreviewHtmlRef = React.useCallback(() => {
+  const syncDraftPreviewHtmlRef = React.useCallback((options?: { materializePositionGroups?: boolean }) => {
     const root = previewRef.current;
 
     if (!root) {
       return '';
     }
 
-    materializePositionGroupWrappers(root);
+    if (options?.materializePositionGroups !== false) {
+      materializePositionGroupWrappers(root);
+    }
     syncFormControlMarkup(root);
     const nextDraftHtml = extractEditorHtml(root);
     const nextRenderHtml = extractPreviewRenderHtml(root);
@@ -18436,8 +18442,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           applyFrameStylePatch(node, patch);
         }
       });
-      applyRelativeAnchoredFrameRectsInRoot(root);
-      syncDraftPreviewHtmlRef();
+      const shouldUpdateGeometry = typeof patch.width === 'number' || typeof patch.height === 'number';
+
+      if (shouldUpdateGeometry) {
+        applyRelativeAnchoredFrameRectsInRoot(root);
+      }
+      syncDraftPreviewHtmlRef({ materializePositionGroups: shouldUpdateGeometry });
       syncSelectionStyleDraft();
       requestPreviewTextFit();
     },
@@ -19773,6 +19783,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
+      const controlValue =
+        stylePanelRef.current?.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-style-field="${field}"]`)?.value ??
+        selectionStyleDraft[field];
+
       setSelectionSaveProgress({
         phase: 'running',
         title: '선택 항목 저장',
@@ -19781,17 +19795,35 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         detail: `${field} 스타일을 반영하고 있습니다.`,
       });
       setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saving' }));
-      const ok = applySelectionStyleDraft();
-      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: ok ? 'saved' : 'failed' }));
+
+      const patch: FrameStylePatch = {};
+
+      if (field === 'width' || field === 'height') {
+        const parsedValue = Number.parseFloat(controlValue);
+
+        if (Number.isFinite(parsedValue)) {
+          patch[field] = parsedValue;
+        }
+      } else {
+        const stringField = field as Exclude<StyleFieldKey, 'width' | 'height'>;
+        (patch as Partial<Record<Exclude<StyleFieldKey, 'width' | 'height'>, string>>)[stringField] = controlValue;
+      }
+
+      setSelectionStyleDraft((previous) => ({ ...previous, [field]: controlValue }));
+      applySelectionStylePatch(patch);
+      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saved' }));
+      window.setTimeout(() => {
+        setStyleFieldApplyStatus((previous) => (previous[field] === 'saved' ? { ...previous, [field]: 'idle' } : previous));
+      }, 3000);
       setSelectionSaveProgress({
-        phase: ok ? 'completed' : 'failed',
+        phase: 'completed',
         title: '선택 항목 저장',
         percent: 100,
-        stage: ok ? '스타일 반영 완료' : '스타일 반영 실패',
-        detail: ok ? `${field} 스타일을 반영했습니다.` : `${field} 스타일 반영에 실패했습니다.`,
+        stage: '스타일 반영 완료',
+        detail: `${field} 스타일을 반영했습니다.`,
       });
     },
-    [applySelectionStyleDraft]
+    [applySelectionStylePatch, selectionStyleDraft]
   );
 
   const applyStyleFieldImmediateValue = React.useCallback(
@@ -19819,6 +19851,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       applySelectionStylePatch(patch);
       setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saved' }));
+      window.setTimeout(() => {
+        setStyleFieldApplyStatus((previous) => (previous[field] === 'saved' ? { ...previous, [field]: 'idle' } : previous));
+      }, 3000);
       setSelectionSaveProgress({
         phase: 'completed',
         title: '선택 항목 저장',
@@ -24231,31 +24266,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
-  const renderStyleNumericInput = (field: StyleFieldKey, label: string, unit = 'px') => (
-    <div className="space-y-2">
-      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-        {label}
-        {renderStyleApplyStatusIcon(field)}
-      </label>
-      <div className="relative">
-        <Input
-          data-style-field={field}
-          value={selectionStyleDraft[field]}
-          inputMode="decimal"
-          placeholder="혼합"
-          className={unit ? 'pr-8' : undefined}
-          onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
-          onBlur={() => applyStyleFieldOnBlur(field)}
-        />
-        {unit ? (
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">
-            {unit}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
-
   const renderBorderStylePreview = (borderStyle: string, className = 'w-16') => (
     normalizeFrameBorderStyleValue(borderStyle, borderStyle === 'none' ? 0 : 1) === 'none' ? (
       <span
@@ -24277,168 +24287,481 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     )
   );
 
-  const renderSelectionAppearanceControls = () => (
-    <div className="space-y-3 rounded-xl border border-slate-200 p-4">
-      <div className="space-y-1">
-        <div className="flex items-center justify-between gap-2">
-          <label className="text-sm font-medium text-slate-800">
-            {effectivePositionAppearanceTargetMode === 'group' ? '그룹 출력 형식' : '상자 출력 형식'}
-          </label>
-          {hasSelectedPositionGroupAppearanceContext ? (
-            <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white text-[11px] font-semibold">
-              <button
-                type="button"
-                className={`px-2 py-1 ${
-                  effectivePositionAppearanceTargetMode === 'group'
-                    ? 'bg-slate-950 text-white'
-                    : 'text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
-                }`}
-                disabled={!canEditSelectedPositionGroupAppearance}
-                onClick={() => switchPositionAppearanceTargetMode('group')}
-              >
-                그룹
-              </button>
-              <button
-                type="button"
-                className={`px-2 py-1 ${
-                  effectivePositionAppearanceTargetMode === 'frame'
-                    ? 'bg-slate-950 text-white'
-                    : 'text-slate-700 hover:bg-slate-50'
-                }`}
-                onClick={() => switchPositionAppearanceTargetMode('frame')}
-              >
-                상자
-              </button>
-            </div>
+  const renderSelectionAppearanceControls = () => {
+    const parseDraftNumber = (value: string) => {
+      const parsedValue = Number.parseFloat(value);
+      return Number.isFinite(parsedValue) ? parsedValue : null;
+    };
+    const clampVisualNumber = (value: number, minimum: number, maximum: number) =>
+      Math.min(Math.max(value, minimum), maximum);
+    const formatDraftValue = (value: string) => (value.trim() ? value.trim() : '혼합');
+    const widthValue = parseDraftNumber(selectionStyleDraft.width);
+    const heightValue = parseDraftNumber(selectionStyleDraft.height);
+    const borderWidthValue = parseDraftNumber(selectionStyleDraft.borderWidth) || 0;
+    const borderRadiusValue = parseDraftNumber(selectionStyleDraft.borderRadius) || 0;
+    const borderStyleValue = normalizeFrameBorderStyleValue(selectionStyleDraft.borderStyle, borderWidthValue);
+    const borderColorValue = selectionStyleDraft.borderColor.trim() || '#0f172a';
+    const backgroundColorValue = selectionStyleDraft.backgroundColor.trim() || 'transparent';
+    const visualContentWidth = widthValue ? clampVisualNumber(widthValue * 0.45, 110, 280) : 180;
+    const visualContentHeight = heightValue ? clampVisualNumber(heightValue * 0.32, 48, 128) : 70;
+    const visualBorderWidth = borderStyleValue === 'none' ? 2 : clampVisualNumber(borderWidthValue || 1, 1, 8);
+    const transparentFillStyle: React.CSSProperties = {
+      backgroundColor: '#ffffff',
+      backgroundImage:
+        'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)',
+      backgroundPosition: '0 0, 0 6px, 6px -6px, -6px 0px',
+      backgroundSize: '12px 12px',
+    };
+    const boxModelZoneClass = () => 'relative cursor-pointer focus-visible:outline-none';
+    const selectBoxModelTarget = (
+      event: React.MouseEvent<HTMLDivElement | HTMLButtonElement>,
+      target: AppearanceBoxModelTarget
+    ) => {
+      event.stopPropagation();
+      setAppearanceBoxModelTarget(target);
+    };
+    const handleBoxModelTargetKeyDown = (
+      event: React.KeyboardEvent<HTMLDivElement | HTMLButtonElement>,
+      target: AppearanceBoxModelTarget
+    ) => {
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setAppearanceBoxModelTarget(target);
+    };
+    const renderBoxModelLabel = (label: string, detail?: string) => (
+      <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-950">
+        <span>{label}</span>
+        {detail ? <span className="font-normal text-slate-600">{detail}</span> : null}
+      </div>
+    );
+    const appearanceTargetByStyleField: Partial<Record<StyleFieldKey, AppearanceBoxModelTarget>> = {
+      width: 'content',
+      height: 'content',
+      backgroundColor: 'content',
+      borderWidth: 'border',
+      borderColor: 'border',
+      borderStyle: 'border',
+      borderAlign: 'border',
+      borderRadius: 'corner',
+    };
+    const stopInlineControlEvent = (event: React.MouseEvent<HTMLElement>) => {
+      event.stopPropagation();
+    };
+    const renderInlineNumericInput = (
+      field: StyleFieldKey,
+      ariaLabel: string,
+      widthClassName = 'w-32',
+      shortLabel = ariaLabel
+    ) => {
+      const applyStatus = styleFieldApplyStatus[field];
+      const inputStateClass =
+        applyStatus === 'saved'
+          ? 'border-emerald-400 bg-emerald-50'
+          : applyStatus === 'failed'
+            ? 'border-red-400 bg-red-50'
+            : applyStatus === 'saving'
+              ? 'border-sky-300 bg-sky-50'
+              : 'border-slate-300 bg-white';
+
+      return (
+        <span
+          className={`relative inline-flex ${widthClassName} items-center`}
+          onMouseDown={stopInlineControlEvent}
+          onClick={stopInlineControlEvent}
+        >
+          <span className="pointer-events-none absolute left-1 top-1/2 z-10 -translate-y-1/2 text-[10px] font-medium text-slate-500 sm:left-2">
+            <span className="hidden sm:inline">{ariaLabel}</span>
+            <span className="sm:hidden">{shortLabel}</span>
+          </span>
+          <Input
+            data-style-field={field}
+            value={selectionStyleDraft[field]}
+            inputMode="decimal"
+            aria-label={ariaLabel}
+            title={ariaLabel}
+            placeholder=""
+            className={`h-8 w-full rounded-md border pl-[20px] pr-[16px] text-center text-[11px] font-semibold text-slate-900 sm:pl-[50px] sm:pr-5 ${inputStateClass}`}
+            onFocus={() => {
+              const nextTarget = appearanceTargetByStyleField[field];
+              if (nextTarget) {
+                setAppearanceBoxModelTarget(nextTarget);
+              }
+            }}
+            onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur(field)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.currentTarget.blur();
+              }
+            }}
+          />
+          <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[10px] font-medium text-slate-500 sm:right-1.5">
+            px
+          </span>
+        </span>
+      );
+    };
+    const renderInlineColorPickerPanel = (
+      field: AppearanceColorPickerField,
+      className: string,
+      style?: React.CSSProperties,
+      variant: 'popover' | 'horizontal' = 'popover'
+    ) => {
+      const currentValue = selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : '#0f172a');
+
+      return (
+        <div
+          className={`absolute z-50 rounded-md border border-amber-200 bg-white text-[11px] text-amber-950 ${
+            variant === 'horizontal' ? 'h-8 overflow-x-auto overflow-y-hidden p-0' : 'w-64 p-2'
+          } ${className}`}
+          style={style}
+          onMouseDown={stopInlineControlEvent}
+          onClick={stopInlineControlEvent}
+        >
+          <div className={variant === 'horizontal' ? 'flex h-full w-max items-center gap-1 px-1' : 'grid grid-cols-3 gap-1'}>
+            {FRAME_STYLE_COLOR_OPTIONS.map((option) => {
+              const isSelected = colorToHex(currentValue) === colorToHex(option.value);
+
+              return (
+                <button
+                  key={`inline-style-color-option:${field}:${option.value}`}
+                  type="button"
+                  className={`flex items-center gap-1.5 rounded border text-left hover:bg-amber-50 ${
+                    variant === 'horizontal' ? 'h-6 shrink-0 px-1.5 py-0 text-[10px]' : 'px-1.5 py-1'
+                  } ${
+                    isSelected ? 'border-slate-950 bg-amber-100' : 'border-slate-200 bg-white'
+                  }`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setStyleColorPickerOpen(null);
+                    applyStyleFieldImmediateValue(field, option.value);
+                  }}
+                >
+                  <span
+                    className="h-3.5 w-3.5 shrink-0 rounded border border-slate-200"
+                    style={{
+                      backgroundColor: option.value === 'transparent' ? '#ffffff' : option.value,
+                      backgroundImage:
+                        option.value === 'transparent'
+                          ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)'
+                          : 'none',
+                      backgroundPosition: option.value === 'transparent' ? '0 0, 0 5px, 5px -5px, -5px 0px' : undefined,
+                      backgroundSize: option.value === 'transparent' ? '10px 10px' : undefined,
+                    }}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 truncate">{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {variant === 'popover' ? (
+            <Input
+              value={selectionStyleDraft[field]}
+              placeholder={field === 'backgroundColor' ? 'transparent 또는 #ffffff' : '#0f172a'}
+              className="mt-2 h-8 text-xs"
+              onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
+              onBlur={() => applyStyleFieldOnBlur(field)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.currentTarget.blur();
+                }
+              }}
+            />
           ) : null}
         </div>
-        <p className="text-xs text-slate-500">
-          {effectivePositionAppearanceTargetMode === 'group'
-            ? '선택한 상위 그룹의 크기, 여백, 배경, 외곽선을 편집합니다.'
-            : '선택한 상자의 크기, 여백, 배경, 외곽선을 편집합니다.'}
-        </p>
-      </div>
+      );
+    };
+    const renderInlineColorPicker = (
+      field: AppearanceColorPickerField,
+      label: string,
+      placementClassName = 'left-1/2 top-full mt-1 -translate-x-1/2',
+      showInlinePanel = true,
+      shortLabel?: string
+    ) => {
+      const currentValue = selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : '#0f172a');
+      const isOpen = styleColorPickerOpen === field;
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {renderStyleNumericInput('width', '너비')}
-        {renderStyleNumericInput('height', '높이')}
-        {renderStyleNumericInput('paddingX', '좌우 여백')}
-        {renderStyleNumericInput('paddingY', '상하 여백')}
-        {renderStyleNumericInput('borderRadius', '모서리 반경')}
-        {renderStyleColorPicker('backgroundColor', '배경 색')}
-        {renderStyleColorPicker('borderColor', '외곽선 색')}
-        {renderStyleNumericInput('borderWidth', '외곽선 굵기')}
-        <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            외곽선 정렬
-            {renderStyleApplyStatusIcon('borderAlign')}
-          </label>
-          <div className="relative">
-            <input data-style-field="borderAlign" type="hidden" value={selectionStyleDraft.borderAlign} readOnly />
-            <button
-              type="button"
-              className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-white px-3 py-1 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              onClick={() => setBorderAlignPickerOpen((previous) => !previous)}
-              onBlur={() => window.setTimeout(() => setBorderAlignPickerOpen(false), 120)}
-            >
-              <span className="truncate">
-                {selectionStyleDraft.borderAlign
-                  ? FRAME_BORDER_ALIGN_LABEL_BY_VALUE.get(selectionStyleDraft.borderAlign) || selectionStyleDraft.borderAlign
-                  : '혼합'}
+      return (
+        <div
+          className="relative inline-flex min-w-0 w-full sm:w-auto"
+          onMouseDown={stopInlineControlEvent}
+          onClick={(event) => {
+            event.stopPropagation();
+            setAppearanceBoxModelTarget(appearanceTargetByStyleField[field] || 'content');
+            setStyleColorPickerOpen((previous) => (previous === field ? null : field));
+          }}
+          onBlur={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+              return;
+            }
+
+            setStyleColorPickerOpen(null);
+          }}
+        >
+          <input data-style-field={field} type="hidden" value={selectionStyleDraft[field]} readOnly />
+          <button
+            type="button"
+            className="inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border border-slate-300 bg-white px-1 text-[11px] font-semibold text-slate-800 sm:gap-1 sm:px-1.5"
+            aria-label={label}
+          >
+            <span
+              className="h-3.5 w-3.5 rounded border border-slate-200"
+              style={{
+                backgroundColor: currentValue === 'transparent' ? '#ffffff' : currentValue,
+                backgroundImage:
+                  currentValue === 'transparent'
+                    ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)'
+                    : 'none',
+                backgroundPosition: currentValue === 'transparent' ? '0 0, 0 5px, 5px -5px, -5px 0px' : undefined,
+                backgroundSize: currentValue === 'transparent' ? '10px 10px' : undefined,
+              }}
+              aria-hidden="true"
+            />
+            <span>
+              <span className={shortLabel ? 'hidden sm:inline' : undefined}>
+                {field === 'backgroundColor' ? '배경' : '선색'}
               </span>
-              <span className="shrink-0 text-xs text-slate-500">선택</span>
-            </button>
-            {borderAlignPickerOpen ? (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
-                {FRAME_BORDER_ALIGN_OPTIONS.map((option) => {
-                  const isSelected = selectionStyleDraft.borderAlign === option.value;
+              {shortLabel ? <span className="sm:hidden">{shortLabel}</span> : null}
+            </span>
+            {renderStyleApplyStatusIcon(field)}
+          </button>
+          {isOpen && showInlinePanel ? renderInlineColorPickerPanel(field, placementClassName) : null}
+        </div>
+      );
+    };
+    const cycleBorderAlignValue = () => {
+      const currentIndex = FRAME_BORDER_ALIGN_OPTIONS.findIndex((option) => option.value === selectionStyleDraft.borderAlign);
+      const nextOption = FRAME_BORDER_ALIGN_OPTIONS[(currentIndex + 1 + FRAME_BORDER_ALIGN_OPTIONS.length) % FRAME_BORDER_ALIGN_OPTIONS.length];
+      applyStyleFieldImmediateValue('borderAlign', nextOption.value);
+    };
+    const renderInlineBorderAlignPicker = () => {
+      const currentLabel = selectionStyleDraft.borderAlign
+        ? FRAME_BORDER_ALIGN_LABEL_BY_VALUE.get(selectionStyleDraft.borderAlign) || selectionStyleDraft.borderAlign
+        : '외곽선 정렬';
+      const currentShortLabel =
+        selectionStyleDraft.borderAlign === 'inside'
+          ? 'I'
+          : selectionStyleDraft.borderAlign === 'center'
+            ? 'C'
+            : selectionStyleDraft.borderAlign === 'outside'
+              ? 'O'
+              : 'BA';
 
-                  return (
-                    <button
-                      key={`border-align-option:${option.value}`}
-                      type="button"
-                      className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-amber-50 ${
-                        isSelected ? 'bg-amber-100' : ''
-                      }`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        setBorderAlignPickerOpen(false);
-                        applyStyleFieldImmediateValue('borderAlign', option.value);
-                      }}
-                    >
-                      <span className="min-w-0 truncate">{option.label}</span>
-                      {isSelected ? (
-                        <span className="rounded-full bg-slate-950 px-1.5 py-0.5 text-[10px] text-white">선택됨</span>
-                      ) : null}
-                    </button>
-                  );
-                })}
+      return (
+      <div
+        className="relative inline-flex min-w-0 w-full sm:w-auto"
+        onMouseDown={stopInlineControlEvent}
+        onClick={stopInlineControlEvent}
+      >
+        <input data-style-field="borderAlign" type="hidden" value={selectionStyleDraft.borderAlign} readOnly />
+        <button
+          type="button"
+          className="inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border border-slate-300 bg-white px-1 text-[11px] font-semibold text-slate-800 sm:gap-1 sm:px-1.5"
+          onClick={() => {
+            setAppearanceBoxModelTarget('border');
+            cycleBorderAlignValue();
+          }}
+          title="클릭할 때마다 내부 → 중앙 → 외곽 순서로 바뀝니다."
+        >
+          <span>
+            <span className="hidden sm:inline">{currentLabel}</span>
+            <span className="sm:hidden">{currentShortLabel}</span>
+          </span>
+          {renderStyleApplyStatusIcon('borderAlign')}
+        </button>
+      </div>
+      );
+    };
+    const renderInlineBorderStylePicker = () => (
+      <div
+        className="relative inline-flex min-w-0 w-full sm:w-auto"
+        onMouseDown={stopInlineControlEvent}
+        onClick={stopInlineControlEvent}
+      >
+        <input data-style-field="borderStyle" type="hidden" value={selectionStyleDraft.borderStyle} readOnly />
+        <button
+          type="button"
+          className="inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border border-slate-300 bg-white px-1 text-[11px] font-semibold text-slate-800 sm:gap-1 sm:px-1.5"
+          onClick={() => {
+            setAppearanceBoxModelTarget('border');
+            setBorderStylePickerOpen((previous) => !previous);
+          }}
+          onBlur={() => window.setTimeout(() => setBorderStylePickerOpen(false), 120)}
+        >
+          <span>
+            <span className="hidden sm:inline">
+              {selectionStyleDraft.borderStyle
+                ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(selectionStyleDraft.borderStyle) || selectionStyleDraft.borderStyle
+                : '외곽선 타입'}
+            </span>
+            <span className="sm:hidden">LT</span>
+          </span>
+          {selectionStyleDraft.borderStyle ? renderBorderStylePreview(selectionStyleDraft.borderStyle, 'hidden sm:block w-10') : null}
+          {renderStyleApplyStatusIcon('borderStyle')}
+        </button>
+        {borderStylePickerOpen ? (
+          <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
+            {FRAME_BORDER_STYLE_OPTIONS.map((option) => {
+              const isSelected = selectionStyleDraft.borderStyle === option.value;
+
+              return (
+                <button
+                  key={`border-style-option:${option.value}`}
+                  type="button"
+                  className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-amber-50 ${
+                    isSelected ? 'bg-amber-100' : ''
+                  }`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setBorderStylePickerOpen(false);
+                    applyStyleFieldImmediateValue('borderStyle', option.value);
+                  }}
+                >
+                  <span className="min-w-0 truncate">{option.label}</span>
+                  <span className="ml-auto flex shrink-0 items-center gap-2">
+                    {renderBorderStylePreview(option.value)}
+                    {isSelected ? (
+                      <span className="rounded-full bg-slate-950 px-1.5 py-0.5 text-[10px] text-white">선택됨</span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    );
+
+    return (
+      <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-sm font-medium text-slate-800">
+              {effectivePositionAppearanceTargetMode === 'group' ? '그룹 출력 형식' : '상자 출력 형식'}
+            </label>
+            {hasSelectedPositionGroupAppearanceContext ? (
+              <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white text-[11px] font-semibold">
+                <button
+                  type="button"
+                  className={`px-2 py-1 ${
+                    effectivePositionAppearanceTargetMode === 'group'
+                      ? 'bg-slate-950 text-white'
+                      : 'text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
+                  }`}
+                  disabled={!canEditSelectedPositionGroupAppearance}
+                  onClick={() => switchPositionAppearanceTargetMode('group')}
+                >
+                  그룹
+                </button>
+                <button
+                  type="button"
+                  className={`px-2 py-1 ${
+                    effectivePositionAppearanceTargetMode === 'frame'
+                      ? 'bg-slate-950 text-white'
+                      : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                  onClick={() => switchPositionAppearanceTargetMode('frame')}
+                >
+                  상자
+                </button>
               </div>
             ) : null}
           </div>
+          <p className="text-xs text-slate-500">
+            {effectivePositionAppearanceTargetMode === 'group'
+              ? '선택한 상위 그룹의 출력 영역을 클릭해 크기, 배경, 외곽선을 편집합니다.'
+              : '선택한 상자의 출력 영역을 클릭해 크기, 배경, 외곽선을 편집합니다.'}
+          </p>
         </div>
-        <div className="space-y-2 md:col-span-2">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            외곽선 타입
-            {renderStyleApplyStatusIcon('borderStyle')}
-          </label>
-          <div className="relative">
-            <input data-style-field="borderStyle" type="hidden" value={selectionStyleDraft.borderStyle} readOnly />
-            <button
-              type="button"
-              className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-white px-3 py-1 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              onClick={() => setBorderStylePickerOpen((previous) => !previous)}
-              onBlur={() => window.setTimeout(() => setBorderStylePickerOpen(false), 120)}
-            >
-              <span className="min-w-0 truncate">
-                {selectionStyleDraft.borderStyle
-                  ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(selectionStyleDraft.borderStyle) || selectionStyleDraft.borderStyle
-                  : '혼합'}
-              </span>
-              <span className="ml-auto flex shrink-0 items-center gap-2">
-                {selectionStyleDraft.borderStyle ? renderBorderStylePreview(selectionStyleDraft.borderStyle) : null}
-                <span className="text-xs text-slate-500">선택</span>
-              </span>
-            </button>
-            {borderStylePickerOpen ? (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
-                {FRAME_BORDER_STYLE_OPTIONS.map((option) => {
-                  const isSelected = selectionStyleDraft.borderStyle === option.value;
 
-                  return (
-                    <button
-                      key={`border-style-option:${option.value}`}
-                      type="button"
-                      className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-amber-50 ${
-                        isSelected ? 'bg-amber-100' : ''
-                      }`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        setBorderStylePickerOpen(false);
-                        applyStyleFieldImmediateValue('borderStyle', option.value);
-                      }}
-                    >
-                      <span className="min-w-0 truncate">{option.label}</span>
-                      <span className="ml-auto flex shrink-0 items-center gap-2">
-                        {renderBorderStylePreview(option.value)}
-                        {isSelected ? (
-                          <span className="rounded-full bg-slate-950 px-1.5 py-0.5 text-[10px] text-white">
-                            선택됨
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  );
-                })}
+        <div className="max-w-full overflow-visible pb-1 pt-6">
+          <div className="relative w-full min-w-0">
+            <div className="absolute right-1 top-0 z-20 grid w-fit max-w-[calc(100%-0.5rem)] -translate-y-1/2 grid-cols-[62px_42px_42px_38px_62px] items-center gap-0.5 sm:right-2 sm:max-w-full sm:grid-cols-[110px_max-content_max-content_max-content_132px] sm:gap-1">
+              {renderInlineNumericInput(
+                'borderWidth',
+                '선 두께',
+                'w-[62px] sm:w-[110px]',
+                'LW'
+              )}
+              {renderInlineColorPicker('borderColor', '선 색 선택', 'left-0 top-full mt-1', true, 'LC')}
+              {renderInlineBorderStylePicker()}
+              {renderInlineBorderAlignPicker()}
+              {renderInlineNumericInput(
+                'borderRadius',
+                '코너 라운딩',
+                'w-[62px] sm:w-[132px]',
+                'CR'
+              )}
+            </div>
+            <div
+              role="button"
+              tabIndex={0}
+              className={`${boxModelZoneClass('border')} rounded-xl bg-slate-50`}
+              aria-label="외곽선 및 상자 출력 형식 편집"
+              style={{
+                boxSizing: 'border-box',
+                borderColor: borderStyleValue === 'none' ? 'rgba(15, 23, 42, .35)' : borderColorValue,
+                borderStyle: borderStyleValue === 'none' ? 'dashed' : borderStyleValue,
+                borderWidth: `${visualBorderWidth}px`,
+                borderRadius: `${clampVisualNumber(borderRadiusValue, 0, 28)}px`,
+              }}
+              onClick={(event) => selectBoxModelTarget(event, 'border')}
+              onKeyDown={(event) => handleBoxModelTargetKeyDown(event, 'border')}
+            >
+              <div
+                role="button"
+                tabIndex={0}
+                className={`${boxModelZoneClass('content')} group/content flex min-h-[96px] min-w-full items-center justify-center text-center text-sm font-semibold text-slate-900`}
+                aria-label="상자 배경색 및 크기 편집"
+                style={{
+                  ...(backgroundColorValue === 'transparent'
+                    ? transparentFillStyle
+                    : { backgroundColor: backgroundColorValue }),
+                  width: `${visualContentWidth}px`,
+                  maxWidth: '100%',
+                  height: `${visualContentHeight}px`,
+                }}
+                onClick={(event) => selectBoxModelTarget(event, 'content')}
+                onKeyDown={(event) => handleBoxModelTargetKeyDown(event, 'content')}
+              >
+                <div className="relative grid w-fit max-w-full grid-cols-[max-content_62px_12px_62px] items-center gap-0.5 rounded-md bg-white/75 px-1 py-1.5 sm:grid-cols-[max-content_104px_12px_104px] sm:gap-2 sm:px-2" onMouseDown={stopInlineControlEvent} onClick={stopInlineControlEvent}>
+                  {renderInlineColorPicker('backgroundColor', '배경 색 선택', 'left-0 top-full mt-1', false)}
+                  {renderInlineNumericInput(
+                    'height',
+                    '높이',
+                    'w-[62px] sm:w-[104px]',
+                    'H'
+                  )}
+                  <span className="text-center text-xs font-semibold text-slate-600">×</span>
+                  {renderInlineNumericInput(
+                    'width',
+                    '너비',
+                    'w-[62px] sm:w-[104px]',
+                    'W'
+                  )}
+                  {styleColorPickerOpen === 'backgroundColor'
+                    ? renderInlineColorPickerPanel('backgroundColor', 'left-0 top-full mt-1 w-full', undefined, 'horizontal')
+                    : null}
+                </div>
               </div>
-            ) : null}
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  const renderRichTextNumericInput = (field: 'fontSize' | 'lineHeight', label: string, placeholder: string) => (
+  const renderRichTextNumericInput = (
+    field: 'fontSize' | 'lineHeight' | 'paddingX' | 'paddingY',
+    label: string,
+    placeholder: string
+  ) => (
     <div className="space-y-1.5">
       <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
         {label}
@@ -24501,7 +24824,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </span>
           </div>
 
-          <div className="grid gap-2 lg:grid-cols-[minmax(160px,1.2fr)_minmax(92px,.55fr)_minmax(92px,.55fr)_minmax(150px,.9fr)]">
+          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
             <div className="space-y-1.5">
               <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
                 폰트
@@ -24524,6 +24847,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </div>
             {renderRichTextNumericInput('fontSize', '글자 크기', '14')}
             {renderRichTextNumericInput('lineHeight', '줄 높이', '20')}
+            {renderRichTextNumericInput('paddingX', '좌우 여백', '0')}
+            {renderRichTextNumericInput('paddingY', '상하 여백', '0')}
             <div className="[&>div>label]:text-xs [&>div>label]:font-semibold [&_button]:h-8 [&_button]:text-xs">
               {renderStyleColorPicker('color', '글자 색')}
             </div>
@@ -24975,6 +25300,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           margin: 0 !important;
           padding: 0 !important;
           background: white !important;
+        }
+        .template-edit-preview .v102-frame-band,
+        .template-edit-preview .v202-cell-box,
+        .template-edit-preview .v202-frame-group[data-template-frame-group],
+        .template-edit-preview .v102-frame-band-table {
+          box-sizing: border-box !important;
         }
         .template-edit-preview[data-frame-create-mode="true"] {
           cursor: crosshair;
