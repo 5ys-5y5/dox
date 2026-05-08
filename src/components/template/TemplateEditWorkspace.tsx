@@ -180,6 +180,12 @@ type PositionGroupTreeEntry = {
   frameGroupIds?: string[];
 };
 
+type PositionPhysicalSortInfo = {
+  pageIndex: number;
+  rect: FrameNodeRect;
+  sourceOrder: number;
+};
+
 type PositionSelectionClickChainEntry =
   | {
       kind: 'group';
@@ -3448,6 +3454,151 @@ const readPositionGroupWrapperRect = (scope: ParentNode | null | undefined, grou
   const pageInner = wrapper?.closest<HTMLElement>('.page-inner') || null;
 
   return wrapper && pageInner ? readFrameElementRect(wrapper, pageInner) : null;
+};
+
+const collectPageInnerElements = (scope: ParentNode | null | undefined) => {
+  if (!scope || typeof HTMLElement === 'undefined') {
+    return [] as HTMLElement[];
+  }
+
+  const pageInners: HTMLElement[] = [];
+  if (scope instanceof HTMLElement && scope.classList.contains('page-inner')) {
+    pageInners.push(scope);
+  }
+  pageInners.push(...Array.from(scope.querySelectorAll<HTMLElement>('.page-inner')));
+
+  return Array.from(new Set(pageInners));
+};
+
+const readPositionElementPhysicalSortInfo = (
+  scope: ParentNode | null | undefined,
+  element: HTMLElement,
+  sourceOrder: number
+): PositionPhysicalSortInfo | null => {
+  const pageInner = element.closest<HTMLElement>('.page-inner') || null;
+
+  if (!pageInner) {
+    return null;
+  }
+
+  const pageIndex = Math.max(0, collectPageInnerElements(scope).indexOf(pageInner));
+
+  return {
+    pageIndex,
+    rect: readFrameElementRect(element, pageInner),
+    sourceOrder,
+  };
+};
+
+const comparePositionPhysicalSortInfo = (
+  left: PositionPhysicalSortInfo | null | undefined,
+  right: PositionPhysicalSortInfo | null | undefined
+) => {
+  if (left && !right) {
+    return -1;
+  }
+
+  if (!left && right) {
+    return 1;
+  }
+
+  if (!left || !right) {
+    return 0;
+  }
+
+  const compareNumeric = (leftValue: number, rightValue: number, tolerance = 0.5) =>
+    Math.abs(leftValue - rightValue) > tolerance ? leftValue - rightValue : 0;
+
+  return (
+    compareNumeric(left.pageIndex, right.pageIndex, 0) ||
+    compareNumeric(left.rect.top, right.rect.top) ||
+    compareNumeric(left.rect.left, right.rect.left) ||
+    compareNumeric(left.rect.top + left.rect.height, right.rect.top + right.rect.height) ||
+    compareNumeric(left.rect.left + left.rect.width, right.rect.left + right.rect.width) ||
+    left.sourceOrder - right.sourceOrder
+  );
+};
+
+const collectFramePhysicalSortInfoById = (scope: ParentNode | null | undefined) => {
+  const nextMap = new Map<string, PositionPhysicalSortInfo>();
+
+  if (!scope || typeof document === 'undefined') {
+    return nextMap;
+  }
+
+  collectFrameSelectionAnchors(scope).forEach((frameNode, sourceOrder) => {
+    const frameGroupId = getFrameGroupId(frameNode);
+
+    if (!frameGroupId || nextMap.has(frameGroupId)) {
+      return;
+    }
+
+    const sortInfo = readPositionElementPhysicalSortInfo(scope, resolveFrameLayoutShell(frameNode), sourceOrder);
+
+    if (sortInfo) {
+      nextMap.set(frameGroupId, sortInfo);
+    }
+  });
+
+  return nextMap;
+};
+
+const collectPositionGroupPhysicalSortInfoById = (
+  scope: ParentNode | null | undefined,
+  groups: PositionImpactGroup[],
+  frameSortInfoById: Map<string, PositionPhysicalSortInfo>
+) => {
+  const nextMap = new Map<string, PositionPhysicalSortInfo>();
+
+  if (!scope || typeof document === 'undefined') {
+    return nextMap;
+  }
+
+  const wrapperSortInfoById = new Map<string, PositionPhysicalSortInfo>();
+  collectPositionGroupWrapperElements(scope).forEach((wrapper, sourceOrder) => {
+    const groupId = readPositionGroupWrapperId(wrapper);
+    const sortInfo = groupId ? readPositionElementPhysicalSortInfo(scope, wrapper, sourceOrder) : null;
+
+    if (groupId && sortInfo) {
+      wrapperSortInfoById.set(groupId, sortInfo);
+    }
+  });
+
+  groups.forEach((group, groupIndex) => {
+    const wrapperSortInfo = wrapperSortInfoById.get(group.id) || null;
+    if (wrapperSortInfo) {
+      nextMap.set(group.id, wrapperSortInfo);
+      return;
+    }
+
+    const memberSortInfos = group.frameGroupIds
+      .map((frameGroupId) => frameSortInfoById.get(frameGroupId.trim()) || null)
+      .filter((sortInfo): sortInfo is PositionPhysicalSortInfo => Boolean(sortInfo));
+
+    if (memberSortInfos.length <= 0) {
+      return;
+    }
+
+    const pageIndex = Math.min(...memberSortInfos.map((sortInfo) => sortInfo.pageIndex));
+    const pageMemberSortInfos = memberSortInfos.filter((sortInfo) => sortInfo.pageIndex === pageIndex);
+    const minLeft = Math.min(...pageMemberSortInfos.map((sortInfo) => sortInfo.rect.left));
+    const minTop = Math.min(...pageMemberSortInfos.map((sortInfo) => sortInfo.rect.top));
+    const maxRight = Math.max(...pageMemberSortInfos.map((sortInfo) => sortInfo.rect.left + sortInfo.rect.width));
+    const maxBottom = Math.max(...pageMemberSortInfos.map((sortInfo) => sortInfo.rect.top + sortInfo.rect.height));
+
+    nextMap.set(group.id, {
+      pageIndex,
+      rect: {
+        left: minLeft,
+        top: minTop,
+        width: Math.max(1, maxRight - minLeft),
+        height: Math.max(1, maxBottom - minTop),
+      },
+      sourceOrder: Math.min(...memberSortInfos.map((sortInfo) => sortInfo.sourceOrder), groupIndex),
+    });
+  });
+
+  return nextMap;
 };
 
 const unwrapPositionGroupWrapperElement = (wrapper: HTMLElement, pageInner: HTMLElement) => {
@@ -9922,23 +10073,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       .filter((frameGroupId) => Boolean(frameGroupId))
       .sort((left, right) => left.localeCompare(right, 'ko'));
   }, [previewDomVersion, renderedPreviewHtml]);
+  const positionBoxGroupSource = React.useMemo(() => {
+    if (previewRef.current) {
+      return previewRef.current;
+    }
+
+    if (typeof document === 'undefined' || !renderedPreviewHtml) {
+      return null;
+    }
+
+    const container = document.createElement('div');
+    container.innerHTML = renderedPreviewHtml;
+    return container;
+  }, [previewDomVersion, renderedPreviewHtml]);
   const positionBoxGroups = React.useMemo(
-    () => {
-      const collectOptions = { includeSingletons: false };
-
-      if (previewRef.current) {
-        return collectPositionBoxGroups(previewRef.current, collectOptions);
-      }
-
-      if (typeof document === 'undefined' || !renderedPreviewHtml) {
-        return [] as PositionImpactGroup[];
-      }
-
-      const container = document.createElement('div');
-      container.innerHTML = renderedPreviewHtml;
-      return collectPositionBoxGroups(container, collectOptions);
-    },
-    [previewDomVersion, renderedPreviewHtml]
+    () =>
+      positionBoxGroupSource
+        ? collectPositionBoxGroups(positionBoxGroupSource, { includeSingletons: false })
+        : ([] as PositionImpactGroup[]),
+    [positionBoxGroupSource, previewDomVersion, renderedPreviewHtml]
   );
   const explicitPositionBoxGroups = React.useMemo(
     () => positionBoxGroups.filter((group) => group.frameGroupIds.length > 0),
@@ -9948,10 +10101,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => new Map(positionBoxGroups.map((group) => [group.id, group] as const)),
     [positionBoxGroups]
   );
+  const positionFramePhysicalSortInfoById = React.useMemo(
+    () => collectFramePhysicalSortInfoById(positionBoxGroupSource),
+    [positionBoxGroupSource, previewDomVersion, renderedPreviewHtml]
+  );
+  const positionGroupPhysicalSortInfoById = React.useMemo(
+    () => collectPositionGroupPhysicalSortInfoById(positionBoxGroupSource, positionBoxGroups, positionFramePhysicalSortInfoById),
+    [positionBoxGroupSource, positionBoxGroups, positionFramePhysicalSortInfoById, previewDomVersion, renderedPreviewHtml]
+  );
   const positionBoxGroupTreeRows = React.useMemo(() => {
     const groupById = new Map(positionBoxGroups.map((group) => [group.id, group] as const));
     const childGroupIdsByParentId = new Map<string, string[]>();
     const childGroupIdSet = new Set<string>();
+    const compareGroupsByPhysicalPosition = (left: PositionImpactGroup, right: PositionImpactGroup) =>
+      comparePositionPhysicalSortInfo(
+        positionGroupPhysicalSortInfoById.get(left.id) || null,
+        positionGroupPhysicalSortInfoById.get(right.id) || null
+      ) || normalizePositionGroupDisplayLabel(left.label, left.id).localeCompare(normalizePositionGroupDisplayLabel(right.label, right.id), 'ko');
 
     positionBoxGroups.forEach((group) => {
       const childGroupIds = Array.from(
@@ -9960,7 +10126,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             .map((childGroupId) => childGroupId.trim())
             .filter((childGroupId) => Boolean(childGroupId) && groupById.has(childGroupId))
         )
-      );
+      ).sort((left, right) => {
+        const leftGroup = groupById.get(left) || null;
+        const rightGroup = groupById.get(right) || null;
+
+        if (!leftGroup || !rightGroup) {
+          return left.localeCompare(right, 'ko');
+        }
+
+        return compareGroupsByPhysicalPosition(leftGroup, rightGroup);
+      });
 
       if (childGroupIds.length > 0) {
         childGroupIdsByParentId.set(group.id, childGroupIds);
@@ -9987,11 +10162,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     positionBoxGroups
       .filter((group) => !childGroupIdSet.has(group.id))
+      .slice()
+      .sort(compareGroupsByPhysicalPosition)
       .forEach((group) => appendGroup(group, 0));
-    positionBoxGroups.forEach((group) => appendGroup(group, 0));
+    positionBoxGroups.slice().sort(compareGroupsByPhysicalPosition).forEach((group) => appendGroup(group, 0));
 
     return rows;
-  }, [positionBoxGroups]);
+  }, [positionBoxGroups, positionGroupPhysicalSortInfoById]);
   const positionGroupStructureWarnings = React.useMemo(() => {
     if (previewRef.current) {
       return collectPositionGroupStructureWarnings(previewRef.current);
@@ -22500,6 +22677,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         const isExpanded = Boolean(expandedPositionBoxGroupIds[group.id]);
                         const groupDisplayLabel = normalizePositionGroupDisplayLabel(group.label, group.id);
                         const groupVisual = resolvePositionStableVisual(group.id, groupDisplayLabel);
+                        const orderedGroupFrameGroupIds = group.frameGroupIds
+                          .map((frameGroupId) => frameGroupId.trim())
+                          .filter((frameGroupId) => Boolean(frameGroupId))
+                          .sort(
+                            (left, right) =>
+                              comparePositionPhysicalSortInfo(
+                                positionFramePhysicalSortInfoById.get(left) || null,
+                                positionFramePhysicalSortInfoById.get(right) || null
+                              ) || left.localeCompare(right, 'ko')
+                          );
 
                         return (
                           <div
@@ -22546,13 +22733,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                             </div>
                             {isExpanded ? (
                               <div className="mt-2 flex flex-wrap items-start justify-start gap-1 text-left">
-                                {group.frameGroupIds.map((frameGroupId) => {
-                                  const normalizedFrameGroupId = frameGroupId.trim();
-
-                                  if (!normalizedFrameGroupId) {
-                                    return null;
-                                  }
-
+                                {orderedGroupFrameGroupIds.map((normalizedFrameGroupId) => {
                                   return (
                                     <button
                                       key={`${group.id}:${normalizedFrameGroupId}`}
