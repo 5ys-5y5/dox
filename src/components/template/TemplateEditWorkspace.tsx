@@ -1,6 +1,30 @@
 'use client';
 
-import { CheckCircle2, CircleDot, CornerDownRight, FileText, KeyRound, Loader2, Minus, MousePointer2, Move, Paperclip, Redo2, Save, Signature, Trash2, Undo2 } from 'lucide-react';
+import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
+  Bold,
+  CheckCircle2,
+  CircleDot,
+  CornerDownRight,
+  FileText,
+  Italic,
+  KeyRound,
+  Loader2,
+  Minus,
+  MousePointer2,
+  Move,
+  Paperclip,
+  Redo2,
+  Save,
+  Signature,
+  Strikethrough,
+  Trash2,
+  Underline,
+  Undo2,
+} from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server.browser';
@@ -55,7 +79,10 @@ type SelectionStyleDraft = {
   paddingX: string;
   paddingY: string;
   borderRadius: string;
+  fontFamily: string;
   fontWeight: string;
+  fontStyle: string;
+  textDecorationLine: string;
   textAlign: 'left' | 'center' | 'right' | 'justify';
   color: string;
   backgroundColor: string;
@@ -1107,7 +1134,10 @@ const defaultSelectionStyleDraft: SelectionStyleDraft = {
   paddingX: '',
   paddingY: '',
   borderRadius: '',
+  fontFamily: '',
   fontWeight: '',
+  fontStyle: '',
+  textDecorationLine: '',
   textAlign: 'left',
   color: '#0f172a',
   backgroundColor: 'transparent',
@@ -1125,7 +1155,10 @@ const defaultStyleFieldApplyStatus: Record<StyleFieldKey, StyleFieldApplyState> 
   paddingX: 'idle',
   paddingY: 'idle',
   borderRadius: 'idle',
+  fontFamily: 'idle',
   fontWeight: 'idle',
+  fontStyle: 'idle',
+  textDecorationLine: 'idle',
   textAlign: 'idle',
   color: 'idle',
   backgroundColor: 'idle',
@@ -1161,6 +1194,36 @@ const FRAME_STYLE_COLOR_OPTIONS = [
   { value: '#dcfce7', label: '초록' },
   { value: '#fee2e2', label: '빨강' },
 ];
+const RICH_TEXT_FONT_FAMILY_OPTIONS = [
+  { value: '', label: '기본 폰트' },
+  { value: '"Noto Sans KR", sans-serif', label: 'Noto Sans KR' },
+  { value: '"Apple SD Gothic Neo", "Malgun Gothic", sans-serif', label: '시스템 한글' },
+  { value: 'Arial, sans-serif', label: 'Arial' },
+  { value: 'Georgia, serif', label: 'Georgia' },
+  { value: '"Courier New", monospace', label: 'Courier New' },
+];
+const normalizeTextDecorationLineValue = (value: string | null | undefined) =>
+  String(value || '')
+    .split(/\s+/)
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token && token !== 'none')
+    .join(' ');
+const hasTextDecorationToken = (value: string | null | undefined, token: 'underline' | 'line-through') =>
+  normalizeTextDecorationLineValue(value).split(/\s+/).includes(token);
+const toggleTextDecorationTokenValue = (
+  value: string | null | undefined,
+  token: 'underline' | 'line-through'
+) => {
+  const nextTokens = new Set(normalizeTextDecorationLineValue(value).split(/\s+/).filter(Boolean));
+
+  if (nextTokens.has(token)) {
+    nextTokens.delete(token);
+  } else {
+    nextTokens.add(token);
+  }
+
+  return Array.from(nextTokens).join(' ') || 'none';
+};
 const FRAME_BORDER_STYLE_LABEL_BY_VALUE = new Map(
   FRAME_BORDER_STYLE_OPTIONS.map((option) => [option.value, option.label] as const)
 );
@@ -5412,6 +5475,18 @@ const stripTransientFrameEditorUi = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>('[data-template-edit-enabled]').forEach((element) => {
     element.removeAttribute('data-template-edit-enabled');
   });
+  root
+    .querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]')
+    .forEach((input) => {
+      input.setAttribute('readonly', '');
+      input.readOnly = true;
+      input.tabIndex = -1;
+      input.style.removeProperty('pointer-events');
+      input.style.removeProperty('user-select');
+      input.style.removeProperty('-webkit-user-select');
+      input.style.cursor = '';
+      input.style.caretColor = '';
+    });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR);
   });
@@ -7461,6 +7536,39 @@ const resolveFrameSelectionAnchor = (node: HTMLElement | null) => {
   return shellAnchor || tableCellAnchor || fallbackAnchor;
 };
 
+const resolveFrameSelectionAnchorAtPoint = (
+  pageInner: HTMLElement | null,
+  clientX: number,
+  clientY: number
+) => {
+  if (!pageInner) {
+    return null;
+  }
+
+  const hitNodes = collectFrameSelectionAnchors(pageInner)
+    .map((node) => {
+      const rect = resolveFrameLayoutShell(node).getBoundingClientRect();
+      const contains =
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom;
+
+      if (!contains) {
+        return null;
+      }
+
+      return {
+        node,
+        area: Math.max(1, rect.width * rect.height),
+      };
+    })
+    .filter((entry): entry is { node: HTMLElement; area: number } => Boolean(entry))
+    .sort((left, right) => left.area - right.area);
+
+  return hitNodes[0]?.node || null;
+};
+
 const collectFrameSelectionAnchors = (scope?: ParentNode | null) => {
   const anchorMap = new Map<string, HTMLElement>();
 
@@ -8141,11 +8249,88 @@ const extractPreviewRenderHtml = (root: HTMLElement) => {
   return container.innerHTML.trim();
 };
 
-const applyPreviewEditPermissions = (root: HTMLElement) => {
+const enableFrameTextInputForEditing = (input: HTMLTextAreaElement | HTMLInputElement) => {
+  input.removeAttribute('readonly');
+  input.readOnly = false;
+  input.tabIndex = 0;
+  input.style.setProperty('pointer-events', 'auto', 'important');
+  input.style.setProperty('user-select', 'text', 'important');
+  input.style.setProperty('-webkit-user-select', 'text', 'important');
+  input.style.cursor = 'text';
+  input.style.caretColor = '';
+};
+
+const disableFrameTextInputEditing = (input: HTMLTextAreaElement | HTMLInputElement) => {
+  input.setAttribute('readonly', '');
+  input.readOnly = true;
+  input.tabIndex = -1;
+  input.style.removeProperty('pointer-events');
+  input.style.removeProperty('user-select');
+  input.style.removeProperty('-webkit-user-select');
+  input.style.cursor = '';
+  input.style.caretColor = '';
+};
+
+const focusFrameTextInputForEditing = (input: HTMLTextAreaElement | HTMLInputElement) => {
+  enableFrameTextInputForEditing(input);
+  window.requestAnimationFrame(() => {
+    input.focus({ preventScroll: true });
+    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+      const valueLength = input.value.length;
+      input.setSelectionRange(valueLength, valueLength);
+    }
+  });
+};
+
+const focusFrameTextInputForEditingByFrameGroupId = (root: HTMLElement, frameGroupId: string) => {
+  const normalizedFrameGroupId = frameGroupId.trim();
+
+  if (!normalizedFrameGroupId) {
+    return;
+  }
+
+  const focusLiveInput = () => {
+    const liveInput = root.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+      `[data-template-frame-input="true"][data-template-frame-group="${escapeCssAttributeValue(normalizedFrameGroupId)}"]`
+    );
+
+    if (!liveInput) {
+      return;
+    }
+
+    enableFrameTextInputForEditing(liveInput);
+    liveInput.focus({ preventScroll: true });
+    const valueLength = liveInput.value.length;
+    liveInput.setSelectionRange(valueLength, valueLength);
+  };
+
+  window.requestAnimationFrame(() => {
+    focusLiveInput();
+    window.setTimeout(focusLiveInput, 0);
+  });
+};
+
+const applyFrameTextEditingMode = (root: HTMLElement, enabled: boolean) => {
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    node
+      .querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]')
+      .forEach((input) => {
+        if (enabled) {
+          enableFrameTextInputForEditing(input);
+          return;
+        }
+
+        disableFrameTextInputEditing(input);
+      });
+  });
+};
+
+const applyPreviewEditPermissions = (root: HTMLElement, selectionPanelTab: SelectionPanelTab = 'position') => {
   root.querySelectorAll<HTMLElement>('[data-template-edit-scope]').forEach((element) => {
     element.setAttribute('contenteditable', 'true');
     element.setAttribute('data-template-edit-enabled', 'true');
   });
+  applyFrameTextEditingMode(root, selectionPanelTab === 'text');
   primeFrameContentScaleMetrics(root);
   collectFrameSelectionAnchors(root).forEach((node) => {
     stabilizeFrameContentHeight(node);
@@ -10657,8 +10842,20 @@ const applyFrameStylePatch = (
     contentTarget.style.lineHeight = patch.lineHeight ? `${Number.parseFloat(patch.lineHeight)}px` : '';
   }
 
+  if (patch.fontFamily !== undefined) {
+    contentTarget.style.fontFamily = patch.fontFamily || '';
+  }
+
   if (patch.fontWeight !== undefined) {
     contentTarget.style.fontWeight = patch.fontWeight || '';
+  }
+
+  if (patch.fontStyle !== undefined) {
+    contentTarget.style.fontStyle = patch.fontStyle || '';
+  }
+
+  if (patch.textDecorationLine !== undefined) {
+    contentTarget.style.textDecorationLine = patch.textDecorationLine || '';
   }
 
   if (patch.textAlign !== undefined) {
@@ -10758,8 +10955,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
   const [positionAppearanceTargetMode, setPositionAppearanceTargetMode] =
     React.useState<PositionAppearanceTargetMode>('frame');
-  const [selectionTextDraft, setSelectionTextDraft] = React.useState('');
-  const [selectionTextMixed, setSelectionTextMixed] = React.useState(false);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
@@ -10805,7 +11000,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     defaultMetadataVirtualConnectionDraft
   );
   const [metadataConnectionPickerOpen, setMetadataConnectionPickerOpen] = React.useState(false);
-  const [styleColorPickerOpen, setStyleColorPickerOpen] = React.useState<null | 'backgroundColor' | 'borderColor'>(null);
+  const [styleColorPickerOpen, setStyleColorPickerOpen] = React.useState<null | 'color' | 'backgroundColor' | 'borderColor'>(null);
   const [borderStylePickerOpen, setBorderStylePickerOpen] = React.useState(false);
   const [borderAlignPickerOpen, setBorderAlignPickerOpen] = React.useState(false);
   const [selectionSaveProgress, setSelectionSaveProgress] =
@@ -11289,6 +11484,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     materializePositionGroupWrappers(root);
+    syncFormControlMarkup(root);
     const nextDraftHtml = extractEditorHtml(root);
     const nextRenderHtml = extractPreviewRenderHtml(root);
     draftPreviewHtmlRef.current = nextDraftHtml;
@@ -15882,7 +16078,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const normalized = ensurePreviewFrameBandNormalization(root);
       syncPreviewSurfaceCloneAttrs(root);
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
-      applyPreviewEditPermissions(root);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       applyFrameCanvasVisualHints(root);
       const materializedPositionGroups = materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
@@ -16032,7 +16228,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      applyPreviewEditPermissions(root);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
       normalizePositionGroupRelativeAnchors(root);
@@ -16087,7 +16283,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      applyPreviewEditPermissions(root);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       materializePositionGroupWrappers(root);
       applyFrameCanvasVisualHints(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
@@ -16933,7 +17129,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const normalized = ensurePreviewFrameBandNormalization(root);
       syncPreviewSurfaceCloneAttrs(root);
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
-      applyPreviewEditPermissions(root);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       applyFrameCanvasVisualHints(root);
       const materializedPositionGroups = materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
@@ -17019,7 +17215,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    applyPreviewEditPermissions(root);
+    applyPreviewEditPermissions(root, selectionPanelTab);
     applyFrameCanvasVisualHints(root);
     normalizeLiveVerticalCohorts(root);
     normalizeLiveVerticalPhysicalPeers(root);
@@ -17230,7 +17426,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const borderRadii = nodes.map((node) =>
       normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetShell(node)).borderRadius)
     );
+    const fontFamilies = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).fontFamily || '');
     const fontWeights = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).fontWeight || '');
+    const fontStyles = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).fontStyle || '');
+    const textDecorationLines = nodes.map((node) =>
+      normalizeTextDecorationLineValue(getComputedStyle(resolveStyleTargetContent(node)).textDecorationLine)
+    );
     const textAligns = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).textAlign || 'left');
     const colors = nodes.map((node) => colorToHex(getComputedStyle(resolveStyleTargetContent(node)).color || ''));
     const backgroundColors = nodes.map((node) =>
@@ -17252,7 +17453,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       paddingX: getSharedValue(paddingXs),
       paddingY: getSharedValue(paddingYs),
       borderRadius: getSharedValue(borderRadii),
+      fontFamily: getSharedValue(fontFamilies),
       fontWeight: getSharedValue(fontWeights),
+      fontStyle: getSharedValue(fontStyles),
+      textDecorationLine: getSharedValue(textDecorationLines),
       textAlign:
         sharedTextAlign === 'center' || sharedTextAlign === 'right' || sharedTextAlign === 'justify'
           ? sharedTextAlign
@@ -17317,40 +17521,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   React.useEffect(() => {
     syncFrameMetadataDraft();
   }, [selectedFrameGroupIds, syncFrameMetadataDraft, templateDetail?.template.id]);
-
-  const syncSelectionTextDraft = React.useCallback(() => {
-    const root = previewRef.current;
-
-    if (!root || selectedFrameGroupIds.length === 0) {
-      setSelectionTextDraft('');
-      setSelectionTextMixed(false);
-      return;
-    }
-
-    const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
-
-    if (!nodes.length) {
-      setSelectionTextDraft('');
-      setSelectionTextMixed(false);
-      return;
-    }
-
-    const texts = nodes.map((node) => {
-      const input = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
-      if (!input) {
-        return '';
-      }
-      return String(input.value || '');
-    });
-    const sharedText = getSharedValue(texts);
-
-    setSelectionTextMixed(!sharedText);
-    setSelectionTextDraft(sharedText || texts[0] || '');
-  }, [getFrameNodes, selectedFrameGroupIds]);
-
-  React.useEffect(() => {
-    syncSelectionTextDraft();
-  }, [selectedFrameGroupIds, syncSelectionTextDraft, templateDetail?.template.id]);
 
   React.useEffect(() => {
     setStyleFieldApplyStatus(defaultStyleFieldApplyStatus);
@@ -19543,7 +19713,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       paddingX: readFieldValue('paddingX'),
       paddingY: readFieldValue('paddingY'),
       borderRadius: readFieldValue('borderRadius'),
+      fontFamily: readFieldValue('fontFamily'),
       fontWeight: readFieldValue('fontWeight'),
+      fontStyle: readFieldValue('fontStyle'),
+      textDecorationLine: readFieldValue('textDecorationLine'),
       textAlign: readFieldValue('textAlign') as SelectionStyleDraft['textAlign'],
       color: readFieldValue('color'),
       backgroundColor: readFieldValue('backgroundColor'),
@@ -19569,6 +19742,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applySelectionStylePatch({
       width: Number.isFinite(width) ? width : undefined,
       height: Number.isFinite(height) ? height : undefined,
+      fontSize: nextDraft.fontSize,
+      lineHeight: nextDraft.lineHeight,
+      fontFamily: nextDraft.fontFamily,
+      fontWeight: nextDraft.fontWeight,
+      fontStyle: nextDraft.fontStyle,
+      textDecorationLine: nextDraft.textDecorationLine,
+      textAlign: nextDraft.textAlign,
+      color: nextDraft.color,
       paddingX: nextDraft.paddingX,
       paddingY: nextDraft.paddingY,
       borderRadius: nextDraft.borderRadius,
@@ -19648,42 +19829,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [applySelectionStylePatch, setStyleFieldDraftValue]
   );
-
-  const applySelectionTextDraft = React.useCallback(() => {
-    const root = previewRef.current;
-    const activeSelectionIds = selectedFrameGroupIdsRef.current;
-
-    if (!root || activeSelectionIds.length === 0) {
-      setMessage('텍스트를 적용할 상자를 먼저 선택하세요.');
-      return;
-    }
-
-    const nodes = getFrameNodes(root).filter((node) => activeSelectionIds.includes(getFrameGroupId(node)));
-
-    if (!nodes.length) {
-      return;
-    }
-
-    nodes.forEach((node) => {
-      const input = node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]');
-      if (!input) {
-        return;
-      }
-
-      input.value = selectionTextDraft;
-      input.textContent = selectionTextDraft;
-      markTemplateValueElementEdited(input);
-    });
-
-    syncDraftPreviewHtmlRef();
-    requestPreviewTextFit();
-    setSelectionTextMixed(false);
-    setMessage(
-      activeSelectionIds.length > 1
-        ? `선택한 ${activeSelectionIds.length}개 상자 텍스트를 일괄 반영했습니다.`
-        : '선택 상자 텍스트를 반영했습니다.'
-    );
-  }, [getFrameNodes, requestPreviewTextFit, selectionTextDraft, syncDraftPreviewHtmlRef]);
 
   const readFrameMetadataDraftFromControls = React.useCallback((): FrameMetadataDraft => {
     const root = stylePanelRef.current;
@@ -20182,7 +20327,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [styleFieldApplyStatus]
   );
 
-  const renderStyleColorPicker = (field: 'backgroundColor' | 'borderColor', label: string) => {
+  const renderStyleColorPicker = (field: 'color' | 'backgroundColor' | 'borderColor', label: string) => {
     const currentValue = selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : '#0f172a');
     const isOpen = styleColorPickerOpen === field;
 
@@ -21586,6 +21731,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyRuntimeSelectionUi([], emptyEdgeSelection, []);
   }, [applyRuntimeSelectionUi, stopPointerInteraction]);
 
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'text' || selectedFrameGroupIdsRef.current.length <= 0) {
+      return;
+    }
+
+    clearFrameSelection();
+  }, [clearFrameSelection, selectedFrameGroupIds.length, selectionPanelTab]);
+
   const deleteCanvasSelectionEntity = React.useCallback(
     (kind: string | null | undefined, targetId: string | null | undefined) => {
       const root = previewRef.current;
@@ -21835,9 +21988,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         edgeButton?.closest<HTMLElement>('.v102-frame-band') ||
         resizeHandle?.closest<HTMLElement>('.v102-frame-band') ||
         target.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR);
-      const frameNode = resolveFrameSelectionAnchor(frameAnchorTarget);
+      const pageInnerFromTarget = target.closest<HTMLElement>('.page-inner') || null;
+      const frameNode =
+        resolveFrameSelectionAnchor(frameAnchorTarget) ||
+        (selectionPanelTab === 'text'
+          ? resolveFrameSelectionAnchorAtPoint(pageInnerFromTarget, event.clientX, event.clientY)
+          : null);
       const pageInner =
-        target.closest<HTMLElement>('.page-inner') || frameNode?.closest<HTMLElement>('.page-inner') || null;
+        pageInnerFromTarget || frameNode?.closest<HTMLElement>('.page-inner') || null;
       const hadSelectionBeforePointerDown = selectedFrameGroupIdsRef.current.length > 0;
       const startFrameDragInteraction = (anchorNode: HTMLElement, selectionFrameGroupIds: string[]) => {
         if (!pageInner || canvasInteractionMode !== 'move' || !hadSelectionBeforePointerDown) {
@@ -22008,6 +22166,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
         });
       };
+
+      if (
+        selectionPanelTab === 'text' &&
+        frameNode &&
+        !edgeButton &&
+        !resizeHandle &&
+        !event.shiftKey
+      ) {
+        const textFrameGroupId = getFrameGroupId(frameNode);
+        const textInput = frameNode.querySelector<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
+
+        if (textInput) {
+          const clickedTextInput = target.closest<HTMLElement>('[data-template-frame-input="true"]');
+
+          if (!clickedTextInput) {
+            event.preventDefault();
+          }
+
+          focusFrameTextInputForEditing(textInput);
+        }
+
+        if (textFrameGroupId) {
+          focusFrameTextInputForEditingByFrameGroupId(root, textFrameGroupId);
+        }
+
+        return;
+      }
 
       if (
         metadataRelationSelectionModeRef.current.kind !== 'idle' &&
@@ -23524,6 +23709,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const target = event.target instanceof HTMLElement ? event.target : null;
 
+    if (selectionPanelTab === 'text' && target && previewRef.current) {
+      const frameNode =
+        resolveFrameSelectionAnchor(target.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)) ||
+        resolveFrameSelectionAnchorAtPoint(
+          target.closest<HTMLElement>('.page-inner'),
+          event.clientX,
+          event.clientY
+        );
+      const frameGroupId = getFrameGroupId(frameNode);
+
+      if (frameGroupId) {
+        focusFrameTextInputForEditingByFrameGroupId(previewRef.current, frameGroupId);
+      }
+    }
+
     if (metadataRelationSelectionModeRef.current.kind !== 'idle') {
       event.preventDefault();
       return;
@@ -23537,12 +23737,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-  }, [deleteCanvasSelectionEntity, syncDraftPreviewHtmlRef]);
+  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef]);
 
   const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
 
     if (!target) {
+      return;
+    }
+
+    const frameTextInput = target.closest<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
+
+    if (selectionPanelTab === 'text' && frameTextInput) {
+      markTemplateValueElementEdited(frameTextInput);
       return;
     }
 
@@ -23552,7 +23759,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
-  }, [requestPreviewTextFit, syncDraftPreviewHtmlRef]);
+  }, [requestPreviewTextFit, selectionPanelTab, syncDraftPreviewHtmlRef]);
 
   const toggleBoxCreationModeFromCanvasToolbar = React.useCallback(() => {
     clearTransientCanvasOverlays();
@@ -24231,6 +24438,177 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     </div>
   );
 
+  const renderRichTextNumericInput = (field: 'fontSize' | 'lineHeight', label: string, placeholder: string) => (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+        {label}
+        {renderStyleApplyStatusIcon(field)}
+      </label>
+      <div className="relative">
+        <Input
+          data-style-field={field}
+          value={selectionStyleDraft[field]}
+          inputMode="decimal"
+          placeholder={placeholder}
+          disabled={selectedFrameGroupIds.length === 0}
+          className="h-8 pr-8 text-xs"
+          onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
+          onBlur={() => applyStyleFieldOnBlur(field)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.currentTarget.blur();
+            }
+          }}
+        />
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-500">
+          px
+        </span>
+      </div>
+    </div>
+  );
+
+  const renderTextCanvasActionControls = () => {
+    const hasSelection = selectedFrameGroupIds.length > 0;
+    const currentFontFamily = selectionStyleDraft.fontFamily || '';
+    const hasCustomFontFamily =
+      Boolean(currentFontFamily) &&
+      !RICH_TEXT_FONT_FAMILY_OPTIONS.some((option) => option.value === currentFontFamily);
+    const fontWeightValue = selectionStyleDraft.fontWeight.trim().toLowerCase();
+    const isBold =
+      fontWeightValue === 'bold' || (Number.isFinite(Number.parseInt(fontWeightValue, 10)) && Number.parseInt(fontWeightValue, 10) >= 600);
+    const isItalic = selectionStyleDraft.fontStyle.trim().toLowerCase() === 'italic';
+    const isUnderline = hasTextDecorationToken(selectionStyleDraft.textDecorationLine, 'underline');
+    const isStrikeThrough = hasTextDecorationToken(selectionStyleDraft.textDecorationLine, 'line-through');
+    const styleButtonClass = (active: boolean) =>
+      `inline-flex h-8 items-center justify-center border-r border-slate-200 text-xs font-semibold transition last:border-r-0 ${
+        active
+          ? 'bg-slate-950 text-white'
+          : 'bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+      }`;
+
+    return (
+      <CardContent className="px-6 pb-3 pt-0">
+        <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold text-slate-900">텍스트 설정</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">
+                텍스트 탭에서는 상자 안의 텍스트를 직접 클릭해 수정합니다.
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] text-slate-600">
+              {hasSelection ? `${selectedFrameGroupIds.length}개 선택` : '상자를 선택하세요'}
+            </span>
+          </div>
+
+          <div className="grid gap-2 lg:grid-cols-[minmax(160px,1.2fr)_minmax(92px,.55fr)_minmax(92px,.55fr)_minmax(150px,.9fr)]">
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+                폰트
+                {renderStyleApplyStatusIcon('fontFamily')}
+              </label>
+              <select
+                data-style-field="fontFamily"
+                value={currentFontFamily}
+                disabled={!hasSelection}
+                onChange={(event) => applyStyleFieldImmediateValue('fontFamily', event.target.value)}
+                className="flex h-8 w-full rounded-md border border-input bg-white px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {hasCustomFontFamily ? <option value={currentFontFamily}>{currentFontFamily}</option> : null}
+                {RICH_TEXT_FONT_FAMILY_OPTIONS.map((option) => (
+                  <option key={`rich-text-font-family:${option.value || 'default'}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {renderRichTextNumericInput('fontSize', '글자 크기', '14')}
+            {renderRichTextNumericInput('lineHeight', '줄 높이', '20')}
+            <div className="[&>div>label]:text-xs [&>div>label]:font-semibold [&_button]:h-8 [&_button]:text-xs">
+              {renderStyleColorPicker('color', '글자 색')}
+            </div>
+          </div>
+
+          <div className="grid gap-2 lg:grid-cols-2">
+            <div className="grid grid-cols-4 overflow-hidden rounded-md border border-slate-200 bg-white">
+              <button
+                type="button"
+                className={styleButtonClass(isBold)}
+                disabled={!hasSelection}
+                onClick={() => applyStyleFieldImmediateValue('fontWeight', isBold ? '400' : '700')}
+                aria-label="굵게"
+                title="굵게"
+              >
+                <Bold className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className={styleButtonClass(isItalic)}
+                disabled={!hasSelection}
+                onClick={() => applyStyleFieldImmediateValue('fontStyle', isItalic ? 'normal' : 'italic')}
+                aria-label="이탤릭"
+                title="이탤릭"
+              >
+                <Italic className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className={styleButtonClass(isUnderline)}
+                disabled={!hasSelection}
+                onClick={() =>
+                  applyStyleFieldImmediateValue(
+                    'textDecorationLine',
+                    toggleTextDecorationTokenValue(selectionStyleDraft.textDecorationLine, 'underline')
+                  )
+                }
+                aria-label="밑줄"
+                title="밑줄"
+              >
+                <Underline className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className={styleButtonClass(isStrikeThrough)}
+                disabled={!hasSelection}
+                onClick={() =>
+                  applyStyleFieldImmediateValue(
+                    'textDecorationLine',
+                    toggleTextDecorationTokenValue(selectionStyleDraft.textDecorationLine, 'line-through')
+                  )
+                }
+                aria-label="삭선"
+                title="삭선"
+              >
+                <Strikethrough className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-4 overflow-hidden rounded-md border border-slate-200 bg-white">
+              {[
+                { value: 'left', label: '왼쪽', icon: AlignLeft },
+                { value: 'center', label: '가운데', icon: AlignCenter },
+                { value: 'right', label: '오른쪽', icon: AlignRight },
+                { value: 'justify', label: '양쪽', icon: AlignJustify },
+              ].map(({ value, label, icon: Icon }) => (
+                <button
+                  key={`rich-text-align:${value}`}
+                  type="button"
+                  className={styleButtonClass(selectionStyleDraft.textAlign === value)}
+                  disabled={!hasSelection}
+                  onClick={() => applyStyleFieldImmediateValue('textAlign', value)}
+                  aria-label={label}
+                  title={label}
+                >
+                  <Icon className="h-4 w-4" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    );
+  };
+
   const renderMetadataCanvasActionControls = () => (
     <CardContent className="px-6 pb-3 pt-0">
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -24707,6 +25085,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-template-edge-host="true"] [data-template-frame-input="true"] {
           position: relative;
           z-index: 22;
+        }
+        .template-edit-preview[data-selection-panel-tab="text"] [data-template-frame-input="true"] {
+          pointer-events: auto !important;
+          user-select: text !important;
+          -webkit-user-select: text !important;
+          cursor: text !important;
+        }
+        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"] [data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
+          pointer-events: auto !important;
+          user-select: text !important;
+          -webkit-user-select: text !important;
+          cursor: text !important;
+        }
+        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"][data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
+          pointer-events: auto !important;
+          user-select: text !important;
+          -webkit-user-select: text !important;
+          cursor: text !important;
         }
         .template-edit-preview ${RAW_FRAME_NODE_SELECTOR} {
           background-color: transparent;
@@ -25378,6 +25774,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </div>
           </CardHeader>
           {selectionPanelTab === 'metadata' ? renderMetadataCanvasActionControls() : null}
+          {selectionPanelTab === 'text' ? renderTextCanvasActionControls() : null}
+          {selectionPanelTab === 'position' && selectedFrameGroupIds.length > 0 ? (
+            <CardContent className="px-6 pb-3 pt-0">
+              {renderSelectionAppearanceControls()}
+            </CardContent>
+          ) : null}
           {showCanvasLegend ? (
             <CardContent className="p-6 pt-0">
               <MetadataCanvasLegend />
@@ -25834,7 +26236,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
 		              {selectionPanelTab === 'position' ? (
 		                <>
-		                  {selectedFrameGroupIds.length > 0 ? renderSelectionAppearanceControls() : null}
 		                  {positionBoxGroups.length > 0 ? (
                     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-left text-xs leading-5 text-slate-700">
                       <div className="text-left font-semibold text-slate-900">전체 그룹 ({positionBoxGroups.length}개)</div>
@@ -25929,32 +26330,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   ) : null}
 		                </>
 	              ) : null}
-
-              {selectionPanelTab === 'text' ? (
-                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-800">상자 텍스트</label>
-                    <p className="text-xs text-slate-500">
-                      현재 선택한 상자의 텍스트를 편집합니다. 여러 상자를 선택하면 같은 값으로 일괄 반영됩니다.
-                    </p>
-                  </div>
-                  <textarea
-                    value={selectionTextDraft}
-                    onChange={(event) => {
-                      setSelectionTextDraft(event.target.value);
-                      setSelectionTextMixed(false);
-                    }}
-                    placeholder={selectionTextMixed ? '여러 상자의 텍스트가 서로 다릅니다.' : '선택한 상자 텍스트'}
-                    className="min-h-40 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus-visible:ring-1 focus-visible:ring-slate-300"
-                  />
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
-                    <span>{selectedFrameGroupIds.length > 0 ? `${selectedFrameGroupIds.length}개 상자 선택됨` : '선택된 상자 없음'}</span>
-                    <Button size="sm" onClick={() => applySelectionTextDraft()} disabled={selectedFrameGroupIds.length === 0}>
-                      텍스트 반영
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
 
             </CardContent>
           </Card>
