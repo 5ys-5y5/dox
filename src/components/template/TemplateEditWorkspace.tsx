@@ -524,6 +524,8 @@ const FRAME_DELETE_BUTTON_ATTR = 'data-v106-frame-delete-button';
 const FRAME_DELETE_KIND_ATTR = 'data-v106-frame-delete-kind';
 const FRAME_DELETE_TARGET_ID_ATTR = 'data-v106-frame-delete-target-id';
 const FRAME_RELATION_BADGE_CLASS = 'v106-frame-relation-badge';
+const FRAME_REVIEW_WARNING_BUTTON_CLASS = 'v106-frame-review-warning-button';
+const FRAME_REVIEW_WARNING_POPOVER_CLASS = 'v106-frame-review-warning-popover';
 const FRAME_KIND_MARKER_CLASS = 'v106-frame-kind-marker';
 const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
@@ -1394,6 +1396,127 @@ const hasResolvedFrameParentCycle = (
   }
 
   return false;
+};
+
+const collectFrameMetadataReviewIssues = (
+  root: ParentNode,
+  virtualDefinitions: VirtualFrameDefinition[] = []
+): FrameMetadataReviewIssue[] => {
+  const frameNodes = collectFrameSelectionAnchors(root);
+  const frameNodeById = new Map(
+    frameNodes
+      .map((node) => [getFrameGroupId(node), node] as const)
+      .filter(([frameGroupId]) => Boolean(frameGroupId))
+  );
+  const availableFrameGroupIds = new Set(Array.from(frameNodeById.keys()));
+  const virtualDefinitionIds = new Set(virtualDefinitions.map((definition) => definition.id));
+  const resolvedMetadataById = new Map<string, ResolvedFrameMetadata>();
+
+  frameNodeById.forEach((node, frameGroupId) => {
+    const metadata = resolveNextFrameMetadata(node, {});
+    resolvedMetadataById.set(
+      frameGroupId,
+      metadata.role === 'value'
+        ? metadata
+        : {
+            ...metadata,
+            parentGroupId: '',
+          }
+    );
+  });
+
+  const reviewIssues: FrameMetadataReviewIssue[] = [];
+  const reviewIssueKeys = new Set<string>();
+  const pushReviewIssue = (frameGroupId: string, message: string) => {
+    const normalizedFrameGroupId = frameGroupId.trim();
+    const normalizedMessage = message.trim();
+    const key = `${normalizedFrameGroupId}:${normalizedMessage}`;
+
+    if (!normalizedFrameGroupId || !normalizedMessage || reviewIssueKeys.has(key)) {
+      return;
+    }
+
+    reviewIssueKeys.add(key);
+    reviewIssues.push({
+      frameGroupId: normalizedFrameGroupId,
+      message: normalizedMessage,
+    });
+  };
+
+  frameNodeById.forEach((node, frameGroupId) => {
+    const metadata = resolvedMetadataById.get(frameGroupId);
+
+    if (!metadata) {
+      return;
+    }
+
+    if (metadata.boxKind && metadata.boxKind !== 'text' && metadata.role === 'key') {
+      pushReviewIssue(
+        frameGroupId,
+        `${frameGroupId}: ${FRAME_BOX_KIND_SHORT_LABELS[metadata.boxKind]}이면서 key 역할입니다. 조치: 라벨/제목이면 텍스트 상자로 바꾸고, 파일/서명 입력값이면 value 또는 독립 값으로 바꾸세요.`
+      );
+    }
+
+    if (metadata.role === 'value' && !metadata.parentGroupId) {
+      pushReviewIssue(
+        frameGroupId,
+        `${frameGroupId}: value 역할이지만 연결된 key 상자가 없습니다. 조치: 박스 연결하기로 key와 연결하거나 독립 값으로 바꾸세요.`
+      );
+    }
+
+    if (
+      metadata.parentGroupId &&
+      !availableFrameGroupIds.has(metadata.parentGroupId) &&
+      !virtualDefinitionIds.has(metadata.parentGroupId)
+    ) {
+      pushReviewIssue(
+        frameGroupId,
+        `${frameGroupId}: 연결된 key 상자 ${metadata.parentGroupId} 를 찾을 수 없습니다. 조치: key 연결을 해제하거나 존재하는 key 상자로 다시 연결하세요.`
+      );
+    }
+
+    if (metadata.parentGroupId === frameGroupId) {
+      pushReviewIssue(
+        frameGroupId,
+        `${frameGroupId}: 자기 자신을 key 상자로 참조하고 있습니다. 조치: key 연결을 해제하거나 다른 key 상자로 다시 연결하세요.`
+      );
+    }
+
+    if (metadata.role === 'value' && metadata.parentGroupId) {
+      const parentMetadata = resolvedMetadataById.get(metadata.parentGroupId) || null;
+      const isVirtualParent = virtualDefinitionIds.has(metadata.parentGroupId);
+
+      if (!parentMetadata && !isVirtualParent) {
+        pushReviewIssue(
+          frameGroupId,
+          `${frameGroupId}: 연결된 key 상자 ${metadata.parentGroupId} 를 찾을 수 없습니다. 조치: key 연결을 해제하거나 다시 연결하세요.`
+        );
+      } else if (parentMetadata && !isVirtualParent && parentMetadata.role !== 'key') {
+        pushReviewIssue(
+          frameGroupId,
+          `${frameGroupId}: 연결된 key 상자 ${metadata.parentGroupId} 의 역할이 key가 아닙니다. 조치: 연결된 상자를 key로 바꾸거나 다른 key 상자로 다시 연결하세요.`
+        );
+      } else if (parentMetadata && !isVirtualParent && parentMetadata.boxKind && parentMetadata.boxKind !== 'text') {
+        pushReviewIssue(
+          metadata.parentGroupId,
+          `${metadata.parentGroupId}: ${FRAME_BOX_KIND_SHORT_LABELS[parentMetadata.boxKind]}이면서 key 역할입니다. 조치: 라벨/제목이면 텍스트 상자로 바꾸고, 파일/서명 입력값이면 value 또는 독립 값으로 바꾸세요.`
+        );
+      }
+    }
+
+    if (
+      metadata.parentGroupId &&
+      !virtualDefinitionIds.has(metadata.parentGroupId) &&
+      hasResolvedFrameParentCycle(frameGroupId, metadata.parentGroupId, resolvedMetadataById)
+    ) {
+      pushReviewIssue(
+        frameGroupId,
+        `${frameGroupId}: key 연결에 순환 참조가 있습니다. 조치: 연결을 해제한 뒤 key/value 방향을 다시 지정하세요.`
+      );
+    }
+  });
+
+  return reviewIssues;
 };
 
 const applyFrameMetadataPatch = (node: HTMLElement, patch: FrameMetadataPatch) => {
@@ -7477,6 +7600,11 @@ const clearFrameValidationErrorUi = (root: ParentNode) => {
 };
 
 const clearFrameReviewWarningUi = (root: ParentNode) => {
+  root
+    .querySelectorAll<HTMLElement>(`.${FRAME_REVIEW_WARNING_BUTTON_CLASS}, .${FRAME_REVIEW_WARNING_POPOVER_CLASS}`)
+    .forEach((element) => {
+      element.remove();
+    });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}="true"]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_REVIEW_WARNING_ATTR);
   });
@@ -7506,17 +7634,217 @@ const applyFrameValidationErrorUi = (root: HTMLElement, frameGroupIds: string[])
   });
 };
 
-const applyFrameReviewWarningUi = (root: HTMLElement, frameGroupIds: string[]) => {
-  clearFrameReviewWarningUi(root);
+const appendFrameReviewWarningOverlay = (frameNode: HTMLElement, messages: string[]) => {
+  const shell = resolveFrameLayoutShell(frameNode);
+  const pageInner = shell.closest<HTMLElement>('.page-inner') || frameNode.closest<HTMLElement>('.page-inner') || null;
+  const frameGroupId = getFrameGroupId(frameNode);
+  const normalizedMessages = Array.from(new Set(messages.map((message) => message.trim()).filter(Boolean)));
 
-  if (frameGroupIds.length === 0) {
+  if (!pageInner || !frameGroupId || normalizedMessages.length <= 0) {
     return;
   }
 
-  const warningIdSet = new Set(frameGroupIds);
+  const closePopover = () => {
+    pageInner.querySelectorAll<HTMLElement>(`.${FRAME_REVIEW_WARNING_POPOVER_CLASS}`).forEach((element) => {
+      element.remove();
+    });
+  };
+  const openPopover = () => {
+    closePopover();
+    const shellRect = readFrameElementRect(shell, pageInner);
+    const pageWidth = pageInner.clientWidth || pageInner.getBoundingClientRect().width || shellRect.left + shellRect.width;
+    const popoverWidth = Math.min(320, Math.max(220, pageWidth));
+    const popoverLeft = Math.max(0, Math.min(shellRect.left + shellRect.width - popoverWidth, pageWidth - popoverWidth));
+
+    const popover = document.createElement('div');
+    popover.className = FRAME_REVIEW_WARNING_POPOVER_CLASS;
+    popover.setAttribute('data-frame-editor-ui', 'true');
+    popover.setAttribute('role', 'dialog');
+    popover.setAttribute('aria-label', `${frameGroupId} 메타데이터 확인 필요`);
+    popover.style.position = 'absolute';
+    popover.style.left = toFrameCssPx(popoverLeft);
+    popover.style.top = toFrameCssPx(shellRect.top - 8);
+    popover.style.transform = 'translateY(-100%)';
+    popover.style.zIndex = '2147483647';
+    popover.style.width = toFrameCssPx(popoverWidth);
+    popover.style.maxWidth = toFrameCssPx(popoverWidth);
+    popover.style.padding = '8px';
+    popover.style.border = '1px solid rgba(217, 119, 6, .5)';
+    popover.style.borderRadius = '10px';
+    popover.style.background = 'rgb(255, 251, 235)';
+    popover.style.backgroundColor = 'rgb(255, 251, 235)';
+    popover.style.color = 'rgb(120, 53, 15)';
+    popover.style.opacity = '1';
+    popover.style.boxShadow = 'none';
+    popover.style.pointerEvents = 'auto';
+    popover.style.fontSize = '11px';
+    popover.style.lineHeight = '1.45';
+    popover.style.isolation = 'isolate';
+
+    const panel = document.createElement('div');
+    panel.style.position = 'absolute';
+    panel.style.inset = '0';
+    panel.style.zIndex = '-1';
+    panel.style.borderRadius = '10px';
+    panel.style.background = 'rgb(255, 255, 255)';
+    panel.style.backgroundColor = 'rgb(255, 255, 255)';
+    panel.style.opacity = '1';
+    panel.style.pointerEvents = 'none';
+    popover.appendChild(panel);
+
+    const header = document.createElement('div');
+    header.style.position = 'relative';
+    header.style.zIndex = '1';
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.justifyContent = 'space-between';
+    header.style.gap = '8px';
+    header.style.marginBottom = '6px';
+
+    const title = document.createElement('div');
+    title.textContent = '메타데이터 확인 필요';
+    title.style.fontWeight = '800';
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.textContent = '×';
+    closeButton.setAttribute('aria-label', '경고 안내 닫기');
+    closeButton.style.display = 'inline-flex';
+    closeButton.style.alignItems = 'center';
+    closeButton.style.justifyContent = 'center';
+    closeButton.style.width = '20px';
+    closeButton.style.height = '20px';
+    closeButton.style.border = '1px solid rgba(217, 119, 6, .32)';
+    closeButton.style.borderRadius = '999px';
+    closeButton.style.background = 'rgba(255, 255, 255, .92)';
+    closeButton.style.color = 'rgb(120, 53, 15)';
+    closeButton.style.cursor = 'pointer';
+    closeButton.style.padding = '0';
+    closeButton.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
+    closeButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closePopover();
+    });
+
+    header.appendChild(title);
+    header.appendChild(closeButton);
+    popover.appendChild(header);
+
+    const list = document.createElement('ul');
+    list.style.position = 'relative';
+    list.style.zIndex = '1';
+    list.style.margin = '0';
+    list.style.paddingLeft = '0';
+    list.style.display = 'grid';
+    list.style.gap = '6px';
+    list.style.listStyle = 'none';
+    normalizedMessages.forEach((message) => {
+      const item = document.createElement('li');
+      const [problemText, actionText] = message.split(/조치:\s*/);
+      item.style.paddingLeft = '10px';
+      item.style.borderLeft = '3px solid rgba(217, 119, 6, .55)';
+      item.style.display = 'grid';
+      item.style.gap = '3px';
+
+      const problem = document.createElement('div');
+      problem.textContent = problemText.trim();
+      item.appendChild(problem);
+
+      if (actionText?.trim()) {
+        const action = document.createElement('div');
+        action.textContent = `조치: ${actionText.trim()}`;
+        action.style.fontWeight = '700';
+        action.style.color = 'rgb(146, 64, 14)';
+        item.appendChild(action);
+      }
+
+      list.appendChild(item);
+    });
+    popover.appendChild(list);
+    popover.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
+    popover.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+
+    pageInner.appendChild(popover);
+  };
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = FRAME_REVIEW_WARNING_BUTTON_CLASS;
+  button.setAttribute('data-frame-editor-ui', 'true');
+  button.setAttribute('aria-label', `${frameGroupId} 메타데이터 확인 필요`);
+  button.title = '메타데이터 확인 필요';
+  button.textContent = '!';
+  button.style.position = 'absolute';
+  button.style.top = '4px';
+  button.style.right = '4px';
+  button.style.zIndex = '61';
+  button.style.width = '20px';
+  button.style.height = '20px';
+  button.style.borderRadius = '999px';
+  button.style.display = 'inline-flex';
+  button.style.alignItems = 'center';
+  button.style.justifyContent = 'center';
+  button.style.border = '1px solid rgba(217, 119, 6, .86)';
+  button.style.background = 'rgba(254, 243, 199, .98)';
+  button.style.color = 'rgba(146, 64, 14, .98)';
+  button.style.fontSize = '12px';
+  button.style.lineHeight = '1';
+  button.style.fontWeight = '800';
+  button.style.boxShadow = 'none';
+  button.style.cursor = 'pointer';
+  button.style.pointerEvents = 'auto';
+  button.style.padding = '0';
+  button.addEventListener('pointerdown', (event) => {
+    event.stopPropagation();
+  });
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = Boolean(pageInner.querySelector(`.${FRAME_REVIEW_WARNING_POPOVER_CLASS}`));
+    if (isOpen) {
+      closePopover();
+      return;
+    }
+
+    openPopover();
+  });
+
+  shell.appendChild(button);
+};
+
+const applyFrameReviewWarningUi = (root: HTMLElement, issues: FrameMetadataReviewIssue[]) => {
+  clearFrameReviewWarningUi(root);
+
+  if (root.getAttribute('data-selection-panel-tab') !== 'metadata' || issues.length === 0) {
+    return;
+  }
+
+  const messagesByFrameGroupId = new Map<string, string[]>();
+  issues.forEach((issue) => {
+    const frameGroupId = issue.frameGroupId.trim();
+    const message = issue.message.trim();
+    if (!frameGroupId || !message) {
+      return;
+    }
+
+    const current = messagesByFrameGroupId.get(frameGroupId) || [];
+    current.push(message);
+    messagesByFrameGroupId.set(frameGroupId, current);
+  });
+
   collectFrameSelectionAnchors(root).forEach((node) => {
-    if (warningIdSet.has(getFrameGroupId(node))) {
+    const frameGroupId = getFrameGroupId(node);
+    const messages = messagesByFrameGroupId.get(frameGroupId) || [];
+    if (messages.length > 0) {
       node.setAttribute(TEMPLATE_FRAME_REVIEW_WARNING_ATTR, 'true');
+      appendFrameReviewWarningOverlay(node, messages);
     }
   });
 };
@@ -9978,10 +10306,39 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     () => Array.from(new Set(selectionValidationIssues.map((issue) => issue.frameGroupId).filter(Boolean))),
     [selectionValidationIssues]
   );
-  const selectionReviewWarningFrameIds = React.useMemo(
-    () => Array.from(new Set(selectionReviewIssues.map((issue) => issue.frameGroupId).filter(Boolean))),
-    [selectionReviewIssues]
-  );
+  const templateMetadataReviewIssues = React.useMemo(() => {
+    if (selectionPanelTab !== 'metadata') {
+      return [] as FrameMetadataReviewIssue[];
+    }
+
+    let root: ParentNode | null = previewRef.current;
+
+    if (!root && typeof document !== 'undefined' && renderedPreviewHtml) {
+      const container = document.createElement('div');
+      container.innerHTML = renderedPreviewHtml;
+      root = container;
+    }
+
+    return root ? collectFrameMetadataReviewIssues(root, virtualFrameDefinitions) : ([] as FrameMetadataReviewIssue[]);
+  }, [previewDomVersion, renderedPreviewHtml, selectionPanelTab, virtualFrameDefinitions]);
+  const visibleMetadataReviewIssues = React.useMemo(() => {
+    const issueByKey = new Map<string, FrameMetadataReviewIssue>();
+
+    [...templateMetadataReviewIssues, ...selectionReviewIssues].forEach((issue) => {
+      const frameGroupId = issue.frameGroupId.trim();
+      const message = issue.message.trim();
+      if (!frameGroupId || !message) {
+        return;
+      }
+
+      issueByKey.set(`${frameGroupId}:${message}`, {
+        frameGroupId,
+        message,
+      });
+    });
+
+    return Array.from(issueByKey.values());
+  }, [selectionReviewIssues, templateMetadataReviewIssues]);
   const selectionSaveProgressFailed = selectionSaveProgress.phase === 'failed';
   const selectionSaveProgressCompleted = selectionSaveProgress.phase === 'completed';
   const selectionSaveProgressActive = selectionSaveProgress.phase === 'running';
@@ -14650,6 +15007,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+      applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -14673,12 +15031,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolveEdgeRolePresentation,
     requestPreviewTextFit,
     resolvePositionGroupProxySelections,
-    selectionPanelTab,
-    positionRelationAnchorFrameGroupId,
-    highlightedDefinedPositionRelativeRelations,
-    positionSpacingGuideRelations,
-    syncPreviewSurfaceScale,
-  ]);
+      selectionPanelTab,
+      positionRelationAnchorFrameGroupId,
+      highlightedDefinedPositionRelativeRelations,
+      positionSpacingGuideRelations,
+      visibleMetadataReviewIssues,
+      syncPreviewSurfaceScale,
+    ]);
   const schedulePreviewEditorStateAfterSelectionPaint = React.useCallback(() => {
     if (typeof window === 'undefined') {
       schedulePreviewEditorState();
@@ -14779,6 +15138,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+      applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -14795,6 +15155,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionRelationAnchorFrameGroupId,
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
+      visibleMetadataReviewIssues,
     ]
   );
 
@@ -15692,6 +16053,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+      applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
       setEdgeRoleDiagnostics((previous) =>
         edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
           ? previous
@@ -15713,6 +16075,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionRelationAnchorFrameGroupId,
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
+      visibleMetadataReviewIssues,
       resolveEdgeRolePresentation,
       syncPreviewSurfaceScale,
       resolvePositionGroupProxySelections,
@@ -15762,6 +16125,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
     applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
     applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+    applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
     setEdgeRoleDiagnostics((previous) =>
       edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
         ? previous
@@ -15784,6 +16148,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvePositionGroupProxySelections,
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
+      visibleMetadataReviewIssues,
       showMetadataIcons,
   ]);
 
@@ -15805,8 +16170,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
-    applyFrameReviewWarningUi(root, selectionReviewWarningFrameIds);
-  }, [renderedPreviewHtml, selectionReviewWarningFrameIds, selectionValidationErrorFrameIds, selectedFrameGroupIds, selectionPanelTab]);
+    applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+  }, [renderedPreviewHtml, selectionValidationErrorFrameIds, selectedFrameGroupIds, selectionPanelTab, visibleMetadataReviewIssues]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -15817,8 +16182,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     applyRuntimeSelectionVisuals(selectedFrameGroupIdsRef.current, edgeSelectionStateRef.current);
     applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
-    applyFrameReviewWarningUi(root, selectionReviewWarningFrameIds);
-  }, [applyRuntimeSelectionVisuals, selectionReviewWarningFrameIds, selectionValidationErrorFrameIds, showMetadataIcons]);
+    applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+  }, [applyRuntimeSelectionVisuals, selectionValidationErrorFrameIds, showMetadataIcons, visibleMetadataReviewIssues]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -15831,6 +16196,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
     applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
     applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+    applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
   }, [
       frameRelationPreviewMode,
       renderedPreviewHtml,
@@ -15839,6 +16205,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionRelationAnchorFrameGroupId,
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
+      visibleMetadataReviewIssues,
   ]);
 
   React.useEffect(() => {
@@ -20023,6 +20390,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
+      const reviewWarningUi = deleteTarget.closest<HTMLElement>(
+        `.${FRAME_REVIEW_WARNING_BUTTON_CLASS}, .${FRAME_REVIEW_WARNING_POPOVER_CLASS}`
+      );
+
+      if (reviewWarningUi && root.contains(reviewWarningUi)) {
+        return;
+      }
+
       const deleteButton = deleteTarget.closest<HTMLElement>(`[${FRAME_DELETE_BUTTON_ATTR}="true"]`);
 
       if (deleteButton && root.contains(deleteButton)) {
@@ -21715,6 +22090,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const deleteTarget = event.target instanceof Element ? event.target : null;
+    const reviewWarningUi = deleteTarget?.closest<HTMLElement>(
+      `.${FRAME_REVIEW_WARNING_BUTTON_CLASS}, .${FRAME_REVIEW_WARNING_POPOVER_CLASS}`
+    ) || null;
+
+    if (reviewWarningUi && previewRef.current?.contains(reviewWarningUi)) {
+      return;
+    }
+
     const deleteButton = deleteTarget?.closest<HTMLElement>(`[${FRAME_DELETE_BUTTON_ATTR}="true"]`) || null;
 
     if (deleteButton && previewRef.current?.contains(deleteButton)) {
@@ -21931,22 +22314,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </ul>
             {selectionValidationIssues.length > 5 ? (
               <div className="mt-1 text-[11px] font-medium">외 {selectionValidationIssues.length - 5}개 오류</div>
-            ) : null}
-          </div>
-        ) : null}
-        {selectionReviewIssues.length > 0 ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
-            <div className="font-semibold">확인 필요</div>
-            <div className="mt-1 text-[11px] leading-5">
-              노란 느낌표가 표시된 상자는 저장을 막지는 않지만 메타데이터 관계 확인이 필요합니다.
-            </div>
-            <ul className="mt-2 space-y-1 text-[11px] leading-5">
-              {selectionReviewIssues.slice(0, 5).map((issue, index) => (
-                <li key={`metadata-canvas-review:${issue.frameGroupId}:${index}`}>{issue.message}</li>
-              ))}
-            </ul>
-            {selectionReviewIssues.length > 5 ? (
-              <div className="mt-1 text-[11px] font-medium">외 {selectionReviewIssues.length - 5}개 확인 필요</div>
             ) : null}
           </div>
         ) : null}
@@ -22241,27 +22608,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}="true"] {
           position: relative;
           overflow: visible !important;
-        }
-        .template-edit-preview [${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}="true"]::after {
-          content: "!";
-          position: absolute;
-          top: 4px;
-          right: 4px;
-          z-index: 35;
-          width: 18px;
-          height: 18px;
-          border-radius: 999px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          border: 1px solid rgba(217, 119, 6, .86);
-          background: rgba(254, 243, 199, .98);
-          color: rgba(146, 64, 14, .98);
-          font-size: 12px;
-          line-height: 1;
-          font-weight: 800;
-          pointer-events: none;
-          box-shadow: none !important;
         }
         .template-edit-preview [data-template-edge-host="true"] {
           position: relative;
