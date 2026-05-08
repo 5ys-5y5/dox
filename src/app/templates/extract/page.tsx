@@ -385,6 +385,7 @@ const FRAME_CREATE_GHOST_CLASS = 'v106-frame-create-ghost';
 const FRAME_VISIBLE_TEXT_CLASS = 'v106-frame-visible-text';
 const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-group',
+  'data-template-frame-label',
   'data-template-frame-color-group',
   'data-template-frame-outline-style',
   'data-template-frame-extracted-text',
@@ -1205,8 +1206,13 @@ const readFrameNodeDto = (node: HTMLElement): TemplateFrameNodeDto => ({
 
 const writeFrameNodeId = (node: HTMLElement, frameGroupId: string) => {
   node.setAttribute('data-template-frame-group', frameGroupId);
+  node.setAttribute('data-template-frame-label', frameGroupId);
   node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]')?.setAttribute(
     'data-template-frame-group',
+    frameGroupId
+  );
+  node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]')?.setAttribute(
+    'data-template-frame-label',
     frameGroupId
   );
 };
@@ -6195,6 +6201,7 @@ export default function TemplateExtractPage() {
     (frameGroupId: string) => {
       const attrs: Record<string, string> = {
         'data-template-frame-group': frameGroupId,
+        'data-template-frame-label': frameGroupId,
         'data-template-frame-role': frameEditorRole,
         'data-template-frame-outline-style': frameEditorOutlineStyle,
       };

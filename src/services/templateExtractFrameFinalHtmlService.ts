@@ -1263,6 +1263,7 @@ const applyFrameTextUpdatesToHtml = (html: string, updates: FrameTextUpdate[]) =
     }
 
     let nextAttrs = attrs;
+    nextAttrs = upsertHtmlAttr(nextAttrs, 'data-template-frame-label', update.frameGroup || null);
     nextAttrs = upsertHtmlAttr(nextAttrs, 'data-template-frame-page', String(update.pageNumber));
     nextAttrs = upsertHtmlAttr(nextAttrs, 'data-template-frame-extracted-text', update.text || null);
     nextAttrs = upsertHtmlAttr(nextAttrs, 'data-template-frame-write-policy', update.meta?.writePolicy || null);
@@ -1282,6 +1283,7 @@ const applyFrameTextUpdatesToHtml = (html: string, updates: FrameTextUpdate[]) =
 
     const nextInner = inner.replace(TEXTAREA_REGEX, (_textareaMatch, textareaAttrs: string) => {
       let nextTextareaAttrs = textareaAttrs;
+      nextTextareaAttrs = upsertHtmlAttr(nextTextareaAttrs, 'data-template-frame-label', update.frameGroup || null);
       nextTextareaAttrs = upsertHtmlAttr(nextTextareaAttrs, 'data-template-frame-page', String(update.pageNumber));
       nextTextareaAttrs = upsertHtmlAttr(nextTextareaAttrs, 'data-template-frame-extracted-text', update.text || null);
       nextTextareaAttrs = upsertHtmlAttr(

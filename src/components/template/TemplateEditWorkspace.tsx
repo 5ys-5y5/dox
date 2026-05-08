@@ -92,6 +92,7 @@ type SelectionStyleDraft = {
 };
 
 type FrameMetadataDraft = {
+  label: string;
   boxKind: TemplateFrameBoxKind | '';
   role: TemplateFrameRole | '';
   valueKey: string;
@@ -150,6 +151,7 @@ type FrameStylePatch = Omit<Partial<SelectionStyleDraft>, 'width' | 'height'> & 
 };
 
 type FrameMetadataPatch = {
+  label?: string;
   boxKind?: TemplateFrameBoxKind;
   role?: TemplateFrameRole;
   valueKey?: string;
@@ -158,6 +160,7 @@ type FrameMetadataPatch = {
 };
 
 type ResolvedFrameMetadata = {
+  label: string;
   boxKind: TemplateFrameBoxKind | '';
   role: TemplateFrameRole | 'group' | '';
   valueKey: string;
@@ -585,6 +588,7 @@ const TEMPLATE_FRAME_BASE_HEIGHT_ATTR = 'data-template-frame-base-height';
 const TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR = 'data-template-frame-base-font-size';
 const TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR = 'data-template-frame-base-line-height';
 const TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR = 'data-template-frame-richtext-active';
+const TEMPLATE_FRAME_LABEL_ATTR = 'data-template-frame-label';
 const TEMPLATE_FRAME_ROLE_ATTR = 'data-template-frame-role';
 const TEMPLATE_FRAME_VALUE_KEY_ATTR = 'data-template-frame-value-key';
 const TEMPLATE_FRAME_PARENT_GROUP_ATTR = 'data-template-frame-parent-group';
@@ -1280,6 +1284,7 @@ const normalizeFrameBorderWidthValue = (value: string | null | undefined) => {
 };
 
 const defaultFrameMetadataDraft: FrameMetadataDraft = {
+  label: '',
   boxKind: '',
   role: '',
   valueKey: '',
@@ -1312,6 +1317,11 @@ const normalizeFrameValueKey = (value: string) =>
     .map((segment) => segment.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .join(' > ');
+
+const normalizeFrameBoxLabel = (value: string | null | undefined) =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const normalizeVirtualDefinitionId = (value: string) => {
   const base = value.trim();
@@ -1510,6 +1520,16 @@ const readFrameValueKey = (node: HTMLElement) =>
 
 const readFrameParentGroupId = (node: HTMLElement) => readFrameMetadataAttr(node, TEMPLATE_FRAME_PARENT_GROUP_ATTR);
 
+const readFrameBoxLabel = (node: HTMLElement | null | undefined) => {
+  if (!node) {
+    return '';
+  }
+
+  const explicitLabel = normalizeFrameBoxLabel(readFrameMetadataAttr(node, TEMPLATE_FRAME_LABEL_ATTR));
+
+  return explicitLabel || getFrameGroupId(node);
+};
+
 const readFrameRuntimeMode = (node: HTMLElement) => {
   const boxKind = readFrameBoxKind(node);
   const explicitRuntimeMode = readFrameMetadataAttr(node, TEMPLATE_FRAME_RUNTIME_MODE_ATTR);
@@ -1530,12 +1550,15 @@ const readFrameRuntimeMode = (node: HTMLElement) => {
 };
 
 const buildFrameMetadataChangePatch = (nextDraft: FrameMetadataDraft, previousDraft: FrameMetadataDraft): FrameMetadataPatch => {
+  const normalizedNextLabel = normalizeFrameBoxLabel(nextDraft.label);
+  const normalizedPreviousLabel = normalizeFrameBoxLabel(previousDraft.label);
   const normalizedNextValueKey = normalizeFrameValueKey(nextDraft.valueKey);
   const normalizedPreviousValueKey = normalizeFrameValueKey(previousDraft.valueKey);
   const normalizedNextParentGroupId = nextDraft.parentGroupId.trim();
   const normalizedPreviousParentGroupId = previousDraft.parentGroupId.trim();
 
   return {
+    label: normalizedNextLabel !== normalizedPreviousLabel ? normalizedNextLabel : undefined,
     boxKind:
       nextDraft.boxKind !== previousDraft.boxKind && isTemplateFrameBoxKind(nextDraft.boxKind)
         ? nextDraft.boxKind
@@ -1555,6 +1578,7 @@ const buildFrameMetadataChangePatch = (nextDraft: FrameMetadataDraft, previousDr
 };
 
 const resolveNextFrameMetadata = (node: HTMLElement, patch: FrameMetadataPatch): ResolvedFrameMetadata => {
+  const label = patch.label !== undefined ? normalizeFrameBoxLabel(patch.label) || getFrameGroupId(node) : readFrameBoxLabel(node);
   const boxKind = patch.boxKind || readFrameBoxKind(node);
   const role = patch.role || readFrameRole(node);
   const valueKey = patch.valueKey !== undefined ? normalizeFrameValueKey(patch.valueKey) : readFrameValueKey(node);
@@ -1562,6 +1586,7 @@ const resolveNextFrameMetadata = (node: HTMLElement, patch: FrameMetadataPatch):
   const runtimeMode = patch.runtimeMode || readFrameRuntimeMode(node);
 
   return {
+    label,
     boxKind,
     role,
     valueKey,
@@ -1752,6 +1777,17 @@ const applyFrameMetadataPatch = (node: HTMLElement, patch: FrameMetadataPatch) =
   const targets = Array.from(new Set([node, persistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
 
   targets.forEach((target) => {
+    if (patch.label !== undefined) {
+      const frameGroupId = getFrameGroupId(target) || getFrameGroupId(node);
+      const nextLabel = normalizeFrameBoxLabel(patch.label);
+
+      if (nextLabel && nextLabel !== frameGroupId) {
+        target.setAttribute(TEMPLATE_FRAME_LABEL_ATTR, nextLabel);
+      } else {
+        target.removeAttribute(TEMPLATE_FRAME_LABEL_ATTR);
+      }
+    }
+
     if (patch.boxKind !== undefined) {
       target.setAttribute(TEMPLATE_FRAME_BOX_KIND_ATTR, patch.boxKind);
     }
@@ -9364,7 +9400,7 @@ const deriveFrameValueKey = (
   if (metadata.role === 'value' && metadata.parentGroupId) {
     const parentNode = frameNodeById.get(metadata.parentGroupId) || null;
     const parentLabel =
-      normalizeFrameValueKey(readFrameDisplayText(parentNode || null)) ||
+      normalizeFrameValueKey(readFrameBoxLabel(parentNode)) ||
       normalizeFrameValueKey(parentNode ? readFrameValueKey(parentNode) : '') ||
       normalizeFrameValueKey(virtualDefinitions.find((definition) => definition.id === metadata.parentGroupId)?.label || '') ||
       metadata.parentGroupId;
@@ -9372,7 +9408,7 @@ const deriveFrameValueKey = (
   }
 
   if (metadata.role === 'key_value') {
-    return normalizeFrameValueKey(readFrameDisplayText(node)) || frameGroupId;
+    return normalizeFrameValueKey(readFrameBoxLabel(node)) || frameGroupId;
   }
 
   return '';
@@ -11173,9 +11209,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const parentNode = resolveFrameSelectionAnchor(
       previewRef.current.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${parentGroupId}"]`)
     );
-    const parentText = readFrameDisplayText(parentNode);
-    if (parentText) {
-      return `${parentGroupId} | ${parentText}`;
+    const parentLabel = readFrameBoxLabel(parentNode);
+    if (parentLabel && parentLabel !== parentGroupId) {
+      return `${parentGroupId} | ${parentLabel}`;
     }
 
     const virtualDefinition = virtualFrameDefinitions.find((definition) => definition.id === parentGroupId);
@@ -12311,7 +12347,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`
       );
       const groupLabel = positionBoxGroupByFrameGroupId.get(frameGroupId)?.label || '';
-      const baseLabel = readFrameDisplayText(resolveFrameSelectionAnchor(node)) || frameGroupId;
+      const baseLabel = readFrameBoxLabel(resolveFrameSelectionAnchor(node)) || frameGroupId;
       const label = groupLabel ? `[${groupLabel}] ${baseLabel}` : baseLabel;
       return {
         id: frameGroupId,
@@ -12373,7 +12409,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const node = previewRef.current?.querySelector<HTMLElement>(
         `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`
       );
-      const label = readFrameDisplayText(resolveFrameSelectionAnchor(node)) || frameGroupId;
+      const label = readFrameBoxLabel(resolveFrameSelectionAnchor(node)) || frameGroupId;
       return {
         id: frameGroupId,
         label,
@@ -12410,7 +12446,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         return {
           id: frameGroupId,
-          label: readFrameDisplayText(node) || frameGroupId,
+          label: readFrameBoxLabel(node) || frameGroupId,
           meta: frameGroupId,
           source: 'frame',
           role: readFrameRole(node),
@@ -15228,7 +15264,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const node = resolveFrameSelectionAnchor(
           previewRef.current?.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
         );
-        const label = readFrameDisplayText(node) || frameGroupId;
+        const label = readFrameBoxLabel(node) || frameGroupId;
         return { id: frameGroupId, label, meta: frameGroupId };
       })
       .filter((option) => Boolean(option.id));
@@ -15254,8 +15290,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const node = resolveFrameSelectionAnchor(
           previewRef.current?.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
         );
-        const text = readFrameDisplayText(node);
-        return text ? `${frameGroupId} | ${text}` : frameGroupId;
+        const label = readFrameBoxLabel(node);
+        return label && label !== frameGroupId ? `${frameGroupId} | ${label}` : frameGroupId;
       })
       .join(', ');
   }, [renderedPreviewHtml, shownValueBoxFrameGroupIds]);
@@ -17507,6 +17543,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
+    const sharedLabel = getSharedValue(nodes.map((node) => readFrameBoxLabel(node)));
     const sharedBoxKind = getSharedValue(nodes.map((node) => readFrameBoxKind(node)));
     const sharedRole = getSharedValue(nodes.map((node) => readFrameRole(node)));
     const sharedValueKey = getSharedValue(nodes.map((node) => readFrameValueKey(node)));
@@ -17514,6 +17551,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const sharedRuntimeMode = getSharedValue(nodes.map((node) => readFrameRuntimeMode(node)));
 
     const nextDraft: FrameMetadataDraft = {
+      label: sharedLabel,
       boxKind: isTemplateFrameBoxKind(sharedBoxKind) ? sharedBoxKind : '',
       role:
         sharedRole === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(sharedRole as TemplateFrameRole)
@@ -17898,7 +17936,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const nextKeyBoxKind = keyMetadata.boxKind || 'text';
     const compatibleKeyRuntimeModes = getCompatibleRuntimeModes(nextKeyBoxKind);
     const keyLabel =
-      normalizeFrameValueKey(readFrameDisplayText(keyEntry.node)) ||
+      normalizeFrameValueKey(readFrameBoxLabel(keyEntry.node)) ||
       normalizeFrameValueKey(readFrameValueKey(keyEntry.node)) ||
       keyEntry.frameGroupId;
 
@@ -17997,7 +18035,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         ? virtualFrameDefinitions.find((definition) => definition.id === id) || null
         : null;
       const targetLabel = existingKeyNode
-        ? readFrameDisplayText(existingKeyNode) || id
+        ? readFrameBoxLabel(existingKeyNode) || id
         : rawLabel || existingVirtualDefinition?.label || '';
 
       if (!id || !targetLabel) {
@@ -18126,7 +18164,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
 
         const keyLabel =
-          normalizeFrameValueKey(readFrameDisplayText(keyEntry.node)) ||
+          normalizeFrameValueKey(readFrameBoxLabel(keyEntry.node)) ||
           normalizeFrameValueKey(readFrameValueKey(keyEntry.node)) ||
           keyEntry.frameGroupId;
         const existingTargetFrameGroupIds = Array.from(frameNodeById.entries())
@@ -18266,7 +18304,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return true;
         }
 
-        const targetLabel = readFrameDisplayText(targetNode) || frameGroupId;
+        const targetLabel = readFrameBoxLabel(targetNode) || frameGroupId;
         setMetadataVirtualConnectionDraft((previous) => ({
           ...previous,
           mode: 'key',
@@ -18313,7 +18351,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           nextTargetFrameGroupIds.length === 0
             ? ''
             : nextTargetFrameGroupIds.length === 1
-              ? readFrameDisplayText(targetNode) || frameGroupId
+              ? readFrameBoxLabel(targetNode) || frameGroupId
               : `${nextTargetFrameGroupIds.length}개 value 상자 선택됨`,
         id: nextTargetFrameGroupIds.length === 0
           ? ''
@@ -19891,6 +19929,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
 
     return {
+      label: readFieldValue('label'),
       boxKind: readFieldValue('boxKind') as FrameMetadataDraft['boxKind'],
       role: readFieldValue('role') as FrameMetadataDraft['role'],
       valueKey: readFieldValue('valueKey'),
@@ -19943,7 +19982,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .map(([frameGroupId]) => frameGroupId);
       const sourceNode = frameNodeById.get(sourceKeyFrameGroupId) || null;
       const derivedValueKey =
-        normalizeFrameValueKey(readFrameDisplayText(sourceNode)) ||
+        normalizeFrameValueKey(readFrameBoxLabel(sourceNode)) ||
         (sourceNode ? normalizeFrameValueKey(readFrameValueKey(sourceNode)) : '') ||
         sourceKeyFrameGroupId;
 
@@ -20162,6 +20201,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       applyFrameMetadataPatch(node, {
+        label: mergedPatch.label,
         boxKind: mergedPatch.boxKind,
         role: mergedPatch.role,
         valueKey: nextMetadata.valueKey,
@@ -24973,6 +25013,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </div>
         ) : null}
         <div className="space-y-2">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-800">상자명</label>
+            <Input
+              data-metadata-field="label"
+              value={hasSelectedMetadataTarget ? frameMetadataDraft.label : ''}
+              disabled={!hasSelectedMetadataTarget || selectedFrameGroupIds.length !== 1}
+              onChange={(event) =>
+                setFrameMetadataDraft((previous) => ({
+                  ...previous,
+                  label: event.target.value,
+                }))
+              }
+              placeholder={
+                hasSelectedMetadataTarget
+                  ? selectedFrameGroupIds.length === 1
+                    ? selectedFrameGroupIds[0] || '상자 ID'
+                    : '상자 1개만 선택하면 수정할 수 있습니다'
+                  : '상자를 선택하세요'
+              }
+              className="h-9 bg-white text-sm"
+            />
+            <div className="text-[11px] leading-4 text-slate-600">
+              비워두면 상자 ID를 이름으로 사용합니다. 상자 안의 예시 텍스트는 이름으로 사용하지 않습니다.
+            </div>
+          </div>
+
           <div className="grid grid-cols-3 gap-2">
             {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
               const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
