@@ -401,13 +401,35 @@ const FRAME_GROUP_ATTR_NAMES = [
   'data-template-frame-halign',
   'data-template-frame-valign',
   'data-v106-band-source',
-  'data-template-frame-position-group-id',
-  'data-template-frame-position-group-label',
-  'data-template-frame-position-group-managed',
 ] as const;
 const TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR = 'data-template-frame-position-group-id';
 const TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR = 'data-template-frame-position-group-label';
 const TEMPLATE_FRAME_POSITION_GROUP_MANAGED_ATTR = 'data-template-frame-position-group-managed';
+const TEMPLATE_FRAME_BORDER_ALIGN_ATTR = 'data-template-frame-border-align';
+const TEMPLATE_FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
+const TEMPLATE_FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
+const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
+const EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP = [
+  'data-template-frame-role',
+  'data-template-frame-role-visual',
+  'data-template-frame-value-key',
+  'data-template-frame-parent-group',
+  'data-template-frame-chain-key',
+  'data-template-frame-chain-depth',
+  'data-template-runtime-mode',
+  'data-template-box-kind',
+  'data-template-frame-box-kind',
+  'data-template-frame-box-kind-visual',
+  'data-template-frame-position-group-id',
+  'data-template-frame-position-group-label',
+  'data-template-frame-position-group-managed',
+  'data-template-frame-relative-anchor-kind',
+  'data-template-frame-relative-anchor-id',
+  'data-template-frame-relative-anchor-x',
+  'data-template-frame-relative-anchor-y',
+  'data-template-frame-relative-offset-x',
+  'data-template-frame-relative-offset-y',
+] as const;
 const FRAME_EDITOR_SUPPORTED_VERSIONS = ['fv1.06', 'fv1.07', 'fv1.08', 'fv1.09', 'fv1.10', 'fv1.11'] as const;
 const FRAME_PROFILE_STORAGE_KEY = 'template-extract-frame-profiles-v109';
 const NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
@@ -676,6 +698,29 @@ const stripDraftPreviewUiState = (html: string) => {
   return container.innerHTML;
 };
 
+const stripExtractOutputFrameAttrs = (html: string) => {
+  if (!html.trim()) {
+    return '';
+  }
+
+  if (typeof document === 'undefined') {
+    return EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP.reduce(
+      (nextHtml, attrName) => nextHtml.replace(new RegExp(`\\s${attrName}="[^"]*"`, 'gi'), ''),
+      html
+    );
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  container.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP.forEach((attrName) => {
+      element.removeAttribute(attrName);
+    });
+  });
+
+  return container.innerHTML;
+};
+
 const applyFramePositionGroupAttrs = (
   frameNode: HTMLElement,
   config:
@@ -710,49 +755,7 @@ const applyFramePositionGroupAttrs = (
   });
 };
 
-const embedExtractPositionGroupAttrs = (html: string) => {
-  if (!html.trim() || typeof document === 'undefined') {
-    return html;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = html;
-  const aliases = computePositionGroupAliases(container);
-  const aliasByFrameGroupId = new Map<string, { alias: string; index: number }>();
-
-  aliases.forEach((groupAlias, index) => {
-    groupAlias.frameGroupIds.forEach((frameGroupId) => {
-      const normalizedFrameGroupId = frameGroupId.trim();
-      if (normalizedFrameGroupId) {
-        aliasByFrameGroupId.set(normalizedFrameGroupId, { alias: groupAlias.alias.trim(), index });
-      }
-    });
-  });
-
-  container.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR).forEach((frameNode) => {
-    const frameGroupId = frameNode.getAttribute('data-template-frame-group')?.trim() || '';
-    const alias = frameGroupId ? aliasByFrameGroupId.get(frameGroupId) : null;
-
-    if (!alias?.alias) {
-      applyFramePositionGroupAttrs(frameNode, null);
-      return;
-    }
-
-    const normalizedAliasId = alias.alias
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    const stableGroupId = normalizedAliasId || `box-${alias.index + 1}`;
-    applyFramePositionGroupAttrs(frameNode, {
-      groupId: `extract:${stableGroupId}`,
-      label: alias.alias,
-      managed: true,
-    });
-  });
-
-  writePositionGroupAliases(container, aliases);
-  return container.innerHTML;
-};
+const embedExtractPositionGroupAttrs = (html: string) => html;
 
 const applyDraftPreviewEditPermissions = (root: HTMLElement, editRole: DraftPreviewEditRole) => {
   const isAdmin = editRole === 'admin';
@@ -905,10 +908,16 @@ const normalizeFrameOutlineStyle = (value: string | null | undefined): FrameOutl
   String(value || '').trim().toLowerCase() === 'dashed' ? 'dashed' : 'solid';
 
 const applyFrameNodeOutlineStyle = (node: HTMLElement, outlineStyle: FrameOutlineStyle) => {
-  node.style.border =
-    outlineStyle === 'dashed'
-      ? '1px dashed rgba(15, 23, 42, 0.34)'
-      : '1px solid rgba(15, 23, 42, 0.55)';
+  const nextBorderStyle = outlineStyle === 'dashed' ? 'dashed' : 'solid';
+  node.style.borderWidth = '1px';
+  node.style.borderStyle = nextBorderStyle;
+  node.style.borderColor = 'rgb(15, 23, 42)';
+  node.style.outline = 'none';
+  node.style.outlineOffset = '0px';
+  node.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
+  node.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, '1');
+  node.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, nextBorderStyle);
+  node.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, '#0f172a');
 };
 
 const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
@@ -916,6 +925,89 @@ const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
   node.style.top = `${Math.round(rect.top)}px`;
   node.style.width = `${Math.max(1, Math.round(rect.width))}px`;
   node.style.height = `${Math.max(1, Math.round(rect.height))}px`;
+};
+
+const FRAME_EDGE_SNAP_TOLERANCE_PX = 0.75;
+
+const buildSnappedAxisValueMap = (values: number[], tolerance = FRAME_EDGE_SNAP_TOLERANCE_PX) => {
+  const sortedValues = values
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const snappedValueMap = new Map<number, number>();
+  let cluster: number[] = [];
+
+  const flushCluster = () => {
+    if (!cluster.length) {
+      return;
+    }
+
+    const snappedValue = Math.round(cluster.reduce((sum, value) => sum + value, 0) / cluster.length);
+    cluster.forEach((value) => {
+      snappedValueMap.set(value, snappedValue);
+    });
+    cluster = [];
+  };
+
+  sortedValues.forEach((value) => {
+    if (!cluster.length) {
+      cluster = [value];
+      return;
+    }
+
+    const clusterAnchor = cluster[0] || value;
+    if (Math.abs(value - clusterAnchor) <= tolerance) {
+      cluster.push(value);
+      return;
+    }
+
+    flushCluster();
+    cluster = [value];
+  });
+  flushCluster();
+
+  return snappedValueMap;
+};
+
+const snapFrameNodeEdgesInPage = (pageInner: HTMLElement) => {
+  const entries = Array.from(pageInner.querySelectorAll<HTMLElement>('.v202-cell-box[data-v106-frame-node="true"]'))
+    .filter((node) => node.style.left.trim() && node.style.top.trim() && node.style.width.trim() && node.style.height.trim())
+    .map((node) => ({
+      node,
+      rect: readFrameNodeRect(node),
+    }));
+
+  if (entries.length < 2) {
+    return false;
+  }
+
+  const xSnapMap = buildSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.left, rect.left + rect.width]));
+  const ySnapMap = buildSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.top, rect.top + rect.height]));
+  let changed = false;
+
+  entries.forEach(({ node, rect }) => {
+    const nextLeft = xSnapMap.get(rect.left) ?? rect.left;
+    const nextRight = xSnapMap.get(rect.left + rect.width) ?? rect.left + rect.width;
+    const nextTop = ySnapMap.get(rect.top) ?? rect.top;
+    const nextBottom = ySnapMap.get(rect.top + rect.height) ?? rect.top + rect.height;
+    const nextRect = {
+      left: nextLeft,
+      top: nextTop,
+      width: Math.max(1, nextRight - nextLeft),
+      height: Math.max(1, nextBottom - nextTop),
+    };
+
+    if (
+      nextRect.left !== rect.left ||
+      nextRect.top !== rect.top ||
+      nextRect.width !== rect.width ||
+      nextRect.height !== rect.height
+    ) {
+      writeFrameNodeRect(node, nextRect);
+      changed = true;
+    }
+  });
+
+  return changed;
 };
 
 const clampFrameNodeRect = (
@@ -3846,6 +3938,9 @@ export default function TemplateExtractPage() {
   }, []);
 
   const getCurrentDraftPreviewHtml = React.useCallback(() => {
+    draftPreviewRef.current?.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+      snapFrameNodeEdgesInPage(pageInner);
+    });
     const liveHtml = draftPreviewRef.current?.innerHTML?.trim() || '';
     const normalizedLiveHtml = stripDraftPreviewUiState(liveHtml);
     const normalizedBaseLiveHtml = stripFrameExtractedTextStateFromHtml(normalizedLiveHtml);
@@ -3856,8 +3951,8 @@ export default function TemplateExtractPage() {
         frameExtractedTextState,
         frameExtractedTextMetaState
       );
-      return embedExtractPositionGroupAttrs(
-        replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel)
+      return stripExtractOutputFrameAttrs(
+        embedExtractPositionGroupAttrs(replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel))
       );
     }
 
@@ -3868,8 +3963,8 @@ export default function TemplateExtractPage() {
       frameExtractedTextState,
       frameExtractedTextMetaState
     );
-    return embedExtractPositionGroupAttrs(
-      replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel)
+    return stripExtractOutputFrameAttrs(
+      embedExtractPositionGroupAttrs(replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel))
     );
   }, [
     appliedImageFrameTextRenderModel,
@@ -3887,11 +3982,14 @@ export default function TemplateExtractPage() {
       return;
     }
 
+    root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+      snapFrameNodeEdgesInPage(pageInner);
+    });
     const normalizedHtml = stripFrameExtractedTextStateFromHtml(stripDraftPreviewUiState(root.innerHTML));
     const baseHtml = flattenedFramePreview
       ? `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedHtml}`
       : normalizedHtml;
-    draftPreviewHtmlRef.current = embedExtractPositionGroupAttrs(baseHtml);
+    draftPreviewHtmlRef.current = stripExtractOutputFrameAttrs(embedExtractPositionGroupAttrs(baseHtml));
     setFrameExtractedTextState((previous) => (Object.keys(previous).length > 0 ? {} : previous));
     setFrameExtractedTextMetaState((previous) => (Object.keys(previous).length > 0 ? {} : previous));
     setFrameTextExtractionCompleted(false);

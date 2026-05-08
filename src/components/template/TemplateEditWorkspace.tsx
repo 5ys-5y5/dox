@@ -59,6 +59,10 @@ type SelectionStyleDraft = {
   textAlign: 'left' | 'center' | 'right' | 'justify';
   color: string;
   backgroundColor: string;
+  borderColor: string;
+  borderWidth: string;
+  borderStyle: string;
+  borderAlign: string;
 };
 
 type FrameMetadataDraft = {
@@ -104,6 +108,14 @@ type VirtualFrameDefinition = {
   label: string;
 };
 
+type MetadataConnectionSuggestionOption = {
+  id: string;
+  label: string;
+  meta: string;
+  source: 'frame' | 'shared';
+  role: TemplateFrameRole | 'group' | '';
+};
+
 type FrameStylePatch = Omit<Partial<SelectionStyleDraft>, 'width' | 'height'> & {
   width?: number;
   height?: number;
@@ -145,8 +157,9 @@ type FrameRelationPreviewMode =
   | { kind: 'value-select'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] }
   | { kind: 'value-linked'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
 
-type SelectionPanelTab = 'metadata' | 'position' | 'text' | 'style';
+type SelectionPanelTab = 'metadata' | 'position' | 'text';
 type CanvasInteractionMode = 'select' | 'move';
+type PositionAppearanceTargetMode = 'group' | 'frame';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
 
@@ -579,6 +592,7 @@ const FRAME_RELATIVE_ANCHOR_GUIDE_CLASS = 'v106-frame-relative-anchor-guide';
 const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
 const CREATED_FRAME_GROUP_PREFIX = 'user-box';
 const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
+const SHARED_VIRTUAL_FRAME_DEFINITIONS_STORAGE_KEY = 'docs:template:shared-virtual-frame-definitions';
 const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
   selectedEdgeClickedIds: [],
   selectedEdgeAutoMultiIds: [],
@@ -1097,6 +1111,10 @@ const defaultSelectionStyleDraft: SelectionStyleDraft = {
   textAlign: 'left',
   color: '#0f172a',
   backgroundColor: 'transparent',
+  borderColor: '#0f172a',
+  borderWidth: '',
+  borderStyle: 'solid',
+  borderAlign: 'inside',
 };
 
 const defaultStyleFieldApplyStatus: Record<StyleFieldKey, StyleFieldApplyState> = {
@@ -1111,6 +1129,90 @@ const defaultStyleFieldApplyStatus: Record<StyleFieldKey, StyleFieldApplyState> 
   textAlign: 'idle',
   color: 'idle',
   backgroundColor: 'idle',
+  borderColor: 'idle',
+  borderWidth: 'idle',
+  borderStyle: 'idle',
+  borderAlign: 'idle',
+};
+const FRAME_BORDER_STYLE_OPTIONS = [
+  { value: 'none', label: '없음' },
+  { value: 'solid', label: '실선' },
+  { value: 'dashed', label: '점선' },
+  { value: 'dotted', label: '점묘선' },
+  { value: 'double', label: '이중선' },
+  { value: 'groove', label: 'groove' },
+  { value: 'ridge', label: 'ridge' },
+  { value: 'inset', label: 'inset' },
+  { value: 'outset', label: 'outset' },
+];
+const FRAME_BORDER_ALIGN_OPTIONS = [
+  { value: 'inside', label: '내부' },
+  { value: 'center', label: '중앙' },
+  { value: 'outside', label: '외곽' },
+];
+const FRAME_STYLE_COLOR_OPTIONS = [
+  { value: 'transparent', label: '투명' },
+  { value: '#ffffff', label: '흰색' },
+  { value: '#f8fafc', label: '슬레이트 50' },
+  { value: '#e2e8f0', label: '슬레이트 200' },
+  { value: '#0f172a', label: '슬레이트 900' },
+  { value: '#fef3c7', label: '노랑' },
+  { value: '#dbeafe', label: '파랑' },
+  { value: '#dcfce7', label: '초록' },
+  { value: '#fee2e2', label: '빨강' },
+];
+const FRAME_BORDER_STYLE_LABEL_BY_VALUE = new Map(
+  FRAME_BORDER_STYLE_OPTIONS.map((option) => [option.value, option.label] as const)
+);
+const FRAME_BORDER_ALIGN_LABEL_BY_VALUE = new Map(
+  FRAME_BORDER_ALIGN_OPTIONS.map((option) => [option.value, option.label] as const)
+);
+const TEMPLATE_FRAME_BORDER_ALIGN_ATTR = 'data-template-frame-border-align';
+const TEMPLATE_FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
+const TEMPLATE_FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
+const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
+const normalizeFrameBorderStyleValue = (value: string | null | undefined, borderWidth = 1) => {
+  const normalizedValue = String(value || '').trim().toLowerCase();
+
+  if (!normalizedValue || normalizedValue === '없음' || normalizedValue === 'none' || normalizedValue === 'hidden' || borderWidth <= 0) {
+    return 'none';
+  }
+
+  if (normalizedValue === '실선') {
+    return 'solid';
+  }
+
+  if (normalizedValue === '점선') {
+    return 'dashed';
+  }
+
+  if (normalizedValue === '점묘선') {
+    return 'dotted';
+  }
+
+  if (normalizedValue === '이중선') {
+    return 'double';
+  }
+
+  return FRAME_BORDER_STYLE_LABEL_BY_VALUE.has(normalizedValue) ? normalizedValue : 'solid';
+};
+const normalizeFrameBorderAlignValue = (value: string | null | undefined) => {
+  const normalizedValue = String(value || '').trim().toLowerCase();
+
+  if (normalizedValue === 'center' || normalizedValue === '중앙') {
+    return 'center';
+  }
+
+  if (normalizedValue === 'outside' || normalizedValue === 'outer' || normalizedValue === '외곽') {
+    return 'outside';
+  }
+
+  return 'inside';
+};
+const normalizeFrameBorderWidthValue = (value: string | null | undefined) => {
+  const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
+
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
 };
 
 const defaultFrameMetadataDraft: FrameMetadataDraft = {
@@ -1190,6 +1292,54 @@ const parseVirtualFrameDefinitions = (raw: string | null | undefined): VirtualFr
   } catch {
     return [];
   }
+};
+
+const mergeVirtualFrameDefinitions = (definitions: VirtualFrameDefinition[]) => {
+  const merged = new Map<string, VirtualFrameDefinition>();
+
+  definitions.forEach((definition) => {
+    const id = normalizeVirtualDefinitionId(definition.id);
+    const label = definition.label.trim();
+
+    if (!id || !label) {
+      return;
+    }
+
+    merged.set(id, { id, label });
+  });
+
+  return Array.from(merged.values()).sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+};
+
+const readSharedVirtualFrameDefinitions = () => {
+  if (typeof window === 'undefined') {
+    return [] as VirtualFrameDefinition[];
+  }
+
+  try {
+    return parseVirtualFrameDefinitions(window.localStorage.getItem(SHARED_VIRTUAL_FRAME_DEFINITIONS_STORAGE_KEY));
+  } catch {
+    return [] as VirtualFrameDefinition[];
+  }
+};
+
+const writeSharedVirtualFrameDefinitions = (definitions: VirtualFrameDefinition[]) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const normalizedDefinitions = mergeVirtualFrameDefinitions(definitions);
+
+  try {
+    if (normalizedDefinitions.length > 0) {
+      window.localStorage.setItem(
+        SHARED_VIRTUAL_FRAME_DEFINITIONS_STORAGE_KEY,
+        JSON.stringify(normalizedDefinitions)
+      );
+    } else {
+      window.localStorage.removeItem(SHARED_VIRTUAL_FRAME_DEFINITIONS_STORAGE_KEY);
+    }
+  } catch {}
 };
 
 const stringArraysEqual = (left: string[], right: string[]) =>
@@ -1598,53 +1748,6 @@ const edgeRoleDiagnosticsStatesEqual = (left: EdgeRoleDiagnosticsState, right: E
   frameSelectionIdsEqual(left.peerEdgeIds, right.peerEdgeIds) &&
   frameSelectionIdsEqual(left.mismatchEdgeIds, right.mismatchEdgeIds);
 
-const presetStylePatches: Record<string, FrameStylePatch> = {
-  label: {
-    fontSize: '12',
-    fontWeight: '600',
-    lineHeight: '1.35',
-    paddingX: '2',
-    paddingY: '2',
-    borderRadius: '4',
-    textAlign: 'left',
-    color: '#0f172a',
-    backgroundColor: 'transparent',
-  },
-  input: {
-    fontSize: '13',
-    fontWeight: '500',
-    lineHeight: '1.45',
-    paddingX: '6',
-    paddingY: '4',
-    borderRadius: '8',
-    textAlign: 'left',
-    color: '#0f172a',
-    backgroundColor: 'transparent',
-  },
-  body: {
-    fontSize: '14',
-    fontWeight: '400',
-    lineHeight: '1.55',
-    paddingX: '4',
-    paddingY: '3',
-    borderRadius: '4',
-    textAlign: 'left',
-    color: '#1e293b',
-    backgroundColor: 'transparent',
-  },
-  focus: {
-    fontSize: '14',
-    fontWeight: '700',
-    lineHeight: '1.45',
-    paddingX: '6',
-    paddingY: '4',
-    borderRadius: '10',
-    textAlign: 'center',
-    color: '#0f172a',
-    backgroundColor: 'transparent',
-  },
-};
-
 const FRAME_RESIZE_TOLERANCE_PX = 2;
 const MIN_FRAME_SIZE_PX = 12;
 const MIN_TABLE_COLUMN_WIDTH_PX = MIN_FRAME_SIZE_PX;
@@ -1815,6 +1918,114 @@ const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | nu
 };
 
 const readFrameMoveRect = (node: HTMLElement): FrameNodeRect => readFrameElementRect(resolveFrameLayoutShell(node));
+
+const FRAME_EDGE_SNAP_TOLERANCE_PX = 0.75;
+
+const buildSnappedAxisValueMap = (values: number[], tolerance = FRAME_EDGE_SNAP_TOLERANCE_PX) => {
+  const sortedValues = values
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const snappedValueMap = new Map<number, number>();
+  let cluster: number[] = [];
+
+  const flushCluster = () => {
+    if (!cluster.length) {
+      return;
+    }
+
+    const snappedValue = Number((cluster.reduce((sum, value) => sum + value, 0) / cluster.length).toFixed(3));
+    cluster.forEach((value) => {
+      snappedValueMap.set(value, snappedValue);
+    });
+    cluster = [];
+  };
+
+  sortedValues.forEach((value) => {
+    if (!cluster.length) {
+      cluster = [value];
+      return;
+    }
+
+    const clusterAnchor = cluster[0] || value;
+    if (Math.abs(value - clusterAnchor) <= tolerance) {
+      cluster.push(value);
+      return;
+    }
+
+    flushCluster();
+    cluster = [value];
+  });
+  flushCluster();
+
+  return snappedValueMap;
+};
+
+const snapFrameRectsToNearbyEdges = (
+  entries: Array<{ element: HTMLElement; rect: FrameNodeRect }>,
+  writeRect: (element: HTMLElement, rect: FrameNodeRect) => void
+) => {
+  if (entries.length < 2) {
+    return false;
+  }
+
+  const xSnapMap = buildSnappedAxisValueMap(
+    entries.flatMap(({ rect }) => [rect.left, rect.left + rect.width])
+  );
+  const ySnapMap = buildSnappedAxisValueMap(
+    entries.flatMap(({ rect }) => [rect.top, rect.top + rect.height])
+  );
+  let changed = false;
+
+  entries.forEach(({ element, rect }) => {
+    const nextLeft = xSnapMap.get(rect.left) ?? rect.left;
+    const nextRight = xSnapMap.get(rect.left + rect.width) ?? rect.left + rect.width;
+    const nextTop = ySnapMap.get(rect.top) ?? rect.top;
+    const nextBottom = ySnapMap.get(rect.top + rect.height) ?? rect.top + rect.height;
+    const nextRect = {
+      left: nextLeft,
+      top: nextTop,
+      width: Math.max(MIN_FRAME_SIZE_PX, nextRight - nextLeft),
+      height: Math.max(MIN_FRAME_SIZE_PX, nextBottom - nextTop),
+    };
+
+    if (
+      Math.abs(nextRect.left - rect.left) > 0.001 ||
+      Math.abs(nextRect.top - rect.top) > 0.001 ||
+      Math.abs(nextRect.width - rect.width) > 0.001 ||
+      Math.abs(nextRect.height - rect.height) > 0.001
+    ) {
+      writeRect(element, nextRect);
+      changed = true;
+    }
+  });
+
+  return changed;
+};
+
+const syncFrameBandShellTableSize = (shell: HTMLElement) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+
+  if (!table) {
+    return;
+  }
+
+  table.style.width = shell.style.width;
+  table.style.height = shell.style.height;
+};
+
+const snapFrameBandShellEdgesInPage = (pageInner: HTMLElement) => {
+  const entries = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
+    .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
+    .map((shell) => ({
+      element: shell,
+      rect: readFrameElementRect(shell, pageInner),
+    }));
+
+  return snapFrameRectsToNearbyEdges(entries, (shell, rect) => {
+    writePositionedElementPageRect(shell, rect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
+    syncFrameBandShellTableSize(shell);
+  });
+};
 
 const writePositionedElementPageRect = (
   element: HTMLElement,
@@ -3887,7 +4098,9 @@ const materializePositionGroupWrappersInPage = (pageInner: HTMLElement): boolean
       writePositionedElementPageRect(wrapper, groupRect, pageInner, { minSize: 1 });
       wrapper.style.position = 'absolute';
       wrapper.style.boxSizing = 'border-box';
-      wrapper.style.background = 'transparent';
+      if (!wrapper.style.background && !wrapper.style.backgroundColor) {
+        wrapper.style.background = 'transparent';
+      }
       wrapper.style.pointerEvents = 'auto';
 
       if (
@@ -5368,6 +5581,9 @@ const ensurePreviewFrameBandNormalization = (root: ParentNode) => {
       pageNormalized = shellNormalized || pageNormalized;
       normalized = shellNormalized || normalized;
     });
+    pageNormalized = snapFrameBandShellEdgesInPage(pageInner) || pageNormalized;
+    pageNormalized = normalizeFrameBorderAppearanceLayersInPage(pageInner) || pageNormalized;
+    normalized = pageNormalized || normalized;
 
     if (pageNormalized) {
       updatePageInnerMinHeight(pageInner);
@@ -7895,6 +8111,10 @@ const applyFrameReviewWarningUi = (root: HTMLElement, issues: FrameMetadataRevie
 const extractEditorHtml = (root: HTMLElement) => {
   const container = document.createElement('div');
   container.innerHTML = root.innerHTML;
+  container.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+    snapFrameBandShellEdgesInPage(pageInner);
+    normalizeFrameBorderAppearanceLayersInPage(pageInner);
+  });
   syncFormControlMarkup(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
@@ -7908,6 +8128,10 @@ const extractEditorHtml = (root: HTMLElement) => {
 const extractPreviewRenderHtml = (root: HTMLElement) => {
   const container = document.createElement('div');
   container.innerHTML = root.innerHTML;
+  container.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+    snapFrameBandShellEdgesInPage(pageInner);
+    normalizeFrameBorderAppearanceLayersInPage(pageInner);
+  });
   syncFormControlMarkup(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
@@ -8652,6 +8876,209 @@ const colorToHex = (value: string) => {
 const normalizeNumericStyleValue = (value: string) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
   return Number.isFinite(parsed) ? String(Number(parsed.toFixed(2))) : '';
+};
+
+const formatFrameBorderWidthValue = (value: number) => {
+  if (!Number.isFinite(value)) {
+    return '';
+  }
+
+  return String(Number(Math.max(0, value).toFixed(2)));
+};
+
+const readElementBorderAppearance = (element: HTMLElement) => {
+  const computedStyle = getComputedStyle(element);
+  const hasStoredBorderAppearance =
+    element.hasAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) ||
+    element.hasAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR) ||
+    element.hasAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
+    element.hasAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
+  const align = normalizeFrameBorderAlignValue(element.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR));
+  const storedWidth = normalizeFrameBorderWidthValue(element.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR));
+  const borderWidth = parseFramePx(computedStyle.borderTopWidth);
+  const outlineWidth = parseFramePx(computedStyle.outlineWidth);
+  const inferredWidth =
+    align === 'center'
+      ? borderWidth + outlineWidth
+      : align === 'outside'
+        ? outlineWidth || borderWidth
+        : borderWidth || outlineWidth;
+  const width = storedWidth ?? inferredWidth;
+  const storedStyle =
+    element.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR)?.trim() ||
+    element.getAttribute('data-template-frame-outline-style')?.trim() ||
+    '';
+  const inferredStyle =
+    align === 'outside'
+      ? computedStyle.outlineStyle || computedStyle.borderTopStyle
+      : computedStyle.borderTopStyle || computedStyle.outlineStyle;
+  const style = normalizeFrameBorderStyleValue(storedStyle || inferredStyle, width);
+  const storedColor = colorToHex(element.getAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) || '');
+  const inferredColor = colorToHex(
+    align === 'outside'
+      ? computedStyle.outlineColor || computedStyle.borderTopColor
+      : computedStyle.borderTopColor || computedStyle.outlineColor
+  );
+
+  if (!hasStoredBorderAppearance && width <= 0 && element.classList.contains('v102-frame-band')) {
+    const nestedAppearance = Array.from(
+      element.querySelectorAll<HTMLElement>('table.v102-frame-band-table, .v202-frame-group[data-template-frame-group]')
+    )
+      .map((candidate) => {
+        const candidateStyle = getComputedStyle(candidate);
+        const sides = [
+          {
+            width: parseFramePx(candidateStyle.borderTopWidth),
+            style: candidateStyle.borderTopStyle,
+            color: candidateStyle.borderTopColor,
+          },
+          {
+            width: parseFramePx(candidateStyle.borderRightWidth),
+            style: candidateStyle.borderRightStyle,
+            color: candidateStyle.borderRightColor,
+          },
+          {
+            width: parseFramePx(candidateStyle.borderBottomWidth),
+            style: candidateStyle.borderBottomStyle,
+            color: candidateStyle.borderBottomColor,
+          },
+          {
+            width: parseFramePx(candidateStyle.borderLeftWidth),
+            style: candidateStyle.borderLeftStyle,
+            color: candidateStyle.borderLeftColor,
+          },
+        ].sort((left, right) => right.width - left.width);
+        const visibleSide = sides.find((side) => side.width > 0 && normalizeFrameBorderStyleValue(side.style, side.width) !== 'none');
+        const candidateWidth = visibleSide?.width || 0;
+
+        if (candidateWidth <= 0) {
+          return null;
+        }
+
+        return {
+          align: 'inside',
+          color: colorToHex(visibleSide?.color || '') || '#0f172a',
+          style: normalizeFrameBorderStyleValue(visibleSide?.style || 'solid', candidateWidth),
+          width: candidateWidth,
+        };
+      })
+      .find((appearance): appearance is { align: string; color: string; style: string; width: number } => Boolean(appearance));
+
+    if (nestedAppearance) {
+      return nestedAppearance;
+    }
+  }
+
+  return {
+    align,
+    color: storedColor || inferredColor || '#0f172a',
+    style,
+    width,
+  };
+};
+
+const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: FrameStylePatch) => {
+  const current = readElementBorderAppearance(element);
+  let nextWidth = current.width;
+  let nextStyle = current.style;
+  const nextAlign = patch.borderAlign !== undefined ? normalizeFrameBorderAlignValue(patch.borderAlign) : current.align;
+  const nextColor =
+    patch.borderColor !== undefined
+      ? colorToHex(patch.borderColor) || patch.borderColor || current.color || '#0f172a'
+      : current.color || '#0f172a';
+
+  if (patch.borderWidth !== undefined) {
+    nextWidth = normalizeFrameBorderWidthValue(patch.borderWidth) ?? 0;
+  }
+
+  if (patch.borderStyle !== undefined) {
+    nextStyle = normalizeFrameBorderStyleValue(patch.borderStyle, Math.max(nextWidth, 1));
+  }
+
+  if (patch.borderWidth !== undefined && patch.borderStyle === undefined && nextWidth > 0 && nextStyle === 'none') {
+    nextStyle = 'solid';
+  }
+
+  if (patch.borderStyle !== undefined && nextStyle !== 'none' && nextWidth <= 0) {
+    nextWidth = 1;
+  }
+
+  const hasVisibleBorder = nextWidth > 0 && nextStyle !== 'none';
+  const insideWidth = hasVisibleBorder
+    ? nextAlign === 'outside'
+      ? 0
+      : nextAlign === 'center'
+        ? nextWidth / 2
+        : nextWidth
+    : 0;
+  const outsideWidth = hasVisibleBorder
+    ? nextAlign === 'outside'
+      ? nextWidth
+      : nextAlign === 'center'
+        ? nextWidth - insideWidth
+        : 0
+    : 0;
+
+  element.style.borderWidth = `${insideWidth}px`;
+  element.style.borderStyle = hasVisibleBorder && insideWidth > 0 ? nextStyle : 'none';
+  element.style.borderColor = nextColor || '';
+  element.style.outlineWidth = `${outsideWidth}px`;
+  element.style.outlineStyle = hasVisibleBorder && outsideWidth > 0 ? nextStyle : 'none';
+  element.style.outlineColor = nextColor || '';
+  element.style.outlineOffset = '0px';
+  element.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, nextAlign);
+  element.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, formatFrameBorderWidthValue(hasVisibleBorder ? nextWidth : 0));
+  element.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, hasVisibleBorder ? nextStyle : 'none');
+
+  if (nextColor) {
+    element.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, nextColor);
+  } else {
+    element.removeAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
+  }
+
+  if (hasVisibleBorder) {
+    element.setAttribute('data-template-frame-outline-style', nextStyle);
+  } else {
+    element.removeAttribute('data-template-frame-outline-style');
+  }
+};
+
+const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
+  shell
+    .querySelectorAll<HTMLElement>('table.v102-frame-band-table, .v202-frame-group[data-template-frame-group]')
+    .forEach((element) => {
+      element.style.borderWidth = '0px';
+      element.style.borderStyle = 'none';
+      element.style.borderColor = 'transparent';
+      element.style.outline = 'none';
+      element.style.outlineOffset = '0px';
+      element.removeAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
+      element.removeAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR);
+      element.removeAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR);
+      element.removeAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
+      element.removeAttribute('data-template-frame-outline-style');
+    });
+};
+
+const normalizeFrameBorderAppearanceLayersInPage = (pageInner: HTMLElement) => {
+  let changed = false;
+
+  Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
+    const hasShellBorderAppearance =
+      shell.hasAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR) ||
+      shell.hasAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
+      shell.hasAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) ||
+      shell.hasAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
+
+    if (!hasShellBorderAppearance) {
+      return;
+    }
+
+    clearNestedFrameBorderAppearanceStyles(shell);
+    changed = true;
+  });
+
+  return changed;
 };
 
 const getSharedValue = (values: string[]) => {
@@ -10201,9 +10628,16 @@ const applyFrameStylePatch = (
 
   if (patch.backgroundColor !== undefined) {
     node.style.backgroundColor = patch.backgroundColor || '';
-    if (persistedFrameNode && persistedFrameNode !== node) {
-      persistedFrameNode.style.backgroundColor = patch.backgroundColor || '';
-    }
+  }
+
+  if (
+    patch.borderColor !== undefined ||
+    patch.borderWidth !== undefined ||
+    patch.borderStyle !== undefined ||
+    patch.borderAlign !== undefined
+  ) {
+    applyElementBorderAppearanceStylePatch(node, patch);
+    clearNestedFrameBorderAppearanceStyles(resolveFrameLayoutShell(node));
   }
 
   if (patch.borderRadius !== undefined) {
@@ -10219,6 +10653,41 @@ const applyFrameStylePatch = (
     const safePaddingX = Number.isFinite(paddingX) ? paddingX : parseFramePx(contentTarget.style.paddingLeft || '0');
     const safePaddingY = Number.isFinite(paddingY) ? paddingY : parseFramePx(contentTarget.style.paddingTop || '0');
     contentTarget.style.padding = `${safePaddingY}px ${safePaddingX}px`;
+  }
+};
+
+const applyElementAppearanceStylePatch = (element: HTMLElement, patch: FrameStylePatch) => {
+  if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
+    element.style.width = `${Math.max(1, patch.width)}px`;
+  }
+
+  if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
+    element.style.height = `${Math.max(1, patch.height)}px`;
+  }
+
+  if (patch.backgroundColor !== undefined) {
+    element.style.backgroundColor = patch.backgroundColor || '';
+  }
+
+  if (patch.borderRadius !== undefined) {
+    element.style.borderRadius = patch.borderRadius ? `${Number.parseFloat(patch.borderRadius)}px` : '';
+  }
+
+  if (patch.paddingX !== undefined || patch.paddingY !== undefined) {
+    const paddingX = patch.paddingX !== undefined ? Number.parseFloat(patch.paddingX || '0') : NaN;
+    const paddingY = patch.paddingY !== undefined ? Number.parseFloat(patch.paddingY || '0') : NaN;
+    const safePaddingX = Number.isFinite(paddingX) ? paddingX : parseFramePx(element.style.paddingLeft || '0');
+    const safePaddingY = Number.isFinite(paddingY) ? paddingY : parseFramePx(element.style.paddingTop || '0');
+    element.style.padding = `${safePaddingY}px ${safePaddingX}px`;
+  }
+
+  if (
+    patch.borderColor !== undefined ||
+    patch.borderWidth !== undefined ||
+    patch.borderStyle !== undefined ||
+    patch.borderAlign !== undefined
+  ) {
+    applyElementBorderAppearanceStylePatch(element, patch);
   }
 };
 
@@ -10244,6 +10713,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [styleFieldApplyStatus, setStyleFieldApplyStatus] =
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
+  const [positionAppearanceTargetMode, setPositionAppearanceTargetMode] =
+    React.useState<PositionAppearanceTargetMode>('frame');
   const [selectionTextDraft, setSelectionTextDraft] = React.useState('');
   const [selectionTextMixed, setSelectionTextMixed] = React.useState(false);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
@@ -10290,6 +10761,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [metadataVirtualConnectionDraft, setMetadataVirtualConnectionDraft] = React.useState<MetadataVirtualConnectionDraft>(
     defaultMetadataVirtualConnectionDraft
   );
+  const [metadataConnectionPickerOpen, setMetadataConnectionPickerOpen] = React.useState(false);
+  const [styleColorPickerOpen, setStyleColorPickerOpen] = React.useState<null | 'backgroundColor' | 'borderColor'>(null);
+  const [borderStylePickerOpen, setBorderStylePickerOpen] = React.useState(false);
+  const [borderAlignPickerOpen, setBorderAlignPickerOpen] = React.useState(false);
   const [selectionSaveProgress, setSelectionSaveProgress] =
     React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
   const [hasSelectionProgressHistory, setHasSelectionProgressHistory] = React.useState(false);
@@ -10597,6 +11072,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   React.useEffect(() => {
     setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setMetadataConnectionPickerOpen(false);
+    setStyleColorPickerOpen(null);
+    setBorderStylePickerOpen(false);
+    setBorderAlignPickerOpen(false);
   }, [selectedFrameGroupIds, selectionPanelTab]);
 
   React.useEffect(() => {
@@ -10840,12 +11319,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const normalized = nextDefinitions
-        .map((definition) => ({
-          id: normalizeVirtualDefinitionId(definition.id),
-          label: definition.label.trim(),
-        }))
-        .filter((definition) => definition.id && definition.label);
+      const normalized = mergeVirtualFrameDefinitions(nextDefinitions);
 
       if (normalized.length > 0) {
         host.setAttribute(TEMPLATE_VIRTUAL_FRAME_DEFINITIONS_ATTR, JSON.stringify(normalized));
@@ -10853,6 +11327,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         host.removeAttribute(TEMPLATE_VIRTUAL_FRAME_DEFINITIONS_ATTR);
       }
 
+      writeSharedVirtualFrameDefinitions(normalized);
       syncDraftPreviewHtmlRef();
     },
     [syncDraftPreviewHtmlRef]
@@ -11671,6 +12146,249 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
     return Array.from(dedup.values());
   }, [availableFrameGroupIds, renderedPreviewHtml, virtualFrameDefinitions]);
+  const metadataConnectionSuggestionOptions = React.useMemo(() => {
+    const frameOptions = availableFrameGroupIds
+      .map((frameGroupId): MetadataConnectionSuggestionOption | null => {
+        const node = resolveFrameSelectionAnchor(
+          previewRef.current?.querySelector<HTMLElement>(
+            `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`
+          )
+        );
+
+        if (!node) {
+          return null;
+        }
+
+        return {
+          id: frameGroupId,
+          label: readFrameDisplayText(node) || frameGroupId,
+          meta: frameGroupId,
+          source: 'frame',
+          role: readFrameRole(node),
+        };
+      })
+      .filter((option): option is MetadataConnectionSuggestionOption => Boolean(option));
+    const sharedOptions = virtualFrameDefinitions.map((definition): MetadataConnectionSuggestionOption => ({
+      id: definition.id,
+      label: definition.label,
+      meta: definition.id,
+      source: 'shared',
+      role: '',
+    }));
+
+    return mergeVirtualFrameDefinitions(
+      [...frameOptions, ...sharedOptions].map((option) => ({
+        id: option.id,
+        label: option.label,
+      }))
+    )
+      .map((definition) => [...frameOptions, ...sharedOptions].find((option) => option.id === definition.id) || null)
+      .filter((option): option is MetadataConnectionSuggestionOption => Boolean(option));
+  }, [availableFrameGroupIds, renderedPreviewHtml, virtualFrameDefinitions]);
+  const metadataVirtualConnectionSuggestions = React.useMemo(() => {
+    const mode = metadataVirtualConnectionDraft.mode;
+
+    if (mode === 'idle') {
+      return [] as MetadataConnectionSuggestionOption[];
+    }
+
+    const query = `${metadataVirtualConnectionDraft.label} ${metadataVirtualConnectionDraft.id}`
+      .trim()
+      .toLowerCase();
+    const sourceIds = new Set(
+      mode === 'key'
+        ? metadataRelationSelectionMode.kind === 'parent'
+          ? metadataRelationSelectionMode.sourceFrameGroupIds
+          : selectedFrameGroupIds
+        : metadataRelationSelectionMode.kind === 'value'
+          ? [metadataRelationSelectionMode.sourceKeyFrameGroupId]
+          : selectedFrameGroupIds
+    );
+    const rolePriority = (option: MetadataConnectionSuggestionOption) => {
+      if (option.source === 'shared') {
+        return 1;
+      }
+      if (mode === 'key') {
+        return option.role === 'key' ? 0 : option.role === 'key_value' ? 2 : 3;
+      }
+      return option.role === 'value' ? 0 : option.role === 'key_value' ? 2 : 3;
+    };
+
+    return metadataConnectionSuggestionOptions
+      .filter((option) => !sourceIds.has(option.id))
+      .filter((option) => {
+        if (option.source === 'shared') {
+          return true;
+        }
+        return mode === 'key' ? option.role === 'key' : option.role === 'value';
+      })
+      .filter((option) => {
+        if (!query) {
+          return true;
+        }
+
+        const haystack = `${option.label} ${option.id} ${option.meta}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .sort((left, right) => rolePriority(left) - rolePriority(right) || left.label.localeCompare(right.label, 'ko'))
+      .slice(0, 6);
+  }, [
+    metadataConnectionSuggestionOptions,
+    metadataRelationSelectionMode,
+    metadataVirtualConnectionDraft.id,
+    metadataVirtualConnectionDraft.label,
+    metadataVirtualConnectionDraft.mode,
+    selectedFrameGroupIds,
+  ]);
+  const metadataConnectionPickerOptions = React.useMemo(() => {
+    const mode = metadataVirtualConnectionDraft.mode;
+
+    if (mode === 'idle') {
+      return [] as MetadataConnectionSuggestionOption[];
+    }
+
+    const query = `${metadataVirtualConnectionDraft.label} ${metadataVirtualConnectionDraft.id}`
+      .trim()
+      .toLowerCase();
+    const sourceIds = new Set(
+      mode === 'key'
+        ? metadataRelationSelectionMode.kind === 'parent'
+          ? metadataRelationSelectionMode.sourceFrameGroupIds
+          : selectedFrameGroupIds
+        : metadataRelationSelectionMode.kind === 'value'
+          ? [metadataRelationSelectionMode.sourceKeyFrameGroupId]
+          : selectedFrameGroupIds
+    );
+    const suggestionKeys = new Set(
+      metadataVirtualConnectionSuggestions.map((option) => `${option.source}:${option.id}`)
+    );
+    const eligibleOptions = metadataConnectionSuggestionOptions
+      .filter((option) => !sourceIds.has(option.id))
+      .filter((option) => {
+        if (option.source === 'shared') {
+          return true;
+        }
+        return mode === 'key' ? option.role === 'key' : option.role === 'value';
+      })
+      .filter((option) => {
+        if (!query) {
+          return true;
+        }
+
+        const haystack = `${option.label} ${option.id} ${option.meta}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+
+    return [
+      ...metadataVirtualConnectionSuggestions,
+      ...eligibleOptions.filter((option) => !suggestionKeys.has(`${option.source}:${option.id}`)),
+    ];
+  }, [
+    metadataConnectionSuggestionOptions,
+    metadataRelationSelectionMode,
+    metadataVirtualConnectionDraft.id,
+    metadataVirtualConnectionDraft.label,
+    metadataVirtualConnectionDraft.mode,
+    metadataVirtualConnectionSuggestions,
+    selectedFrameGroupIds,
+  ]);
+  const selectedMetadataValueConnectionOptions = React.useMemo(() => {
+    if (metadataRelationSelectionMode.kind !== 'value') {
+      return [] as MetadataConnectionSuggestionOption[];
+    }
+
+    return metadataRelationSelectionMode.targetFrameGroupIds.map((frameGroupId) => {
+      const existingOption = metadataConnectionSuggestionOptions.find((option) => option.id === frameGroupId);
+
+      if (existingOption) {
+        return existingOption;
+      }
+
+      return {
+        id: frameGroupId,
+        label: frameGroupId,
+        meta: frameGroupId,
+        source: 'shared' as const,
+        role: '',
+      };
+    });
+  }, [metadataConnectionSuggestionOptions, metadataRelationSelectionMode]);
+  const metadataConnectionPickerDisplayOptions = React.useMemo(() => {
+    const optionMap = new Map<string, MetadataConnectionSuggestionOption>();
+
+    if (metadataVirtualConnectionDraft.mode === 'value') {
+      selectedMetadataValueConnectionOptions.forEach((option) => {
+        optionMap.set(`${option.source}:${option.id}`, option);
+      });
+    }
+    metadataConnectionPickerOptions.forEach((option) => {
+      const optionKey = `${option.source}:${option.id}`;
+      if (!optionMap.has(optionKey)) {
+        optionMap.set(optionKey, option);
+      }
+    });
+
+    return Array.from(optionMap.values());
+  }, [
+    metadataConnectionPickerOptions,
+    metadataVirtualConnectionDraft.mode,
+    selectedMetadataValueConnectionOptions,
+  ]);
+  const resolveMetadataConnectionOption = React.useCallback(
+    (rawValue: string) => {
+      const trimmedValue = rawValue.trim();
+
+      if (!trimmedValue) {
+        return null;
+      }
+
+      const normalizedId = normalizeVirtualDefinitionId(trimmedValue);
+      return (
+        metadataConnectionSuggestionOptions.find(
+          (option) =>
+            option.id === trimmedValue ||
+            option.id === normalizedId ||
+            option.label.trim() === trimmedValue
+        ) || null
+      );
+    },
+    [metadataConnectionSuggestionOptions]
+  );
+  const removeMetadataValueConnectionTarget = React.useCallback(
+    (targetFrameGroupId: string) => {
+      if (metadataRelationSelectionMode.kind !== 'value') {
+        return;
+      }
+
+      const nextTargetFrameGroupIds = metadataRelationSelectionMode.targetFrameGroupIds.filter(
+        (currentTargetFrameGroupId) => currentTargetFrameGroupId !== targetFrameGroupId
+      );
+      const singleTargetOption =
+        nextTargetFrameGroupIds.length === 1
+          ? metadataConnectionSuggestionOptions.find((option) => option.id === nextTargetFrameGroupIds[0]) || null
+          : null;
+
+      setMetadataRelationSelectionMode({
+        kind: 'value',
+        sourceKeyFrameGroupId: metadataRelationSelectionMode.sourceKeyFrameGroupId,
+        targetFrameGroupIds: nextTargetFrameGroupIds,
+      });
+      setMetadataVirtualConnectionDraft((previous) => ({
+        ...previous,
+        label:
+          nextTargetFrameGroupIds.length === 1
+            ? singleTargetOption?.label || nextTargetFrameGroupIds[0]
+            : nextTargetFrameGroupIds.length > 1
+              ? `${nextTargetFrameGroupIds.length}개 value 상자 선택됨`
+              : '',
+        id: nextTargetFrameGroupIds.length === 1 ? nextTargetFrameGroupIds[0] : nextTargetFrameGroupIds.join(', '),
+        idTouched: nextTargetFrameGroupIds.length > 0,
+        error: '',
+      }));
+    },
+    [metadataConnectionSuggestionOptions, metadataRelationSelectionMode]
+  );
   const selectedPositionTargetFrameGroupId = React.useMemo(
     () => {
       const normalizedTargetFrameGroupId = positionRelationTargetFrameGroupId.trim();
@@ -13143,6 +13861,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return selectedPositionResolvedBoxGroup || null;
   }, [positionBoxGroupById, positionSelectionStateRevision, selectedPositionResolvedBoxGroup, selectedFrameGroupIds, selectionPanelTab]);
+  const canEditSelectedPositionGroupAppearance = Boolean(
+    selectionPanelTab === 'position' &&
+      selectedPositionResolvedBoxGroup &&
+      selectedPositionResolvedBoxGroup.frameGroupIds.length > 1
+  );
+  const hasSelectedPositionGroupAppearanceContext = Boolean(
+    canEditSelectedPositionGroupAppearance || selectedPositionCurrentBoxGroups.length > 0
+  );
+  const effectivePositionAppearanceTargetMode: PositionAppearanceTargetMode =
+    canEditSelectedPositionGroupAppearance && positionAppearanceTargetMode === 'group' ? 'group' : 'frame';
   const selectedPositionActiveGroupChildGroupIds = React.useMemo(
     () =>
       selectedPositionActiveGroup
@@ -14282,24 +15010,108 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       })
       .join(', ');
   }, [renderedPreviewHtml, shownValueBoxFrameGroupIds]);
+  const metadataConnectionCtaState = React.useMemo(() => {
+    const selectedIds = selectedFrameGroupIds
+      .map((frameGroupId) => frameGroupId.trim())
+      .filter((frameGroupId) => Boolean(frameGroupId));
+
+    if (selectedIds.length <= 0 || !previewRef.current) {
+      return {
+        label: '박스를 선택하세요',
+        disabled: true,
+      };
+    }
+
+    const frameNodes = getFrameNodes(previewRef.current);
+    const entries = selectedIds.map((frameGroupId) => {
+      const node = resolveFrameSelectionAnchor(
+        previewRef.current?.querySelector<HTMLElement>(
+          `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`
+        )
+      );
+      return {
+        frameGroupId,
+        role: node ? readFrameRole(node) : '',
+        parentGroupId: node ? readFrameParentGroupId(node) : '',
+      };
+    });
+    const keyEntries = entries.filter((entry) => entry.role === 'key');
+    const valueEntries = entries.filter((entry) => entry.role === 'value');
+
+    if (keyEntries.length > 1) {
+      return {
+        label: '키 박스는 1개만 선택하세요',
+        disabled: true,
+      };
+    }
+
+    if (entries.some((entry) => entry.role === 'key_value')) {
+      return {
+        label: '독립 박스는 연결할 수 없습니다',
+        disabled: true,
+      };
+    }
+
+    if (keyEntries.length + valueEntries.length !== entries.length) {
+      return {
+        label: '키 또는 밸류 상자를 선택하세요',
+        disabled: true,
+      };
+    }
+
+    if (keyEntries.length === 1 && valueEntries.length === 0) {
+      const hasExistingValueBoxes = frameNodes.some(
+        (node) => readFrameRole(node) === 'value' && readFrameParentGroupId(node) === keyEntries[0].frameGroupId
+      );
+
+      return {
+        label: hasExistingValueBoxes ? '입력값 박스 추가/제거하기' : '입력 박스 선택하기',
+        disabled: false,
+      };
+    }
+
+    if (keyEntries.length === 0 && valueEntries.length > 0) {
+      const hasExistingKeyBox = valueEntries.some((entry) => Boolean(entry.parentGroupId));
+
+      return {
+        label: hasExistingKeyBox ? '기존 연결 해제하고 키 박스 선택하기' : '키 박스 선택하기',
+        disabled: false,
+      };
+    }
+
+    if (keyEntries.length === 1 && valueEntries.length > 0) {
+      const hasExistingConnection = valueEntries.some((entry) => Boolean(entry.parentGroupId));
+      return {
+        label: hasExistingConnection ? '기존 연결 해제하고 박스 연결하기' : '박스 연결하기',
+        disabled: false,
+      };
+    }
+
+    return {
+      label: '박스 연결하기',
+      disabled: true,
+    };
+  }, [getFrameNodes, previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
   const frameRelationPreviewMode = React.useMemo<FrameRelationPreviewMode>(() => {
     if (selectionPanelTab !== 'metadata') {
       return { kind: 'idle' };
     }
 
-    if (metadataRelationSelectionMode.kind === 'parent') {
-      return {
-        kind: 'parent-select',
-        sourceFrameGroupIds: metadataRelationSelectionMode.sourceFrameGroupIds,
-      };
-    }
+    if (metadataVirtualConnectionDraft.mode === 'idle') {
+      if (metadataRelationSelectionMode.kind === 'parent') {
+        return {
+          kind: 'parent-select',
+          sourceFrameGroupIds: metadataRelationSelectionMode.sourceFrameGroupIds,
+        };
+      }
 
-    if (metadataRelationSelectionMode.kind === 'value') {
-      return {
-        kind: 'value-select',
-        sourceKeyFrameGroupId: metadataRelationSelectionMode.sourceKeyFrameGroupId,
-        targetFrameGroupIds: metadataRelationSelectionMode.targetFrameGroupIds,
-      };
+      if (metadataRelationSelectionMode.kind === 'value') {
+        return {
+          kind: 'value-select',
+          sourceKeyFrameGroupId: metadataRelationSelectionMode.sourceKeyFrameGroupId,
+          targetFrameGroupIds: metadataRelationSelectionMode.targetFrameGroupIds,
+        };
+      }
     }
 
     const linkedKeyFrameGroupId = frameMetadataDraft.parentGroupId.trim();
@@ -14324,6 +15136,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [
     frameMetadataDraft.parentGroupId,
     metadataRelationSelectionMode,
+    metadataVirtualConnectionDraft.mode,
     primarySelectedFrameGroupId,
     selectedFrameGroupIds,
     selectionPanelTab,
@@ -15383,6 +16196,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       positionGroupProxySelectionShowAllGroupsRef.current = Boolean(
         options?.showAllGroupProxySelections
       );
+      setPositionAppearanceTargetMode(
+        selectionPanelTab === 'position' && nextPositionGroupProxySelectionGroupId && !options?.disableAutoPositionGroupProxySelection
+          ? 'group'
+          : 'frame'
+      );
       selectedFrameGroupIdsRef.current = normalizedSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
       const commitSelectionReactState = () => {
@@ -16295,6 +17113,44 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectionPanelTab,
   ]);
 
+  const resolveSelectionAppearanceStyleTargets = React.useCallback(
+    (root: HTMLElement) => {
+      if (
+        selectionPanelTab === 'position' &&
+        effectivePositionAppearanceTargetMode === 'group' &&
+        selectedPositionResolvedBoxGroup
+      ) {
+        materializePositionGroupWrappers(root);
+        const wrapper =
+          collectPageInnerElements(root)
+            .map((pageInner) => resolvePositionGroupWrapperElement(pageInner, selectedPositionResolvedBoxGroup.id))
+            .find((element): element is HTMLElement => Boolean(element)) || null;
+
+        return {
+          kind: 'group' as const,
+          elements: wrapper ? [wrapper] : [],
+        };
+      }
+
+      const activeSelectionIds = selectedFrameGroupIdsRef.current.length > 0
+        ? selectedFrameGroupIdsRef.current
+        : selectedFrameGroupIds;
+      const selectedIdSet = new Set(activeSelectionIds);
+
+      return {
+        kind: 'frame' as const,
+        elements: getFrameNodes(root).filter((node) => selectedIdSet.has(getFrameGroupId(node))),
+      };
+    },
+    [
+      effectivePositionAppearanceTargetMode,
+      getFrameNodes,
+      selectedFrameGroupIds,
+      selectedPositionResolvedBoxGroup,
+      selectionPanelTab,
+    ]
+  );
+
   const syncSelectionStyleDraft = React.useCallback(() => {
     const root = previewRef.current;
 
@@ -16303,34 +17159,45 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    const nodes = getFrameNodes(root).filter((node) => selectedFrameGroupIds.includes(getFrameGroupId(node)));
+    const styleTargets = resolveSelectionAppearanceStyleTargets(root);
+    const nodes = styleTargets.elements;
 
     if (!nodes.length) {
       setSelectionStyleDraft(defaultSelectionStyleDraft);
       return;
     }
 
-    const widths = nodes.map((node) => String(Math.round(readFrameNodeRect(node).width)));
-    const heights = nodes.map((node) => String(Math.round(readFrameNodeRect(node).height)));
-    const fontSizes = nodes.map((node) => normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).fontSize));
+    const resolveStyleTargetContent = (node: HTMLElement) =>
+      styleTargets.kind === 'frame' ? resolveFrameContentTarget(node) : node;
+    const resolveStyleTargetShell = (node: HTMLElement) =>
+      styleTargets.kind === 'frame' ? resolveFrameLayoutShell(node) : node;
+
+    const widths = nodes.map((node) => String(Math.round(node.getBoundingClientRect().width)));
+    const heights = nodes.map((node) => String(Math.round(node.getBoundingClientRect().height)));
+    const fontSizes = nodes.map((node) => normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).fontSize));
     const lineHeights = nodes.map((node) =>
-      normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).lineHeight)
+      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).lineHeight)
     );
     const paddingXs = nodes.map((node) =>
-      normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).paddingLeft)
+      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingLeft)
     );
     const paddingYs = nodes.map((node) =>
-      normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).paddingTop)
+      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingTop)
     );
     const borderRadii = nodes.map((node) =>
-      normalizeNumericStyleValue(getComputedStyle(resolvePersistedFrameNode(node) || node).borderRadius)
+      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetShell(node)).borderRadius)
     );
-    const fontWeights = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).fontWeight || '');
-    const textAligns = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).textAlign || 'left');
-    const colors = nodes.map((node) => colorToHex(getComputedStyle(resolveFrameContentTarget(node)).color || ''));
+    const fontWeights = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).fontWeight || '');
+    const textAligns = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).textAlign || 'left');
+    const colors = nodes.map((node) => colorToHex(getComputedStyle(resolveStyleTargetContent(node)).color || ''));
     const backgroundColors = nodes.map((node) =>
-      colorToHex(getComputedStyle(resolvePersistedFrameNode(node) || node).backgroundColor || '')
+      colorToHex(getComputedStyle(resolveStyleTargetShell(node)).backgroundColor || '')
     );
+    const borderAppearances = nodes.map((node) => readElementBorderAppearance(resolveStyleTargetShell(node)));
+    const borderColors = borderAppearances.map((appearance) => appearance.color);
+    const borderWidths = borderAppearances.map((appearance) => formatFrameBorderWidthValue(appearance.width));
+    const borderStyles = borderAppearances.map((appearance) => appearance.style);
+    const borderAligns = borderAppearances.map((appearance) => appearance.align);
 
     const sharedTextAlign = getSharedValue(textAligns);
 
@@ -16349,12 +17216,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           : 'left',
       color: getSharedValue(colors) || '#0f172a',
       backgroundColor: getSharedValue(backgroundColors) || 'transparent',
+      borderColor: getSharedValue(borderColors),
+      borderWidth: getSharedValue(borderWidths),
+      borderStyle: getSharedValue(borderStyles),
+      borderAlign: getSharedValue(borderAligns) || 'inside',
     });
-  }, [getFrameNodes, selectedFrameGroupIds]);
+  }, [resolveSelectionAppearanceStyleTargets, selectedFrameGroupIds]);
 
   React.useEffect(() => {
     syncSelectionStyleDraft();
-  }, [selectedFrameGroupIds, syncSelectionStyleDraft, templateDetail?.template.id]);
+  }, [
+    effectivePositionAppearanceTargetMode,
+    selectedFrameGroupIds,
+    selectedPositionResolvedBoxGroup?.id,
+    syncSelectionStyleDraft,
+    templateDetail?.template.id,
+  ]);
 
   const syncFrameMetadataDraft = React.useCallback(() => {
     const root = previewRef.current;
@@ -16456,7 +17333,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const parsed = parseVirtualFrameDefinitions(host.getAttribute(TEMPLATE_VIRTUAL_FRAME_DEFINITIONS_ATTR));
-    setVirtualFrameDefinitions(parsed);
+    const shared = readSharedVirtualFrameDefinitions();
+    const merged = mergeVirtualFrameDefinitions([...shared, ...parsed]);
+    setVirtualFrameDefinitions(merged);
+    if (merged.length > 0) {
+      writeSharedVirtualFrameDefinitions(merged);
+    }
   }, [renderedPreviewHtml]);
 
   const startParentKeySelectionMode = React.useCallback(() => {
@@ -16641,6 +17523,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setMetadataConnectionPickerOpen(false);
     setFrameMetadataDraft((previous) => {
       const compatibleRuntimeModes = getCompatibleRuntimeModes(boxKind);
       const nextRuntimeMode =
@@ -16663,6 +17546,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setMetadataConnectionPickerOpen(false);
     setFrameMetadataDraft((previous) => ({
       ...previous,
       role,
@@ -16676,6 +17560,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const resetMetadataVirtualConnectionDraft = React.useCallback(() => {
     setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setMetadataConnectionPickerOpen(false);
   }, []);
 
   const startMetadataVirtualConnectionDraft = React.useCallback((mode: 'key' | 'value') => {
@@ -16686,6 +17571,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       idTouched: false,
       error: '',
     });
+    setMetadataConnectionPickerOpen(false);
   }, []);
 
   const applySelectedMetadataBoxConnection = React.useCallback(() => {
@@ -16702,12 +17588,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .map((node) => [getFrameGroupId(node), node] as const)
         .filter(([frameGroupId]) => Boolean(frameGroupId))
     );
-    const selectedEntries = activeSelectionIds
-      .map((frameGroupId) => {
-        const node = frameNodeById.get(frameGroupId) || null;
-        const role = node ? readFrameRole(node) : '';
-        return node && (role === 'key' || role === 'value') ? { frameGroupId, node, role } : null;
-      })
+    const allSelectedEntries = activeSelectionIds.map((frameGroupId) => {
+      const node = frameNodeById.get(frameGroupId) || null;
+      const role = node ? readFrameRole(node) : '';
+      return { frameGroupId, node, role };
+    });
+
+    if (allSelectedEntries.some((entry) => entry.role === 'key_value')) {
+      setMessage('독립 박스는 연결할 수 없습니다.');
+      return;
+    }
+
+    const selectedEntries = allSelectedEntries
+      .map((entry) =>
+        entry.node && (entry.role === 'key' || entry.role === 'value')
+          ? {
+              frameGroupId: entry.frameGroupId,
+              node: entry.node,
+              role: entry.role,
+            }
+          : null
+      )
       .filter(
         (
           entry
@@ -16733,13 +17634,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     if (keyEntries.length === 0 && valueEntries.length > 0) {
       startMetadataVirtualConnectionDraft('key');
-      setMessage('선택한 value 상자를 연결할 새 key 정의를 입력하세요.');
+      startParentKeySelectionMode();
       return;
     }
 
     if (keyEntries.length === 1 && valueEntries.length === 0) {
       startMetadataVirtualConnectionDraft('value');
-      setMessage('선택한 key 상자에 연결할 새 입력값 정의를 입력하세요.');
+      startValueBoxSelectionMode();
       return;
     }
 
@@ -16796,6 +17697,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
 
     setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setMetadataConnectionPickerOpen(false);
     setMetadataRelationSelectionMode({ kind: 'idle' });
     syncFrameRelationshipValueKeys(root, undefined, virtualFrameDefinitions);
     syncDraftPreviewHtmlRef();
@@ -16807,7 +17709,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyRuntimeSelectionUi,
     getFrameNodes,
     requestPreviewTextFit,
+    startParentKeySelectionMode,
     startMetadataVirtualConnectionDraft,
+    startValueBoxSelectionMode,
     syncDraftPreviewHtmlRef,
     syncFrameMetadataDraft,
     virtualFrameDefinitions,
@@ -16816,28 +17720,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const saveMetadataVirtualConnectionDefinition = React.useCallback(() => {
     const root = previewRef.current;
     const activeSelectionIds = selectedFrameGroupIdsRef.current;
+    const relationMode = metadataRelationSelectionModeRef.current;
     const mode = metadataVirtualConnectionDraft.mode;
-    const label = metadataVirtualConnectionDraft.label.trim();
-    const id = normalizeVirtualDefinitionId(metadataVirtualConnectionDraft.id || label);
+    const rawLabel = metadataVirtualConnectionDraft.label.trim();
+    const id = normalizeVirtualDefinitionId(metadataVirtualConnectionDraft.id || rawLabel);
 
     if (!root || mode === 'idle') {
-      return;
-    }
-
-    if (!label || !id) {
-      setMetadataVirtualConnectionDraft((previous) => ({
-        ...previous,
-        error: '상자명과 아이디를 입력하세요.',
-      }));
-      return;
-    }
-
-    if (availableFrameGroupIds.includes(id) || virtualFrameDefinitions.some((definition) => definition.id === id)) {
-      setMetadataVirtualConnectionDraft((previous) => ({
-        ...previous,
-        id,
-        error: `이미 사용 중인 아이디입니다: ${id}`,
-      }));
       return;
     }
 
@@ -16881,14 +17769,64 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const nextDefinitions = [...virtualFrameDefinitions, { id, label }];
-      setVirtualFrameDefinitions(nextDefinitions);
-      persistVirtualFrameDefinitions(nextDefinitions);
+      const existingKeyNode = id ? frameNodeById.get(id) || null : null;
+      const existingVirtualDefinition = id
+        ? virtualFrameDefinitions.find((definition) => definition.id === id) || null
+        : null;
+      const targetLabel = existingKeyNode
+        ? readFrameDisplayText(existingKeyNode) || id
+        : rawLabel || existingVirtualDefinition?.label || '';
+
+      if (!id || !targetLabel) {
+        setMetadataVirtualConnectionDraft((previous) => ({
+          ...previous,
+          error: 'key 상자명과 아이디를 입력하거나 기존 key 상자를 선택하세요.',
+        }));
+        return;
+      }
+
+      if (existingKeyNode && readFrameRole(existingKeyNode) !== 'key') {
+        setMetadataVirtualConnectionDraft((previous) => ({
+          ...previous,
+          error: `${id} 는 key 역할 상자가 아닙니다. value 상자를 다른 value 상자 밑에 연결할 수 없습니다.`,
+        }));
+        return;
+      }
+
+      const conflictingValueIds = valueEntries
+        .filter((entry) => {
+          const parentGroupId = readFrameParentGroupId(entry.node);
+          return parentGroupId && parentGroupId !== id;
+        })
+        .map((entry) => entry.frameGroupId);
+
+      if (conflictingValueIds.length > 0) {
+        const approved =
+          typeof window !== 'undefined' &&
+          window.confirm(
+            `이미 다른 key의 입력값인 박스가 있습니다: ${formatIssueList(conflictingValueIds)}.\n` +
+              '해제하고 선택한 key 박스의 입력값으로 바꿀까요?'
+          );
+
+        if (!approved) {
+          setMessage('박스 연결을 취소했습니다.');
+          return;
+        }
+      }
+
+      const nextDefinitions =
+        existingKeyNode || existingVirtualDefinition
+          ? virtualFrameDefinitions
+          : [...virtualFrameDefinitions, { id, label: targetLabel }];
+      if (!existingKeyNode && !existingVirtualDefinition) {
+        setVirtualFrameDefinitions(nextDefinitions);
+        persistVirtualFrameDefinitions(nextDefinitions);
+      }
       valueEntries.forEach((entry) => {
         applyFrameMetadataPatch(entry.node, {
           role: 'value',
           parentGroupId: id,
-          valueKey: label,
+          valueKey: normalizeFrameValueKey(targetLabel) || id,
         });
       });
       syncFrameRelationshipValueKeys(root, undefined, nextDefinitions);
@@ -16896,7 +17834,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       syncFrameMetadataDraft();
       applyRuntimeSelectionUi(activeSelectionIds, edgeSelectionStateRef.current);
       requestPreviewTextFit();
-      setMessage(`가상 key 정의 ${id} 를 저장하고 ${valueEntries.length}개 value 상자에 연결했습니다.`);
+      setMetadataRelationSelectionMode({ kind: 'idle' });
+      setMessage(`${id} key에 ${valueEntries.length}개 value 상자를 연결했습니다.`);
     } else {
       const keyEntries = selectedEntries.filter((entry) => entry.role === 'key');
 
@@ -16908,13 +17847,132 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const nextDefinitions = [...virtualFrameDefinitions, { id, label }];
-      setVirtualFrameDefinitions(nextDefinitions);
-      persistVirtualFrameDefinitions(nextDefinitions);
       const keyEntry = keyEntries[0];
+      const relationSelectedValueTargetIds =
+        relationMode.kind === 'value' && relationMode.sourceKeyFrameGroupId === keyEntry.frameGroupId
+          ? Array.from(
+              new Set(
+                relationMode.targetFrameGroupIds
+                  .map((targetFrameGroupId) => targetFrameGroupId.trim())
+                  .filter((targetFrameGroupId) => Boolean(targetFrameGroupId) && frameNodeById.has(targetFrameGroupId))
+              )
+            )
+          : [];
+      const selectedValueTargetIds =
+        relationSelectedValueTargetIds.length > 0
+          ? relationSelectedValueTargetIds
+          : id && frameNodeById.has(id)
+            ? [id]
+            : [];
       const keyMetadata = resolveNextFrameMetadata(keyEntry.node, {});
       const nextKeyBoxKind = keyMetadata.boxKind || 'text';
       const compatibleKeyRuntimeModes = getCompatibleRuntimeModes(nextKeyBoxKind);
+
+      if (selectedValueTargetIds.length > 0) {
+        const invalidValueTargetIds = selectedValueTargetIds.filter((targetFrameGroupId) => {
+          const targetNode = frameNodeById.get(targetFrameGroupId) || null;
+          return !targetNode || readFrameRole(targetNode) !== 'value';
+        });
+
+        if (invalidValueTargetIds.length > 0) {
+          setMetadataVirtualConnectionDraft((previous) => ({
+            ...previous,
+            error: `value 대상은 Role이 value인 상자만 가능합니다: ${formatIssueList(invalidValueTargetIds)}`,
+          }));
+          return;
+        }
+
+        const conflictingValueIds = selectedValueTargetIds.filter((targetFrameGroupId) => {
+          const targetNode = frameNodeById.get(targetFrameGroupId) || null;
+          const parentGroupId = targetNode ? readFrameParentGroupId(targetNode) : '';
+          return parentGroupId && parentGroupId !== keyEntry.frameGroupId;
+        });
+
+        if (conflictingValueIds.length > 0) {
+          const approved =
+            typeof window !== 'undefined' &&
+            window.confirm(
+              `이미 다른 key의 입력값인 박스가 있습니다: ${formatIssueList(conflictingValueIds)}.\n` +
+                '해제하고 현재 key 박스의 입력값으로 바꿀까요?'
+            );
+
+          if (!approved) {
+            setMessage('박스 연결을 취소했습니다.');
+            return;
+          }
+        }
+
+        const keyLabel =
+          normalizeFrameValueKey(readFrameDisplayText(keyEntry.node)) ||
+          normalizeFrameValueKey(readFrameValueKey(keyEntry.node)) ||
+          keyEntry.frameGroupId;
+        const existingTargetFrameGroupIds = Array.from(frameNodeById.entries())
+          .filter(([, node]) => readFrameParentGroupId(node) === keyEntry.frameGroupId)
+          .map(([frameGroupId]) => frameGroupId);
+
+        applyFrameMetadataPatch(keyEntry.node, {
+          boxKind: nextKeyBoxKind,
+          role: 'key',
+          parentGroupId: '',
+          runtimeMode: keyMetadata.runtimeMode && compatibleKeyRuntimeModes.includes(keyMetadata.runtimeMode)
+            ? keyMetadata.runtimeMode
+            : getDefaultRuntimeMode(nextKeyBoxKind, 'key'),
+        });
+        selectedValueTargetIds.forEach((targetFrameGroupId) => {
+          const targetNode = frameNodeById.get(targetFrameGroupId);
+          if (!targetNode) {
+            return;
+          }
+          applyFrameMetadataPatch(targetNode, {
+            role: 'value',
+            parentGroupId: keyEntry.frameGroupId,
+            valueKey: keyLabel,
+          });
+        });
+        existingTargetFrameGroupIds
+          .filter((targetFrameGroupId) => !selectedValueTargetIds.includes(targetFrameGroupId))
+          .forEach((targetFrameGroupId) => {
+            const targetNode = frameNodeById.get(targetFrameGroupId);
+            if (!targetNode) {
+              return;
+            }
+            applyFrameMetadataPatch(targetNode, {
+              role: 'key_value',
+              parentGroupId: '',
+              valueKey: '',
+            });
+          });
+        syncFrameRelationshipValueKeys(root, undefined, virtualFrameDefinitions);
+        syncDraftPreviewHtmlRef();
+        syncFrameMetadataDraft();
+        applyRuntimeSelectionUi(
+          Array.from(new Set([...activeSelectionIds, ...selectedValueTargetIds])),
+          edgeSelectionStateRef.current
+        );
+        requestPreviewTextFit();
+        setMetadataRelationSelectionMode({ kind: 'idle' });
+        setMessage(`${keyEntry.frameGroupId} key에 ${selectedValueTargetIds.length}개 value 상자를 연결했습니다.`);
+        setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+        setMetadataConnectionPickerOpen(false);
+        return;
+      }
+
+      if (!rawLabel || !id) {
+        setMetadataVirtualConnectionDraft((previous) => ({
+          ...previous,
+          error: '입력값 상자명과 아이디를 입력하거나 기존 value 상자를 선택하세요.',
+        }));
+        return;
+      }
+
+      const existingVirtualDefinition = virtualFrameDefinitions.find((definition) => definition.id === id) || null;
+      const nextDefinitions = existingVirtualDefinition
+        ? virtualFrameDefinitions
+        : [...virtualFrameDefinitions, { id, label: rawLabel }];
+      if (!existingVirtualDefinition) {
+        setVirtualFrameDefinitions(nextDefinitions);
+        persistVirtualFrameDefinitions(nextDefinitions);
+      }
       applyFrameMetadataPatch(keyEntry.node, {
         boxKind: nextKeyBoxKind,
         role: 'key',
@@ -16936,9 +17994,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setMetadataConnectionPickerOpen(false);
   }, [
     applyRuntimeSelectionUi,
-    availableFrameGroupIds,
     getFrameNodes,
     metadataVirtualConnectionDraft,
     persistVirtualFrameDefinitions,
@@ -16949,7 +18007,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   ]);
 
   const handleMetadataRelationFramePick = React.useCallback(
-    (frameGroupId: string) => {
+    (
+      frameGroupId: string,
+      options: {
+        append?: boolean;
+      } = {}
+    ) => {
       const root = previewRef.current;
       const relationMode = metadataRelationSelectionModeRef.current;
 
@@ -16971,16 +18034,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return true;
         }
 
-        const nextValueKey = normalizeFrameValueKey(readFrameDisplayText(targetNode)) || frameGroupId;
-        setFrameMetadataDraft((previous) => ({
+        if (readFrameRole(targetNode) !== 'key') {
+          setMetadataVirtualConnectionDraft((previous) => ({
+            ...previous,
+            error: `${frameGroupId} 는 key 역할 상자가 아닙니다. value 상자를 다른 value 상자 밑에 연결할 수 없습니다.`,
+          }));
+          setMessage('key 대상은 Role이 key인 상자만 선택할 수 있습니다.');
+          return true;
+        }
+
+        const targetLabel = readFrameDisplayText(targetNode) || frameGroupId;
+        setMetadataVirtualConnectionDraft((previous) => ({
           ...previous,
-          role: 'value',
-          parentGroupId: frameGroupId,
-          valueKey: nextValueKey,
+          mode: 'key',
+          label: targetLabel,
+          id: frameGroupId,
+          idTouched: true,
+          error: '',
         }));
-        setMetadataRelationSelectionMode({ kind: 'idle' });
         applyRuntimeSelectionVisuals(relationMode.sourceFrameGroupIds, edgeSelectionStateRef.current);
-        setMessage(`key 상자를 ${frameGroupId} 로 지정했습니다. 저장하면 선택된 상자들에 반영됩니다.`);
+        setMessage(`key 대상 ${frameGroupId} 를 입력했습니다. 저장 버튼을 눌러 연결을 적용하세요.`);
         return true;
       }
 
@@ -16989,15 +18062,44 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return true;
       }
 
-      const nextTargetFrameGroupIds = relationMode.targetFrameGroupIds.includes(frameGroupId)
+      if (readFrameRole(targetNode) !== 'value') {
+        setMetadataVirtualConnectionDraft((previous) => ({
+          ...previous,
+          error: `${frameGroupId} 는 value 역할 상자가 아닙니다. key에 연결할 대상은 value 상자여야 합니다.`,
+        }));
+        setMessage('value 대상은 Role이 value인 상자만 선택할 수 있습니다.');
+        return true;
+      }
+
+      const isAlreadySelectedTarget = relationMode.targetFrameGroupIds.includes(frameGroupId);
+      const nextTargetFrameGroupIds = isAlreadySelectedTarget
         ? relationMode.targetFrameGroupIds.filter((targetId) => targetId !== frameGroupId)
-        : [...relationMode.targetFrameGroupIds, frameGroupId];
+        : options.append
+          ? [...relationMode.targetFrameGroupIds, frameGroupId]
+          : [frameGroupId];
 
       setMetadataRelationSelectionMode({
         kind: 'value',
         sourceKeyFrameGroupId: relationMode.sourceKeyFrameGroupId,
         targetFrameGroupIds: nextTargetFrameGroupIds,
       });
+      setMetadataVirtualConnectionDraft((previous) => ({
+        ...previous,
+        mode: 'value',
+        label:
+          nextTargetFrameGroupIds.length === 0
+            ? ''
+            : nextTargetFrameGroupIds.length === 1
+              ? readFrameDisplayText(targetNode) || frameGroupId
+              : `${nextTargetFrameGroupIds.length}개 value 상자 선택됨`,
+        id: nextTargetFrameGroupIds.length === 0
+          ? ''
+          : nextTargetFrameGroupIds.length === 1
+            ? frameGroupId
+            : nextTargetFrameGroupIds.join(', '),
+        idTouched: nextTargetFrameGroupIds.length > 0,
+        error: '',
+      }));
       setMessage(
         nextTargetFrameGroupIds.length > 0
           ? `현재 key 상자가 선택된 상태입니다. value 상자 ${nextTargetFrameGroupIds.length}개가 연결 예정입니다. 계속 선택하거나 저장하세요.`
@@ -17007,6 +18109,82 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [applyRuntimeSelectionVisuals, syncDraftPreviewHtmlRef]
   );
+
+  const applyMetadataConnectionSuggestion = React.useCallback(
+    (option: MetadataConnectionSuggestionOption) => {
+      if (metadataVirtualConnectionDraft.mode === 'idle') {
+        return;
+      }
+
+      if (option.source === 'shared') {
+        setMetadataVirtualConnectionDraft((previous) => ({
+          ...previous,
+          label: option.label,
+          id: option.id,
+          idTouched: true,
+          error: '',
+        }));
+        if (metadataVirtualConnectionDraft.mode === 'key') {
+          setMetadataConnectionPickerOpen(false);
+        }
+        return;
+      }
+
+      handleMetadataRelationFramePick(option.id, {
+        append: metadataVirtualConnectionDraft.mode === 'value',
+      });
+      if (metadataVirtualConnectionDraft.mode === 'key') {
+        setMetadataConnectionPickerOpen(false);
+      }
+    },
+    [handleMetadataRelationFramePick, metadataVirtualConnectionDraft.mode]
+  );
+
+  const syncMetadataConnectionDraftFromLabelInput = React.useCallback(() => {
+    setMetadataVirtualConnectionDraft((previous) => {
+      const existingOption = resolveMetadataConnectionOption(previous.label);
+
+      if (existingOption) {
+        return {
+          ...previous,
+          label: existingOption.label,
+          id: existingOption.id,
+          idTouched: true,
+          error: '',
+        };
+      }
+
+      if (previous.idTouched && previous.id.trim()) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        id: normalizeVirtualDefinitionId(previous.label),
+      };
+    });
+  }, [resolveMetadataConnectionOption]);
+
+  const syncMetadataConnectionDraftFromIdInput = React.useCallback(() => {
+    setMetadataVirtualConnectionDraft((previous) => {
+      const existingOption = resolveMetadataConnectionOption(previous.id);
+
+      if (existingOption) {
+        return {
+          ...previous,
+          label: existingOption.label,
+          id: existingOption.id,
+          idTouched: true,
+          error: '',
+        };
+      }
+
+      return {
+        ...previous,
+        id: normalizeVirtualDefinitionId(previous.id || previous.label),
+      };
+    });
+  }, [resolveMetadataConnectionOption]);
 
   const waitForNextPaint = React.useCallback(
     () =>
@@ -17031,19 +18209,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const nodes = getFrameNodes(root).filter((node) => activeSelectionIds.includes(getFrameGroupId(node)));
+      const styleTargets = resolveSelectionAppearanceStyleTargets(root);
+      const nodes = styleTargets.elements;
 
       if (!nodes.length) {
         return;
       }
 
-      nodes.forEach((node) => applyFrameStylePatch(node, patch));
+      nodes.forEach((node) => {
+        if (styleTargets.kind === 'group') {
+          applyElementAppearanceStylePatch(node, patch);
+        } else {
+          applyFrameStylePatch(node, patch);
+        }
+      });
       applyRelativeAnchoredFrameRectsInRoot(root);
       syncDraftPreviewHtmlRef();
       syncSelectionStyleDraft();
       requestPreviewTextFit();
     },
-    [getFrameNodes, requestPreviewTextFit, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
+    [requestPreviewTextFit, resolveSelectionAppearanceStyleTargets, syncDraftPreviewHtmlRef, syncSelectionStyleDraft]
   );
 
   const previewPositionOrderLockCandidateSelection = React.useCallback(
@@ -18319,6 +19504,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       textAlign: readFieldValue('textAlign') as SelectionStyleDraft['textAlign'],
       color: readFieldValue('color'),
       backgroundColor: readFieldValue('backgroundColor'),
+      borderColor: readFieldValue('borderColor'),
+      borderWidth: readFieldValue('borderWidth'),
+      borderStyle: readFieldValue('borderStyle'),
+      borderAlign: readFieldValue('borderAlign'),
     };
   }, [selectionStyleDraft]);
 
@@ -18337,15 +19526,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applySelectionStylePatch({
       width: Number.isFinite(width) ? width : undefined,
       height: Number.isFinite(height) ? height : undefined,
-      fontSize: nextDraft.fontSize,
-      lineHeight: nextDraft.lineHeight,
       paddingX: nextDraft.paddingX,
       paddingY: nextDraft.paddingY,
       borderRadius: nextDraft.borderRadius,
-      fontWeight: nextDraft.fontWeight,
-      textAlign: nextDraft.textAlign,
-      color: nextDraft.color,
       backgroundColor: nextDraft.backgroundColor,
+      borderColor: nextDraft.borderColor || undefined,
+      borderWidth: nextDraft.borderWidth || undefined,
+      borderStyle: nextDraft.borderStyle || undefined,
+      borderAlign: nextDraft.borderAlign || undefined,
     });
     return true;
   }, [applySelectionStylePatch, readSelectionStyleDraftFromControls]);
@@ -18380,6 +19568,42 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
     },
     [applySelectionStyleDraft]
+  );
+
+  const applyStyleFieldImmediateValue = React.useCallback(
+    (field: StyleFieldKey, value: string) => {
+      if (selectedFrameGroupIdsRef.current.length === 0) {
+        return;
+      }
+
+      setStyleFieldDraftValue(field, value);
+      setSelectionStyleDraft((previous) => ({ ...previous, [field]: value }));
+      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saving' }));
+
+      const patch: FrameStylePatch = {};
+
+      if (field === 'width' || field === 'height') {
+        const parsedValue = Number.parseFloat(value);
+
+        if (Number.isFinite(parsedValue)) {
+          patch[field] = parsedValue;
+        }
+      } else {
+        const stringField = field as Exclude<StyleFieldKey, 'width' | 'height'>;
+        (patch as Partial<Record<Exclude<StyleFieldKey, 'width' | 'height'>, string>>)[stringField] = value;
+      }
+
+      applySelectionStylePatch(patch);
+      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saved' }));
+      setSelectionSaveProgress({
+        phase: 'completed',
+        title: '선택 항목 저장',
+        percent: 100,
+        stage: '스타일 반영 완료',
+        detail: `${field} 스타일을 반영했습니다.`,
+      });
+    },
+    [applySelectionStylePatch, setStyleFieldDraftValue]
   );
 
   const applySelectionTextDraft = React.useCallback(() => {
@@ -18898,27 +20122,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   }, [applySelectionMetadataDraft, applySelectionStyleDraft, waitForNextPaint]);
 
-  const stageSelectionStylePreset = React.useCallback((preset: FrameStylePatch) => {
-    setSelectionStyleDraft((previous) => ({
-      ...previous,
-      fontSize: preset.fontSize ?? previous.fontSize,
-      lineHeight: preset.lineHeight ?? previous.lineHeight,
-      paddingX: preset.paddingX ?? previous.paddingX,
-      paddingY: preset.paddingY ?? previous.paddingY,
-      borderRadius: preset.borderRadius ?? previous.borderRadius,
-      fontWeight: preset.fontWeight ?? previous.fontWeight,
-      textAlign:
-        preset.textAlign === 'left' ||
-        preset.textAlign === 'center' ||
-        preset.textAlign === 'right' ||
-        preset.textAlign === 'justify'
-          ? preset.textAlign
-          : previous.textAlign,
-      color: preset.color ?? previous.color,
-      backgroundColor: preset.backgroundColor ?? previous.backgroundColor,
-    }));
-  }, []);
-
   const renderStyleApplyStatusIcon = React.useCallback(
     (field: StyleFieldKey) => {
       const status = styleFieldApplyStatus[field];
@@ -18935,6 +20138,108 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [styleFieldApplyStatus]
   );
+
+  const renderStyleColorPicker = (field: 'backgroundColor' | 'borderColor', label: string) => {
+    const currentValue = selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : '#0f172a');
+    const isOpen = styleColorPickerOpen === field;
+
+    return (
+      <div className="space-y-2">
+        <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+          {label}
+          {renderStyleApplyStatusIcon(field)}
+        </label>
+        <div
+          className="relative"
+          onBlur={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+              return;
+            }
+
+            setStyleColorPickerOpen(null);
+          }}
+        >
+          <input data-style-field={field} type="hidden" value={selectionStyleDraft[field]} readOnly />
+          <button
+            type="button"
+            className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-white px-3 py-1 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => setStyleColorPickerOpen((previous) => (previous === field ? null : field))}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span
+                className="h-4 w-4 shrink-0 rounded border border-slate-200"
+                style={{
+                  backgroundColor: currentValue === 'transparent' ? '#ffffff' : currentValue,
+                  backgroundImage:
+                    currentValue === 'transparent'
+                      ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)'
+                      : 'none',
+                  backgroundPosition: currentValue === 'transparent' ? '0 0, 0 6px, 6px -6px, -6px 0px' : undefined,
+                  backgroundSize: currentValue === 'transparent' ? '12px 12px' : undefined,
+                }}
+                aria-hidden="true"
+              />
+              <span className="truncate">{currentValue || '혼합'}</span>
+            </span>
+            <span className="shrink-0 text-xs text-slate-500">선택</span>
+          </button>
+          {isOpen ? (
+            <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border border-amber-200 bg-white p-2 text-[11px] text-amber-950">
+              <div className="grid grid-cols-3 gap-1">
+                {FRAME_STYLE_COLOR_OPTIONS.map((option) => {
+                  const isSelected = colorToHex(currentValue) === colorToHex(option.value);
+
+                  return (
+                    <button
+                      key={`style-color-option:${field}:${option.value}`}
+                      type="button"
+                      className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-left hover:bg-amber-50 ${
+                        isSelected ? 'border-slate-950 bg-amber-100' : 'border-slate-200 bg-white'
+                      }`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setStyleColorPickerOpen(null);
+                        applyStyleFieldImmediateValue(field, option.value);
+                      }}
+                    >
+                      <span
+                        className="h-3.5 w-3.5 shrink-0 rounded border border-slate-200"
+                        style={{
+                          backgroundColor: option.value === 'transparent' ? '#ffffff' : option.value,
+                          backgroundImage:
+                            option.value === 'transparent'
+                              ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)'
+                              : 'none',
+                          backgroundPosition: option.value === 'transparent' ? '0 0, 0 5px, 5px -5px, -5px 0px' : undefined,
+                          backgroundSize: option.value === 'transparent' ? '10px 10px' : undefined,
+                        }}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 truncate">{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2">
+                <Input
+                  value={selectionStyleDraft[field]}
+                  placeholder={field === 'backgroundColor' ? 'transparent 또는 #ffffff' : '#0f172a'}
+                  onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
+                  onBlur={() => applyStyleFieldOnBlur(field)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   const applyPrimaryFramePositionMode = React.useCallback(
     (nextMode: TemplateFramePositionMode) => {
@@ -20671,7 +21976,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         if (relationFrameGroupId) {
           event.preventDefault();
-          handleMetadataRelationFramePick(relationFrameGroupId);
+          handleMetadataRelationFramePick(relationFrameGroupId, {
+            append: Boolean(event.shiftKey),
+          });
           return;
         }
       }
@@ -22288,6 +23595,41 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [applyFrameBoxSelection, positionOrderLockSelectionMode]
   );
 
+  const switchPositionAppearanceTargetMode = React.useCallback(
+    (nextMode: PositionAppearanceTargetMode) => {
+      if (nextMode === 'group') {
+        if (!selectedPositionResolvedBoxGroup || selectedPositionResolvedBoxGroup.frameGroupIds.length <= 1) {
+          return;
+        }
+
+        setPositionAppearanceTargetMode('group');
+        selectPositionGroupFromGroupList(selectedPositionResolvedBoxGroup);
+        return;
+      }
+
+      if (!selectedPositionResolvedBoxGroup || selectedPositionResolvedBoxGroup.frameGroupIds.length <= 0) {
+        setPositionAppearanceTargetMode('frame');
+        return;
+      }
+
+      const childFrameGroupIds = selectedPositionResolvedBoxGroup.frameGroupIds
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId));
+
+      if (childFrameGroupIds.length <= 0) {
+        return;
+      }
+
+      setPositionAppearanceTargetMode('frame');
+      applyFrameBoxSelection(childFrameGroupIds, {
+        disableAutoPositionGroupProxySelection: true,
+        showAllGroupProxySelections: false,
+        overridePositionGroupProxySelections: [],
+      });
+    },
+    [applyFrameBoxSelection, selectPositionGroupFromGroupList, selectedPositionResolvedBoxGroup]
+  );
+
   const renderPositionSummarySection = (title: string, children: React.ReactNode) => {
     const content = React.Children.toArray(children);
 
@@ -22639,6 +23981,245 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
+  const renderSelectionAppearanceControls = () => (
+    <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-sm font-medium text-slate-800">
+            {effectivePositionAppearanceTargetMode === 'group' ? '그룹 출력 형식' : '상자 출력 형식'}
+          </label>
+          {hasSelectedPositionGroupAppearanceContext ? (
+            <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white text-[11px] font-semibold">
+              <button
+                type="button"
+                className={`px-2 py-1 ${
+                  effectivePositionAppearanceTargetMode === 'group'
+                    ? 'bg-slate-950 text-white'
+                    : 'text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
+                }`}
+                disabled={!canEditSelectedPositionGroupAppearance}
+                onClick={() => switchPositionAppearanceTargetMode('group')}
+              >
+                그룹
+              </button>
+              <button
+                type="button"
+                className={`px-2 py-1 ${
+                  effectivePositionAppearanceTargetMode === 'frame'
+                    ? 'bg-slate-950 text-white'
+                    : 'text-slate-700 hover:bg-slate-50'
+                }`}
+                onClick={() => switchPositionAppearanceTargetMode('frame')}
+              >
+                상자
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <p className="text-xs text-slate-500">
+          {effectivePositionAppearanceTargetMode === 'group'
+            ? '선택한 상위 그룹의 크기, 여백, 배경, 외곽선을 편집합니다.'
+            : '선택한 상자의 크기, 여백, 배경, 외곽선을 편집합니다.'}
+        </p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            너비 (px)
+            {renderStyleApplyStatusIcon('width')}
+          </label>
+          <Input
+            data-style-field="width"
+            value={selectionStyleDraft.width}
+            placeholder="혼합"
+            onChange={(event) => setStyleFieldDraftValue('width', event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur('width')}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            높이 (px)
+            {renderStyleApplyStatusIcon('height')}
+          </label>
+          <Input
+            data-style-field="height"
+            value={selectionStyleDraft.height}
+            placeholder="혼합"
+            onChange={(event) => setStyleFieldDraftValue('height', event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur('height')}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            좌우 여백
+            {renderStyleApplyStatusIcon('paddingX')}
+          </label>
+          <Input
+            data-style-field="paddingX"
+            value={selectionStyleDraft.paddingX}
+            placeholder="혼합"
+            onChange={(event) => setStyleFieldDraftValue('paddingX', event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur('paddingX')}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            상하 여백
+            {renderStyleApplyStatusIcon('paddingY')}
+          </label>
+          <Input
+            data-style-field="paddingY"
+            value={selectionStyleDraft.paddingY}
+            placeholder="혼합"
+            onChange={(event) => setStyleFieldDraftValue('paddingY', event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur('paddingY')}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            모서리 반경
+            {renderStyleApplyStatusIcon('borderRadius')}
+          </label>
+          <Input
+            data-style-field="borderRadius"
+            value={selectionStyleDraft.borderRadius}
+            placeholder="혼합"
+            onChange={(event) => setStyleFieldDraftValue('borderRadius', event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur('borderRadius')}
+          />
+        </div>
+        {renderStyleColorPicker('backgroundColor', '배경 색')}
+        {renderStyleColorPicker('borderColor', '외곽선 색')}
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            외곽선 굵기
+            {renderStyleApplyStatusIcon('borderWidth')}
+          </label>
+          <Input
+            data-style-field="borderWidth"
+            value={selectionStyleDraft.borderWidth}
+            placeholder="혼합"
+            onChange={(event) => setStyleFieldDraftValue('borderWidth', event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur('borderWidth')}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            외곽선 정렬
+            {renderStyleApplyStatusIcon('borderAlign')}
+          </label>
+          <div className="relative">
+            <input data-style-field="borderAlign" type="hidden" value={selectionStyleDraft.borderAlign} readOnly />
+            <button
+              type="button"
+              className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-white px-3 py-1 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => setBorderAlignPickerOpen((previous) => !previous)}
+              onBlur={() => window.setTimeout(() => setBorderAlignPickerOpen(false), 120)}
+            >
+              <span className="truncate">
+                {selectionStyleDraft.borderAlign
+                  ? FRAME_BORDER_ALIGN_LABEL_BY_VALUE.get(selectionStyleDraft.borderAlign) || selectionStyleDraft.borderAlign
+                  : '혼합'}
+              </span>
+              <span className="shrink-0 text-xs text-slate-500">선택</span>
+            </button>
+            {borderAlignPickerOpen ? (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
+                {FRAME_BORDER_ALIGN_OPTIONS.map((option) => {
+                  const isSelected = selectionStyleDraft.borderAlign === option.value;
+
+                  return (
+                    <button
+                      key={`border-align-option:${option.value}`}
+                      type="button"
+                      className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-amber-50 ${
+                        isSelected ? 'bg-amber-100' : ''
+                      }`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setBorderAlignPickerOpen(false);
+                        applyStyleFieldImmediateValue('borderAlign', option.value);
+                      }}
+                    >
+                      <span className="min-w-0 truncate">{option.label}</span>
+                      {isSelected ? (
+                        <span className="rounded-full bg-slate-950 px-1.5 py-0.5 text-[10px] text-white">선택됨</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="space-y-2 md:col-span-2">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            외곽선 타입
+            {renderStyleApplyStatusIcon('borderStyle')}
+          </label>
+          <div className="relative">
+            <input data-style-field="borderStyle" type="hidden" value={selectionStyleDraft.borderStyle} readOnly />
+            <button
+              type="button"
+              className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-white px-3 py-1 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => setBorderStylePickerOpen((previous) => !previous)}
+              onBlur={() => window.setTimeout(() => setBorderStylePickerOpen(false), 120)}
+            >
+              <span className="truncate">
+                {selectionStyleDraft.borderStyle
+                  ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(selectionStyleDraft.borderStyle) || selectionStyleDraft.borderStyle
+                  : '혼합'}
+              </span>
+              <span className="shrink-0 text-xs text-slate-500">선택</span>
+            </button>
+            {borderStylePickerOpen ? (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
+                {FRAME_BORDER_STYLE_OPTIONS.map((option) => {
+                  const isSelected = selectionStyleDraft.borderStyle === option.value;
+
+                  return (
+                    <button
+                      key={`border-style-option:${option.value}`}
+                      type="button"
+                      className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-amber-50 ${
+                        isSelected ? 'bg-amber-100' : ''
+                      }`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setBorderStylePickerOpen(false);
+                        applyStyleFieldImmediateValue('borderStyle', option.value);
+                      }}
+                    >
+                      <span className="min-w-0 truncate">{option.label}</span>
+                      <span className="ml-auto flex shrink-0 items-center gap-2">
+                        <span
+                          className="block w-16"
+                          style={{
+                            borderTop:
+                              option.value === 'none'
+                                ? '0'
+                                : `2px ${option.value} rgba(15, 23, 42, .85)`,
+                          }}
+                          aria-hidden="true"
+                        />
+                        {isSelected ? (
+                          <span className="rounded-full bg-slate-950 px-1.5 py-0.5 text-[10px] text-white">
+                            선택됨
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderMetadataCanvasActionControls = () => (
     <CardContent className="px-6 pb-3 pt-0">
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -22658,55 +24239,53 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ) : null}
           </div>
         ) : null}
-        <div className="grid gap-2 xl:grid-cols-2">
-          <div className="space-y-2">
-            <div className="grid grid-cols-3 gap-2">
-              {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
-                const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
+              const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
 
-                return (
-                  <button
-                    key={`metadata-canvas-box-kind:${boxKind}`}
-                    type="button"
-                    disabled={!hasSelectedMetadataTarget}
-	                    onClick={() => stageMetadataBoxKind(boxKind)}
-	                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-	                      isActive
-	                        ? FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES[boxKind]
-	                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-	                    }`}
-                  >
-                    {FRAME_BOX_KIND_BUTTON_LABELS[boxKind]}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-800">Runtime Mode</label>
-              <select
-                value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
-                disabled={!hasSelectedMetadataTarget}
-                onChange={(event) =>
-                  setFrameMetadataDraft((previous) => ({
-                    ...previous,
-                    runtimeMode: event.target.value as FrameMetadataDraft['runtimeMode'],
-                  }))
-                }
-                className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">{hasSelectedMetadataTarget ? '혼합 / 자동 기본값 사용' : '-'}</option>
-                {runtimeModeOptions.map((runtimeMode) => (
-                  <option key={`metadata-canvas-runtime:${runtimeMode}`} value={runtimeMode}>
-                    {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
-                  </option>
-                ))}
-              </select>
-              <div className="text-[11px] leading-4 text-slate-600">{frameRuntimeModeHelpText}</div>
-            </div>
+              return (
+                <button
+                  key={`metadata-canvas-box-kind:${boxKind}`}
+                  type="button"
+                  disabled={!hasSelectedMetadataTarget}
+                  onClick={() => stageMetadataBoxKind(boxKind)}
+                  className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                    isActive
+                      ? FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES[boxKind]
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                  }`}
+                >
+                  {FRAME_BOX_KIND_BUTTON_LABELS[boxKind]}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="grid grid-cols-3 gap-2 self-start">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-800">Runtime Mode</label>
+            <select
+              value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
+              disabled={!hasSelectedMetadataTarget}
+              onChange={(event) =>
+                setFrameMetadataDraft((previous) => ({
+                  ...previous,
+                  runtimeMode: event.target.value as FrameMetadataDraft['runtimeMode'],
+                }))
+              }
+              className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">{hasSelectedMetadataTarget ? '혼합 / 자동 기본값 사용' : '-'}</option>
+              {runtimeModeOptions.map((runtimeMode) => (
+                <option key={`metadata-canvas-runtime:${runtimeMode}`} value={runtimeMode}>
+                  {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
+                </option>
+              ))}
+            </select>
+            <div className="text-[11px] leading-4 text-slate-600">{frameRuntimeModeHelpText}</div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
             {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
               const isActive = hasSelectedMetadataTarget && frameMetadataDraft.role === role;
 
@@ -22715,12 +24294,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   key={`metadata-canvas-role:${role}`}
                   type="button"
                   disabled={!hasSelectedMetadataTarget}
-	                  onClick={() => stageMetadataRole(role)}
-	                  className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-	                    isActive
-	                      ? FRAME_ROLE_ACTIVE_BUTTON_CLASSES[role]
-	                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-	                  }`}
+                  onClick={() => stageMetadataRole(role)}
+                  className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                    isActive
+                      ? FRAME_ROLE_ACTIVE_BUTTON_CLASSES[role]
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                  }`}
                 >
                   {FRAME_ROLE_SHORT_LABELS[role]}
                 </button>
@@ -22731,61 +24310,194 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         <div>
           {metadataVirtualConnectionDraft.mode === 'idle' ? (
-            <Button
-              type="button"
-              className="w-full"
-              onClick={applySelectedMetadataBoxConnection}
-              disabled={!hasSelectedMetadataTarget}
-            >
-              박스 연결하기
-            </Button>
+            metadataRelationSelectionMode.kind !== 'idle' ? (
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => {
+                  const metadataResult = applySelectionMetadataDraft();
+                  if (!metadataResult.ok) {
+                    setSelectionValidationIssues(metadataResult.issues);
+                    setSelectionReviewIssues(metadataResult.reviewIssues || []);
+                    setMessage('박스 연결 반영에 실패했습니다.');
+                    return;
+                  }
+                  setSelectionValidationIssues([]);
+                  setSelectionReviewIssues(metadataResult.reviewIssues || []);
+                  setMetadataRelationSelectionMode({ kind: 'idle' });
+                  setMessage('박스 연결을 반영했습니다.');
+                }}
+                disabled={
+                  metadataRelationSelectionMode.kind === 'parent' ||
+                  (metadataRelationSelectionMode.kind === 'value' &&
+                    metadataRelationSelectionMode.targetFrameGroupIds.length <= 0)
+                }
+              >
+                {metadataRelationSelectionMode.kind === 'parent'
+                  ? 'key 상자 1개를 선택하세요'
+                  : metadataRelationSelectionMode.targetFrameGroupIds.length > 0
+                    ? '박스 연결 반영'
+                    : 'value 상자를 선택하세요'}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                className="w-full"
+                onClick={applySelectedMetadataBoxConnection}
+                disabled={metadataConnectionCtaState.disabled}
+              >
+                {metadataConnectionCtaState.label}
+              </Button>
+            )
           ) : (
             <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
               <div className="text-[11px] font-semibold text-amber-900">
                 {metadataVirtualConnectionDraft.mode === 'key'
-                  ? '새 key 정의를 만들고 선택한 value 상자에 연결합니다.'
-                  : '새 입력값 정의를 만들고 선택한 key 상자와 연결할 준비를 합니다.'}
+                  ? metadataRelationSelectionMode.kind === 'parent'
+                    ? `선택된 하위 값 ${metadataRelationSelectionMode.sourceFrameGroupIds.length}개를 연결할 상위 키 상자 1개를 캔버스에서 선택하거나 이름으로 찾은 뒤 저장하세요.`
+                    : '기존 key 상자를 선택하거나 새 key 정의를 입력한 뒤 저장합니다.'
+                  : metadataRelationSelectionMode.kind === 'value'
+                    ? `현재 key 상자 ${metadataRelationSelectionMode.sourceKeyFrameGroupId}에 연결할 하위 값 상자를 선택하거나 이름으로 찾은 뒤 저장하세요. 이미 선택된 상자는 다시 클릭하면 해제됩니다.`
+                    : '기존 value 상자를 선택하거나 새 입력값 정의를 입력한 뒤 저장합니다.'}
+              </div>
+              {selectedMetadataValueConnectionOptions.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedMetadataValueConnectionOptions.map((option) => (
+                    <span
+                      key={`metadata-selected-value-target:${option.source}:${option.id}`}
+                      className="inline-flex max-w-[110px] items-center gap-1 rounded-full border border-amber-300 bg-white px-2 py-1 text-[11px] text-amber-950"
+                      title={`${option.label} (${option.id})`}
+                    >
+	                      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+	                      <button
+	                        type="button"
+	                        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-amber-700 hover:bg-amber-100"
+	                        aria-label={`${option.label} 선택 해제`}
+	                        onClick={() => removeMetadataValueConnectionTarget(option.id)}
+	                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="relative">
+                <Input
+                  value={metadataVirtualConnectionDraft.label}
+                  onFocus={() => setMetadataConnectionPickerOpen(true)}
+                  onChange={(event) => {
+                    const nextLabel = event.target.value;
+                    const existingOption = resolveMetadataConnectionOption(nextLabel);
+                    setMetadataVirtualConnectionDraft((previous) =>
+                      existingOption
+                        ? {
+                            ...previous,
+                            label: existingOption.label,
+                            id: existingOption.id,
+                            idTouched: true,
+                            error: '',
+                          }
+                        : {
+                            ...previous,
+                            label: nextLabel,
+                            error: '',
+                          }
+                    );
+                  }}
+                  onBlur={() => {
+                    syncMetadataConnectionDraftFromLabelInput();
+                    window.setTimeout(() => setMetadataConnectionPickerOpen(false), 120);
+                  }}
+                  placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자명 입력' : '입력값 상자명 입력'}
+                  className={metadataVirtualConnectionDraft.error && !metadataVirtualConnectionDraft.label.trim() ? 'border-red-500' : ''}
+                />
+                {metadataConnectionPickerOpen ? (
+                  <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
+                    {metadataConnectionPickerDisplayOptions.length > 0 ? (
+                      metadataConnectionPickerDisplayOptions.map((option) => {
+                        const isRecommended = metadataVirtualConnectionSuggestions.some(
+                          (suggestion) => suggestion.source === option.source && suggestion.id === option.id
+                        );
+                        const isSelected =
+                          metadataVirtualConnectionDraft.mode === 'value' &&
+                          metadataRelationSelectionMode.kind === 'value' &&
+                          metadataRelationSelectionMode.targetFrameGroupIds.includes(option.id);
+
+                        return (
+                          <div
+                            key={`metadata-connection-picker:${option.source}:${option.id}`}
+                            role="button"
+                            tabIndex={0}
+                            className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-amber-50 ${
+                              isSelected ? 'bg-amber-100' : ''
+                            }`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => applyMetadataConnectionSuggestion(option)}
+                            title={`${option.label} (${option.id})`}
+                          >
+                            <span className="min-w-0 truncate">
+                              {option.label}
+                              <span className="ml-1 text-amber-700">({option.id})</span>
+                            </span>
+                            {isSelected ? (
+                              <span className="flex shrink-0 items-center gap-1">
+                                <span className="rounded-full bg-slate-950 px-1.5 py-0.5 text-[10px] text-white">
+                                  선택됨
+                                </span>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-700 hover:bg-slate-200"
+                                  aria-label={`${option.label} 선택 해제`}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    removeMetadataValueConnectionTarget(option.id);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ) : isRecommended || option.source === 'shared' ? (
+                              <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
+                                {isRecommended ? '추천' : '공유'}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="px-2 py-2 text-amber-800">일치하는 상자가 없습니다.</div>
+                    )}
+                  </div>
+                ) : null}
               </div>
               <Input
-                value={metadataVirtualConnectionDraft.label}
-                onChange={(event) =>
-                  setMetadataVirtualConnectionDraft((previous) => ({
-                    ...previous,
-                    label: event.target.value,
-                    error: '',
-                  }))
-                }
-                onBlur={() =>
-                  setMetadataVirtualConnectionDraft((previous) => {
-                    if (previous.idTouched && previous.id.trim()) {
-                      return previous;
-                    }
-
-                    return {
-                      ...previous,
-                      id: normalizeVirtualDefinitionId(previous.label),
-                    };
-                  })
-                }
-                placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자명 입력' : '입력값 상자명 입력'}
-                className={metadataVirtualConnectionDraft.error && !metadataVirtualConnectionDraft.label.trim() ? 'border-red-500' : ''}
-              />
-              <Input
                 value={metadataVirtualConnectionDraft.id}
-                onChange={(event) =>
-                  setMetadataVirtualConnectionDraft((previous) => ({
-                    ...previous,
-                    id: event.target.value,
-                    idTouched: true,
-                    error: '',
-                  }))
-                }
-                onBlur={() =>
-                  setMetadataVirtualConnectionDraft((previous) => ({
-                    ...previous,
-                    id: normalizeVirtualDefinitionId(previous.id || previous.label),
-                  }))
-                }
+                onFocus={() => setMetadataConnectionPickerOpen(true)}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  const existingOption = resolveMetadataConnectionOption(nextId);
+                  setMetadataVirtualConnectionDraft((previous) =>
+                    existingOption
+                      ? {
+                          ...previous,
+                          label: existingOption.label,
+                          id: existingOption.id,
+                          idTouched: true,
+                          error: '',
+                        }
+                      : {
+                          ...previous,
+                          id: nextId,
+                          idTouched: true,
+                          error: '',
+                        }
+                  );
+                }}
+                onBlur={() => {
+                  syncMetadataConnectionDraftFromIdInput();
+                  window.setTimeout(() => setMetadataConnectionPickerOpen(false), 120);
+                }}
                 placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자 아이디 입력' : '입력값 상자 아이디 입력'}
                 className={metadataVirtualConnectionDraft.error ? 'border-red-500 bg-red-50' : ''}
               />
@@ -22793,7 +24505,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <div className="text-[11px] font-medium text-red-700">{metadataVirtualConnectionDraft.error}</div>
               ) : null}
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" onClick={resetMetadataVirtualConnectionDraft}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    resetMetadataVirtualConnectionDraft();
+                    setMetadataRelationSelectionMode({ kind: 'idle' });
+                  }}
+                >
                   취소
                 </Button>
                 <Button type="button" onClick={saveMetadataVirtualConnectionDefinition}>
@@ -24075,10 +25794,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               ) : null}
               <UnderlineTabs<SelectionPanelTab>
 	                tabs={[
-	                  { key: 'position', label: '요약/상자 위치' },
-	                  { key: 'metadata', label: '메타데이터' },
+	                  { key: 'position', label: '크기 및 위치' },
+	                  { key: 'metadata', label: '속성' },
 	                  { key: 'text', label: '텍스트' },
-	                  { key: 'style', label: '스타일' },
                 ]}
                 activeKey={selectionPanelTab}
                 onSelect={setSelectionPanelTab}
@@ -24087,46 +25805,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               {selectionPanelTab === 'position' ? renderSelectionSummaryBox() : null}
 
               {selectionPanelTab === 'metadata' ? (
-                <>
-                  {renderSelectionSummaryBox()}
-                  <div className="space-y-3 rounded-xl border border-slate-200 p-4">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-800">상자 메타데이터</label>
-                      <p className="text-xs text-slate-500">
-                        Box Kind, Role, Runtime Mode, 박스 연결은 상자 편집 캔버스 상단 버튼에서 설정합니다.
-                      </p>
-                    </div>
-                    <input type="hidden" data-metadata-field="valueKey" value={frameMetadataDraft.valueKey} readOnly />
-                    <input
-                      type="hidden"
-                      data-metadata-field="boxKind"
-                      value={hasSelectedMetadataTarget ? frameMetadataDraft.boxKind : ''}
-                      readOnly
-                    />
-                    <input
-                      type="hidden"
-                      data-metadata-field="role"
-                      value={hasSelectedMetadataTarget ? frameMetadataDraft.role : ''}
-                      readOnly
-                    />
-                    <input
-                      type="hidden"
-                      data-metadata-field="runtimeMode"
-                      value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
-                      readOnly
-                    />
-                    <input
-                      type="hidden"
-                      data-metadata-field="parentGroupId"
-                      value={frameMetadataDraft.parentGroupId}
-                      readOnly
-                    />
-                  </div>
-                </>
+                renderSelectionSummaryBox()
               ) : null}
 
 		              {selectionPanelTab === 'position' ? (
 		                <>
+		                  {selectedFrameGroupIds.length > 0 ? renderSelectionAppearanceControls() : null}
 		                  {positionBoxGroups.length > 0 ? (
                     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-left text-xs leading-5 text-slate-700">
                       <div className="text-left font-semibold text-slate-900">전체 그룹 ({positionBoxGroups.length}개)</div>
@@ -24248,178 +25932,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 </div>
               ) : null}
 
-              {selectionPanelTab === 'style' ? (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">빠른 프리셋</label>
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.label)}>
-                        라벨형
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.input)}>
-                        입력칸형
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.body)}>
-                        본문형
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => stageSelectionStylePreset(presetStylePatches.focus)}>
-                        강조형
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        너비 (px)
-                        {renderStyleApplyStatusIcon('width')}
-                      </label>
-                      <Input
-                        data-style-field="width"
-                        value={selectionStyleDraft.width}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('width', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('width')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        높이 (px)
-                        {renderStyleApplyStatusIcon('height')}
-                      </label>
-                      <Input
-                        data-style-field="height"
-                        value={selectionStyleDraft.height}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('height', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('height')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        폰트 크기
-                        {renderStyleApplyStatusIcon('fontSize')}
-                      </label>
-                      <Input
-                        data-style-field="fontSize"
-                        value={selectionStyleDraft.fontSize}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('fontSize', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('fontSize')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        줄 간격
-                        {renderStyleApplyStatusIcon('lineHeight')}
-                      </label>
-                      <Input
-                        data-style-field="lineHeight"
-                        value={selectionStyleDraft.lineHeight}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('lineHeight', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('lineHeight')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        좌우 여백
-                        {renderStyleApplyStatusIcon('paddingX')}
-                      </label>
-                      <Input
-                        data-style-field="paddingX"
-                        value={selectionStyleDraft.paddingX}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('paddingX', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('paddingX')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        상하 여백
-                        {renderStyleApplyStatusIcon('paddingY')}
-                      </label>
-                      <Input
-                        data-style-field="paddingY"
-                        value={selectionStyleDraft.paddingY}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('paddingY', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('paddingY')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        모서리 반경
-                        {renderStyleApplyStatusIcon('borderRadius')}
-                      </label>
-                      <Input
-                        data-style-field="borderRadius"
-                        value={selectionStyleDraft.borderRadius}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('borderRadius', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('borderRadius')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        글자 굵기
-                        {renderStyleApplyStatusIcon('fontWeight')}
-                      </label>
-                      <Input
-                        data-style-field="fontWeight"
-                        value={selectionStyleDraft.fontWeight}
-                        placeholder="혼합"
-                        onChange={(event) => setStyleFieldDraftValue('fontWeight', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('fontWeight')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        정렬
-                        {renderStyleApplyStatusIcon('textAlign')}
-                      </label>
-                      <select
-                        data-style-field="textAlign"
-                        value={selectionStyleDraft.textAlign}
-                        onChange={(event) => setStyleFieldDraftValue('textAlign', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('textAlign')}
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      >
-                        <option value="left">left</option>
-                        <option value="center">center</option>
-                        <option value="right">right</option>
-                        <option value="justify">justify</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        글자 색
-                        {renderStyleApplyStatusIcon('color')}
-                      </label>
-                      <Input
-                        data-style-field="color"
-                        type="color"
-                        value={selectionStyleDraft.color}
-                        onChange={(event) => setStyleFieldDraftValue('color', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('color')}
-                      />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-                        배경 색
-                        {renderStyleApplyStatusIcon('backgroundColor')}
-                      </label>
-                      <Input
-                        data-style-field="backgroundColor"
-                        value={selectionStyleDraft.backgroundColor}
-                        placeholder="transparent"
-                        onChange={(event) => setStyleFieldDraftValue('backgroundColor', event.target.value)}
-                        onBlur={() => applyStyleFieldOnBlur('backgroundColor')}
-                      />
-                    </div>
-                  </div>
-                </>
-              ) : null}
             </CardContent>
           </Card>
         </div>
