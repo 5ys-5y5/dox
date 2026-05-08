@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, CircleDot, CornerDownRight, FileText, KeyRound, Loader2, Minus, Paperclip, Redo2, Save, Signature, Trash2, Undo2 } from 'lucide-react';
+import { CheckCircle2, CircleDot, CornerDownRight, FileText, KeyRound, Loader2, Minus, MousePointer2, Move, Paperclip, Redo2, Save, Signature, Trash2, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server.browser';
@@ -74,6 +74,11 @@ type FrameMetadataValidationIssue = {
   message: string;
 };
 
+type FrameMetadataReviewIssue = {
+  frameGroupId: string;
+  message: string;
+};
+
 type SelectionSaveProgressPhase = 'idle' | 'running' | 'completed' | 'failed';
 
 type SelectionSaveProgressState = {
@@ -91,6 +96,7 @@ type SelectionMetadataApplyResult = {
   ok: boolean;
   skipped: boolean;
   issues: FrameMetadataValidationIssue[];
+  reviewIssues?: FrameMetadataReviewIssue[];
 };
 
 type VirtualFrameDefinition = {
@@ -124,6 +130,14 @@ type MetadataRelationSelectionMode =
   | { kind: 'parent'; sourceFrameGroupIds: string[] }
   | { kind: 'value'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
 
+type MetadataVirtualConnectionDraft = {
+  mode: 'idle' | 'key' | 'value';
+  label: string;
+  id: string;
+  idTouched: boolean;
+  error: string;
+};
+
 type FrameRelationPreviewMode =
   | { kind: 'idle' }
   | { kind: 'parent-select'; sourceFrameGroupIds: string[] }
@@ -132,6 +146,7 @@ type FrameRelationPreviewMode =
   | { kind: 'value-linked'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
 
 type SelectionPanelTab = 'metadata' | 'position' | 'text' | 'style';
+type CanvasInteractionMode = 'select' | 'move';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
 
@@ -520,6 +535,7 @@ const FRAME_SELECTED_SIDE_INDICATOR_ATTR = 'data-v106-frame-selected-side-indica
 const FRAME_SELECTION_FILL_CLASS = 'v106-frame-selection-fill';
 const FRAME_RICHTEXT_PREVIEW_CLASS = 'v106-frame-richtext-preview';
 const TEMPLATE_FRAME_VALIDATION_ERROR_ATTR = 'data-template-validation-error';
+const TEMPLATE_FRAME_REVIEW_WARNING_ATTR = 'data-template-review-warning';
 const TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR = 'data-template-native-outline-hidden';
 const TEMPLATE_FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-mode';
 const TEMPLATE_FRAME_BASE_HEIGHT_ATTR = 'data-template-frame-base-height';
@@ -841,8 +857,8 @@ const FRAME_ROLE_SHORT_LABELS: Record<TemplateFrameRole | 'group', string> = {
   key_value: '독립 값',
 };
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
-  key: '다른 value 상자들을 묶는 기준 상자입니다. 보통 라벨이나 제목 역할을 맡습니다.',
-  value: '어떤 key 상자에 속한 실제 입력값 상자입니다. 연결된 key 상자가 필요합니다.',
+  key: '다른 value 상자를 묶을 수 있는 기준 역할입니다. 연결이 없어도 key 역할 자체는 유지됩니다.',
+  value: '입력값 역할입니다. key 연결이 없으면 확인 필요 상태로 표시되지만 저장을 막지는 않습니다.',
   key_value: '상위 key 없이 자기 자신이 하나의 완결된 값이 되는 독립 상자입니다.',
 };
 
@@ -913,14 +929,6 @@ const renderFrameMetadataMarkerMarkup = (
   role: TemplateFrameRole | 'group' | '',
   compact = false
 ) => renderToStaticMarkup(<FrameMetadataMarker boxKind={boxKind} role={role} compact={compact} />);
-
-const confirmPromoteKeyBoxToText = () => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  return window.confirm('key 상자는 text 상자여야 합니다. text 상자로 업데이트하고 설정을 반영할까요?');
-};
 
 const confirmPromoteRuntimeMode = (frameGroupId: string, currentRuntimeMode: string, nextRuntimeMode: TemplateFrameRuntimeMode) => {
   if (typeof window === 'undefined') {
@@ -1094,6 +1102,14 @@ const defaultFrameMetadataDraft: FrameMetadataDraft = {
   valueKey: '',
   parentGroupId: '',
   runtimeMode: '',
+};
+
+const defaultMetadataVirtualConnectionDraft: MetadataVirtualConnectionDraft = {
+  mode: 'idle',
+  label: '',
+  id: '',
+  idTouched: false,
+  error: '',
 };
 
 const isTemplateFrameBoxKind = (value: string | null | undefined): value is TemplateFrameBoxKind =>
@@ -7444,11 +7460,20 @@ const stripSelectionAttrs = (
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
   });
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_REVIEW_WARNING_ATTR);
+  });
 };
 
 const clearFrameValidationErrorUi = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_VALIDATION_ERROR_ATTR);
+  });
+};
+
+const clearFrameReviewWarningUi = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}="true"]`).forEach((element) => {
+    element.removeAttribute(TEMPLATE_FRAME_REVIEW_WARNING_ATTR);
   });
 };
 
@@ -7476,6 +7501,21 @@ const applyFrameValidationErrorUi = (root: HTMLElement, frameGroupIds: string[])
   });
 };
 
+const applyFrameReviewWarningUi = (root: HTMLElement, frameGroupIds: string[]) => {
+  clearFrameReviewWarningUi(root);
+
+  if (frameGroupIds.length === 0) {
+    return;
+  }
+
+  const warningIdSet = new Set(frameGroupIds);
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    if (warningIdSet.has(getFrameGroupId(node))) {
+      node.setAttribute(TEMPLATE_FRAME_REVIEW_WARNING_ATTR, 'true');
+    }
+  });
+};
+
 const extractEditorHtml = (root: HTMLElement) => {
   const container = document.createElement('div');
   container.innerHTML = root.innerHTML;
@@ -7483,6 +7523,7 @@ const extractEditorHtml = (root: HTMLElement) => {
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
   clearFrameValidationErrorUi(container);
+  clearFrameReviewWarningUi(container);
   stripFrameMetadataMarkers(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   return container.innerHTML.trim();
@@ -7495,6 +7536,7 @@ const extractPreviewRenderHtml = (root: HTMLElement) => {
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
   clearFrameValidationErrorUi(container);
+  clearFrameReviewWarningUi(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   return container.innerHTML.trim();
 };
@@ -7860,7 +7902,7 @@ const applyFrameRelationSelectionUi = (
         return;
       }
 
-      if (relationMode.kind === 'parent-select' && readFrameBoxKind(node) === 'text') {
+      if (relationMode.kind === 'parent-select' && !sourceIds.has(frameGroupId)) {
         node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'parent-candidate');
       }
     });
@@ -8186,7 +8228,8 @@ const readFrameDisplayText = (node: HTMLElement | null | undefined) => {
 const deriveFrameValueKey = (
   node: HTMLElement,
   frameNodeById: Map<string, HTMLElement>,
-  resolvedMetadata?: ResolvedFrameMetadata | null
+  resolvedMetadata?: ResolvedFrameMetadata | null,
+  virtualDefinitions: VirtualFrameDefinition[] = []
 ) => {
   const metadata = resolvedMetadata || resolveNextFrameMetadata(node, {});
   const frameGroupId = getFrameGroupId(node);
@@ -8200,6 +8243,7 @@ const deriveFrameValueKey = (
     const parentLabel =
       normalizeFrameValueKey(readFrameDisplayText(parentNode || null)) ||
       normalizeFrameValueKey(parentNode ? readFrameValueKey(parentNode) : '') ||
+      normalizeFrameValueKey(virtualDefinitions.find((definition) => definition.id === metadata.parentGroupId)?.label || '') ||
       metadata.parentGroupId;
     return parentLabel;
   }
@@ -8211,12 +8255,21 @@ const deriveFrameValueKey = (
   return '';
 };
 
-const syncFrameRelationshipValueKeys = (root: HTMLElement, metadataById?: Map<string, ResolvedFrameMetadata>) => {
+const syncFrameRelationshipValueKeys = (
+  root: HTMLElement,
+  metadataById?: Map<string, ResolvedFrameMetadata>,
+  virtualDefinitions: VirtualFrameDefinition[] = []
+) => {
   const frameNodes = collectFrameSelectionAnchors(root);
   const frameNodeById = new Map(frameNodes.map((node) => [getFrameGroupId(node), node] as const));
 
   frameNodes.forEach((node) => {
-    const nextValueKey = deriveFrameValueKey(node, frameNodeById, metadataById?.get(getFrameGroupId(node)) || null);
+    const nextValueKey = deriveFrameValueKey(
+      node,
+      frameNodeById,
+      metadataById?.get(getFrameGroupId(node)) || null,
+      virtualDefinitions
+    );
     applyFrameMetadataPatch(node, { valueKey: nextValueKey });
   });
 };
@@ -9762,14 +9815,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   >({});
   const [showMetadataIcons, setShowMetadataIcons] = React.useState(false);
   const [showCanvasLegend, setShowCanvasLegend] = React.useState(false);
+  const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
     kind: 'idle',
   });
+  const [metadataVirtualConnectionDraft, setMetadataVirtualConnectionDraft] = React.useState<MetadataVirtualConnectionDraft>(
+    defaultMetadataVirtualConnectionDraft
+  );
   const [selectionSaveProgress, setSelectionSaveProgress] =
     React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
   const [hasSelectionProgressHistory, setHasSelectionProgressHistory] = React.useState(false);
   const [showSelectionStatus, setShowSelectionStatus] = React.useState(false);
   const [selectionValidationIssues, setSelectionValidationIssues] = React.useState<FrameMetadataValidationIssue[]>([]);
+  const [selectionReviewIssues, setSelectionReviewIssues] = React.useState<FrameMetadataReviewIssue[]>([]);
   const [virtualFrameDefinitions, setVirtualFrameDefinitions] = React.useState<VirtualFrameDefinition[]>([]);
   const [message, setMessage] = React.useState<string | null>(null);
   const [previewDomVersion, setPreviewDomVersion] = React.useState(0);
@@ -9841,6 +9899,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectionValidationErrorFrameIds = React.useMemo(
     () => Array.from(new Set(selectionValidationIssues.map((issue) => issue.frameGroupId).filter(Boolean))),
     [selectionValidationIssues]
+  );
+  const selectionReviewWarningFrameIds = React.useMemo(
+    () => Array.from(new Set(selectionReviewIssues.map((issue) => issue.frameGroupId).filter(Boolean))),
+    [selectionReviewIssues]
   );
   const selectionSaveProgressFailed = selectionSaveProgress.phase === 'failed';
   const selectionSaveProgressCompleted = selectionSaveProgress.phase === 'completed';
@@ -10037,6 +10099,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [metadataRelationSelectionMode, primarySelectedFrameGroupId, selectedFrameGroupIds]);
 
   React.useEffect(() => {
+    setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+  }, [selectedFrameGroupIds, selectionPanelTab]);
+
+  React.useEffect(() => {
     if (selectionPanelTab !== 'metadata' && metadataRelationSelectionModeRef.current.kind !== 'idle') {
       setMetadataRelationSelectionMode({ kind: 'idle' });
     }
@@ -10152,7 +10218,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setSelectedFrameGroupIds(nextEntry.selectedFrameGroupIds.slice());
       setEdgeSelectionState(emptyEdgeSelection);
       setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
-      setSelectionValidationIssues([]);
+    setSelectionValidationIssues([]);
+    setSelectionReviewIssues([]);
       setSelectionSaveProgress(defaultSelectionSaveProgressState);
       commitCanvasHistoryRevision();
       setMessage(`${actionLabel} 적용됨`);
@@ -14822,6 +14889,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setEdgeSelectionState(emptyEdgeSelection);
         setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
         setSelectionValidationIssues([]);
+        setSelectionReviewIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
       };
 
@@ -15191,6 +15259,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
         setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
         setSelectionValidationIssues([]);
+        setSelectionReviewIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
         draftPreviewHtmlRef.current = '';
         lastPersistedDraftHtmlRef.current = '';
@@ -15227,6 +15296,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
         setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
         setSelectionValidationIssues([]);
+        setSelectionReviewIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
         draftPreviewHtmlRef.current = detail.template.draftHtml;
         lastPersistedDraftHtmlRef.current = detail.template.draftHtml.trim();
@@ -15292,6 +15362,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
           setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
           setSelectionValidationIssues([]);
+          setSelectionReviewIssues([]);
           setSelectionSaveProgress(defaultSelectionSaveProgressState);
           draftPreviewHtmlRef.current = '';
           lastPersistedDraftHtmlRef.current = '';
@@ -15656,7 +15727,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
-  }, [renderedPreviewHtml, selectionValidationErrorFrameIds, selectedFrameGroupIds, selectionPanelTab]);
+    applyFrameReviewWarningUi(root, selectionReviewWarningFrameIds);
+  }, [renderedPreviewHtml, selectionReviewWarningFrameIds, selectionValidationErrorFrameIds, selectedFrameGroupIds, selectionPanelTab]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -15667,7 +15739,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     applyRuntimeSelectionVisuals(selectedFrameGroupIdsRef.current, edgeSelectionStateRef.current);
     applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
-  }, [applyRuntimeSelectionVisuals, selectionValidationErrorFrameIds, showMetadataIcons]);
+    applyFrameReviewWarningUi(root, selectionReviewWarningFrameIds);
+  }, [applyRuntimeSelectionVisuals, selectionReviewWarningFrameIds, selectionValidationErrorFrameIds, showMetadataIcons]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -15918,22 +15991,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    if (sourceMetadata.boxKind !== 'text') {
-      const approved = confirmPromoteKeyBoxToText();
-
-      if (!approved) {
-        setMessage('key 상자 선택을 취소했습니다.');
-        return;
-      }
-
-      applyFrameMetadataPatch(sourceNode, {
-        boxKind: 'text',
-        role: 'key',
-      });
-      syncDraftPreviewHtmlRef();
-      setMessage(`key 상자 ${sourceKeyFrameGroupId}를 text 상자로 업데이트하고 설정을 계속합니다.`);
-    }
-
     const existingTargetFrameGroupIds = getFrameNodes(root)
       .filter((node) => readFrameParentGroupId(node) === sourceKeyFrameGroupId)
       .map((node) => getFrameGroupId(node))
@@ -15952,7 +16009,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       targetFrameGroupIds: existingTargetFrameGroupIds,
     });
     setMessage('현재 key 상자가 선택된 상태입니다. 이제 이 key에 연결할 value 상자들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.');
-  }, [clearTransientCanvasOverlays, getFrameNodes, syncDraftPreviewHtmlRef]);
+  }, [clearTransientCanvasOverlays, getFrameNodes]);
 
   const clearParentKeySelectionDraft = React.useCallback(() => {
     setFrameMetadataDraft((previous) => ({
@@ -16070,6 +16127,320 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [persistVirtualFrameDefinitions, virtualFrameDefinitions]
   );
 
+  const stageMetadataBoxKind = React.useCallback((boxKind: TemplateFrameBoxKind) => {
+    if (selectedFrameGroupIdsRef.current.length === 0) {
+      setMessage('먼저 메타데이터를 설정할 상자를 선택하세요.');
+      return;
+    }
+
+    setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setFrameMetadataDraft((previous) => {
+      const compatibleRuntimeModes = getCompatibleRuntimeModes(boxKind);
+      const nextRuntimeMode =
+        previous.runtimeMode && compatibleRuntimeModes.includes(previous.runtimeMode)
+          ? previous.runtimeMode
+          : getDefaultRuntimeMode(boxKind, previous.role || 'key_value');
+
+      return {
+        ...previous,
+        boxKind,
+        runtimeMode: nextRuntimeMode,
+      };
+    });
+  }, []);
+
+  const stageMetadataRole = React.useCallback((role: TemplateFrameRole) => {
+    if (selectedFrameGroupIdsRef.current.length === 0) {
+      setMessage('먼저 메타데이터를 설정할 상자를 선택하세요.');
+      return;
+    }
+
+    setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setFrameMetadataDraft((previous) => ({
+      ...previous,
+      role,
+      parentGroupId: role === 'value' ? previous.parentGroupId : '',
+      valueKey: role === 'value' ? previous.valueKey : '',
+      runtimeMode:
+        previous.runtimeMode ||
+        (previous.boxKind ? getDefaultRuntimeMode(previous.boxKind, role) : previous.runtimeMode),
+    }));
+  }, []);
+
+  const resetMetadataVirtualConnectionDraft = React.useCallback(() => {
+    setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+  }, []);
+
+  const startMetadataVirtualConnectionDraft = React.useCallback((mode: 'key' | 'value') => {
+    setMetadataVirtualConnectionDraft({
+      mode,
+      label: '',
+      id: '',
+      idTouched: false,
+      error: '',
+    });
+  }, []);
+
+  const applySelectedMetadataBoxConnection = React.useCallback(() => {
+    const root = previewRef.current;
+    const activeSelectionIds = selectedFrameGroupIdsRef.current;
+
+    if (!root || activeSelectionIds.length === 0) {
+      setMessage('연결할 상자를 먼저 선택하세요.');
+      return;
+    }
+
+    const frameNodeById = new Map(
+      getFrameNodes(root)
+        .map((node) => [getFrameGroupId(node), node] as const)
+        .filter(([frameGroupId]) => Boolean(frameGroupId))
+    );
+    const selectedEntries = activeSelectionIds
+      .map((frameGroupId) => {
+        const node = frameNodeById.get(frameGroupId) || null;
+        const role = node ? readFrameRole(node) : '';
+        return node && (role === 'key' || role === 'value') ? { frameGroupId, node, role } : null;
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          frameGroupId: string;
+          node: HTMLElement;
+          role: 'key' | 'value';
+        } => Boolean(entry)
+      );
+
+    if (selectedEntries.length !== activeSelectionIds.length) {
+      setMessage('박스 연결은 선택한 모든 상자의 Role이 key 또는 value일 때만 가능합니다.');
+      return;
+    }
+
+    const keyEntries = selectedEntries.filter((entry) => entry.role === 'key');
+    const valueEntries = selectedEntries.filter((entry) => entry.role === 'value');
+
+    if (keyEntries.length > 1) {
+      setMessage('키가 되는 상자는 하나만 있어야 합니다.');
+      return;
+    }
+
+    if (keyEntries.length === 0 && valueEntries.length > 0) {
+      startMetadataVirtualConnectionDraft('key');
+      setMessage('선택한 value 상자를 연결할 새 key 정의를 입력하세요.');
+      return;
+    }
+
+    if (keyEntries.length === 1 && valueEntries.length === 0) {
+      startMetadataVirtualConnectionDraft('value');
+      setMessage('선택한 key 상자에 연결할 새 입력값 정의를 입력하세요.');
+      return;
+    }
+
+    if (keyEntries.length !== 1 || valueEntries.length <= 0) {
+      setMessage('박스 연결은 key 상자 1개와 value 상자 1개 이상을 선택해야 합니다.');
+      return;
+    }
+
+    const keyEntry = keyEntries[0];
+    const conflictingValueIds = valueEntries
+      .filter((entry) => {
+        const parentGroupId = readFrameParentGroupId(entry.node);
+        return parentGroupId && parentGroupId !== keyEntry.frameGroupId;
+      })
+      .map((entry) => entry.frameGroupId);
+
+    if (conflictingValueIds.length > 0) {
+      const approved =
+        typeof window !== 'undefined' &&
+        window.confirm(
+          `이미 다른 박스의 입력값인 박스가 있습니다: ${formatIssueList(conflictingValueIds)}.\n` +
+            '해제하고 선택한 키 박스의 입력값으로 만들까요?'
+        );
+
+      if (!approved) {
+        setMessage('박스 연결을 취소했습니다.');
+        return;
+      }
+    }
+
+    const keyMetadata = resolveNextFrameMetadata(keyEntry.node, {});
+    const nextKeyBoxKind = keyMetadata.boxKind || 'text';
+    const compatibleKeyRuntimeModes = getCompatibleRuntimeModes(nextKeyBoxKind);
+    const keyLabel =
+      normalizeFrameValueKey(readFrameDisplayText(keyEntry.node)) ||
+      normalizeFrameValueKey(readFrameValueKey(keyEntry.node)) ||
+      keyEntry.frameGroupId;
+
+    applyFrameMetadataPatch(keyEntry.node, {
+      boxKind: nextKeyBoxKind,
+      role: 'key',
+      parentGroupId: '',
+      runtimeMode: keyMetadata.runtimeMode && compatibleKeyRuntimeModes.includes(keyMetadata.runtimeMode)
+        ? keyMetadata.runtimeMode
+        : getDefaultRuntimeMode(nextKeyBoxKind, 'key'),
+    });
+
+    valueEntries.forEach((entry) => {
+      applyFrameMetadataPatch(entry.node, {
+        role: 'value',
+        parentGroupId: keyEntry.frameGroupId,
+        valueKey: keyLabel,
+      });
+    });
+
+    setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+    setMetadataRelationSelectionMode({ kind: 'idle' });
+    syncFrameRelationshipValueKeys(root, undefined, virtualFrameDefinitions);
+    syncDraftPreviewHtmlRef();
+    syncFrameMetadataDraft();
+    applyRuntimeSelectionUi(activeSelectionIds, edgeSelectionStateRef.current);
+    requestPreviewTextFit();
+    setMessage(`박스 연결 완료: ${keyEntry.frameGroupId} → ${valueEntries.length}개 value`);
+  }, [
+    applyRuntimeSelectionUi,
+    getFrameNodes,
+    requestPreviewTextFit,
+    startMetadataVirtualConnectionDraft,
+    syncDraftPreviewHtmlRef,
+    syncFrameMetadataDraft,
+    virtualFrameDefinitions,
+  ]);
+
+  const saveMetadataVirtualConnectionDefinition = React.useCallback(() => {
+    const root = previewRef.current;
+    const activeSelectionIds = selectedFrameGroupIdsRef.current;
+    const mode = metadataVirtualConnectionDraft.mode;
+    const label = metadataVirtualConnectionDraft.label.trim();
+    const id = normalizeVirtualDefinitionId(metadataVirtualConnectionDraft.id || label);
+
+    if (!root || mode === 'idle') {
+      return;
+    }
+
+    if (!label || !id) {
+      setMetadataVirtualConnectionDraft((previous) => ({
+        ...previous,
+        error: '상자명과 아이디를 입력하세요.',
+      }));
+      return;
+    }
+
+    if (availableFrameGroupIds.includes(id) || virtualFrameDefinitions.some((definition) => definition.id === id)) {
+      setMetadataVirtualConnectionDraft((previous) => ({
+        ...previous,
+        id,
+        error: `이미 사용 중인 아이디입니다: ${id}`,
+      }));
+      return;
+    }
+
+    const frameNodeById = new Map(
+      getFrameNodes(root)
+        .map((node) => [getFrameGroupId(node), node] as const)
+        .filter(([frameGroupId]) => Boolean(frameGroupId))
+    );
+    const selectedEntries = activeSelectionIds
+      .map((frameGroupId) => {
+        const node = frameNodeById.get(frameGroupId) || null;
+        const role = node ? readFrameRole(node) : '';
+        return node && (role === 'key' || role === 'value') ? { frameGroupId, node, role } : null;
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          frameGroupId: string;
+          node: HTMLElement;
+          role: 'key' | 'value';
+        } => Boolean(entry)
+      );
+
+    if (selectedEntries.length <= 0 || selectedEntries.length !== activeSelectionIds.length) {
+      setMetadataVirtualConnectionDraft((previous) => ({
+        ...previous,
+        error: '선택한 모든 상자의 Role이 key 또는 value여야 합니다.',
+      }));
+      return;
+    }
+
+    if (mode === 'key') {
+      const valueEntries = selectedEntries.filter((entry) => entry.role === 'value');
+
+      if (valueEntries.length <= 0 || selectedEntries.some((entry) => entry.role !== 'value')) {
+        setMetadataVirtualConnectionDraft((previous) => ({
+          ...previous,
+          error: '새 key 정의는 value 상자만 선택된 상태에서 저장할 수 있습니다.',
+        }));
+        return;
+      }
+
+      const nextDefinitions = [...virtualFrameDefinitions, { id, label }];
+      setVirtualFrameDefinitions(nextDefinitions);
+      persistVirtualFrameDefinitions(nextDefinitions);
+      valueEntries.forEach((entry) => {
+        applyFrameMetadataPatch(entry.node, {
+          role: 'value',
+          parentGroupId: id,
+          valueKey: label,
+        });
+      });
+      syncFrameRelationshipValueKeys(root, undefined, nextDefinitions);
+      syncDraftPreviewHtmlRef();
+      syncFrameMetadataDraft();
+      applyRuntimeSelectionUi(activeSelectionIds, edgeSelectionStateRef.current);
+      requestPreviewTextFit();
+      setMessage(`가상 key 정의 ${id} 를 저장하고 ${valueEntries.length}개 value 상자에 연결했습니다.`);
+    } else {
+      const keyEntries = selectedEntries.filter((entry) => entry.role === 'key');
+
+      if (keyEntries.length !== 1 || selectedEntries.length !== 1) {
+        setMetadataVirtualConnectionDraft((previous) => ({
+          ...previous,
+          error: '새 입력값 정의는 key 상자 1개만 선택된 상태에서 저장할 수 있습니다.',
+        }));
+        return;
+      }
+
+      const nextDefinitions = [...virtualFrameDefinitions, { id, label }];
+      setVirtualFrameDefinitions(nextDefinitions);
+      persistVirtualFrameDefinitions(nextDefinitions);
+      const keyEntry = keyEntries[0];
+      const keyMetadata = resolveNextFrameMetadata(keyEntry.node, {});
+      const nextKeyBoxKind = keyMetadata.boxKind || 'text';
+      const compatibleKeyRuntimeModes = getCompatibleRuntimeModes(nextKeyBoxKind);
+      applyFrameMetadataPatch(keyEntry.node, {
+        boxKind: nextKeyBoxKind,
+        role: 'key',
+        parentGroupId: '',
+        runtimeMode: keyMetadata.runtimeMode && compatibleKeyRuntimeModes.includes(keyMetadata.runtimeMode)
+          ? keyMetadata.runtimeMode
+          : getDefaultRuntimeMode(nextKeyBoxKind, 'key'),
+      });
+      setMetadataRelationSelectionMode({
+        kind: 'value',
+        sourceKeyFrameGroupId: keyEntry.frameGroupId,
+        targetFrameGroupIds: [id],
+      });
+      syncDraftPreviewHtmlRef();
+      syncFrameMetadataDraft();
+      applyRuntimeSelectionUi(activeSelectionIds, edgeSelectionStateRef.current);
+      requestPreviewTextFit();
+      setMessage(`가상 입력값 정의 ${id} 를 저장했습니다.`);
+    }
+
+    setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+  }, [
+    applyRuntimeSelectionUi,
+    availableFrameGroupIds,
+    getFrameNodes,
+    metadataVirtualConnectionDraft,
+    persistVirtualFrameDefinitions,
+    requestPreviewTextFit,
+    syncDraftPreviewHtmlRef,
+    syncFrameMetadataDraft,
+    virtualFrameDefinitions,
+  ]);
+
   const handleMetadataRelationFramePick = React.useCallback(
     (frameGroupId: string) => {
       const root = previewRef.current;
@@ -16091,23 +16462,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         if (relationMode.sourceFrameGroupIds.includes(frameGroupId)) {
           setMessage('선택된 상자 자신을 key 상자로 지정할 수 없습니다.');
           return true;
-        }
-
-        const targetMetadata = resolveNextFrameMetadata(targetNode, {});
-
-        if (targetMetadata.boxKind !== 'text') {
-          const approved = confirmPromoteKeyBoxToText();
-
-          if (!approved) {
-            setMessage('key 상자 선택을 취소했습니다.');
-            return true;
-          }
-
-          applyFrameMetadataPatch(targetNode, {
-            boxKind: 'text',
-            role: 'key',
-          });
-          syncDraftPreviewHtmlRef();
         }
 
         const nextValueKey = normalizeFrameValueKey(readFrameDisplayText(targetNode)) || frameGroupId;
@@ -17651,15 +18005,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         );
     }
 
-    if (!hasMetadataChanges && !hasRelationChanges) {
-      return {
-        ok: true,
-        skipped: true,
-        issues: [],
-      };
-    }
-
-    const autoParentPatchByFrameId = new Map<string, FrameMetadataPatch>();
     const resolvedMetadataById = new Map<string, ResolvedFrameMetadata>();
     frameNodeById.forEach((node, frameGroupId) => {
       const nextMetadata = resolveNextFrameMetadata(node, {
@@ -17676,54 +18021,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvedMetadataById.set(frameGroupId, normalizedMetadata);
     });
 
-    const keyParentsNeedingPromotion = Array.from(
-      new Set(
-        Array.from(resolvedMetadataById.values())
-          .filter((metadata) => metadata.role === 'value' && metadata.parentGroupId)
-          .map((metadata) => metadata.parentGroupId)
-          .filter((parentGroupId) => {
-            const parentMetadata = resolvedMetadataById.get(parentGroupId);
-            return Boolean(parentMetadata && parentMetadata.boxKind !== 'text');
-          })
-      )
-    );
-
-    for (const parentGroupId of keyParentsNeedingPromotion) {
-      const approved = confirmPromoteKeyBoxToText();
-
-      if (!approved) {
-        return {
-          ok: false,
-          skipped: false,
-          issues: [
-            {
-              frameGroupId: parentGroupId,
-              message: `${parentGroupId} 의 key 상자 text 보정이 취소되어 저장을 중단했습니다.`,
-            },
-          ],
-        };
-      }
-
-      const parentMetadata = resolvedMetadataById.get(parentGroupId);
-
-      if (!parentMetadata) {
-        continue;
-      }
-
-      resolvedMetadataById.set(parentGroupId, {
-        ...parentMetadata,
-        boxKind: 'text',
-        role: 'key',
-      });
-      autoParentPatchByFrameId.set(parentGroupId, {
-        boxKind: 'text',
-        role: 'key',
-      });
-    }
-
     const autoRuntimePatchByFrameId = new Map<string, FrameMetadataPatch>();
     const affectedFrameGroupIds = Array.from(
-      new Set([...activeSelectionIds, ...Array.from(relationPatchByFrameId.keys()), ...Array.from(autoParentPatchByFrameId.keys())])
+      new Set([...activeSelectionIds, ...Array.from(relationPatchByFrameId.keys())])
     );
     const affectedNodes = affectedFrameGroupIds
       .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
@@ -17776,6 +18076,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const issues: FrameMetadataValidationIssue[] = [];
+    const reviewIssues: FrameMetadataReviewIssue[] = [];
 
     affectedNodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
@@ -17786,16 +18087,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       if (nextMetadata.boxKind && nextMetadata.boxKind !== 'text' && nextMetadata.role === 'key') {
-        issues.push({
+        reviewIssues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 ${nextMetadata.boxKind} 상자라 key 역할을 가질 수 없습니다.`,
+          message: `${frameGroupId}: ${FRAME_BOX_KIND_SHORT_LABELS[nextMetadata.boxKind]}이면서 key 역할입니다. 조치: 라벨/제목이면 텍스트 상자로 바꾸고, 파일/서명 입력값이면 value 또는 독립 값으로 바꾸세요.`,
         });
       }
 
       if (nextMetadata.role === 'value' && !nextMetadata.parentGroupId) {
-        issues.push({
+        reviewIssues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 value 역할이라 연결된 key 상자가 필요합니다.`,
+          message: `${frameGroupId}: value 역할이지만 연결된 key 상자가 없습니다. 조치: 박스 연결하기로 key와 연결하거나 독립 값으로 바꾸세요.`,
         });
       }
 
@@ -17804,16 +18105,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         !availableFrameGroupIds.includes(nextMetadata.parentGroupId) &&
         !virtualDefinitionIds.has(nextMetadata.parentGroupId)
       ) {
-        issues.push({
+        reviewIssues.push({
           frameGroupId,
-          message: `${frameGroupId} 의 key 상자 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+          message: `${frameGroupId}: 연결된 key 상자 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다. 조치: key 연결을 해제하거나 존재하는 key 상자로 다시 연결하세요.`,
         });
       }
 
       if (nextMetadata.parentGroupId === frameGroupId) {
-        issues.push({
+        reviewIssues.push({
           frameGroupId,
-          message: `${frameGroupId} 는 자기 자신을 key 상자로 가질 수 없습니다.`,
+          message: `${frameGroupId}: 자기 자신을 key 상자로 참조하고 있습니다. 조치: key 연결을 해제하거나 다른 key 상자로 다시 연결하세요.`,
         });
       }
 
@@ -17822,14 +18123,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         const isVirtualParent = virtualDefinitionIds.has(nextMetadata.parentGroupId);
 
         if (!parentMetadata && !isVirtualParent) {
-          issues.push({
+          reviewIssues.push({
             frameGroupId,
-            message: `${frameGroupId} 의 key 상자 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다.`,
+            message: `${frameGroupId}: 연결된 key 상자 ${nextMetadata.parentGroupId} 를 찾을 수 없습니다. 조치: key 연결을 해제하거나 다시 연결하세요.`,
           });
-        } else if (parentMetadata && !isVirtualParent && (parentMetadata.boxKind !== 'text' || parentMetadata.role !== 'key')) {
-          issues.push({
+        } else if (parentMetadata && !isVirtualParent && parentMetadata.role !== 'key') {
+          reviewIssues.push({
             frameGroupId,
-            message: `${frameGroupId} 의 key 상자 ${nextMetadata.parentGroupId} 는 text key 상자여야 합니다.`,
+            message: `${frameGroupId}: 연결된 key 상자 ${nextMetadata.parentGroupId} 의 역할이 key가 아닙니다. 조치: 연결된 상자를 key로 바꾸거나 다른 key 상자로 다시 연결하세요.`,
+          });
+        } else if (parentMetadata && !isVirtualParent && parentMetadata.boxKind && parentMetadata.boxKind !== 'text') {
+          reviewIssues.push({
+            frameGroupId: nextMetadata.parentGroupId,
+            message: `${nextMetadata.parentGroupId}: ${FRAME_BOX_KIND_SHORT_LABELS[parentMetadata.boxKind]}이면서 key 역할입니다. 조치: 라벨/제목이면 텍스트 상자로 바꾸고, 파일/서명 입력값이면 value 또는 독립 값으로 바꾸세요.`,
           });
         }
       }
@@ -17839,9 +18145,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         !virtualDefinitionIds.has(nextMetadata.parentGroupId) &&
         hasResolvedFrameParentCycle(frameGroupId, nextMetadata.parentGroupId, resolvedMetadataById)
       ) {
-        issues.push({
+        reviewIssues.push({
           frameGroupId,
-          message: `${frameGroupId} 의 key 연결에 순환 참조가 있습니다.`,
+          message: `${frameGroupId}: key 연결에 순환 참조가 있습니다. 조치: 연결을 해제한 뒤 key/value 방향을 다시 지정하세요.`,
         });
       }
 
@@ -17862,6 +18168,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         ok: false,
         skipped: false,
         issues,
+        reviewIssues,
+      };
+    }
+
+    if (!hasMetadataChanges && !hasRelationChanges && autoRuntimePatchByFrameId.size <= 0) {
+      return {
+        ok: true,
+        skipped: true,
+        issues: [],
+        reviewIssues,
       };
     }
 
@@ -17871,7 +18187,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const mergedPatch = {
         ...(activeSelectionIds.includes(frameGroupId) ? metadataPatch : {}),
         ...(relationPatchByFrameId.get(frameGroupId) || {}),
-        ...(autoParentPatchByFrameId.get(frameGroupId) || {}),
         ...(autoRuntimePatchByFrameId.get(frameGroupId) || {}),
       };
 
@@ -17893,7 +18208,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
     });
 
-    syncFrameRelationshipValueKeys(root, resolvedMetadataById);
+    syncFrameRelationshipValueKeys(root, resolvedMetadataById, virtualFrameDefinitions);
     syncDraftPreviewHtmlRef();
     syncFrameMetadataDraft();
     if (relationMode.kind === 'value') {
@@ -17904,6 +18219,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       ok: true,
       skipped: false,
       issues: [],
+      reviewIssues,
     };
   }, [
     availableFrameGroupIds,
@@ -17912,6 +18228,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     requestPreviewTextFit,
     syncDraftPreviewHtmlRef,
     syncFrameMetadataDraft,
+    virtualFrameDefinitions,
     virtualDefinitionIds,
   ]);
 
@@ -17936,6 +18253,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (!metadataResult.ok) {
         setSelectionValidationIssues(metadataResult.issues);
+        setSelectionReviewIssues(metadataResult.reviewIssues || []);
         setSelectionSaveProgress({
           phase: 'failed',
           title: '선택 항목 저장',
@@ -17946,13 +18264,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
+      const nextReviewIssues = metadataResult.reviewIssues || [];
       setSelectionValidationIssues([]);
+      setSelectionReviewIssues(nextReviewIssues);
       setSelectionSaveProgress({
         phase: 'completed',
         title: '선택 항목 저장',
         percent: 100,
-        stage: metadataResult.skipped ? '변경 없음' : '메타데이터 반영 완료',
-        detail: metadataResult.skipped ? '반영할 메타데이터 변경이 없습니다.' : '메타데이터를 자동 반영했습니다.',
+        stage: nextReviewIssues.length > 0 ? '확인 필요' : metadataResult.skipped ? '변경 없음' : '메타데이터 반영 완료',
+        detail:
+          nextReviewIssues.length > 0
+            ? `${nextReviewIssues.length}개 상자에 확인 필요한 메타데이터 상태가 있습니다.`
+            : metadataResult.skipped
+              ? '반영할 메타데이터 변경이 없습니다.'
+              : '메타데이터를 자동 반영했습니다.',
       });
     }, 120);
 
@@ -17976,7 +18301,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    setSelectionValidationIssues([]);
+	      setSelectionValidationIssues([]);
+	      setSelectionReviewIssues([]);
     setSelectionSaveProgress({
       phase: 'running',
       title: '선택 항목 저장',
@@ -17992,6 +18318,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const issues = metadataResult.issues;
       const errorCount = issues.length;
       setSelectionValidationIssues(issues);
+      setSelectionReviewIssues(metadataResult.reviewIssues || []);
       setSelectionSaveProgress({
         phase: 'failed',
         title: '선택 항목 저장',
@@ -18010,15 +18337,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
+    const nextReviewIssues = metadataResult.reviewIssues || [];
     setSelectionValidationIssues([]);
+    setSelectionReviewIssues(nextReviewIssues);
     setSelectionSaveProgress({
       phase: 'running',
       title: '선택 항목 저장',
       percent: metadataResult.skipped ? 52 : 58,
-      stage: metadataResult.skipped ? '메타데이터 변경 없음' : '메타데이터 반영 중',
-      detail: metadataResult.skipped
-        ? '메타데이터 변경은 없어 스타일 저장 단계로 바로 넘어갑니다.'
-        : '선택한 상자의 메타데이터를 캔버스에 반영했습니다.',
+      stage: nextReviewIssues.length > 0 ? '메타데이터 확인 필요' : metadataResult.skipped ? '메타데이터 변경 없음' : '메타데이터 반영 중',
+      detail:
+        nextReviewIssues.length > 0
+          ? `${nextReviewIssues.length}개 상자에 확인 필요한 메타데이터 상태가 있습니다. 저장은 계속 진행합니다.`
+          : metadataResult.skipped
+            ? '메타데이터 변경은 없어 스타일 저장 단계로 바로 넘어갑니다.'
+            : '선택한 상자의 메타데이터를 캔버스에 반영했습니다.',
     });
     await waitForNextPaint();
 
@@ -19389,6 +19721,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setPositionOrderLockCandidateSelectionStage('');
     setPositionSelectionClickChainSnapshot(null);
     setSelectionValidationIssues([]);
+    setSelectionReviewIssues([]);
     setSelectionSaveProgress(defaultSelectionSaveProgressState);
     setSelectedPositionSpacingSettingRelationKey('');
     setPositionSelectionStateRevision((previous) => previous + 1);
@@ -19461,6 +19794,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setPositionOrderLockCandidateSelectionStage('');
       setPositionSelectionClickChainSnapshot(null);
       setSelectionValidationIssues([]);
+      setSelectionReviewIssues([]);
       setSelectionSaveProgress(defaultSelectionSaveProgressState);
       setSelectedPositionSpacingSettingRelationKey('');
       setPositionSelectionStateRevision((previous) => previous + 1);
@@ -19575,6 +19909,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setPositionSpacingCheckedRowKeys({});
         setPositionSelectionClickChainSnapshot(null);
         setSelectionValidationIssues([]);
+        setSelectionReviewIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
         setPositionSelectionStateRevision((previous) => previous + 1);
         applyRuntimeSelectionUi([], emptyEdgeSelection, []);
@@ -19640,6 +19975,176 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const frameNode = resolveFrameSelectionAnchor(frameAnchorTarget);
       const pageInner =
         target.closest<HTMLElement>('.page-inner') || frameNode?.closest<HTMLElement>('.page-inner') || null;
+      const hadSelectionBeforePointerDown = selectedFrameGroupIdsRef.current.length > 0;
+      const startFrameDragInteraction = (anchorNode: HTMLElement, selectionFrameGroupIds: string[]) => {
+        if (!pageInner || canvasInteractionMode !== 'move' || !hadSelectionBeforePointerDown) {
+          return false;
+        }
+
+        const normalizedSelectionIdSet = new Set(
+          selectionFrameGroupIds
+            .map((selectionFrameGroupId) => selectionFrameGroupId.trim())
+            .filter((selectionFrameGroupId) => Boolean(selectionFrameGroupId))
+        );
+
+        if (normalizedSelectionIdSet.size <= 0) {
+          normalizedSelectionIdSet.add(getFrameGroupId(anchorNode));
+        }
+
+        const selectionOnPage = getFrameNodes(pageInner).filter(
+          (node) =>
+            normalizedSelectionIdSet.has(getFrameGroupId(node)) &&
+            node.closest<HTMLElement>('.page-inner') === pageInner
+        );
+
+        event.preventDefault();
+        lockPreviewEditorStateDuringInteraction();
+        safeSetPointerCapture(event.currentTarget, event.pointerId);
+        activePointerOwnerRef.current = event.currentTarget;
+        dragStateRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          scale: previewZoom / 100,
+          pageInner,
+          anchorRect: readFrameMoveRect(anchorNode),
+          nodes: selectionOnPage.length
+            ? selectionOnPage.map((node) => ({ node, rect: readFrameMoveRect(node) }))
+            : [{ node: anchorNode, rect: readFrameMoveRect(anchorNode) }],
+        };
+        return true;
+      };
+      const startMarqueeSelectionInteraction = ({
+        anchorFrameGroupId = '',
+        baseSelectionIds,
+      }: {
+        anchorFrameGroupId?: string;
+        baseSelectionIds?: string[];
+      } = {}) => {
+        if (!pageInner || edgeButton || resizeHandle) {
+          return false;
+        }
+
+        const useGroupedShiftSelection = selectionPanelTab === 'position' && positionOrderLockSelectionMode;
+        const shouldAccumulateSelection = Boolean(event.shiftKey);
+        const expandGroupMembers = (frameGroupId: string) => {
+          const normalizedFrameGroupId = frameGroupId.trim();
+          if (!normalizedFrameGroupId) {
+            return [] as string[];
+          }
+          const group = positionBoxGroupByFrameGroupId.get(normalizedFrameGroupId);
+          if (!group || group.frameGroupIds.length <= 1) {
+            return [normalizedFrameGroupId];
+          }
+          return group.frameGroupIds
+            .map((memberFrameGroupId) => memberFrameGroupId.trim())
+            .filter((memberFrameGroupId) => Boolean(memberFrameGroupId));
+        };
+        const resolvedBaseSelectionIds =
+          baseSelectionIds !== undefined
+            ? baseSelectionIds
+            : shouldAccumulateSelection
+              ? useGroupedShiftSelection
+                ? Array.from(new Set(selectedFrameGroupIdsRef.current.flatMap(expandGroupMembers)))
+                : selectedFrameGroupIdsRef.current.slice()
+              : [];
+        const frameHitEntries = getFrameNodes(pageInner)
+          .filter((node) => node.closest<HTMLElement>('.page-inner') === pageInner)
+          .map((node) => {
+            const candidateFrameGroupId = getFrameGroupId(node);
+
+            if (!candidateFrameGroupId) {
+              return null;
+            }
+
+            return {
+              frameGroupId: candidateFrameGroupId,
+              rect: readFrameMoveRect(node),
+            };
+          })
+          .filter((entry): entry is MarqueeFrameHitEntry => Boolean(entry));
+        const frameGroupIdSet = new Set(frameHitEntries.map((entry) => entry.frameGroupId));
+        const positionGroupHitEntries =
+          selectionPanelTab === 'position'
+            ? positionBoxGroups
+                .map((group) => {
+                  const frameGroupIds = Array.from(
+                    new Set(
+                      group.frameGroupIds
+                        .map((candidateFrameGroupId) => candidateFrameGroupId.trim())
+                        .filter((candidateFrameGroupId) => Boolean(candidateFrameGroupId) && frameGroupIdSet.has(candidateFrameGroupId))
+                    )
+                  );
+
+                  if (frameGroupIds.length <= 1) {
+                    return null;
+                  }
+
+                  const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
+                  const rect = wrapper ? readFrameElementRect(wrapper, pageInner) : null;
+
+                  if (!rect) {
+                    return null;
+                  }
+
+                  return {
+                    groupId: group.id,
+                    label: group.label,
+                    frameGroupIds,
+                    frameGroupIdSet: new Set(frameGroupIds),
+                    rect,
+                  };
+                })
+                .filter((entry): entry is MarqueePositionGroupHitEntry => Boolean(entry))
+                .sort((left, right) => {
+                  const leftArea = left.rect.width * left.rect.height;
+                  const rightArea = right.rect.width * right.rect.height;
+
+                  if (Math.abs(leftArea - rightArea) > 0.1) {
+                    return rightArea - leftArea;
+                  }
+
+                  if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+                    return right.frameGroupIds.length - left.frameGroupIds.length;
+                  }
+
+                  return left.groupId.localeCompare(right.groupId, 'ko');
+                })
+            : [];
+
+        event.preventDefault();
+        lockPreviewEditorStateDuringInteraction();
+        safeSetPointerCapture(event.currentTarget, event.pointerId);
+        activePointerOwnerRef.current = event.currentTarget;
+        marqueeSelectionStateRef.current = {
+          pointerId: event.pointerId,
+          scale: previewZoom / 100,
+          pageInner,
+          anchorFrameGroupId: anchorFrameGroupId || null,
+          baseSelectionIds: resolvedBaseSelectionIds.slice(),
+          lastSelectionIds: resolvedBaseSelectionIds.slice(),
+          lastProxySelections: selectionPanelTab === 'position'
+            ? resolvePositionMarqueeProxySelectionsFromHitEntries(positionGroupHitEntries, resolvedBaseSelectionIds)
+            : undefined,
+          frameHitEntries,
+          positionGroupHitEntries,
+          origin: readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100),
+          ghost: null,
+          mode: 'contained',
+          active: false,
+        };
+        return true;
+      };
+      const startSelectionMarqueeAfterClickSelection = () => {
+        if (canvasInteractionMode !== 'select' && !(canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown)) {
+          return false;
+        }
+
+        return startMarqueeSelectionInteraction({
+          anchorFrameGroupId: '',
+          baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
+        });
+      };
 
       if (
         metadataRelationSelectionModeRef.current.kind !== 'idle' &&
@@ -19788,134 +20293,48 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	                    },
 	                  ]
 	                : undefined;
-	            applyFrameBoxSelection(nextSelectionIds.length > 0 ? nextSelectionIds : [nextEntry.frameGroupId], {
-	              positionGroupProxySelectionGroupId: nextEntry.groupId,
-	              overridePositionGroupProxySelections: proxySelection,
-	            });
-	            return;
-	          }
+		            const dragSelectionIds = nextSelectionIds.length > 0 ? nextSelectionIds : [nextEntry.frameGroupId];
+		            const dragAnchorNode = queryFrameSelectionAnchorByFrameGroupId(pageInner, dragSelectionIds[0] || nextEntry.frameGroupId);
+			            applyFrameBoxSelection(dragSelectionIds, {
+			              positionGroupProxySelectionGroupId: nextEntry.groupId,
+			              overridePositionGroupProxySelections: proxySelection,
+			            });
+			            if (startSelectionMarqueeAfterClickSelection()) {
+			              return;
+			            }
+			            if (dragAnchorNode) {
+			              startFrameDragInteraction(dragAnchorNode, dragSelectionIds);
+			            }
+		          return;
+		        }
 
-	          applyFrameBoxSelection([nextEntry.frameGroupId], {
-	            disableAutoPositionGroupProxySelection: true,
-	          });
-	          return;
-	        }
+		        const nextFrameAnchorNode = queryFrameSelectionAnchorByFrameGroupId(pageInner, nextEntry.frameGroupId);
+			        applyFrameBoxSelection([nextEntry.frameGroupId], {
+			          disableAutoPositionGroupProxySelection: true,
+			        });
+			        if (startSelectionMarqueeAfterClickSelection()) {
+			          return;
+			        }
+			        if (nextFrameAnchorNode) {
+			          startFrameDragInteraction(nextFrameAnchorNode, [nextEntry.frameGroupId]);
+			        }
+	        return;
+	      }
 	      }
 
       const shouldStartMarqueeSelection =
         !edgeButton &&
         !resizeHandle &&
         Boolean(pageInner) &&
-        (!frameNode || (event.shiftKey && selectionPanelTab !== 'position'));
+        (!frameNode ||
+          (event.shiftKey && selectionPanelTab !== 'position') ||
+          (selectionPanelTab !== 'position' &&
+            Boolean(frameNode) &&
+            (canvasInteractionMode === 'select' || (canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown))));
 
       if (shouldStartMarqueeSelection && pageInner) {
-        const useGroupedShiftSelection = selectionPanelTab === 'position' && positionOrderLockSelectionMode;
-        const shouldAccumulateSelection = Boolean(event.shiftKey);
         const rawAnchorFrameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
-        const resolvedAnchorFrameGroupId = rawAnchorFrameGroupId;
-        const expandGroupMembers = (frameGroupId: string) => {
-          const normalizedFrameGroupId = frameGroupId.trim();
-          if (!normalizedFrameGroupId) {
-            return [] as string[];
-          }
-          const group = positionBoxGroupByFrameGroupId.get(normalizedFrameGroupId);
-          if (!group || group.frameGroupIds.length <= 1) {
-            return [normalizedFrameGroupId];
-          }
-          return group.frameGroupIds
-            .map((memberFrameGroupId) => memberFrameGroupId.trim())
-            .filter((memberFrameGroupId) => Boolean(memberFrameGroupId));
-        };
-        const baseSelectionIds = shouldAccumulateSelection
-          ? useGroupedShiftSelection
-            ? Array.from(new Set(selectedFrameGroupIdsRef.current.flatMap(expandGroupMembers)))
-            : selectedFrameGroupIdsRef.current.slice()
-          : [];
-        const frameHitEntries = getFrameNodes(pageInner)
-          .filter((node) => node.closest<HTMLElement>('.page-inner') === pageInner)
-          .map((node) => {
-            const frameGroupId = getFrameGroupId(node);
-
-            if (!frameGroupId) {
-              return null;
-            }
-
-            return {
-              frameGroupId,
-              rect: readFrameMoveRect(node),
-            };
-          })
-          .filter((entry): entry is MarqueeFrameHitEntry => Boolean(entry));
-        const frameGroupIdSet = new Set(frameHitEntries.map((entry) => entry.frameGroupId));
-        const positionGroupHitEntries =
-          selectionPanelTab === 'position'
-            ? positionBoxGroups
-                .map((group) => {
-                  const frameGroupIds = Array.from(
-                    new Set(
-                      group.frameGroupIds
-                        .map((frameGroupId) => frameGroupId.trim())
-                        .filter((frameGroupId) => Boolean(frameGroupId) && frameGroupIdSet.has(frameGroupId))
-                    )
-                  );
-
-                  if (frameGroupIds.length <= 1) {
-                    return null;
-                  }
-
-                  const wrapper = resolvePositionGroupWrapperElement(pageInner, group.id);
-                  const rect = wrapper ? readFrameElementRect(wrapper, pageInner) : null;
-
-                  if (!rect) {
-                    return null;
-                  }
-
-                  return {
-                    groupId: group.id,
-                    label: group.label,
-                    frameGroupIds,
-                    frameGroupIdSet: new Set(frameGroupIds),
-                    rect,
-                  };
-                })
-                .filter((entry): entry is MarqueePositionGroupHitEntry => Boolean(entry))
-                .sort((left, right) => {
-                  const leftArea = left.rect.width * left.rect.height;
-                  const rightArea = right.rect.width * right.rect.height;
-
-                  if (Math.abs(leftArea - rightArea) > 0.1) {
-                    return rightArea - leftArea;
-                  }
-
-                  if (left.frameGroupIds.length !== right.frameGroupIds.length) {
-                    return right.frameGroupIds.length - left.frameGroupIds.length;
-                  }
-
-                  return left.groupId.localeCompare(right.groupId, 'ko');
-                })
-            : [];
-
-        event.preventDefault();
-        lockPreviewEditorStateDuringInteraction();
-        safeSetPointerCapture(event.currentTarget, event.pointerId);
-        activePointerOwnerRef.current = event.currentTarget;
-        marqueeSelectionStateRef.current = {
-          pointerId: event.pointerId,
-          scale: previewZoom / 100,
-          pageInner,
-          anchorFrameGroupId: resolvedAnchorFrameGroupId || null,
-          baseSelectionIds,
-          lastSelectionIds: baseSelectionIds.slice(),
-          lastProxySelections: selectionPanelTab === 'position'
-            ? resolvePositionMarqueeProxySelectionsFromHitEntries(positionGroupHitEntries, baseSelectionIds)
-            : undefined,
-          frameHitEntries,
-          positionGroupHitEntries,
-          origin: readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100),
-          ghost: null,
-          mode: 'contained',
-          active: false,
-        };
+        startMarqueeSelectionInteraction({ anchorFrameGroupId: rawAnchorFrameGroupId });
         return;
       }
 
@@ -20068,11 +20487,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               frameGroupId,
             });
             return;
-          }
+	          }
 
-          applyFrameBoxSelection([frameGroupId]);
-          return;
-        }
+		          applyFrameBoxSelection([frameGroupId]);
+		          if (startSelectionMarqueeAfterClickSelection()) {
+		            return;
+		          }
+		          startFrameDragInteraction(frameNode, [frameGroupId]);
+		          return;
+		        }
 
         if (event.shiftKey) {
           applyShiftMergedPositionEntitySelection(nextEntry);
@@ -20104,18 +20527,28 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   },
                 ]
               : undefined;
-          applyFrameBoxSelection(nextSelectionIds.length > 0 ? nextSelectionIds : [nextEntry.frameGroupId], {
-            positionGroupProxySelectionGroupId: nextEntry.groupId,
-            overridePositionGroupProxySelections: proxySelection,
-          });
-          return;
-        }
+	          const dragSelectionIds = nextSelectionIds.length > 0 ? nextSelectionIds : [nextEntry.frameGroupId];
+		          applyFrameBoxSelection(dragSelectionIds, {
+		            positionGroupProxySelectionGroupId: nextEntry.groupId,
+		            overridePositionGroupProxySelections: proxySelection,
+		          });
+		          if (startSelectionMarqueeAfterClickSelection()) {
+		            return;
+		          }
+		          startFrameDragInteraction(frameNode, dragSelectionIds);
+		          return;
+		        }
 
-        applyFrameBoxSelection([nextEntry.frameGroupId], {
-          disableAutoPositionGroupProxySelection: true,
-        });
-        return;
-      }
+	        const nextFrameAnchorNode = queryFrameSelectionAnchorByFrameGroupId(pageInner, nextEntry.frameGroupId) || frameNode;
+		        applyFrameBoxSelection([nextEntry.frameGroupId], {
+		          disableAutoPositionGroupProxySelection: true,
+		        });
+		        if (startSelectionMarqueeAfterClickSelection()) {
+		          return;
+		        }
+		        startFrameDragInteraction(nextFrameAnchorNode, [nextEntry.frameGroupId]);
+		        return;
+	      }
 
       const explicitEdgeDirection = (edgeButton?.getAttribute('data-direction') ||
         resizeHandle?.getAttribute('data-direction') ||
@@ -20163,11 +20596,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const currentSelectionIds = selectedFrameGroupIdsRef.current;
-      const stableSelection = currentSelectionIds.includes(frameGroupId) ? currentSelectionIds : [frameGroupId];
-      applyFrameBoxSelection(stableSelection);
+	      const currentSelectionIds = selectedFrameGroupIdsRef.current;
+	      const stableSelection = currentSelectionIds.includes(frameGroupId) ? currentSelectionIds : [frameGroupId];
+	      applyFrameBoxSelection(stableSelection);
 
-      if (resizeHandle) {
+	      if (resizeHandle) {
         const direction = (resizeHandle.getAttribute('data-direction') || 'se') as TemplateFrameResizeDirection;
         const resizeContext = buildFrameResizeContext(frameNode);
         event.preventDefault();
@@ -20188,11 +20621,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               ? collectWidthResizeInstructions(resizeContext, direction.includes('w') ? 'left' : 'right')
               : undefined,
           edgeResizeTargets: undefined,
-        };
-        return;
-      }
+	        };
+	        return;
+	      }
 
-      if (isInteractiveTarget(target)) {
+	      if (canvasInteractionMode !== 'move') {
+	        return;
+	      }
+
+	      if (isInteractiveTarget(target)) {
         return;
       }
 
@@ -20222,8 +20659,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [
       boxCreationMode,
       boxCreationPositionMode,
-      buildLiveEdgeTopologySnapshot,
-      applyFrameBoxSelection,
+	      buildLiveEdgeTopologySnapshot,
+	      canvasInteractionMode,
+	      applyFrameBoxSelection,
       applyShiftMergedPositionEntitySelection,
       clearFrameSelection,
       deleteCanvasSelectionEntity,
@@ -21399,6 +21837,193 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
+  const renderMetadataCanvasActionControls = () => (
+    <CardContent className="px-6 pb-3 pt-0">
+      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        {selectionValidationIssues.length > 0 ? (
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-950">
+            <div className="font-semibold">메타데이터 설정 오류</div>
+            <div className="mt-1 text-[11px] leading-5">
+              빨간색으로 표시된 상자는 아래 사유로 메타데이터를 반영할 수 없습니다.
+            </div>
+            <ul className="mt-2 space-y-1 text-[11px] leading-5">
+              {selectionValidationIssues.slice(0, 5).map((issue, index) => (
+                <li key={`metadata-canvas-validation:${issue.frameGroupId}:${index}`}>{issue.message}</li>
+              ))}
+            </ul>
+            {selectionValidationIssues.length > 5 ? (
+              <div className="mt-1 text-[11px] font-medium">외 {selectionValidationIssues.length - 5}개 오류</div>
+            ) : null}
+          </div>
+        ) : null}
+        {selectionReviewIssues.length > 0 ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+            <div className="font-semibold">확인 필요</div>
+            <div className="mt-1 text-[11px] leading-5">
+              노란 느낌표가 표시된 상자는 저장을 막지는 않지만 메타데이터 관계 확인이 필요합니다.
+            </div>
+            <ul className="mt-2 space-y-1 text-[11px] leading-5">
+              {selectionReviewIssues.slice(0, 5).map((issue, index) => (
+                <li key={`metadata-canvas-review:${issue.frameGroupId}:${index}`}>{issue.message}</li>
+              ))}
+            </ul>
+            {selectionReviewIssues.length > 5 ? (
+              <div className="mt-1 text-[11px] font-medium">외 {selectionReviewIssues.length - 5}개 확인 필요</div>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-3 gap-2 xl:grid-cols-6">
+          {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
+            const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
+
+            return (
+              <button
+                key={`metadata-canvas-box-kind:${boxKind}`}
+                type="button"
+                disabled={!hasSelectedMetadataTarget}
+                onClick={() => stageMetadataBoxKind(boxKind)}
+                className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                  isActive
+                    ? 'border-teal-600 bg-teal-600 text-white'
+                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                }`}
+              >
+                {FRAME_BOX_KIND_LABELS[boxKind]}
+              </button>
+            );
+          })}
+          {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
+            const isActive = hasSelectedMetadataTarget && frameMetadataDraft.role === role;
+
+            return (
+              <button
+                key={`metadata-canvas-role:${role}`}
+                type="button"
+                disabled={!hasSelectedMetadataTarget}
+                onClick={() => stageMetadataRole(role)}
+                className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                  isActive
+                    ? 'border-amber-600 bg-amber-500 text-white'
+                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                }`}
+              >
+                {FRAME_ROLE_SHORT_LABELS[role]}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.7fr)]">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-800">Runtime Mode</label>
+            <select
+              value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
+              disabled={!hasSelectedMetadataTarget}
+              onChange={(event) =>
+                setFrameMetadataDraft((previous) => ({
+                  ...previous,
+                  runtimeMode: event.target.value as FrameMetadataDraft['runtimeMode'],
+                }))
+              }
+              className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">{hasSelectedMetadataTarget ? '혼합 / 자동 기본값 사용' : '-'}</option>
+              {runtimeModeOptions.map((runtimeMode) => (
+                <option key={`metadata-canvas-runtime:${runtimeMode}`} value={runtimeMode}>
+                  {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
+                </option>
+              ))}
+            </select>
+            <div className="text-[11px] leading-4 text-slate-600">{frameRuntimeModeHelpText}</div>
+          </div>
+
+          <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-700">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-semibold text-slate-900">박스 연결</div>
+              <div className="text-[11px] text-slate-500">key 1개와 value 1개 이상</div>
+            </div>
+            <div className="space-y-1 text-[11px] leading-5">
+              <div>Key Box: {hasSelectedMetadataTarget && currentParentKeyBoxLabel !== 'null' ? currentParentKeyBoxLabel : '-'}</div>
+              <div>Value Box: {hasSelectedMetadataTarget ? valueBoxPickerSummary : '-'}</div>
+            </div>
+            {metadataVirtualConnectionDraft.mode === 'idle' ? (
+              <Button
+                type="button"
+                className="w-full"
+                onClick={applySelectedMetadataBoxConnection}
+                disabled={!hasSelectedMetadataTarget}
+              >
+                박스 연결하기
+              </Button>
+            ) : (
+              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+                <div className="text-[11px] font-semibold text-amber-900">
+                  {metadataVirtualConnectionDraft.mode === 'key'
+                    ? '새 key 정의를 만들고 선택한 value 상자에 연결합니다.'
+                    : '새 입력값 정의를 만들고 선택한 key 상자와 연결할 준비를 합니다.'}
+                </div>
+                <Input
+                  value={metadataVirtualConnectionDraft.label}
+                  onChange={(event) =>
+                    setMetadataVirtualConnectionDraft((previous) => ({
+                      ...previous,
+                      label: event.target.value,
+                      error: '',
+                    }))
+                  }
+                  onBlur={() =>
+                    setMetadataVirtualConnectionDraft((previous) => {
+                      if (previous.idTouched && previous.id.trim()) {
+                        return previous;
+                      }
+
+                      return {
+                        ...previous,
+                        id: normalizeVirtualDefinitionId(previous.label),
+                      };
+                    })
+                  }
+                  placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자명 입력' : '입력값 상자명 입력'}
+                  className={metadataVirtualConnectionDraft.error && !metadataVirtualConnectionDraft.label.trim() ? 'border-red-500' : ''}
+                />
+                <Input
+                  value={metadataVirtualConnectionDraft.id}
+                  onChange={(event) =>
+                    setMetadataVirtualConnectionDraft((previous) => ({
+                      ...previous,
+                      id: event.target.value,
+                      idTouched: true,
+                      error: '',
+                    }))
+                  }
+                  onBlur={() =>
+                    setMetadataVirtualConnectionDraft((previous) => ({
+                      ...previous,
+                      id: normalizeVirtualDefinitionId(previous.id || previous.label),
+                    }))
+                  }
+                  placeholder={metadataVirtualConnectionDraft.mode === 'key' ? '키 상자 아이디 입력' : '입력값 상자 아이디 입력'}
+                  className={metadataVirtualConnectionDraft.error ? 'border-red-500 bg-red-50' : ''}
+                />
+                {metadataVirtualConnectionDraft.error ? (
+                  <div className="text-[11px] font-medium text-red-700">{metadataVirtualConnectionDraft.error}</div>
+                ) : null}
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant="outline" onClick={resetMetadataVirtualConnectionDraft}>
+                    취소
+                  </Button>
+                  <Button type="button" onClick={saveMetadataVirtualConnectionDefinition}>
+                    저장
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </CardContent>
+  );
+
   return (
     <div className="space-y-6">
       <style>{`
@@ -21536,6 +22161,31 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview [data-template-selected="true"][${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]::before {
           background: rgba(225, 29, 72, .98);
+          box-shadow: none !important;
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}="true"] {
+          position: relative;
+          overflow: visible !important;
+        }
+        .template-edit-preview [${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}="true"]::after {
+          content: "!";
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          z-index: 35;
+          width: 18px;
+          height: 18px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid rgba(217, 119, 6, .86);
+          background: rgba(254, 243, 199, .98);
+          color: rgba(146, 64, 14, .98);
+          font-size: 12px;
+          line-height: 1;
+          font-weight: 800;
+          pointer-events: none;
           box-shadow: none !important;
         }
         .template-edit-preview [data-template-edge-host="true"] {
@@ -22125,11 +22775,39 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr] min-w-0">
         <Card className="border-slate-200 min-w-0 overflow-hidden">
           <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>상자 편집 캔버스</CardTitle>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
+	            <div className="flex items-center justify-between gap-3">
+	              <CardTitle>상자 편집 캔버스</CardTitle>
+	              <div className="flex items-center gap-2">
+	                <div className="inline-flex overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="캔버스 조작 모드">
+	                  <button
+	                    type="button"
+	                    className={`inline-flex h-8 w-8 items-center justify-center transition ${
+	                      canvasInteractionMode === 'select'
+	                        ? 'bg-slate-900 text-white'
+	                        : 'bg-white text-slate-600 hover:bg-slate-100'
+	                    }`}
+	                    onClick={() => setCanvasInteractionMode('select')}
+	                    aria-label="선택 모드"
+	                    title="선택 모드"
+	                  >
+	                    <MousePointer2 className="h-4 w-4" />
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className={`inline-flex h-8 w-8 items-center justify-center border-l border-slate-300 transition ${
+	                      canvasInteractionMode === 'move'
+	                        ? 'bg-slate-900 text-white'
+	                        : 'bg-white text-slate-600 hover:bg-slate-100'
+	                    }`}
+	                    onClick={() => setCanvasInteractionMode('move')}
+	                    aria-label="이동 모드"
+	                    title="이동 모드"
+	                  >
+	                    <Move className="h-4 w-4" />
+	                  </button>
+	                </div>
+	                <Button
+	                  size="sm"
                   variant="outline"
                   onClick={handleUndoCanvasHistory}
                   disabled={!canUndoCanvasHistory}
@@ -22157,6 +22835,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               </div>
             </div>
           </CardHeader>
+          {selectionPanelTab === 'metadata' ? renderMetadataCanvasActionControls() : null}
           {showCanvasLegend ? (
             <CardContent className="p-6 pt-0">
               <MetadataCanvasLegend />
@@ -22800,163 +23479,34 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-slate-800">상자 메타데이터</label>
                     <p className="text-xs text-slate-500">
-                      템플릿은 슬롯 정의만 저장하고, 실제 파일/서명 값은 템플릿을 사용하는 문서가 소유합니다.
+                      Box Kind, Role, Runtime Mode, 박스 연결은 상자 편집 캔버스 상단 버튼에서 설정합니다.
                     </p>
                   </div>
                   <input type="hidden" data-metadata-field="valueKey" value={frameMetadataDraft.valueKey} readOnly />
+                  <input
+                    type="hidden"
+                    data-metadata-field="boxKind"
+                    value={hasSelectedMetadataTarget ? frameMetadataDraft.boxKind : ''}
+                    readOnly
+                  />
+                  <input
+                    type="hidden"
+                    data-metadata-field="role"
+                    value={hasSelectedMetadataTarget ? frameMetadataDraft.role : ''}
+                    readOnly
+                  />
+                  <input
+                    type="hidden"
+                    data-metadata-field="runtimeMode"
+                    value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
+                    readOnly
+                  />
                   <input
                     type="hidden"
                     data-metadata-field="parentGroupId"
                     value={frameMetadataDraft.parentGroupId}
                     readOnly
                   />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">Box Kind</label>
-                      <select
-                        data-metadata-field="boxKind"
-                        value={hasSelectedMetadataTarget ? frameMetadataDraft.boxKind : ''}
-                        disabled={!hasSelectedMetadataTarget}
-                        onChange={(event) =>
-                          setFrameMetadataDraft((previous) => ({
-                            ...previous,
-                            boxKind: event.target.value as FrameMetadataDraft['boxKind'],
-                          }))
-                        }
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      >
-                        <option value="">{hasSelectedMetadataTarget ? '혼합 / 변경 안 함' : '-'}</option>
-                        {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => (
-                          <option key={boxKind} value={boxKind}>
-                            {FRAME_BOX_KIND_LABELS[boxKind]}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">Role</label>
-                      <select
-                        data-metadata-field="role"
-                        value={hasSelectedMetadataTarget ? frameMetadataDraft.role : ''}
-                        disabled={!hasSelectedMetadataTarget}
-                        onChange={(event) =>
-                          setFrameMetadataDraft((previous) => ({
-                            ...previous,
-                            role: event.target.value as FrameMetadataDraft['role'],
-                          }))
-                        }
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      >
-                        <option value="">{hasSelectedMetadataTarget ? '혼합 / 변경 안 함' : '-'}</option>
-                        {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => (
-                          <option key={role} value={role}>
-                            {FRAME_ROLE_LABELS[role]}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-medium text-slate-800">Key Box</label>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
-                        <div className="font-semibold text-slate-900">현재 연결 예정 / 현재 연결</div>
-                        <div className="mt-1">{hasSelectedMetadataTarget ? currentParentKeyBoxLabel : '-'}</div>
-                        <div className="mt-2">
-                          <EntityPicker
-                            value={hasSelectedMetadataTarget ? frameMetadataDraft.parentGroupId : ''}
-                            options={keyBoxPickerOptions as EntityPickerOption[]}
-                            onChange={(value) =>
-                              setFrameMetadataDraft((previous) => ({
-                                ...previous,
-                                parentGroupId: value,
-                              }))
-                            }
-                            onCreateOption={(label) => upsertVirtualDefinition(label, 'key')}
-                            onRenameOption={(option, nextLabel, nextId) => renameVirtualDefinition(option.id, nextLabel, nextId)}
-                            onDeleteOption={(option) => deleteVirtualDefinition(option.id)}
-                            createOptionLabel="저장"
-                            placeholder={hasSelectedMetadataTarget ? 'Key Box 검색/선택 또는 새 정의 입력' : '-'}
-                            emptyMessage="선택 가능한 Key Box가 없습니다."
-                            allowClear
-                            disabled={!hasSelectedMetadataTarget}
-                            optionLayout="inline"
-                            deleteOptionLabel="정의 삭제"
-                            renameOptionLabel="정의 수정"
-                            triggerClassName="h-11 min-h-11 items-center rounded-md py-2"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-medium text-slate-800">Value Box</label>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
-                        <div className="font-semibold text-slate-900">현재 연결 예정 / 현재 연결</div>
-                        <div className="mt-1 break-all">{hasSelectedMetadataTarget ? valueBoxPickerSummary : '-'}</div>
-                        <div className="mt-2">
-                          <EntityPicker
-                            value={valueBoxPickerCurrentValue}
-                            options={valueBoxPickerOptions as EntityPickerOption[]}
-                            onChange={(value) => {
-                              if (!primarySelectedFrameGroupId) {
-                                return;
-                              }
-                              setMetadataRelationSelectionMode({
-                                kind: 'value',
-                                sourceKeyFrameGroupId: primarySelectedFrameGroupId,
-                                targetFrameGroupIds: value ? [value] : [],
-                              });
-                            }}
-                            onCreateOption={(label) => upsertVirtualDefinition(label, 'value')}
-                            onRenameOption={(option, nextLabel, nextId) => renameVirtualDefinition(option.id, nextLabel, nextId)}
-                            onDeleteOption={(option) => deleteVirtualDefinition(option.id)}
-                            createOptionLabel="저장"
-                            placeholder={canEditValueBoxField ? 'Value Box 검색/선택 또는 새 정의 입력' : '-'}
-                            emptyMessage="선택 가능한 Value Box가 없습니다."
-                            allowClear
-                            disabled={!canEditValueBoxField}
-                            optionLayout="inline"
-                            deleteOptionLabel="정의 삭제"
-                            renameOptionLabel="정의 수정"
-                            triggerClassName="h-11 min-h-11 items-center rounded-md py-2"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-medium text-slate-800">Runtime Mode</label>
-                      <select
-                        data-metadata-field="runtimeMode"
-                        value={hasSelectedMetadataTarget ? frameMetadataDraft.runtimeMode : ''}
-                        disabled={!hasSelectedMetadataTarget}
-                        onChange={(event) =>
-                          setFrameMetadataDraft((previous) => ({
-                            ...previous,
-                            runtimeMode: event.target.value as FrameMetadataDraft['runtimeMode'],
-                          }))
-                        }
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      >
-                        <option value="">{hasSelectedMetadataTarget ? '혼합 / 자동 기본값 사용' : '-'}</option>
-                        {runtimeModeOptions.map((runtimeMode) => (
-                          <option key={runtimeMode} value={runtimeMode}>
-                            {FRAME_RUNTIME_MODE_LABELS[runtimeMode]}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
-                        <div className="font-semibold text-slate-900">현재 선택 설명</div>
-                        <div className="mt-1">{frameRuntimeModeHelpText}</div>
-                        <div className="mt-2 space-y-1">
-                          {runtimeModeOptions.map((runtimeMode) => (
-                            <div key={runtimeMode}>
-                              <span className="font-medium text-slate-900">{FRAME_RUNTIME_MODE_LABELS[runtimeMode]}</span>
-                              {' - '}
-                              {FRAME_RUNTIME_MODE_DESCRIPTIONS[runtimeMode]}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               ) : null}
 
