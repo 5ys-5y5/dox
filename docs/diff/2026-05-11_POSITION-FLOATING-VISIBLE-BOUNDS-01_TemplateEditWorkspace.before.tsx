@@ -606,22 +606,10 @@ type SummaryOverlayDragState = {
   pointerId: number;
   originX: number;
   originY: number;
-  initialLeft: number;
-  initialTop: number;
   offsetX: number;
   offsetY: number;
   width: number;
   height: number;
-  shellLeft: number;
-  shellTop: number;
-  minLeft: number;
-  maxLeft: number;
-  minTop: number;
-  maxTop: number;
-  visibleLeft: number;
-  visibleTop: number;
-  visibleWidth: number;
-  visibleHeight: number;
   hasMoved: boolean;
 };
 
@@ -702,7 +690,12 @@ const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
 const SUMMARY_OVERLAY_INSET_PX = 12;
 const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
 const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
-const FLOATING_ACTION_OVERLAY_TOP_STACK_OFFSET_PX = SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX + SUMMARY_OVERLAY_INSET_PX;
+const SUMMARY_OVERLAY_CORNER_CLASS: Record<SummaryOverlayCorner, string> = {
+  'top-left': 'left-3 top-3',
+  'top-right': 'right-3 top-3',
+  'bottom-left': 'bottom-3 left-3',
+  'bottom-right': 'bottom-3 right-3',
+};
 
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
   if (element.getAttribute(attrName) === nextValue) {
@@ -1078,220 +1071,72 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     action: null,
   });
   const floatingOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
-  const pendingFloatingOverlayDragStyleResetRef = React.useRef<TemplateFloatingOverlayId | null>(null);
   const [floatingOverlayCorners, setFloatingOverlayCorners] = React.useState<Record<TemplateFloatingOverlayId, SummaryOverlayCorner>>({
     summary: 'top-left',
     style: 'top-right',
     action: 'top-right',
   });
+  const [floatingOverlayDragStyles, setFloatingOverlayDragStyles] = React.useState<
+    Record<TemplateFloatingOverlayId, React.CSSProperties | null>
+  >({
+    summary: null,
+    style: null,
+    action: null,
+  });
   const [styleOverlayCollapsed, setStyleOverlayCollapsed] = React.useState(true);
   const [summaryOverlayCollapsed, setSummaryOverlayCollapsed] = React.useState(true);
   const [actionOverlayCollapsed, setActionOverlayCollapsed] = React.useState(false);
-  const [floatingOverlayViewportRevision, setFloatingOverlayViewportRevision] = React.useState(0);
-  const hasSummaryOverlay = Boolean(summaryOverlay);
-  const hasStyleOverlay = Boolean(styleOverlay);
-  const hasActionOverlay = Boolean(actionOverlay);
 
-  React.useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined;
-    }
-
-    let animationFrameId: number | null = null;
-    const requestViewportRevision = () => {
-      if (animationFrameId !== null) {
-        window.cancelAnimationFrame(animationFrameId);
+  const resolveFloatingOverlayCornerClass = React.useCallback(
+    (overlayId: TemplateFloatingOverlayId, corner: SummaryOverlayCorner) => {
+      if (overlayId === 'action') {
+        switch (corner) {
+          case 'top-left':
+            return 'left-3 top-14';
+          case 'top-right':
+            return 'right-3 top-14';
+          case 'bottom-left':
+            return 'bottom-3 left-3';
+          case 'bottom-right':
+            return 'bottom-3 right-3';
+        }
       }
 
-      animationFrameId = window.requestAnimationFrame(() => {
-        animationFrameId = null;
-        setFloatingOverlayViewportRevision((currentRevision) => currentRevision + 1);
-      });
-    };
-
-    requestViewportRevision();
-    window.addEventListener('resize', requestViewportRevision);
-    window.addEventListener('scroll', requestViewportRevision, true);
-
-    const resizeObserver =
-      typeof ResizeObserver === 'undefined'
-        ? null
-        : new ResizeObserver(() => {
-            requestViewportRevision();
-          });
-
-    if (surfaceShellRef.current) {
-      resizeObserver?.observe(surfaceShellRef.current);
-    }
-
-    Object.values(floatingOverlayNodeRefs.current).forEach((overlayNode) => {
-      if (overlayNode) {
-        resizeObserver?.observe(overlayNode);
-      }
-    });
-
-    return () => {
-      if (animationFrameId !== null) {
-        window.cancelAnimationFrame(animationFrameId);
-      }
-
-      window.removeEventListener('resize', requestViewportRevision);
-      window.removeEventListener('scroll', requestViewportRevision, true);
-      resizeObserver?.disconnect();
-    };
-  }, [
-    renderedPreviewHtml,
-    summaryOverlayCollapsed,
-    styleOverlayCollapsed,
-    actionOverlayCollapsed,
-    hasSummaryOverlay,
-    hasStyleOverlay,
-    hasActionOverlay,
-  ]);
-
-  const readFloatingOverlayVisibleBounds = React.useCallback(() => {
-    void floatingOverlayViewportRevision;
-    const shell = surfaceShellRef.current;
-
-    if (!shell || typeof window === 'undefined') {
-      return null;
-    }
-
-    const shellRect = shell.getBoundingClientRect();
-    const clampToShellWidth = (value: number) => Math.min(Math.max(value, 0), shellRect.width);
-    const clampToShellHeight = (value: number) => Math.min(Math.max(value, 0), shellRect.height);
-    const visibleLeft = clampToShellWidth(Math.max(0, 0 - shellRect.left));
-    const visibleTop = clampToShellHeight(Math.max(0, 0 - shellRect.top));
-    const visibleRight = clampToShellWidth(Math.min(shellRect.width, window.innerWidth - shellRect.left));
-    const visibleBottom = clampToShellHeight(Math.min(shellRect.height, window.innerHeight - shellRect.top));
-    const normalizedRight = Math.max(visibleLeft, visibleRight);
-    const normalizedBottom = Math.max(visibleTop, visibleBottom);
-
-    return {
-      shellRect,
-      left: visibleLeft,
-      top: visibleTop,
-      right: normalizedRight,
-      bottom: normalizedBottom,
-      width: normalizedRight - visibleLeft,
-      height: normalizedBottom - visibleTop,
-      shellWidth: shellRect.width,
-      shellHeight: shellRect.height,
-    };
-  }, [floatingOverlayViewportRevision]);
-
-  const resolveFloatingOverlayPinnedStyle = React.useCallback(
-    (
-      overlayId: TemplateFloatingOverlayId,
-      corner: SummaryOverlayCorner,
-      isCollapsed: boolean
-    ): React.CSSProperties | undefined => {
-      const visibleBounds = readFloatingOverlayVisibleBounds();
-
-      if (!visibleBounds) {
-        return undefined;
-      }
-
-      const overlayNode = floatingOverlayNodeRefs.current[overlayId];
-      const fallbackWidth = isCollapsed ? 96 : overlayId === 'action' ? 176 : 480;
-      const fallbackHeight = isCollapsed ? SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX : overlayId === 'action' ? 220 : 260;
-      const overlayWidth = overlayNode?.offsetWidth || fallbackWidth;
-      const overlayHeight = overlayNode?.offsetHeight || fallbackHeight;
-      const availableWidth = Math.max(
-        SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX,
-        visibleBounds.width - SUMMARY_OVERLAY_INSET_PX * 2
-      );
-      const verticalStackOffset =
-        overlayId === 'action' && corner.startsWith('top') ? FLOATING_ACTION_OVERLAY_TOP_STACK_OFFSET_PX : 0;
-      const minLeft = visibleBounds.left + SUMMARY_OVERLAY_INSET_PX;
-      const maxLeft = Math.max(minLeft, visibleBounds.right - overlayWidth - SUMMARY_OVERLAY_INSET_PX);
-      const baseMinTop = visibleBounds.top + SUMMARY_OVERLAY_INSET_PX;
-      const minTop = baseMinTop + verticalStackOffset;
-      const maxTop = Math.max(baseMinTop, visibleBounds.bottom - overlayHeight - SUMMARY_OVERLAY_INSET_PX);
-      const pinnedLeft = corner.endsWith('left') ? minLeft : maxLeft;
-      const pinnedTop = corner.startsWith('top') ? Math.min(minTop, maxTop) : maxTop;
-
-      return {
-        left: `${pinnedLeft}px`,
-        top: `${pinnedTop}px`,
-        maxWidth: `${availableWidth}px`,
-      };
-    },
-    [readFloatingOverlayVisibleBounds]
-  );
-
-  const resetFloatingOverlayDirectDragStyle = React.useCallback((overlayId: TemplateFloatingOverlayId) => {
-    const overlay = floatingOverlayNodeRefs.current[overlayId];
-
-    if (!overlay) {
-      return;
-    }
-
-    overlay.style.removeProperty('transform');
-    overlay.style.removeProperty('width');
-    overlay.style.removeProperty('will-change');
-  }, []);
-
-  const applyFloatingOverlayDirectDragStyle = React.useCallback(
-    (
-      overlayId: TemplateFloatingOverlayId,
-      metrics: {
-        left: number;
-        top: number;
-        width: number;
-      }
-    ) => {
-      const dragState = floatingOverlayDragStateRef.current;
-      const overlay = floatingOverlayNodeRefs.current[overlayId];
-
-      if (!dragState || dragState.overlayId !== overlayId || !overlay) {
-        return;
-      }
-
-      const translateX = metrics.left - dragState.initialLeft;
-      const translateY = metrics.top - dragState.initialTop;
-      overlay.style.transform = `translate3d(${translateX}px, ${translateY}px, 0)`;
-      overlay.style.width = `${metrics.width}px`;
+      return SUMMARY_OVERLAY_CORNER_CLASS[corner];
     },
     []
   );
 
-  React.useLayoutEffect(() => {
-    const overlayId = pendingFloatingOverlayDragStyleResetRef.current;
-
-    if (!overlayId) {
-      return;
-    }
-
-    pendingFloatingOverlayDragStyleResetRef.current = null;
-    resetFloatingOverlayDirectDragStyle(overlayId);
-  }, [floatingOverlayCorners, resetFloatingOverlayDirectDragStyle]);
-
   const readFloatingOverlayDragMetrics = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const shell = surfaceShellRef.current;
     const dragState = floatingOverlayDragStateRef.current;
 
-    if (!dragState) {
+    if (!shell || !dragState) {
       return null;
     }
 
+    const shellRect = shell.getBoundingClientRect();
+    const maxLeft = Math.max(SUMMARY_OVERLAY_INSET_PX, shellRect.width - dragState.width - SUMMARY_OVERLAY_INSET_PX);
+    const maxTop = Math.max(SUMMARY_OVERLAY_INSET_PX, shellRect.height - dragState.height - SUMMARY_OVERLAY_INSET_PX);
     const left = Math.min(
-      Math.max(event.clientX - dragState.shellLeft - dragState.offsetX, dragState.minLeft),
-      dragState.maxLeft
+      Math.max(event.clientX - shellRect.left - dragState.offsetX, SUMMARY_OVERLAY_INSET_PX),
+      maxLeft
     );
     const top = Math.min(
-      Math.max(event.clientY - dragState.shellTop - dragState.offsetY, dragState.minTop),
-      dragState.maxTop
+      Math.max(event.clientY - shellRect.top - dragState.offsetY, SUMMARY_OVERLAY_INSET_PX),
+      maxTop
     );
 
     return {
       left,
       top,
-      width: dragState.width,
+      width: Math.min(
+        dragState.width,
+        Math.max(SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX, shellRect.width - SUMMARY_OVERLAY_INSET_PX * 2)
+      ),
       height: dragState.height,
-      visibleLeft: dragState.visibleLeft,
-      visibleTop: dragState.visibleTop,
-      visibleWidth: dragState.visibleWidth,
-      visibleHeight: dragState.visibleHeight,
+      shellWidth: shellRect.width,
+      shellHeight: shellRect.height,
     };
   }, []);
 
@@ -1306,45 +1151,20 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       event.preventDefault();
       event.stopPropagation();
       const overlayRect = overlay.getBoundingClientRect();
-      const visibleBounds = readFloatingOverlayVisibleBounds();
-
-      if (!visibleBounds) {
-        return;
-      }
-
-      const boundedWidth = Math.min(
-        overlayRect.width,
-        Math.max(SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX, visibleBounds.width - SUMMARY_OVERLAY_INSET_PX * 2)
-      );
-      const minLeft = visibleBounds.left + SUMMARY_OVERLAY_INSET_PX;
-      const minTop = visibleBounds.top + SUMMARY_OVERLAY_INSET_PX;
-      overlay.style.willChange = 'transform';
       floatingOverlayDragStateRef.current = {
         overlayId,
         pointerId: event.pointerId,
         originX: event.clientX,
         originY: event.clientY,
-        initialLeft: overlayRect.left - visibleBounds.shellRect.left,
-        initialTop: overlayRect.top - visibleBounds.shellRect.top,
         offsetX: event.clientX - overlayRect.left,
         offsetY: event.clientY - overlayRect.top,
-        width: boundedWidth,
+        width: overlayRect.width,
         height: overlayRect.height,
-        shellLeft: visibleBounds.shellRect.left,
-        shellTop: visibleBounds.shellRect.top,
-        minLeft,
-        maxLeft: Math.max(minLeft, visibleBounds.right - boundedWidth - SUMMARY_OVERLAY_INSET_PX),
-        minTop,
-        maxTop: Math.max(minTop, visibleBounds.bottom - overlayRect.height - SUMMARY_OVERLAY_INSET_PX),
-        visibleLeft: visibleBounds.left,
-        visibleTop: visibleBounds.top,
-        visibleWidth: visibleBounds.width,
-        visibleHeight: visibleBounds.height,
         hasMoved: false,
       };
       event.currentTarget.setPointerCapture(event.pointerId);
     },
-    [readFloatingOverlayVisibleBounds]
+    []
   );
 
   const handleFloatingOverlayPointerMove = React.useCallback(
@@ -1374,9 +1194,16 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return;
       }
 
-      applyFloatingOverlayDirectDragStyle(dragState.overlayId, metrics);
+      setFloatingOverlayDragStyles((currentStyles) => ({
+        ...currentStyles,
+        [dragState.overlayId]: {
+          left: `${metrics.left}px`,
+          top: `${metrics.top}px`,
+          width: `${metrics.width}px`,
+        },
+      }));
     },
-    [applyFloatingOverlayDirectDragStyle, readFloatingOverlayDragMetrics]
+    [readFloatingOverlayDragMetrics]
   );
 
   const finishFloatingOverlayDrag = React.useCallback(
@@ -1393,17 +1220,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       const metrics = readFloatingOverlayDragMetrics(event);
 
       if (metrics && dragState.hasMoved) {
-        const nextVertical =
-          metrics.top + metrics.height / 2 < metrics.visibleTop + metrics.visibleHeight / 2 ? 'top' : 'bottom';
-        const nextHorizontal =
-          metrics.left + metrics.width / 2 < metrics.visibleLeft + metrics.visibleWidth / 2 ? 'left' : 'right';
-        pendingFloatingOverlayDragStyleResetRef.current = overlayId;
+        const nextVertical = metrics.top + metrics.height / 2 < metrics.shellHeight / 2 ? 'top' : 'bottom';
+        const nextHorizontal = metrics.left + metrics.width / 2 < metrics.shellWidth / 2 ? 'left' : 'right';
         setFloatingOverlayCorners((currentCorners) => ({
           ...currentCorners,
           [overlayId]: `${nextVertical}-${nextHorizontal}` as SummaryOverlayCorner,
         }));
-      } else if (dragState.hasMoved) {
-        resetFloatingOverlayDirectDragStyle(overlayId);
       }
 
       if (!dragState.hasMoved && toggleCollapsed) {
@@ -1411,11 +1233,15 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       }
 
       floatingOverlayDragStateRef.current = null;
+      setFloatingOverlayDragStyles((currentStyles) => ({
+        ...currentStyles,
+        [overlayId]: null,
+      }));
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
     },
-    [readFloatingOverlayDragMetrics, resetFloatingOverlayDirectDragStyle]
+    [readFloatingOverlayDragMetrics]
   );
   const finishActionOverlayDrag = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -1446,11 +1272,14 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     event.stopPropagation();
     const overlayId = dragState.overlayId;
     floatingOverlayDragStateRef.current = null;
-    resetFloatingOverlayDirectDragStyle(overlayId);
+    setFloatingOverlayDragStyles((currentStyles) => ({
+      ...currentStyles,
+      [overlayId]: null,
+    }));
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-  }, [resetFloatingOverlayDirectDragStyle]);
+  }, []);
   const renderedPreviewMarkup = React.useMemo(
     () => ({
       __html: renderedPreviewHtml,
@@ -1474,20 +1303,22 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     }
 
     const isCollapsed = options.alwaysExpanded ? false : collapsed;
+    const overlayDragStyle = floatingOverlayDragStyles[overlayId];
     const overlayCorner = floatingOverlayCorners[overlayId];
     const expandedWidthClassName = options.expandedWidthClassName || 'w-[30rem] max-w-[calc(100%_-_1.5rem)]';
     const overlayWidthClassName = isCollapsed ? 'w-max max-w-[calc(100%_-_1.5rem)]' : expandedWidthClassName;
     const overlayZIndexClassName =
       overlayId === 'action' ? 'z-[72]' : overlayId === 'style' ? 'z-[71]' : 'z-[70]';
-    const pinnedOverlayStyle = resolveFloatingOverlayPinnedStyle(overlayId, overlayCorner, isCollapsed);
 
     return (
       <div
         ref={(node) => {
           floatingOverlayNodeRefs.current[overlayId] = node;
         }}
-        className={`absolute ${overlayZIndexClassName} ${overlayWidthClassName}`}
-        style={pinnedOverlayStyle}
+        className={`absolute ${overlayZIndexClassName} ${overlayWidthClassName} ${
+          overlayDragStyle ? '' : resolveFloatingOverlayCornerClass(overlayId, overlayCorner)
+        }`}
+        style={overlayDragStyle || undefined}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
       >
@@ -1537,7 +1368,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
               if (dragState?.pointerId === event.pointerId) {
                 const activeOverlayId = dragState.overlayId;
                 floatingOverlayDragStateRef.current = null;
-                resetFloatingOverlayDirectDragStyle(activeOverlayId);
+                setFloatingOverlayDragStyles((currentStyles) => ({
+                  ...currentStyles,
+                  [activeOverlayId]: null,
+                }));
               }
             }}
           >
