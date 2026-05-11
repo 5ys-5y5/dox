@@ -632,9 +632,6 @@ const FRAME_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-outline-overlay';
 const FRAME_CLUSTER_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-cluster-outline-overlay';
 const FRAME_SELECTED_SIDE_INDICATOR_ATTR = 'data-v106-frame-selected-side-indicator';
 const FRAME_SELECTION_FILL_CLASS = 'v106-frame-selection-fill';
-const FRAME_SELECTION_VISUAL_ATTR = 'data-v106-frame-selection-visual';
-const FRAME_SELECTION_LABEL_ATTR = 'data-template-selection-label';
-const TEMPLATE_POSITION_SPACING_SELECTION_VISUAL_ATTR = 'data-template-position-spacing-selection-visual';
 const FRAME_RICHTEXT_PREVIEW_CLASS = 'v106-frame-richtext-preview';
 const TEMPLATE_FRAME_VALIDATION_ERROR_ATTR = 'data-template-validation-error';
 const TEMPLATE_FRAME_REVIEW_WARNING_ATTR = 'data-template-review-warning';
@@ -935,91 +932,6 @@ const resolvePositionStableVisual = (entityId: string, label = '', selectionOrde
   groupId: entityId,
   ...resolvePositionStableColorPreset(entityId, label),
 });
-
-type PositionSelectionVisualStyle = Pick<
-  ReturnType<typeof resolvePositionStableVisual>,
-  'outlineColor' | 'fillColor' | 'haloColor' | 'badgeColor' | 'badgeTextColor'
->;
-
-const shouldUsePositionSpacingSelectionVisual = (root: HTMLElement) =>
-  root.getAttribute(TEMPLATE_POSITION_SPACING_SELECTION_VISUAL_ATTR) === 'true';
-
-const clearPositionSelectionVisualStyle = (element: HTMLElement) => {
-  element.removeAttribute(FRAME_SELECTION_VISUAL_ATTR);
-  element.removeAttribute(FRAME_SELECTION_LABEL_ATTR);
-  element.style.removeProperty('--template-selection-outline-color');
-  element.style.removeProperty('--template-selection-fill-color');
-  element.style.removeProperty('--template-selection-halo-color');
-  element.style.removeProperty('--template-selection-badge-color');
-  element.style.removeProperty('--template-selection-badge-text-color');
-};
-
-const applyPositionSelectionVisualStyle = (
-  element: HTMLElement,
-  visual: PositionSelectionVisualStyle,
-  selectionLabel: string
-) => {
-  element.setAttribute(FRAME_SELECTION_VISUAL_ATTR, 'position-spacing');
-  element.setAttribute(FRAME_SELECTION_LABEL_ATTR, selectionLabel.trim() || element.getAttribute('data-template-selection-order') || '');
-  element.style.setProperty('--template-selection-outline-color', visual.outlineColor);
-  element.style.setProperty('--template-selection-fill-color', visual.fillColor);
-  element.style.setProperty('--template-selection-halo-color', visual.haloColor);
-  element.style.setProperty('--template-selection-badge-color', visual.badgeColor);
-  element.style.setProperty('--template-selection-badge-text-color', visual.badgeTextColor);
-};
-
-const syncPositionSelectionVisualStyles = (root: HTMLElement) => {
-  const enabled = shouldUsePositionSpacingSelectionVisual(root);
-
-  root.querySelectorAll<HTMLElement>(`[${FRAME_SELECTION_VISUAL_ATTR}]`).forEach(clearPositionSelectionVisualStyle);
-
-  if (!enabled) {
-    return;
-  }
-
-  root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
-    const frameGroupId = getFrameGroupId(resolveFrameSelectionAnchor(element) || element).trim();
-    const selectionOrder = Math.max(1, Number(element.getAttribute('data-template-selection-order')) || 1);
-
-    if (!frameGroupId) {
-      return;
-    }
-
-    applyPositionSelectionVisualStyle(
-      element,
-      resolvePositionStableVisual(`single:${frameGroupId}`, frameGroupId, selectionOrder),
-      frameGroupId
-    );
-  });
-
-  root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-selection-ui="true"]').forEach((element) => {
-    const groupId = element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '';
-    const selectionOrder = Math.max(1, Number(element.getAttribute('data-template-selection-order')) || 1);
-
-    if (!groupId) {
-      return;
-    }
-
-    const groupLabel =
-      resolvePositionGroupWrapperElement(root, groupId)?.getAttribute(TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR) ||
-      element.getAttribute(TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR) ||
-      groupId;
-    const visual = resolvePositionStableVisual(groupId, groupLabel, selectionOrder);
-    applyPositionSelectionVisualStyle(element, visual, groupLabel);
-    element.style.outline = `2px solid ${visual.outlineColor}`;
-    element.style.boxShadow = `0 0 0 4px ${visual.haloColor}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
-  });
-};
-
-const syncPreviewSurfacePositionSpacingSelectionVisualAttr = (root: HTMLElement, enabled: boolean) => {
-  if (enabled) {
-    root.setAttribute(TEMPLATE_POSITION_SPACING_SELECTION_VISUAL_ATTR, 'true');
-    return;
-  }
-
-  root.removeAttribute(TEMPLATE_POSITION_SPACING_SELECTION_VISUAL_ATTR);
-  syncPositionSelectionVisualStyles(root);
-};
 
 const buildStablePositionGroupProxySelection = (
   groupId: string,
@@ -6187,7 +6099,6 @@ const stripTransientFrameEditorUi = (root: ParentNode) => {
     element.removeAttribute('data-template-selected');
     element.removeAttribute('data-template-primary-selected');
     element.removeAttribute('data-template-selection-order');
-    clearPositionSelectionVisualStyle(element);
   });
   root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
     element.removeAttribute('data-template-edge-visual');
@@ -8619,7 +8530,6 @@ const stripSelectionAttrs = (
     element.removeAttribute('data-template-selected');
     element.removeAttribute('data-template-primary-selected');
     element.removeAttribute('data-template-selection-order');
-    clearPositionSelectionVisualStyle(element);
   });
   root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
     element.removeAttribute('data-template-edge-visual');
@@ -11262,7 +11172,6 @@ const cleanupStaleFrameSelectionChrome = (
       element.removeAttribute('data-template-selected');
       element.removeAttribute('data-template-primary-selected');
       element.removeAttribute('data-template-selection-order');
-      clearPositionSelectionVisualStyle(element);
       removeFrameSelectionChromeFromShell(resolveFrameLayoutShell(anchorNode));
       return;
     }
@@ -11475,7 +11384,6 @@ const clearFastSelectionEditorUi = (root: HTMLElement) => {
     element.removeAttribute('data-template-selected');
     element.removeAttribute('data-template-primary-selected');
     element.removeAttribute('data-template-selection-order');
-    clearPositionSelectionVisualStyle(element);
   });
   root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
     element.removeAttribute('data-template-edge-visual');
@@ -11692,7 +11600,6 @@ const applyFastFrameSelectionUi = (
       positionSelectionOrderState.normalizedProxySelections
     )
   ) {
-    syncPositionSelectionVisualStyles(root);
     return;
   }
 
@@ -11738,7 +11645,6 @@ const applyFastFrameSelectionUi = (
   root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_BADGE_CLASS}`).forEach((element) => {
     element.remove();
   });
-  syncPositionSelectionVisualStyles(root);
 };
 
 const normalizeFrameSelectionIds = (frameGroupIds: string[]) =>
@@ -12124,7 +12030,6 @@ const applyFrameSelectionUi = (
     !(relativeGuideFrameGroupId || '').trim() &&
     !root.querySelector('[data-template-relative-anchor-target="true"]')
   ) {
-    syncPositionSelectionVisualStyles(root);
     return;
   }
 
@@ -12233,7 +12138,6 @@ const applyFrameSelectionUi = (
     expectedDirectSelectedIds,
     positionSelectionOrderState.directSelectionOrderByFrameGroupId
   );
-  syncPositionSelectionVisualStyles(root);
   ensureSelectedFrameDeleteButtons(root);
   renderRelativeAnchorGuides(root, selectedIds, relativeGuideFrameGroupId);
 };
@@ -14522,8 +14426,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
   }, [definedPositionRelativeRelations, positionBoxGroupByFrameGroupId, selectedFrameGroupIds]);
   const highlightedDefinedPositionRelativeRelations = React.useMemo(
-    () => [] as DefinedPositionRelativeRelation[],
-    []
+    () => (selectedFrameGroupIds.length > 0 ? focusedDefinedPositionRelativeRelations : []),
+    [focusedDefinedPositionRelativeRelations, selectedFrameGroupIds.length]
   );
   const positionSpacingSettingRelations = React.useMemo(() => {
     const baseRelations = definedPositionRelativeRelations.filter((relation) => relation.anchorKind !== 'page-corner');
@@ -16750,20 +16654,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     positionActiveSelectionEntityRef.current = null;
   }, [selectionPanelTab]);
 
-  React.useEffect(() => {
-    const root = previewRef.current;
-
-    if (!root) {
-      return;
-    }
-
-    syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-      root,
-      selectionPanelTab === 'position' && positionOrderLockSelectionMode
-    );
-    syncPositionSelectionVisualStyles(root);
-  }, [positionOrderLockSelectionMode, selectionPanelTab, selectedFrameGroupIds, positionSelectionStateRevision]);
-
   const virtualDefinitionIds = React.useMemo(
     () => new Set(virtualFrameDefinitions.map((definition) => definition.id)),
     [virtualFrameDefinitions]
@@ -17649,10 +17539,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const normalized = ensurePreviewFrameBandNormalization(root);
       syncPreviewSurfaceCloneAttrs(root);
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
-      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-        root,
-        selectionPanelTab === 'position' && positionOrderLockSelectionMode
-      );
       applyPreviewEditPermissions(root, selectionPanelTab);
       applyFrameCanvasVisualHints(root);
       const materializedPositionGroups = materializePositionGroupWrappers(root);
@@ -17719,7 +17605,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     hasActivePointerInteraction,
     previewRelativeGuideFrameGroupId,
     previewHasStableFrameLayout,
-    positionOrderLockSelectionMode,
     renderedPreviewHtml,
     resolveEdgeRolePresentation,
     requestPreviewTextFit,
@@ -17739,10 +17624,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (node && renderedPreviewHtml) {
         syncPreviewSurfaceCloneAttrs(node);
         syncPreviewSurfaceSelectionPanelTabAttr(node, selectionPanelTab);
-        syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-          node,
-          selectionPanelTab === 'position' && positionOrderLockSelectionMode
-        );
         syncPreviewSurfaceScale(node);
         const clearedLegacyInferredCount = clearLegacyInferredRelativeAnchors(node);
         if (clearedLegacyInferredCount > 0) {
@@ -17753,14 +17634,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         schedulePreviewEditorState();
       }
     },
-    [
-      positionOrderLockSelectionMode,
-      renderedPreviewHtml,
-      schedulePreviewEditorState,
-      selectionPanelTab,
-      syncDraftPreviewHtmlRef,
-      syncPreviewSurfaceScale,
-    ]
+    [renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab, syncDraftPreviewHtmlRef, syncPreviewSurfaceScale]
   );
 
   const applyRuntimeSelectionUi = React.useCallback(
@@ -17777,10 +17651,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-        root,
-        selectionPanelTab === 'position' && positionOrderLockSelectionMode
-      );
       applyPreviewEditPermissions(root, selectionPanelTab);
       materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
@@ -17823,7 +17693,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvePositionGroupProxySelections,
       restoreActivePositionGroupProxySelections,
       selectionPanelTab,
-      positionOrderLockSelectionMode,
       positionRelationAnchorFrameGroupId,
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
@@ -17841,10 +17710,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-        root,
-        selectionPanelTab === 'position' && positionOrderLockSelectionMode
-      );
       applyPreviewEditPermissions(root, selectionPanelTab);
       materializePositionGroupWrappers(root);
       applyFrameCanvasVisualHints(root);
@@ -17877,7 +17742,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       resolvePositionGroupProxySelections,
       restoreActivePositionGroupProxySelections,
       selectionPanelTab,
-      positionOrderLockSelectionMode,
       positionRelationAnchorFrameGroupId,
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
@@ -17899,10 +17763,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-        root,
-        selectionPanelTab === 'position' && positionOrderLockSelectionMode
-      );
       const resolvedFrameNodeById = frameNodeById || collectFrameSelectionAnchorByIdMap(root);
       const resolvedPositionGroupProxySelections = restoreActivePositionGroupProxySelections(
         nextSelectedFrameGroupIds,
@@ -17933,11 +17793,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         positionSelectionOrderState.expectedDirectSelectedIds,
         positionSelectionOrderState.directSelectionOrderByFrameGroupId
       );
-      syncPositionSelectionVisualStyles(root);
     },
     [
       positionBoxGroups,
-      positionOrderLockSelectionMode,
       resolvePositionGroupProxySelections,
       restoreActivePositionGroupProxySelections,
       selectionPanelTab,
@@ -27790,10 +27648,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
           overflow: visible !important;
           z-index: 20 !important;
-          outline: 2px solid var(--template-selection-outline-color, rgba(37, 99, 235, .96)) !important;
+          outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 4px var(--template-selection-halo-color, rgba(96, 165, 250, .22)),
+            0 0 0 4px rgba(96, 165, 250, .22),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview [data-template-selected="true"]::before,
@@ -27810,8 +27668,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          background: var(--template-selection-badge-color, rgba(37, 99, 235, .98));
-          color: var(--template-selection-badge-text-color, white);
+          background: rgba(37, 99, 235, .98);
+          color: white;
           box-shadow: none !important;
           font-size: 11px;
           line-height: 1;
@@ -27819,24 +27677,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           pointer-events: none;
         }
         .template-edit-preview [data-template-primary-selected="true"] {
-          outline-color: var(--template-selection-outline-color, rgba(13, 148, 136, .98)) !important;
+          outline-color: rgba(13, 148, 136, .98) !important;
           box-shadow:
-            0 0 0 4px var(--template-selection-halo-color, rgba(45, 212, 191, .22)),
+            0 0 0 4px rgba(45, 212, 191, .22),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview [data-template-primary-selected="true"]::before {
-          background: var(--template-selection-badge-color, rgba(13, 148, 136, .98));
+          background: rgba(13, 148, 136, .98);
           box-shadow: none !important;
-        }
-        .template-edit-preview[${TEMPLATE_POSITION_SPACING_SELECTION_VISUAL_ATTR}="true"] [${FRAME_SELECTION_VISUAL_ATTR}="position-spacing"]::before {
-          content: attr(${FRAME_SELECTION_LABEL_ATTR});
-          min-width: 0;
-          max-width: 120px;
-          width: auto;
-          padding: 0 8px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
         }
         .template-edit-preview [${TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR}="true"] {
           position: relative;

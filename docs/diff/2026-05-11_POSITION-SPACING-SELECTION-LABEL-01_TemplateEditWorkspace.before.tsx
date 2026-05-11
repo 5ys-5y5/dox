@@ -633,7 +633,6 @@ const FRAME_CLUSTER_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-cluster-outline-over
 const FRAME_SELECTED_SIDE_INDICATOR_ATTR = 'data-v106-frame-selected-side-indicator';
 const FRAME_SELECTION_FILL_CLASS = 'v106-frame-selection-fill';
 const FRAME_SELECTION_VISUAL_ATTR = 'data-v106-frame-selection-visual';
-const FRAME_SELECTION_LABEL_ATTR = 'data-template-selection-label';
 const TEMPLATE_POSITION_SPACING_SELECTION_VISUAL_ATTR = 'data-template-position-spacing-selection-visual';
 const FRAME_RICHTEXT_PREVIEW_CLASS = 'v106-frame-richtext-preview';
 const TEMPLATE_FRAME_VALIDATION_ERROR_ATTR = 'data-template-validation-error';
@@ -946,7 +945,6 @@ const shouldUsePositionSpacingSelectionVisual = (root: HTMLElement) =>
 
 const clearPositionSelectionVisualStyle = (element: HTMLElement) => {
   element.removeAttribute(FRAME_SELECTION_VISUAL_ATTR);
-  element.removeAttribute(FRAME_SELECTION_LABEL_ATTR);
   element.style.removeProperty('--template-selection-outline-color');
   element.style.removeProperty('--template-selection-fill-color');
   element.style.removeProperty('--template-selection-halo-color');
@@ -954,13 +952,8 @@ const clearPositionSelectionVisualStyle = (element: HTMLElement) => {
   element.style.removeProperty('--template-selection-badge-text-color');
 };
 
-const applyPositionSelectionVisualStyle = (
-  element: HTMLElement,
-  visual: PositionSelectionVisualStyle,
-  selectionLabel: string
-) => {
+const applyPositionSelectionVisualStyle = (element: HTMLElement, visual: PositionSelectionVisualStyle) => {
   element.setAttribute(FRAME_SELECTION_VISUAL_ATTR, 'position-spacing');
-  element.setAttribute(FRAME_SELECTION_LABEL_ATTR, selectionLabel.trim() || element.getAttribute('data-template-selection-order') || '');
   element.style.setProperty('--template-selection-outline-color', visual.outlineColor);
   element.style.setProperty('--template-selection-fill-color', visual.fillColor);
   element.style.setProperty('--template-selection-halo-color', visual.haloColor);
@@ -987,8 +980,7 @@ const syncPositionSelectionVisualStyles = (root: HTMLElement) => {
 
     applyPositionSelectionVisualStyle(
       element,
-      resolvePositionStableVisual(`single:${frameGroupId}`, frameGroupId, selectionOrder),
-      frameGroupId
+      resolvePositionStableVisual(`single:${frameGroupId}`, frameGroupId, selectionOrder)
     );
   });
 
@@ -1005,7 +997,7 @@ const syncPositionSelectionVisualStyles = (root: HTMLElement) => {
       element.getAttribute(TEMPLATE_POSITION_GROUP_NODE_LABEL_ATTR) ||
       groupId;
     const visual = resolvePositionStableVisual(groupId, groupLabel, selectionOrder);
-    applyPositionSelectionVisualStyle(element, visual, groupLabel);
+    applyPositionSelectionVisualStyle(element, visual);
     element.style.outline = `2px solid ${visual.outlineColor}`;
     element.style.boxShadow = `0 0 0 4px ${visual.haloColor}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
   });
@@ -27827,16 +27819,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-template-primary-selected="true"]::before {
           background: var(--template-selection-badge-color, rgba(13, 148, 136, .98));
           box-shadow: none !important;
-        }
-        .template-edit-preview[${TEMPLATE_POSITION_SPACING_SELECTION_VISUAL_ATTR}="true"] [${FRAME_SELECTION_VISUAL_ATTR}="position-spacing"]::before {
-          content: attr(${FRAME_SELECTION_LABEL_ATTR});
-          min-width: 0;
-          max-width: 120px;
-          width: auto;
-          padding: 0 8px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
         }
         .template-edit-preview [${TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR}="true"] {
           position: relative;
