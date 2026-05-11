@@ -294,6 +294,8 @@ type PositionGroupEditMode =
       sourceSelection: PositionEntitySelectionSnapshot;
     };
 
+type TextAutoSizeAxis = 'height' | 'width';
+
 type PositionSpacingMemberFrameEntry = {
   frameGroupId: string;
   node: HTMLElement;
@@ -654,8 +656,6 @@ const TEMPLATE_FRAME_BASE_HEIGHT_ATTR = 'data-template-frame-base-height';
 const TEMPLATE_FRAME_BASE_FONT_SIZE_ATTR = 'data-template-frame-base-font-size';
 const TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR = 'data-template-frame-base-line-height';
 const TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR = 'data-template-frame-richtext-active';
-const TEMPLATE_FRAME_AUTO_HEIGHT_ATTR = 'data-template-frame-auto-height';
-const TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR = 'data-template-frame-auto-height-base';
 const TEMPLATE_FRAME_LABEL_ATTR = 'data-template-frame-label';
 const TEMPLATE_FRAME_ROLE_ATTR = 'data-template-frame-role';
 const TEMPLATE_FRAME_VALUE_KEY_ATTR = 'data-template-frame-value-key';
@@ -2285,41 +2285,6 @@ const readFrameRuntimeMode = (node: HTMLElement) => {
   }
 
   return '' as const;
-};
-
-const readFrameAutoHeightBox = (node: HTMLElement) => readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_ATTR) === 'true';
-
-const readFrameAutoHeightBaseHeight = (node: HTMLElement, currentHeight: number) => {
-  const baseHeight = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR));
-
-  if (Number.isFinite(baseHeight) && baseHeight > 0) {
-    return Math.max(MIN_FRAME_SIZE_PX, baseHeight);
-  }
-
-  return Math.max(MIN_FRAME_SIZE_PX, currentHeight);
-};
-
-const writeFrameAutoHeightBoxAttrs = (node: HTMLElement, enabled: boolean) => {
-  const persistedFrameNode = resolvePersistedFrameNode(node);
-  const textarea =
-    node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
-    persistedFrameNode?.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
-    null;
-  const targets = Array.from(new Set([node, persistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
-  const baseHeight = Number(readFrameNodeRect(node).height.toFixed(3));
-
-  targets.forEach((target) => {
-    if (enabled) {
-      target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_ATTR, 'true');
-      if (!target.hasAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR)) {
-        target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR, String(baseHeight));
-      }
-      return;
-    }
-
-    target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_ATTR);
-    target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR);
-  });
 };
 
 const buildFrameMetadataChangePatch = (nextDraft: FrameMetadataDraft, previousDraft: FrameMetadataDraft): FrameMetadataPatch => {
@@ -7357,7 +7322,6 @@ const shiftShellsBelowBoundary = (
         ...shellRect,
         top: shellRect.top + deltaY,
       });
-      syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(shell), pageInner);
     }
   });
 };
@@ -7466,84 +7430,6 @@ const applyFrameResizeHeightDelta = (node: HTMLElement, delta: number) => {
     stabilizeFrameContentHeight(node);
   }
 
-  return appliedDelta;
-};
-
-const applyTableBoundaryHeightDeltaPreservingFollowingRows = (
-  shell: HTMLElement,
-  boundaryIndex: number,
-  delta: number,
-  shrinkRange: BoundaryShrinkRange
-) => {
-  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
-  const colWidths = readTableColWidths(table);
-  const rowHeights = readTableRowHeights(table);
-  const minimums = readTableRowMinimums(table, rowHeights);
-
-  if (!table || rowHeights.length === 0 || boundaryIndex <= 0 || boundaryIndex > rowHeights.length) {
-    return 0;
-  }
-
-  const nextRowHeights = [...rowHeights];
-  const targetRowIndex = Math.min(rowHeights.length - 1, boundaryIndex - 1);
-
-  if (delta >= 0) {
-    nextRowHeights[targetRowIndex] += delta;
-    setTableRowHeights(table, nextRowHeights);
-    syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
-    return delta;
-  }
-
-  const applied = Math.min(Math.abs(delta), getRangeShrinkCapacity(nextRowHeights, minimums, shrinkRange));
-
-  if (applied <= 0) {
-    return 0;
-  }
-
-  shrinkSizeRange(nextRowHeights, minimums, shrinkRange, applied);
-  setTableRowHeights(table, nextRowHeights);
-  syncShellSizeFromTable(shell, table, colWidths, nextRowHeights, { width: false });
-  return -applied;
-};
-
-const applyFrameAutoHeightDelta = (node: HTMLElement, delta: number) => {
-  const context = buildFrameResizeContext(node);
-
-  if (!context.pageInner || Math.abs(delta) < 0.5) {
-    return 0;
-  }
-
-  const boundaryY = context.cellRect.top + context.cellRect.height;
-  const resizesOuterBottom = context.singleCellBand || context.rowHeights.length <= context.endRowIndex;
-  const shrinkRange = {
-    startIndex: context.startRowIndex,
-    endIndex: context.endRowIndex - 1,
-    side: 'before' as const,
-  };
-  let appliedDelta = 0;
-
-  if (resizesOuterBottom) {
-    appliedDelta = applyOuterBottomHeightDelta(context.shell, delta, shrinkRange);
-  } else if (context.table) {
-    appliedDelta = applyTableBoundaryHeightDeltaPreservingFollowingRows(
-      context.shell,
-      context.endRowIndex,
-      delta,
-      shrinkRange
-    );
-  }
-
-  if (Math.abs(appliedDelta) <= 0.5) {
-    return 0;
-  }
-
-  if (!isAbsolutePositionedShell(context.shell)) {
-    shiftShellsBelowBoundary(context.pageInner, boundaryY, appliedDelta, [context.shell]);
-    updatePageInnerMinHeight(context.pageInner);
-  }
-
-  stabilizeFrameContentHeight(node);
-  rebaseRelativeAnchorConfigForResizeDirection(node, context.pageInner, 's');
   return appliedDelta;
 };
 
@@ -10509,125 +10395,6 @@ const resolveFrameContentTarget = (node: HTMLElement) => {
   );
 };
 
-const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInputElement) => {
-  const targetRect = target.getBoundingClientRect();
-  const computedStyle = getComputedStyle(target);
-  const clone = target.cloneNode(false) as HTMLTextAreaElement | HTMLInputElement;
-
-  clone.value = target.value || target.textContent || '';
-  clone.removeAttribute('id');
-  clone.removeAttribute('name');
-  clone.removeAttribute('readonly');
-  clone.removeAttribute('disabled');
-  clone.style.position = 'fixed';
-  clone.style.left = '-10000px';
-  clone.style.top = '0';
-  clone.style.width = toFrameCssPx(targetRect.width || parseFramePx(computedStyle.width));
-  clone.style.height = '0px';
-  clone.style.minHeight = '0px';
-  clone.style.maxHeight = 'none';
-  clone.style.visibility = 'hidden';
-  clone.style.overflow = 'hidden';
-  clone.style.pointerEvents = 'none';
-  clone.style.boxSizing = computedStyle.boxSizing;
-  clone.style.font = computedStyle.font;
-  clone.style.lineHeight = computedStyle.lineHeight;
-  clone.style.letterSpacing = computedStyle.letterSpacing;
-  clone.style.padding = computedStyle.padding;
-  clone.style.border = computedStyle.border;
-  clone.style.whiteSpace = computedStyle.whiteSpace;
-  clone.style.wordBreak = computedStyle.wordBreak;
-  clone.style.overflowWrap = computedStyle.overflowWrap;
-  document.body.appendChild(clone);
-
-  const measuredHeight = clone.scrollHeight || clone.getBoundingClientRect().height || target.scrollHeight || 0;
-  clone.remove();
-  return measuredHeight;
-};
-
-const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
-  const contentTarget = resolveFrameContentTarget(node);
-  const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
-  const baseHeight = readFrameAutoHeightBaseHeight(node, currentRect.height);
-  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
-  const extraHeight = measureTargets.reduce((maxExtraHeight, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const naturalTextControlHeight =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlHeight(target)
-        : 0;
-    const targetScrollHeight = Math.max(target.scrollHeight || 0, naturalTextControlHeight);
-    const targetClientHeight = target.clientHeight || 0;
-    const targetOffsetHeight = target.offsetHeight || 0;
-    const requiredTargetHeight =
-      naturalTextControlHeight > 0 ? naturalTextControlHeight : Math.max(targetScrollHeight, targetClientHeight, targetOffsetHeight);
-    const visibleTargetHeight = targetRect.height || targetOffsetHeight || targetClientHeight;
-
-    return Math.max(maxExtraHeight, requiredTargetHeight - visibleTargetHeight);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedExtraHeight = Number.isFinite(extraHeight) ? extraHeight : 0;
-
-  return Math.ceil(Math.max(baseHeight, currentRect.height + resolvedExtraHeight));
-};
-
-const applyTemplateAutoHeightBoxes = (
-  root: HTMLElement,
-  frameGroupIds?: string[]
-): {
-  changedCount: number;
-  skippedCount: number;
-  changedFrameGroupIds: string[];
-} => {
-  const targetFrameGroupIdSet = frameGroupIds?.length
-    ? new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
-    : null;
-  const changedFrameGroupIds: string[] = [];
-  let skippedCount = 0;
-
-  collectFrameSelectionAnchors(root)
-    .filter((node) => {
-      const frameGroupId = getFrameGroupId(node);
-      return Boolean(frameGroupId) && (!targetFrameGroupIdSet || targetFrameGroupIdSet.has(frameGroupId));
-    })
-    .filter((node) => readFrameAutoHeightBox(node))
-    .sort((left, right) => readFrameNodeRect(left).top - readFrameNodeRect(right).top)
-    .forEach((node) => {
-      const frameGroupId = getFrameGroupId(node);
-      const currentRect = readFrameNodeRect(node);
-      const requiredHeight = measureRequiredAutoHeightFrameHeight(node);
-      const requestedDelta = requiredHeight - currentRect.height;
-
-      if (!Number.isFinite(requiredHeight)) {
-        skippedCount += 1;
-        return;
-      }
-
-      if (Math.abs(requestedDelta) <= 0.5) {
-        return;
-      }
-
-      const appliedDelta = applyFrameAutoHeightDelta(node, requestedDelta);
-
-      if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(frameGroupId);
-      } else {
-        skippedCount += 1;
-      }
-    });
-
-  if (changedFrameGroupIds.length > 0) {
-    ensureRelativeAnchorConfigs(root);
-    applyRelativeAnchoredFrameRectsInRoot(root, changedFrameGroupIds);
-  }
-
-  return {
-    changedCount: changedFrameGroupIds.length,
-    skippedCount,
-    changedFrameGroupIds,
-  };
-};
-
 const readFrameDisplayText = (node: HTMLElement | null | undefined) => {
   if (!node) {
     return '';
@@ -12763,6 +12530,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   >('');
   const [moveGroupAssignmentTargetGroupId, setMoveGroupAssignmentTargetGroupId] = React.useState('');
   const [positionGroupEditMode, setPositionGroupEditMode] = React.useState<PositionGroupEditMode>({ kind: 'idle' });
+  const [textAutoSizeAxis, setTextAutoSizeAxis] = React.useState<TextAutoSizeAxis>('height');
   const [expandedPositionBoxGroupIds, setExpandedPositionBoxGroupIds] = React.useState<Record<string, boolean>>({});
   const [expandedPositionSummarySections, setExpandedPositionSummarySections] = React.useState<Record<string, boolean>>({});
   const [expandedSelectionSummaryTabs, setExpandedSelectionSummaryTabs] = React.useState<
@@ -12873,29 +12641,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
   const primarySelectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds) || null;
   const canEditSingleSelection = selectedFrameGroupIds.length === 1;
-  const selectedTextAutoHeightState = React.useMemo(() => {
-    const root = previewRef.current;
-
-    if (!root || selectedFrameGroupIds.length === 0) {
-      return {
-        totalCount: 0,
-        enabledCount: 0,
-        allEnabled: false,
-        partiallyEnabled: false,
-      };
-    }
-
-    const selectedIdSet = new Set(selectedFrameGroupIds);
-    const selectedNodes = collectFrameSelectionAnchors(root).filter((node) => selectedIdSet.has(getFrameGroupId(node)));
-    const enabledCount = selectedNodes.filter((node) => readFrameAutoHeightBox(node)).length;
-
-    return {
-      totalCount: selectedNodes.length,
-      enabledCount,
-      allEnabled: selectedNodes.length > 0 && enabledCount === selectedNodes.length,
-      partiallyEnabled: enabledCount > 0 && enabledCount < selectedNodes.length,
-    };
-  }, [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
   const selectionValidationErrorFrameIds = React.useMemo(
     () => Array.from(new Set(selectionValidationIssues.map((issue) => issue.frameGroupId).filter(Boolean))),
     [selectionValidationIssues]
@@ -20581,13 +20326,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       nodes.forEach((node) => {
         applyFrameStylePatch(node, patch);
       });
-      const autoHeightResult = applyTemplateAutoHeightBoxes(root, activeSelectionIds);
-      const shouldUpdateGeometry =
-        typeof patch.width === 'number' ||
-        typeof patch.height === 'number' ||
-        autoHeightResult.changedCount > 0;
+      const shouldUpdateGeometry = typeof patch.width === 'number' || typeof patch.height === 'number';
 
-      if (shouldUpdateGeometry && autoHeightResult.changedCount <= 0) {
+      if (shouldUpdateGeometry) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
       syncDraftPreviewHtmlRef({ materializePositionGroups: shouldUpdateGeometry });
@@ -20606,49 +20347,112 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     ]
   );
 
-  const toggleTextAutoHeightBoxForSelection = React.useCallback(() => {
+  const applyTextAutoSizeToSelection = React.useCallback(() => {
     const root = previewRef.current;
     const activeSelectionIds = Array.from(
       new Set(selectedFrameGroupIdsRef.current.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
     );
 
     if (!root || activeSelectionIds.length <= 0) {
-      setMessage('자동 높이 상자로 설정할 상자를 먼저 선택하세요.');
+      setMessage('텍스트 맞춤 확장을 적용할 상자를 먼저 선택하세요.');
       return;
     }
 
     const activeSelectionIdSet = new Set(activeSelectionIds);
-    const nodes = collectFrameSelectionAnchors(root).filter((node) => activeSelectionIdSet.has(getFrameGroupId(node)));
+    const allFrameNodes = getFrameNodes(root);
+    const frameNodeByGroupId = new Map<string, HTMLElement>();
+    const beforeMoveRectByGroupId = new Map<string, FrameNodeRect>();
 
-    if (nodes.length <= 0) {
-      setMessage('자동 높이 상자로 설정할 상자를 찾지 못했습니다.');
+    allFrameNodes.forEach((node) => {
+      const frameGroupId = getFrameGroupId(node);
+      if (!frameGroupId) {
+        return;
+      }
+
+      frameNodeByGroupId.set(frameGroupId, node);
+      beforeMoveRectByGroupId.set(frameGroupId, readFrameMoveRect(node));
+    });
+
+    let changedCount = 0;
+    let skippedCount = 0;
+
+    activeSelectionIds.forEach((frameGroupId) => {
+      const node = frameNodeByGroupId.get(frameGroupId);
+
+      if (!node) {
+        skippedCount += 1;
+        return;
+      }
+
+      const currentRect = readFrameNodeRect(node);
+      const contentTarget = resolveFrameContentTarget(node);
+      const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+      const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
+      const measuredSize = measureTargets.reduce((maxSize, target) => {
+        const scrollSize = textAutoSizeAxis === 'height' ? target.scrollHeight : target.scrollWidth;
+        const clientSize = textAutoSizeAxis === 'height' ? target.clientHeight : target.clientWidth;
+        const offsetSize = textAutoSizeAxis === 'height' ? target.offsetHeight : target.offsetWidth;
+        return Math.max(maxSize, scrollSize, clientSize, offsetSize);
+      }, 0);
+      const currentSize = textAutoSizeAxis === 'height' ? currentRect.height : currentRect.width;
+      const nextSize = Math.ceil(Math.max(currentSize, measuredSize));
+
+      if (!Number.isFinite(nextSize) || nextSize <= currentSize + 0.5) {
+        return;
+      }
+
+      applyFrameStylePatch(node, textAutoSizeAxis === 'height' ? { height: nextSize } : { width: nextSize });
+      changedCount += 1;
+    });
+
+    if (changedCount <= 0) {
+      setMessage(
+        skippedCount > 0
+          ? `텍스트 맞춤 확장을 적용할 상자를 찾지 못했습니다. (${skippedCount}개 제외됨)`
+          : '이미 선택 상자가 텍스트와 여백을 담을 수 있는 크기입니다.'
+      );
       return;
     }
 
-    const nextEnabled = !nodes.every((node) => readFrameAutoHeightBox(node));
+    applyRelativeAnchoredFrameRectsInRoot(root);
+    allFrameNodes.forEach((node) => {
+      const frameGroupId = getFrameGroupId(node);
+      const beforeRect = beforeMoveRectByGroupId.get(frameGroupId);
 
-    nodes.forEach((node) => {
-      writeFrameAutoHeightBoxAttrs(node, nextEnabled);
+      if (!beforeRect || activeSelectionIdSet.has(frameGroupId)) {
+        return;
+      }
+
+      const afterRect = readFrameMoveRect(node);
+      const guardedRect = {
+        ...afterRect,
+        width: Math.max(afterRect.width, beforeRect.width),
+        height: Math.max(afterRect.height, beforeRect.height),
+      };
+
+      if (
+        Math.abs(guardedRect.width - afterRect.width) > 0.5 ||
+        Math.abs(guardedRect.height - afterRect.height) > 0.5
+      ) {
+        writeFrameMoveRect(node, guardedRect);
+      }
     });
-
-    const autoHeightResult = nextEnabled
-      ? applyTemplateAutoHeightBoxes(root, activeSelectionIds)
-      : { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
 
     syncDraftPreviewHtmlRef({ materializePositionGroups: false });
     schedulePreviewEditorState();
     syncSelectionStyleDraft();
     requestPreviewTextFit();
     setMessage(
-      `자동 높이 상자 ${nextEnabled ? '설정' : '해제'}: ${nodes.length}개 상자` +
-        (nextEnabled && autoHeightResult.changedCount > 0 ? `, ${autoHeightResult.changedCount}개 높이 재계산` : '') +
-        (autoHeightResult.skippedCount > 0 ? `, ${autoHeightResult.skippedCount}개 제외` : '')
+      `텍스트 맞춤 ${textAutoSizeAxis === 'height' ? '높이' : '너비'} 확장 완료: ${changedCount}개 상자` +
+        (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
     );
   }, [
+    getFrameNodes,
     requestPreviewTextFit,
     schedulePreviewEditorState,
     syncDraftPreviewHtmlRef,
     syncSelectionStyleDraft,
+    textAutoSizeAxis,
   ]);
 
   const previewPositionOrderLockCandidateSelection = React.useCallback(
@@ -26496,17 +26300,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     if (selectionPanelTab === 'text' && frameTextInput) {
       markTemplateValueElementEdited(frameTextInput);
-      const root = previewRef.current;
-      const frameNode = resolveFrameSelectionAnchor(frameTextInput.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
-      const frameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
-
-      if (root && frameNode && frameGroupId && readFrameAutoHeightBox(frameNode)) {
-        const autoHeightResult = applyTemplateAutoHeightBoxes(root, [frameGroupId]);
-
-        if (autoHeightResult.changedCount > 0) {
-          syncDraftPreviewHtmlRef({ materializePositionGroups: false, updateRenderedHtml: false });
-        }
-      }
       return;
     }
 
@@ -27691,27 +27484,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </div>
 
           <div className="grid gap-2 lg:grid-cols-[1fr_auto]">
-            <div className="flex h-8 items-center justify-between rounded-md border border-slate-200 bg-white px-3 text-[11px] font-medium text-slate-700">
-              <span>자동 높이</span>
-              <span className="text-slate-500">
-                {selectedTextAutoHeightState.totalCount > 0
-                  ? `${selectedTextAutoHeightState.enabledCount}/${selectedTextAutoHeightState.totalCount}`
-                  : '-'}
-              </span>
+            <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white">
+              {[
+                { value: 'height', label: '높이' },
+                { value: 'width', label: '너비' },
+              ].map((option) => (
+                <button
+                  key={`text-auto-size-axis:${option.value}`}
+                  type="button"
+                  className={styleButtonClass(textAutoSizeAxis === option.value)}
+                  disabled={!hasSelection}
+                  onClick={() => setTextAutoSizeAxis(option.value as TextAutoSizeAxis)}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
             <Button
               type="button"
               size="sm"
               className="h-8"
-              variant={selectedTextAutoHeightState.allEnabled ? 'default' : 'outline'}
               disabled={!hasSelection}
-              onClick={toggleTextAutoHeightBoxForSelection}
+              onClick={applyTextAutoSizeToSelection}
             >
-              {selectedTextAutoHeightState.allEnabled
-                ? '자동 높이 상자 해제'
-                : selectedTextAutoHeightState.partiallyEnabled
-                  ? '자동 높이 상자 일부 설정'
-                  : '자동 높이 상자'}
+              텍스트에 맞게 확장
             </Button>
           </div>
         </div>

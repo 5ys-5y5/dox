@@ -348,44 +348,45 @@ export type PositionCanvasActionVisibilityResultDto = {
 - 텍스트/속성 탭에서 드래그를 시작한 뒤 pointermove에서 무시하는 방식. 0.001초라도 움직임이 보일 수 있으므로 시작 자체를 막는다.
 - `canvasInteractionMode`만 바꿔 간접적으로 막는 방식. `move` 모드가 남아 있어도 탭 정책이 우선해야 한다.
 
-### 6.2 텍스트 탭 자동 높이 상자
+### 6.2 텍스트 탭 자동 높이/너비 확장
 
 #### UI 설계
 
-`renderTextCanvasActionControls()` 내부 `텍스트 설정` 컨트롤의 기존 실행형 `텍스트에 맞게 확장` 개념은 폐기한다. 텍스트 탭에는 선택 상자에 대해 속성 토글인 `자동 높이 상자`만 제공한다.
+`renderTextCanvasActionControls()` 내부 `텍스트 설정` 컨트롤에 다음 조작을 추가한다.
 
-- 버튼명:
-  - `자동 높이 상자`
-  - 이미 선택된 모든 상자가 자동 높이 상태이면 `자동 높이 상자 해제`
-- 상태 표시:
-  - 선택 없음: `자동 높이 -`
-  - 선택 있음: `자동 높이 {설정된 개수}/{선택 개수}`
+- 축 선택 segmented control:
+  - `높이 맞춤`
+  - `너비 맞춤`
+- 실행 버튼:
+  - `텍스트에 맞게 확장`
 
-선택이 없으면 비활성화한다. 복수 선택은 허용하되 각 상자별로 독립 계산한다. 이 기능은 실행 버튼이 아니라 상자의 저장 가능한 속성이므로, 설정 후 텍스트 입력이나 서식 변경으로 내용 높이가 바뀔 때마다 자동으로 재계산되어야 한다.
+선택이 없으면 비활성화한다. 복수 선택은 허용하되 각 상자별로 독립 계산한다. 단, 최초 구현이 단일 선택만 지원해야 한다고 판단되면 문서에 근거를 남기고 사용자 확인을 다시 받아야 한다.
 
 #### 계산 정책
 
-- 자동 높이 설정 시 현재 상자 높이를 `data-template-frame-auto-height-base`로 저장한다.
-- 텍스트 입력 영역의 자연 높이를 현재 상자 높이와 분리해 측정한다.
-- `nextHeight = Math.max(autoHeightBase, measuredContentHeightWithPadding)`이다.
-- 내용이 길어지면 선택 상자 높이는 커질 수 있다.
-- 내용이 줄어들면 선택 상자는 자동 높이 설정 당시의 기본 높이까지 줄어들 수 있다.
-- 선택 상자의 width는 유지한다.
-- 주변 상자의 width/height는 줄이거나 늘리지 않는다.
-- 선택 상자 높이 변화로 peer edge, relative anchor, 위치 관계를 보존해야 하면 주변 상자의 `left/top` 위치 이동은 허용한다.
-- 주변 상자를 이동한 경우 상대 위치 anchor offset도 즉시 새 위치로 다시 기록한다. 그렇지 않으면 직후 relative anchor 보정에서 이동이 이전 위치로 되돌아갈 수 있다.
-- 적용 후 `syncDraftPreviewHtmlRef({ materializePositionGroups: false })`를 기본으로 한다.
-- 이 자동 높이 경로에서는 위치 탭 edge resize처럼 반대편 상자의 높이를 줄이거나 늘리는 알고리즘을 호출하지 않는다.
-- 상대 위치 anchor 자체를 깨지 않기 위해, 선택 상자의 크기 변경과 주변 상자의 위치 보정은 같은 transaction으로 계산한다.
+- `height` 축:
+  - 현재 width는 유지한다.
+  - 텍스트의 `scrollHeight` 또는 측정 element 높이와 `paddingY`를 합산해 필요한 높이를 계산한다.
+  - `nextHeight = Math.max(currentHeight, measuredHeight)`이다.
+- `width` 축:
+  - 현재 height는 유지한다.
+  - 텍스트의 `scrollWidth` 또는 측정 element 너비와 `paddingX`를 합산해 필요한 너비를 계산한다.
+  - `nextWidth = Math.max(currentWidth, measuredWidth)`이다.
+- 줄임은 하지 않는다.
+- 주변 상자 크기 축소는 하지 않는다.
+- 선택 상자 확장으로 peer edge, relative anchor, 위치 관계를 보존해야 하면 다른 상자의 위치 이동은 허용한다.
+- 적용 후 `syncDraftPreviewHtmlRef({ materializePositionGroups: false })`를 기본으로 하되, 위치 보정이 필요한 경우에는 크기 축소 금지 guard를 통과한 보정 결과만 materialize한다.
+- 이 자동 확장 경로에서는 위치 탭 edge resize처럼 반대편 상자를 줄이는 알고리즘을 호출하지 않는다.
+- 상대 위치 anchor 자체를 깨지 않기 위해, 선택 상자의 크기 확장과 주변 상자의 위치 보정은 같은 transaction으로 계산한다.
+- 주변 peer 보정은 `width`/`height` 축소 없이 `left`/`top` 이동만 허용한다.
 
 #### `status-history-1` 검증 기준
 
-대표 템플릿에서 `status-history-1`을 선택하고 `자동 높이 상자`를 설정한다.
+대표 템플릿에서 `status-history-1`을 선택하고 높이 맞춤을 실행한다.
 
-- 긴 텍스트 입력 시 `status-history-1`의 height는 내용과 여백이 잘리지 않는 높이로 커져야 한다.
-- 긴 텍스트를 다시 줄이면 `status-history-1`은 자동 높이 설정 당시의 기본 높이까지 돌아갈 수 있어야 한다.
-- `band-5-cell-1`, `band-5-cell-2`, `band-5-cell-3`, `band-5-cell-4`, `band-5-cell-5`, `band-5-cell-6`의 height는 커지거나 작아지면 실패다.
-- `band-5-cell-1..6`의 `top`은 `status-history-1`의 height 변화량과 같은 값으로 이동할 수 있다.
+- `status-history-1`의 height는 현재값 이상으로만 변경된다.
+- `band-5-cell-1`, `band-5-cell-2`, `band-5-cell-3`, `band-5-cell-4`, `band-5-cell-5`, `band-5-cell-6`의 height는 실행 전보다 작아지면 실패다.
+- `band-5-cell-1..6`의 위치는 peer edge와 위치 관계를 보존하기 위해 이동할 수 있다.
 - 변경 대상이 `status-history-1` 하나뿐인 경우 다른 상자의 width/height는 바뀌지 않아야 한다. 다른 상자의 `left/top` 변화는 위치 관계 보존 목적일 때만 허용한다.
 
 ### 6.3 위치 탭 액션 버튼 조건부 출력
@@ -496,9 +497,6 @@ type PositionGroupEditMode =
 | `POSITION-SPACING-MULTIPAIRS-01` | `크기 및 위치` 탭의 간격 설정에서 선택 번호가 모두 1로 보이지 않도록 그룹 프록시 선택 순서를 보존한다. `band-1-header`, `band-0-header`, `그룹 1` 선택 시 세로 비교 가능한 두 간격 후보를 모두 표시하고, 한 그룹이 여러 외부 기준점을 가질 때 기존 간격을 하나로 정규화해 삭제하지 않는다. | `docs/diff/2026-05-11_POSITION-SPACING-MULTIPAIRS-01_*` | 완료 |
 | `POSITION-FLOATING-VISIBLE-BOUNDS-01` | `요약`, `스타일`, `기능 버튼` 오버레이의 사분면 판정, 기본 고정 위치, 드래그 스냅 위치를 `/html/body/main/main/div/div/div[4]/div/div[3]` 전체 높이가 아니라 해당 영역 중 현재 viewport에 보이는 부분의 위/아래/좌/우 기준으로 계산한다. | `docs/diff/2026-05-11_POSITION-FLOATING-VISIBLE-BOUNDS-01_*` | 완료 |
 | `POSITION-FLOATING-DRAG-PERF-01` | 플로팅 오버레이 드래그 중 pointer move마다 React state 갱신/DOM bounds 재측정을 하지 않는다. 드래그 시작 시 clamp 경계값을 캐시하고, 이동 중에는 `translate3d`와 width만 직접 반영해 즉각적으로 따라오게 한다. | `docs/diff/2026-05-11_POSITION-FLOATING-DRAG-PERF-01_*` | 완료 |
-| `TEXT-AUTO-HEIGHT-BOX-01` | `텍스트에 맞게 확장` 실행형 UI를 `자동 높이 상자` 속성 토글로 교체한다. 설정 시 현재 높이를 기본 높이로 저장하고, 텍스트 입력/서식 변경 시 내용과 여백 기준으로 선택 상자 높이를 동적 재계산한다. | `docs/diff/2026-05-11_TEXT-AUTO-HEIGHT-BOX-01_*` | 완료 |
-| `TEXT-AUTO-HEIGHT-BOX-02` | 자동 높이 계산으로 선택 상자가 커지거나 기본 높이까지 줄어들 때, 주변 peer 상자의 높이는 바꾸지 않고 같은 변화량만큼 위치를 이동한다. 이동한 주변 상자의 relative anchor offset도 새 위치로 갱신한다. | `docs/diff/2026-05-11_TEXT-AUTO-HEIGHT-BOX-01_TemplateEditWorkspace.before.tsx` | 완료 |
-| `TEXT-AUTO-HEIGHT-BOX-03` | 대표 템플릿의 `status-history-1` 자동 높이 설정 후 긴 텍스트 입력/축소를 검증한다. `band-5-cell-1..6`은 높이 변화 0, top 변화는 선택 상자 height 변화량과 동일해야 한다. | 테스트 기록 | 완료 |
 
 ## 9. 테스트 계획
 
@@ -516,14 +514,13 @@ type PositionGroupEditMode =
 4. `텍스트` 탭에서 상자를 선택한 뒤 drag move를 시도한다. 상자의 `left/top` 또는 transform이 바뀌면 실패다.
 5. `텍스트` 탭에서 resize handle 또는 edge drag를 시도한다. 상자의 `width/height`가 바뀌면 실패다.
 6. `텍스트` 탭에서 상자 텍스트 직접 입력은 계속 가능해야 한다.
-7. `status-history-1`을 선택하고 `자동 높이 상자`를 설정한다.
-8. 긴 텍스트 입력 전후 `status-history-1`의 height와 `band-5-cell-1..6`의 height/top을 비교한다. `status-history-1`은 커질 수 있고, `band-5-cell-1..6`의 height는 변하면 실패다. `band-5-cell-1..6`의 top은 `status-history-1`의 height 변화량만큼 이동해야 한다.
-9. 긴 텍스트를 원래 값으로 줄인 뒤 `status-history-1`이 자동 높이 기본 높이로 돌아가고, `band-5-cell-1..6`의 height는 계속 변하지 않으며 top이 원래 위치로 돌아오는지 확인한다.
-10. `크기 및 위치` 탭에서 선택 없음 상태를 확인한다. `상자 생성`, `간격 설정`만 출력되어야 한다.
-11. 복수 상자 선택 상태를 확인한다. `그룹 만들기`, `그룹에 포함`, `간격 설정`이 출력되어야 한다.
-12. 그룹 선택 포함 상태를 확인한다. `그룹 해제`, `그룹에서 제외`, `그룹에 포함`, `간격 설정`이 출력되어야 한다.
-13. `그룹에서 제외` 모드 진입 후 `Esc`, `x`, `q`, 화면 `x` 버튼으로 종료되는지 확인한다.
-14. `그룹에 포함` 모드 진입 후 `Esc`, `x`, `q`, 화면 `x` 버튼으로 종료되는지 확인한다.
+7. `status-history-1`을 선택하고 높이 맞춤을 실행한다.
+8. 실행 전후 `status-history-1`의 height와 `band-5-cell-1..6`의 height를 비교한다. `status-history-1`은 커질 수 있고, `band-5-cell-1..6`은 작아지면 실패다. 단, `band-5-cell-1..6`의 `left/top` 위치 이동은 peer edge와 위치 관계 보존 목적이면 허용한다.
+9. `크기 및 위치` 탭에서 선택 없음 상태를 확인한다. `상자 생성`, `간격 설정`만 출력되어야 한다.
+10. 복수 상자 선택 상태를 확인한다. `그룹 만들기`, `그룹에 포함`, `간격 설정`이 출력되어야 한다.
+11. 그룹 선택 포함 상태를 확인한다. `그룹 해제`, `그룹에서 제외`, `그룹에 포함`, `간격 설정`이 출력되어야 한다.
+12. `그룹에서 제외` 모드 진입 후 `Esc`, `x`, `q`, 화면 `x` 버튼으로 종료되는지 확인한다.
+13. `그룹에 포함` 모드 진입 후 `Esc`, `x`, `q`, 화면 `x` 버튼으로 종료되는지 확인한다.
 
 ### 9.3 Supabase MCP 검증
 
@@ -619,11 +616,4 @@ type PositionGroupEditMode =
 - 2026-05-11: `POSITION-FLOATING-DRAG-PERF-01` 구현. 플로팅 오버레이 드래그 중 `setFloatingOverlayDragStyles` state 갱신 경로를 제거했다. pointer down에서 visible bounds, clamp 범위, shell 좌표를 한 번 계산해 drag ref에 저장하고, pointer move에서는 저장된 숫자로 clamp한 뒤 DOM style `transform: translate3d(...)`와 `width`만 직접 반영한다. pointer up 이후 layout effect에서 임시 drag style을 제거한다.
 - 2026-05-11: chrome-devtools MCP 검증. 대표 URL에서 `요약` 오버레이에 80회 연속 pointer move를 전달했다. 이동 중 style은 `will-change: transform; transform: translate3d(260px, 130px, 0px); width: 72.7109px`로 직접 갱신됐고, pointer up 후 style은 `left/top/max-width`만 남아 `transform`, `will-change`, 직접 `width`가 제거됐다.
 - 2026-05-11: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다. `npm run lint`는 ESLint 9가 현재 repo 위치에서 `eslint.config.*`를 찾지 못해 실행 자체가 실패했다.
-- 2026-05-11: Supabase MCP 검증. `tool_search`로 Supabase MCP 도구를 탐색했으나 세션에 Supabase namespace가 노출되지 않았다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다.
-- 2026-05-11: `TEXT-AUTO-HEIGHT-BOX-01` 구현 전 백업을 `docs/diff/2026-05-11_TEXT-AUTO-HEIGHT-BOX-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-11_TEXT-AUTO-HEIGHT-BOX-01_uiupdate0511.before.md`에 생성했다.
-- 2026-05-11: `TEXT-AUTO-HEIGHT-BOX-01` 구현. `텍스트` 탭의 `텍스트에 맞게 확장` 실행 버튼과 높이/너비 축 선택을 제거하고, 선택 상자에 저장되는 `자동 높이 상자` 속성 토글로 변경했다. 속성은 `data-template-frame-auto-height="true"`와 설정 당시 기본 높이 `data-template-frame-auto-height-base`로 저장한다.
-- 2026-05-11: `TEXT-AUTO-HEIGHT-BOX-02` 구현. 자동 높이 상자는 텍스트 입력 컨트롤의 자연 높이를 숨김 복제 요소로 측정하고, `Math.max(기본 높이, 내용 높이)`로 선택 상자 높이를 재계산한다. 선택 상자 높이가 바뀌면 아래쪽 peer 상자를 같은 변화량만큼 이동시키되, 그 상자들의 width/height는 변경하지 않는다. 이동한 peer 상자는 relative anchor offset을 새 위치로 즉시 다시 기록한다.
-- 2026-05-11: chrome-devtools MCP 검증. 격리 브라우저 컨텍스트에서 대표 URL을 열고 `텍스트` 탭으로 전환한 뒤 `status-history-1`을 선택해 `자동 높이 상자`를 설정했다. 긴 텍스트 입력 시 `status-history-1`은 height `102 -> 245`로 증가했고, `band-5-cell-1..6`은 각각 top `+143`, height 변화 `0`이었다.
-- 2026-05-11: chrome-devtools MCP 검증. 같은 상태에서 텍스트를 원래 2줄로 되돌리자 `status-history-1`은 height `245 -> 102`로 기본 높이까지 축소됐고, `band-5-cell-1..6`은 각각 top `-143`, height 변화 `0`으로 원래 위치에 복귀했다. 콘솔 `error`/`warn`은 발견되지 않았다.
-- 2026-05-11: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`, `npm run check:no-shadow-app`가 통과했다. `npm run lint`는 `APP-NOSHADOW-02` 통과 후 ESLint 9 설정 파일(`eslint.config.*`) 부재로 실패했다.
 - 2026-05-11: Supabase MCP 검증. `tool_search`로 Supabase MCP 도구를 탐색했으나 세션에 Supabase namespace가 노출되지 않았다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다.
