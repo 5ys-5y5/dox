@@ -322,9 +322,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 | `SUMMARY-FIT-01` | 요약 버튼 내용 폭 변경 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_SUMMARY-FIT-01_*.before.*` | 완료 |
 | `SUMMARY-FIT-02` | 접힌 요약 오버레이의 50px 고정 폭을 제거하고 내용 기준 폭으로 렌더링한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SUMMARY-FIT-03` | 정적 검증과 문서 테스트 기록을 갱신한다. | 테스트 기록 | 완료 |
-| `SUMMARY-HANDLE-01` | 요약 핸들 위치 고정 변경 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_SUMMARY-HANDLE-01_*.before.*` | 완료 |
-| `SUMMARY-HANDLE-02` | 축소/확장 상태에서 요약 핸들을 동일한 좌측 위치에 출력한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `SUMMARY-HANDLE-03` | 정적 검증과 문서 테스트 기록을 갱신한다. | 테스트 기록 | 완료 |
 
 ## 9. 테스트 계획
 
@@ -436,17 +433,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 - 2026-05-11: 접힌 상태의 요약 버튼은 파일 모양 아이콘 대신 `요약` 텍스트를 출력한다.
 - 2026-05-11: 접힌 상태와 펼친 상태의 위치 이동 핸들은 모두 lucide `GripHorizontal`을 90도 회전해 표시한다.
 - 2026-05-11: 접힌 요약 버튼 오른쪽에는 `ChevronDown`을 배치해 확장 가능한 항목임을 암시하고, 펼친 헤더에는 `ChevronUp`을 배치해 다시 접을 수 있음을 표시한다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: `chrome-devtools` MCP `list_pages`는 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 화면 검증을 수행하지 못했다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-요약 핸들 위치 고정 추가 변경:
-
-- 2026-05-11: `SUMMARY-HANDLE-01` 백업 완료.
-  - `docs/diff/2026-05-11_SUMMARY-HANDLE-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_SUMMARY-HANDLE-01_0511ui.before.md`
-- 2026-05-11: 축소 상태와 확장 상태 모두 버튼 내부 순서를 `핸들 -> 요약 -> 접기/펼치기 표시`로 통일했다.
-- 2026-05-11: 축소/확장 버튼의 좌측 padding을 동일하게 유지해 lucide `GripHorizontal` 핸들의 좌측 기준 위치가 상태 전환 중 바뀌지 않도록 했다.
 - 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
 - 2026-05-11: `chrome-devtools` MCP `list_pages`는 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 화면 검증을 수행하지 못했다.
 - 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.

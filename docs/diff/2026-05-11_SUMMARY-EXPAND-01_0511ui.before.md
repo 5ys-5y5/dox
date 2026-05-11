@@ -312,19 +312,10 @@ export type TemplateEditWorkspaceLayoutSlots = {
 | `UI-TEXT-BULK-11` | `supabase` MCP로 DB 변경 없음과 저장 계약 영향 없음을 확인한다. | 테스트 기록 | 차단됨: supabase MCP 도구가 현재 세션에 노출되지 않음 |
 | `UI-TEXT-BULK-12` | 이 문서에 구현 결과, 테스트 결과, 남은 위험을 기록한다. | `0511ui.before.md` | 완료 |
 | `SUMMARY-ICON-01` | 요약 오버레이 아이콘 기본 상태 변경 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_SUMMARY-ICON-01_*.before.*` | 완료 |
-| `SUMMARY-ICON-02` | 요약 플로팅 오버레이의 기본 상태를 50px 너비, 32px 높이의 접힌 아이콘으로 변경한다. 후속 `SUMMARY-FIT-02`에서 50px 고정 폭은 제거됐다. | `TemplateEditWorkspace.before.tsx` | 완료 |
+| `SUMMARY-ICON-02` | 요약 플로팅 오버레이의 기본 상태를 50px 너비, 32px 높이의 접힌 아이콘으로 변경한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SUMMARY-ICON-03` | 요약 위치 이동 아이콘을 lucide `Move`에서 lucide 핸들 표시로 변경한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SUMMARY-ICON-04` | 접힌 아이콘과 펼친 요약 패널 모두 기존 네 귀퉁이 드래그 스냅 계약을 유지한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SUMMARY-ICON-05` | 정적 검증과 문서 테스트 기록을 갱신한다. | 테스트 기록 | 완료 |
-| `SUMMARY-EXPAND-01` | 요약 버튼 표시 변경 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_SUMMARY-EXPAND-01_*.before.*` | 완료 |
-| `SUMMARY-EXPAND-02` | 접힌 요약 버튼에서 파일 아이콘 대신 `요약` 텍스트를 출력한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `SUMMARY-EXPAND-03` | 요약 핸들을 90도 회전 출력하고, 접힌 버튼에 확장 가능 표시를 추가한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `SUMMARY-FIT-01` | 요약 버튼 내용 폭 변경 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_SUMMARY-FIT-01_*.before.*` | 완료 |
-| `SUMMARY-FIT-02` | 접힌 요약 오버레이의 50px 고정 폭을 제거하고 내용 기준 폭으로 렌더링한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `SUMMARY-FIT-03` | 정적 검증과 문서 테스트 기록을 갱신한다. | 테스트 기록 | 완료 |
-| `SUMMARY-HANDLE-01` | 요약 핸들 위치 고정 변경 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_SUMMARY-HANDLE-01_*.before.*` | 완료 |
-| `SUMMARY-HANDLE-02` | 축소/확장 상태에서 요약 핸들을 동일한 좌측 위치에 출력한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `SUMMARY-HANDLE-03` | 정적 검증과 문서 테스트 기록을 갱신한다. | 테스트 기록 | 완료 |
 
 ## 9. 테스트 계획
 
@@ -420,47 +411,12 @@ export type TemplateEditWorkspaceLayoutSlots = {
 - 2026-05-11: `SUMMARY-ICON-01` 백업 완료.
   - `docs/diff/2026-05-11_SUMMARY-ICON-01_TemplateEditWorkspace.before.tsx`
   - `docs/diff/2026-05-11_SUMMARY-ICON-01_0511ui.before.md`
-- 2026-05-11: 요약 플로팅 오버레이는 기본 렌더링 시 border를 포함한 `50px * 32px` 크기의 접힌 아이콘 상태로 표시했다. 이 고정 폭은 후속 `SUMMARY-FIT-02`에서 제거됐다.
+- 2026-05-11: 요약 플로팅 오버레이는 기본 렌더링 시 border를 포함한 `50px * 32px` 크기의 접힌 아이콘 상태로 표시한다.
 - 2026-05-11: 접힌 아이콘을 클릭하면 요약 패널이 펼쳐지고, 펼쳐진 헤더를 클릭하면 다시 접힌 아이콘으로 돌아가도록 했다.
 - 2026-05-11: 접힌 아이콘과 펼친 헤더 모두 같은 pointer drag 계약을 사용하며, 4px 이상 이동한 경우 클릭 토글이 아니라 기존 사분면 기준 네 귀퉁이 자동 스냅으로 처리한다.
 - 2026-05-11: 요약 위치 이동 affordance는 lucide `Move`가 아니라 lucide `GripHorizontal` 핸들 표시를 사용한다.
 - 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다. `esbuild` 최초 실행은 zsh glob 해석 때문에 실패했으며, `--external:*` 인자를 따옴표 처리한 동일 명령으로 재실행해 통과했다.
 - 2026-05-11: `chrome-devtools` MCP는 `list_pages`와 `new_page` 모두 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 `/templates/edit` 화면 검증을 수행하지 못했다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-요약 버튼 표시 추가 변경:
-
-- 2026-05-11: `SUMMARY-EXPAND-01` 백업 완료.
-  - `docs/diff/2026-05-11_SUMMARY-EXPAND-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_SUMMARY-EXPAND-01_0511ui.before.md`
-- 2026-05-11: 접힌 상태의 요약 버튼은 파일 모양 아이콘 대신 `요약` 텍스트를 출력한다.
-- 2026-05-11: 접힌 상태와 펼친 상태의 위치 이동 핸들은 모두 lucide `GripHorizontal`을 90도 회전해 표시한다.
-- 2026-05-11: 접힌 요약 버튼 오른쪽에는 `ChevronDown`을 배치해 확장 가능한 항목임을 암시하고, 펼친 헤더에는 `ChevronUp`을 배치해 다시 접을 수 있음을 표시한다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: `chrome-devtools` MCP `list_pages`는 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 화면 검증을 수행하지 못했다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-요약 핸들 위치 고정 추가 변경:
-
-- 2026-05-11: `SUMMARY-HANDLE-01` 백업 완료.
-  - `docs/diff/2026-05-11_SUMMARY-HANDLE-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_SUMMARY-HANDLE-01_0511ui.before.md`
-- 2026-05-11: 축소 상태와 확장 상태 모두 버튼 내부 순서를 `핸들 -> 요약 -> 접기/펼치기 표시`로 통일했다.
-- 2026-05-11: 축소/확장 버튼의 좌측 padding을 동일하게 유지해 lucide `GripHorizontal` 핸들의 좌측 기준 위치가 상태 전환 중 바뀌지 않도록 했다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: `chrome-devtools` MCP `list_pages`는 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 화면 검증을 수행하지 못했다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-요약 버튼 내용 폭 추가 변경:
-
-- 2026-05-11: `SUMMARY-FIT-01` 백업 완료.
-  - `docs/diff/2026-05-11_SUMMARY-FIT-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_SUMMARY-FIT-01_0511ui.before.md`
-- 2026-05-11: 접힌 요약 오버레이에서 50px 고정 폭 상수와 inline width 지정을 제거했다. 후속 구현 기준은 `50px * 32px` 고정 아이콘이 아니라 `요약` 텍스트, 회전 핸들, 확장 표시가 차지하는 실제 내용 폭이다.
-- 2026-05-11: 접힌 오버레이 outer는 `w-max`와 preview 폭 기준 `max-width`만 사용한다. 버튼 내부는 absolute 배치로 구겨 넣지 않고 flex gap으로 배치해 내용 길이가 폭을 결정한다.
-- 2026-05-11: 접힌 상태 높이 `32px`와 네 귀퉁이 스냅 계약은 유지한다. 드래그 중 폭은 현재 렌더링된 실제 overlay rect width를 기준으로 계산한다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: `chrome-devtools` MCP `list_pages`는 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 화면 검증을 수행하지 못했다.
 - 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
 
 후속 구현자는 아래 양식을 채운다.

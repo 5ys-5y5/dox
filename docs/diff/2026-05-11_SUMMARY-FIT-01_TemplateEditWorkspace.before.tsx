@@ -644,6 +644,7 @@ const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
 const CREATED_FRAME_GROUP_PREFIX = 'user-box';
 const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
 const SUMMARY_OVERLAY_INSET_PX = 12;
+const SUMMARY_OVERLAY_COLLAPSED_WIDTH_PX = 50;
 const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
 const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
 const SUMMARY_OVERLAY_CORNER_CLASS: Record<SummaryOverlayCorner, string> = {
@@ -892,7 +893,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       top,
       width: Math.min(
         dragState.width,
-        Math.max(SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX, shellRect.width - SUMMARY_OVERLAY_INSET_PX * 2)
+        Math.max(SUMMARY_OVERLAY_COLLAPSED_WIDTH_PX, shellRect.width - SUMMARY_OVERLAY_INSET_PX * 2)
       ),
       height: dragState.height,
       shellWidth: shellRect.width,
@@ -1015,6 +1016,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     );
   }
 
+  const summaryOverlayInlineStyle =
+    summaryOverlayDragStyle ||
+    (summaryOverlayCollapsed ? { width: `${SUMMARY_OVERLAY_COLLAPSED_WIDTH_PX}px` } : undefined);
+
   return (
     <CardContent ref={surfaceShellRef} className="relative overflow-hidden p-0">
       <div
@@ -1036,17 +1041,17 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         <div
           ref={summaryOverlayRef}
           className={`absolute z-[70] ${
-            summaryOverlayCollapsed ? 'w-max max-w-[calc(100%_-_1.5rem)]' : 'w-96 max-w-[calc(100%_-_1.5rem)]'
+            summaryOverlayCollapsed ? '' : 'w-96 max-w-[calc(100%_-_1.5rem)]'
           } ${
             summaryOverlayDragStyle ? '' : SUMMARY_OVERLAY_CORNER_CLASS[summaryOverlayCorner]
           }`}
-          style={summaryOverlayDragStyle || undefined}
+          style={summaryOverlayInlineStyle}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
           <div
             className={`overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-lg backdrop-blur ${
-              summaryOverlayCollapsed ? 'inline-block max-w-full' : ''
+              summaryOverlayCollapsed ? 'w-full' : ''
             }`}
             style={
               summaryOverlayCollapsed
@@ -1058,10 +1063,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
           >
             <button
               type="button"
-              className={`flex cursor-move items-center bg-white/90 text-xs font-semibold text-slate-700 ${
+              className={`flex w-full cursor-move items-center bg-white/90 text-xs font-semibold text-slate-700 ${
                 summaryOverlayCollapsed
-                  ? 'h-full w-auto justify-between gap-1.5 px-2 text-[11px] leading-none'
-                  : 'h-8 w-full justify-between gap-3 border-b border-slate-200 px-2'
+                  ? 'relative h-full justify-center px-1 text-[11px] leading-none'
+                  : 'h-8 justify-between border-b border-slate-200 px-3'
               }`}
               aria-label={summaryOverlayCollapsed ? '요약 열기 및 위치 이동' : '요약 접기 및 위치 이동'}
               title={summaryOverlayCollapsed ? '요약' : '요약 위치 이동'}
@@ -1087,22 +1092,23 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
             >
               {summaryOverlayCollapsed ? (
                 <>
-                  <span className="flex items-center gap-1.5">
-                    <GripHorizontal className="h-3 w-3 rotate-90 text-slate-400" aria-hidden="true" />
-                    <span className="whitespace-nowrap">요약</span>
-                  </span>
+                  <GripHorizontal
+                    className="absolute left-1 top-1/2 h-3 w-3 -translate-y-1/2 rotate-90 text-slate-400"
+                    aria-hidden="true"
+                  />
+                  <span>요약</span>
                   <ChevronDown
-                    className="h-3 w-3 text-slate-500"
+                    className="absolute right-1 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-500"
                     aria-hidden="true"
                   />
                 </>
               ) : (
                 <>
-                  <span className="flex items-center gap-1.5">
-                    <GripHorizontal className="h-3 w-3 rotate-90 text-slate-400" aria-hidden="true" />
-                    <span>요약</span>
+                  <span>요약</span>
+                  <span className="flex items-center gap-2">
+                    <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
+                    <GripHorizontal className="h-3.5 w-3.5 rotate-90" aria-hidden="true" />
                   </span>
-                  <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                 </>
               )}
             </button>

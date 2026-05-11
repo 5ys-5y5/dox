@@ -6,12 +6,9 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
-  ChevronDown,
-  ChevronUp,
   CircleDot,
   CornerDownRight,
   FileText,
-  GripHorizontal,
   Italic,
   KeyRound,
   Loader2,
@@ -568,13 +565,10 @@ type SummaryOverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-r
 
 type SummaryOverlayDragState = {
   pointerId: number;
-  originX: number;
-  originY: number;
   offsetX: number;
   offsetY: number;
   width: number;
   height: number;
-  hasMoved: boolean;
 };
 
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
@@ -644,8 +638,6 @@ const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
 const CREATED_FRAME_GROUP_PREFIX = 'user-box';
 const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
 const SUMMARY_OVERLAY_INSET_PX = 12;
-const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
-const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
 const SUMMARY_OVERLAY_CORNER_CLASS: Record<SummaryOverlayCorner, string> = {
   'top-left': 'left-3 top-3',
   'top-right': 'right-3 top-3',
@@ -865,7 +857,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const summaryOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
   const [summaryOverlayCorner, setSummaryOverlayCorner] = React.useState<SummaryOverlayCorner>('top-left');
   const [summaryOverlayDragStyle, setSummaryOverlayDragStyle] = React.useState<React.CSSProperties | null>(null);
-  const [summaryOverlayCollapsed, setSummaryOverlayCollapsed] = React.useState(true);
 
   const readSummaryOverlayDragMetrics = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
     const shell = surfaceShellRef.current;
@@ -890,10 +881,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     return {
       left,
       top,
-      width: Math.min(
-        dragState.width,
-        Math.max(SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX, shellRect.width - SUMMARY_OVERLAY_INSET_PX * 2)
-      ),
+      width: Math.min(dragState.width, Math.max(160, shellRect.width - SUMMARY_OVERLAY_INSET_PX * 2)),
       height: dragState.height,
       shellWidth: shellRect.width,
       shellHeight: shellRect.height,
@@ -912,13 +900,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     const overlayRect = overlay.getBoundingClientRect();
     summaryOverlayDragStateRef.current = {
       pointerId: event.pointerId,
-      originX: event.clientX,
-      originY: event.clientY,
       offsetX: event.clientX - overlayRect.left,
       offsetY: event.clientY - overlayRect.top,
       width: overlayRect.width,
       height: overlayRect.height,
-      hasMoved: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   }, []);
@@ -933,17 +918,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 
       event.preventDefault();
       event.stopPropagation();
-
-      if (!dragState.hasMoved) {
-        const pointerDistance = Math.hypot(event.clientX - dragState.originX, event.clientY - dragState.originY);
-
-        if (pointerDistance < SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX) {
-          return;
-        }
-
-        dragState.hasMoved = true;
-      }
-
       const metrics = readSummaryOverlayDragMetrics(event);
 
       if (!metrics) {
@@ -971,14 +945,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       event.stopPropagation();
       const metrics = readSummaryOverlayDragMetrics(event);
 
-      if (metrics && dragState.hasMoved) {
+      if (metrics) {
         const nextVertical = metrics.top + metrics.height / 2 < metrics.shellHeight / 2 ? 'top' : 'bottom';
         const nextHorizontal = metrics.left + metrics.width / 2 < metrics.shellWidth / 2 ? 'left' : 'right';
         setSummaryOverlayCorner(`${nextVertical}-${nextHorizontal}` as SummaryOverlayCorner);
-      }
-
-      if (!dragState.hasMoved) {
-        setSummaryOverlayCollapsed((current) => !current);
       }
 
       summaryOverlayDragStateRef.current = null;
@@ -1035,49 +1005,23 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       {summaryOverlay ? (
         <div
           ref={summaryOverlayRef}
-          className={`absolute z-[70] ${
-            summaryOverlayCollapsed ? 'w-max max-w-[calc(100%_-_1.5rem)]' : 'w-96 max-w-[calc(100%_-_1.5rem)]'
-          } ${
+          className={`absolute z-[70] w-96 max-w-[calc(100%_-_1.5rem)] ${
             summaryOverlayDragStyle ? '' : SUMMARY_OVERLAY_CORNER_CLASS[summaryOverlayCorner]
           }`}
           style={summaryOverlayDragStyle || undefined}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
-          <div
-            className={`overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-lg backdrop-blur ${
-              summaryOverlayCollapsed ? 'inline-block max-w-full' : ''
-            }`}
-            style={
-              summaryOverlayCollapsed
-                ? {
-                    height: `${SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX}px`,
-                  }
-                : undefined
-            }
-          >
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
             <button
               type="button"
-              className={`flex cursor-move items-center bg-white/90 text-xs font-semibold text-slate-700 ${
-                summaryOverlayCollapsed
-                  ? 'h-full w-auto justify-between gap-1.5 px-2 text-[11px] leading-none'
-                  : 'h-8 w-full justify-between gap-3 border-b border-slate-200 px-2'
-              }`}
-              aria-label={summaryOverlayCollapsed ? '요약 열기 및 위치 이동' : '요약 접기 및 위치 이동'}
-              title={summaryOverlayCollapsed ? '요약' : '요약 위치 이동'}
+              className="flex h-8 w-full cursor-move items-center justify-between border-b border-slate-200 bg-white/90 px-3 text-xs font-semibold text-slate-700"
+              aria-label="요약 위치 이동"
+              title="요약 위치 이동"
               onPointerDown={handleSummaryOverlayPointerDown}
               onPointerMove={handleSummaryOverlayPointerMove}
               onPointerUp={finishSummaryOverlayDrag}
               onPointerCancel={cancelSummaryOverlayDrag}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') {
-                  return;
-                }
-
-                event.preventDefault();
-                event.stopPropagation();
-                setSummaryOverlayCollapsed((current) => !current);
-              }}
               onLostPointerCapture={(event) => {
                 if (summaryOverlayDragStateRef.current?.pointerId === event.pointerId) {
                   summaryOverlayDragStateRef.current = null;
@@ -1085,32 +1029,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
                 }
               }}
             >
-              {summaryOverlayCollapsed ? (
-                <>
-                  <span className="flex items-center gap-1.5">
-                    <GripHorizontal className="h-3 w-3 rotate-90 text-slate-400" aria-hidden="true" />
-                    <span className="whitespace-nowrap">요약</span>
-                  </span>
-                  <ChevronDown
-                    className="h-3 w-3 text-slate-500"
-                    aria-hidden="true"
-                  />
-                </>
-              ) : (
-                <>
-                  <span className="flex items-center gap-1.5">
-                    <GripHorizontal className="h-3 w-3 rotate-90 text-slate-400" aria-hidden="true" />
-                    <span>요약</span>
-                  </span>
-                  <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
-                </>
-              )}
+              <span>요약</span>
+              <Move className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
-            {summaryOverlayCollapsed ? null : (
-              <div className="max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2">
-                {summaryOverlay}
-              </div>
-            )}
+            <div className="max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2">
+              {summaryOverlay}
+            </div>
           </div>
         </div>
       ) : null}

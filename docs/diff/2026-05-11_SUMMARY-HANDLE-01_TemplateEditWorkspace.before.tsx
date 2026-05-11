@@ -1060,8 +1060,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
               type="button"
               className={`flex cursor-move items-center bg-white/90 text-xs font-semibold text-slate-700 ${
                 summaryOverlayCollapsed
-                  ? 'h-full w-auto justify-between gap-1.5 px-2 text-[11px] leading-none'
-                  : 'h-8 w-full justify-between gap-3 border-b border-slate-200 px-2'
+                  ? 'h-full w-auto gap-1.5 px-2 text-[11px] leading-none'
+                  : 'h-8 w-full justify-between border-b border-slate-200 px-3'
               }`}
               aria-label={summaryOverlayCollapsed ? '요약 열기 및 위치 이동' : '요약 접기 및 위치 이동'}
               title={summaryOverlayCollapsed ? '요약' : '요약 위치 이동'}
@@ -1087,10 +1087,11 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
             >
               {summaryOverlayCollapsed ? (
                 <>
-                  <span className="flex items-center gap-1.5">
-                    <GripHorizontal className="h-3 w-3 rotate-90 text-slate-400" aria-hidden="true" />
-                    <span className="whitespace-nowrap">요약</span>
-                  </span>
+                  <GripHorizontal
+                    className="h-3 w-3 rotate-90 text-slate-400"
+                    aria-hidden="true"
+                  />
+                  <span className="whitespace-nowrap">요약</span>
                   <ChevronDown
                     className="h-3 w-3 text-slate-500"
                     aria-hidden="true"
@@ -1098,11 +1099,11 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
                 </>
               ) : (
                 <>
-                  <span className="flex items-center gap-1.5">
-                    <GripHorizontal className="h-3 w-3 rotate-90 text-slate-400" aria-hidden="true" />
-                    <span>요약</span>
+                  <span>요약</span>
+                  <span className="flex items-center gap-2">
+                    <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
+                    <GripHorizontal className="h-3.5 w-3.5 rotate-90" aria-hidden="true" />
                   </span>
-                  <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                 </>
               )}
             </button>
