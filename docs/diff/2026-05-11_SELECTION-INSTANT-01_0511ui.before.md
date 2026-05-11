@@ -368,15 +368,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 | `SELECTION-STABLE-06` | 선택 attrs와 위치/속성 focus attrs를 값 변경 시에만 쓰도록 바꿔 동일 선택 재쓰기 mutation을 막는다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SELECTION-STABLE-07` | 안정 refresh에서 edge resize 버튼을 중복 append하지 않고 기존 버튼을 동기화한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SELECTION-STABLE-08` | 최종 정적 검증, chrome-devtools 관찰 결과, MCP 제한 사항을 테스트 기록에 남긴다. | 테스트 기록 | 완료 |
-| `SELECTION-INSTANT-01` | 선택 즉시 출력 수정 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_SELECTION-INSTANT-01_*.before.*` | 완료 |
-| `SELECTION-INSTANT-02` | 클릭 시 이전 선택을 먼저 비우지 않고 새 선택 chrome/proxy를 먼저 적용한 뒤 stale chrome을 정리한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `SELECTION-INSTANT-03` | 선택 전환은 이미 브라우저에 로드된 preview DOM과 frame map을 사용하고, 클릭마다 템플릿/preview HTML을 다시 불러오지 않는다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `SELECTION-INSTANT-04` | 정적 검증과 chrome-devtools mutation 순서 검증 결과를 기록한다. | 테스트 기록 | 완료 |
-| `GROUP-SELECTION-UI-01` | 그룹 선택 UI 재수정 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_GROUP-SELECTION-UI-01_*.before.*` | 완료 |
-| `GROUP-SELECTION-UI-02` | 크기 및 위치 탭의 그룹 선택은 실제 그룹 wrapper가 아니라 편집기 proxy overlay에 단일 상자 선택과 같은 선택 chrome을 출력한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `GROUP-SELECTION-UI-03` | 미선택 상태에서 그룹 전체를 감싸는 카탈로그성 외곽선 오버레이를 생성하지 않고, 기존 잔여 오버레이는 제거한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `GROUP-SELECTION-UI-04` | proxy overlay 안정성 판정은 직접 선택 fill과 그룹 proxy fill을 함께 계산해 불필요한 repaint를 막는다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `GROUP-SELECTION-UI-05` | 정적 검증, chrome-devtools 화면 클릭 검증, Supabase MCP 제한 사항을 테스트 기록에 남긴다. | 테스트 기록 | 완료 |
 
 ## 9. 테스트 계획
 
@@ -649,22 +640,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 - 2026-05-11: 마지막 추가 chrome-devtools click 1건은 안전 모니터가 중단했다. 중단 전 최신 snapshot과 mutation 관찰 결과를 기준으로 기록하며, DB 변경은 없다.
 - 2026-05-11: `supabase` MCP는 현재 세션에 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
 
-선택 즉시 출력 추가 수정:
-
-- 2026-05-11: `SELECTION-INSTANT-01` 백업 완료.
-  - `docs/diff/2026-05-11_SELECTION-INSTANT-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_SELECTION-INSTANT-01_0511ui.before.md`
-- 2026-05-11: 후속 기준은 0.001초라도 `old 선택 제거 -> new 선택 추가` 순서가 발생하지 않는 것이다. 선택 전환은 반드시 `new 선택 chrome/proxy 선적용 -> old stale chrome 정리` 순서로 수행한다.
-- 2026-05-11: `applyFastFrameSelectionUi()`와 `applyFrameSelectionUi()`에서 선택 대상이 있는 경우 `stripSelectionAttrs()`가 기존 선택을 먼저 제거하지 않도록 `preserveFrameSelectionState`를 강제하고, 새 선택의 `data-template-selected`, order, primary, fill/delete chrome을 먼저 붙인다.
-- 2026-05-11: 위치 탭 group proxy 순환은 direct selected attr이 없는 상태가 정상일 수 있으므로, proxy marker와 position active focus를 브라우저에 있는 DOM에 먼저 반영한 뒤 이전 direct selection fill/delete를 정리한다. 그룹은 별도 스타일을 갖지 않는다는 `GROUP-NOSTYLE` 기준은 유지한다.
-- 2026-05-11: 클릭마다 템플릿 데이터를 다시 불러오지 않는다. 선택 전환은 `collectFrameSelectionAnchorByIdMap()`으로 현재 preview DOM에 이미 로드된 frame map을 만들고, `selectedFrameGroupIdsRef`, `positionGroupProxySelectionGroupIdRef`, `positionBoxGroups` 같은 브라우저 resident 상태로 즉시 계산한다. `applyFrameBoxSelection()`은 이전 예약 rehydrate를 취소하므로 일반 클릭 선택이 preview HTML 재로드를 요구하지 않는다.
-- 2026-05-11: chrome-devtools MCP mutation 검증 결과:
-  - 속성 탭 `B90467CA-12 -> 발 급 일` 전환에서 `data-template-selected:null->true`가 먼저 기록되고, 기존 `B90467CA-12`의 `true->null`은 그 뒤에 기록됐다. `removeBeforeAdd=false`.
-  - 위치 탭 group proxy 상태에서 `B90467CA-12` direct 선택으로 순환 시 `data-template-selected:null->true`만 기록됐고 제거 이벤트는 없었다.
-  - 위치 탭 direct 선택에서 group proxy 상태로 순환 시 최종 상태는 `selectedCount=0`, `proxyMarkerCount=1`, `positionActiveCount=51`이다. 이 상태는 그룹이 별도 style surface가 아니고 proxy/active-focus로만 존재한다는 현재 설계 기준에 맞는다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: `supabase` MCP는 현재 세션에 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
 요약 핸들 위치 고정 추가 변경:
 
 - 2026-05-11: `SUMMARY-HANDLE-01` 백업 완료.
@@ -686,22 +661,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 - 2026-05-11: 접힌 상태 높이 `32px`와 네 귀퉁이 스냅 계약은 유지한다. 드래그 중 폭은 현재 렌더링된 실제 overlay rect width를 기준으로 계산한다.
 - 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
 - 2026-05-11: `chrome-devtools` MCP `list_pages`는 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 화면 검증을 수행하지 못했다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-크기 및 위치 탭 그룹 선택 UI 추가 변경:
-
-- 2026-05-11: `GROUP-SELECTION-UI-01` 백업 완료.
-  - `docs/diff/2026-05-11_GROUP-SELECTION-UI-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_GROUP-SELECTION-UI-01_0511ui.before.md`
-- 2026-05-11: 그룹 선택 표시를 실제 그룹 wrapper 스타일이 아니라 `.page-inner`에 붙는 `data-v106-position-group-proxy-selection-ui="true"` 편집기 overlay로 출력하도록 바꿨다. overlay는 단일 상자 선택과 같은 선택 번호, fill, primary outline/box-shadow를 가진다.
-- 2026-05-11: `data-v106-position-group-catalog-overlay` 생성 경로는 기존 잔여 overlay 제거만 수행하도록 변경했다. 따라서 미선택 상태의 `그룹 1`을 감싸는 별도 카탈로그 외곽선은 새로 생성되지 않는다.
-- 2026-05-11: 그룹 proxy overlay는 안정 선택 UI 판정에서 직접 선택 fill과 별도로 계산한다. direct box 선택과 group proxy 선택을 오갈 때 proxy fill이 누락되어 full repaint로 되돌아가는 일을 막는다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: chrome-devtools MCP에서 `http://localhost:3001/templates/edit?templateId=d3a38b9c-2603-4bc4-88e6-6b15fcfd0c40`를 reload한 뒤 접근성 스냅샷의 `B90467CA-12` 텍스트 상자를 화면 클릭 방식으로 눌러 확인했다. `div` selector를 직접 타겟하지 않았다.
-  - reload 직후 미선택 상태: `selectedCount=0`, `proxyCount=0`, `catalogCount=0`.
-  - 첫 클릭 그룹 proxy 상태: `selectedCount=0`, `proxyCount=1`, `proxyVisibleCount=1`, `data-v106-position-group-proxy-selection-ui="true"`, `data-template-primary-selected="true"`, `outlineColor=rgba(13, 148, 136, 0.98)`, `catalogCount=0`, `positionFocusActiveCount=51`, `positionFocusInactiveCount=3`.
-  - 두 번째 클릭 단일 상자 상태: `selectedCount=1`, `proxyCount=0`, `fillCount=1`, `deleteButtonCount=1`, `catalogCount=0`.
-- 2026-05-11: chrome-devtools MCP 콘솔 확인 결과 error/warn 메시지는 없었다.
 - 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
 
 후속 구현자는 아래 양식을 채운다.

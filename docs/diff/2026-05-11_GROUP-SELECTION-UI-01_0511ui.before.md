@@ -372,11 +372,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 | `SELECTION-INSTANT-02` | 클릭 시 이전 선택을 먼저 비우지 않고 새 선택 chrome/proxy를 먼저 적용한 뒤 stale chrome을 정리한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SELECTION-INSTANT-03` | 선택 전환은 이미 브라우저에 로드된 preview DOM과 frame map을 사용하고, 클릭마다 템플릿/preview HTML을 다시 불러오지 않는다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `SELECTION-INSTANT-04` | 정적 검증과 chrome-devtools mutation 순서 검증 결과를 기록한다. | 테스트 기록 | 완료 |
-| `GROUP-SELECTION-UI-01` | 그룹 선택 UI 재수정 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_GROUP-SELECTION-UI-01_*.before.*` | 완료 |
-| `GROUP-SELECTION-UI-02` | 크기 및 위치 탭의 그룹 선택은 실제 그룹 wrapper가 아니라 편집기 proxy overlay에 단일 상자 선택과 같은 선택 chrome을 출력한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `GROUP-SELECTION-UI-03` | 미선택 상태에서 그룹 전체를 감싸는 카탈로그성 외곽선 오버레이를 생성하지 않고, 기존 잔여 오버레이는 제거한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `GROUP-SELECTION-UI-04` | proxy overlay 안정성 판정은 직접 선택 fill과 그룹 proxy fill을 함께 계산해 불필요한 repaint를 막는다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `GROUP-SELECTION-UI-05` | 정적 검증, chrome-devtools 화면 클릭 검증, Supabase MCP 제한 사항을 테스트 기록에 남긴다. | 테스트 기록 | 완료 |
 
 ## 9. 테스트 계획
 
@@ -686,22 +681,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 - 2026-05-11: 접힌 상태 높이 `32px`와 네 귀퉁이 스냅 계약은 유지한다. 드래그 중 폭은 현재 렌더링된 실제 overlay rect width를 기준으로 계산한다.
 - 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic ...`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
 - 2026-05-11: `chrome-devtools` MCP `list_pages`는 기존 chrome-devtools profile이 이미 실행 중이라는 오류를 반환해 화면 검증을 수행하지 못했다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-크기 및 위치 탭 그룹 선택 UI 추가 변경:
-
-- 2026-05-11: `GROUP-SELECTION-UI-01` 백업 완료.
-  - `docs/diff/2026-05-11_GROUP-SELECTION-UI-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_GROUP-SELECTION-UI-01_0511ui.before.md`
-- 2026-05-11: 그룹 선택 표시를 실제 그룹 wrapper 스타일이 아니라 `.page-inner`에 붙는 `data-v106-position-group-proxy-selection-ui="true"` 편집기 overlay로 출력하도록 바꿨다. overlay는 단일 상자 선택과 같은 선택 번호, fill, primary outline/box-shadow를 가진다.
-- 2026-05-11: `data-v106-position-group-catalog-overlay` 생성 경로는 기존 잔여 overlay 제거만 수행하도록 변경했다. 따라서 미선택 상태의 `그룹 1`을 감싸는 별도 카탈로그 외곽선은 새로 생성되지 않는다.
-- 2026-05-11: 그룹 proxy overlay는 안정 선택 UI 판정에서 직접 선택 fill과 별도로 계산한다. direct box 선택과 group proxy 선택을 오갈 때 proxy fill이 누락되어 full repaint로 되돌아가는 일을 막는다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: chrome-devtools MCP에서 `http://localhost:3001/templates/edit?templateId=d3a38b9c-2603-4bc4-88e6-6b15fcfd0c40`를 reload한 뒤 접근성 스냅샷의 `B90467CA-12` 텍스트 상자를 화면 클릭 방식으로 눌러 확인했다. `div` selector를 직접 타겟하지 않았다.
-  - reload 직후 미선택 상태: `selectedCount=0`, `proxyCount=0`, `catalogCount=0`.
-  - 첫 클릭 그룹 proxy 상태: `selectedCount=0`, `proxyCount=1`, `proxyVisibleCount=1`, `data-v106-position-group-proxy-selection-ui="true"`, `data-template-primary-selected="true"`, `outlineColor=rgba(13, 148, 136, 0.98)`, `catalogCount=0`, `positionFocusActiveCount=51`, `positionFocusInactiveCount=3`.
-  - 두 번째 클릭 단일 상자 상태: `selectedCount=1`, `proxyCount=0`, `fillCount=1`, `deleteButtonCount=1`, `catalogCount=0`.
-- 2026-05-11: chrome-devtools MCP 콘솔 확인 결과 error/warn 메시지는 없었다.
 - 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
 
 후속 구현자는 아래 양식을 채운다.

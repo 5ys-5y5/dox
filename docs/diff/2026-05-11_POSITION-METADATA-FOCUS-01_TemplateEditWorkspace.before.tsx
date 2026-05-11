@@ -194,6 +194,7 @@ type FrameRelationPreviewMode =
 
 type SelectionPanelTab = 'metadata' | 'position' | 'text';
 type CanvasInteractionMode = 'select' | 'move';
+type PositionAppearanceTargetMode = 'group' | 'frame';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
 
@@ -643,7 +644,6 @@ const TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR = 'data-template-metadata-relat
 const TEMPLATE_FRAME_METADATA_FOCUS_ATTR = 'data-template-metadata-focus';
 const TEMPLATE_METADATA_ACTIVE_FILTER_ATTR = 'data-template-metadata-active-filter';
 const TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR = 'data-template-frame-position-impact-group';
-const TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR = 'data-template-position-impact-focus';
 const TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR = 'data-template-position-impact-active-filter';
 const TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR = 'data-template-frame-position-group-id';
 const TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR = 'data-template-frame-position-group-label';
@@ -667,22 +667,6 @@ const SUMMARY_OVERLAY_CORNER_CLASS: Record<SummaryOverlayCorner, string> = {
   'top-right': 'right-3 top-3',
   'bottom-left': 'bottom-3 left-3',
   'bottom-right': 'bottom-3 right-3',
-};
-
-const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
-  if (element.getAttribute(attrName) === nextValue) {
-    return;
-  }
-
-  element.setAttribute(attrName, nextValue);
-};
-
-const removeElementAttributeIfPresent = (element: HTMLElement, attrName: string) => {
-  if (!element.hasAttribute(attrName)) {
-    return;
-  }
-
-  element.removeAttribute(attrName);
 };
 const SHARED_VIRTUAL_FRAME_DEFINITIONS_STORAGE_KEY = 'docs:template:shared-virtual-frame-definitions';
 const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
@@ -2254,6 +2238,12 @@ const normalizePositionGroupDisplayLabel = (label: string, fallbackId = '') => {
 
 const stripPositionGroupMemberCountSuffix = (label: string) =>
   label.trim().replace(/\s*\((이동\s+묶음\s+박스|이동\s+묶음\s+상자|그룹)\s*\d+개\)\s*$/u, '');
+
+const resolvePositionGroupProxySelectionBadgeLabel = (positionGroupProxySelection: PositionGroupProxySelection) =>
+  normalizePositionGroupDisplayLabel(
+    stripPositionGroupMemberCountSuffix(positionGroupProxySelection.label),
+    positionGroupProxySelection.groupId
+  );
 
 const readPositionGroupWrapperLabel = (element: HTMLElement | null | undefined) =>
   normalizePositionGroupDisplayLabel(
@@ -4431,22 +4421,6 @@ const unwrapPositionGroupWrapperElement = (wrapper: HTMLElement, pageInner: HTML
   wrapper.remove();
 };
 
-const applyPositionGroupWrapperReferenceOnlyStyle = (wrapper: HTMLElement) => {
-  wrapper.style.position = 'absolute';
-  wrapper.style.boxSizing = 'border-box';
-  wrapper.style.background = 'transparent';
-  wrapper.style.backgroundColor = 'transparent';
-  wrapper.style.border = '0';
-  wrapper.style.borderWidth = '0px';
-  wrapper.style.borderStyle = 'none';
-  wrapper.style.borderColor = 'transparent';
-  wrapper.style.outline = 'none';
-  wrapper.style.outlineOffset = '0px';
-  wrapper.style.boxShadow = 'none';
-  wrapper.style.filter = 'none';
-  wrapper.style.pointerEvents = 'auto';
-};
-
 const materializePositionGroupWrappersInPage = (pageInner: HTMLElement): boolean => {
   const frameNodes = collectFrameSelectionAnchors(pageInner).filter(
     (node) => node.closest<HTMLElement>('.page-inner') === pageInner
@@ -4561,7 +4535,12 @@ const materializePositionGroupWrappersInPage = (pageInner: HTMLElement): boolean
       );
       const previousRect = readFrameElementRect(wrapper, pageInner);
       writePositionedElementPageRect(wrapper, groupRect, pageInner, { minSize: 1 });
-      applyPositionGroupWrapperReferenceOnlyStyle(wrapper);
+      wrapper.style.position = 'absolute';
+      wrapper.style.boxSizing = 'border-box';
+      if (!wrapper.style.background && !wrapper.style.backgroundColor) {
+        wrapper.style.background = 'transparent';
+      }
+      wrapper.style.pointerEvents = 'auto';
 
       if (
         Math.abs(previousRect.left - groupRect.left) > 0.01 ||
@@ -8281,7 +8260,6 @@ const stripSelectionAttrs = (
   options?: {
     preserveFrameVisualHints?: boolean;
     preserveFrameSelectionState?: boolean;
-    preserveDerivedSelectionState?: boolean;
   }
 ) => {
   root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
@@ -8319,39 +8297,18 @@ const stripSelectionAttrs = (
     }
   });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`).forEach((element) => {
-    if (options?.preserveDerivedSelectionState) {
-      return;
-    }
-
     element.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
   });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}]`).forEach((element) => {
-    if (options?.preserveDerivedSelectionState) {
-      return;
-    }
-
     element.removeAttribute(TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
   });
-  if (root instanceof HTMLElement && !options?.preserveDerivedSelectionState) {
+  if (root instanceof HTMLElement) {
     root.removeAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
     root.removeAttribute(TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
   }
-  if (!options?.preserveDerivedSelectionState) {
-    clearFrameMetadataRelationOutlineUi(root);
-  }
+  clearFrameMetadataRelationOutlineUi(root);
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((element) => {
-    if (options?.preserveDerivedSelectionState) {
-      return;
-    }
-
     element.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
-  });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}]`).forEach((element) => {
-    if (options?.preserveDerivedSelectionState) {
-      return;
-    }
-
-    element.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR);
   });
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_REVIEW_WARNING_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_REVIEW_WARNING_ATTR);
@@ -9102,39 +9059,18 @@ const applyFrameRelationSelectionUi = (
   selectedFrameGroupIds: string[] = []
 ) => {
   const frameNodes = collectFrameSelectionAnchors(root);
-  const relationSelectionFrameIds = new Set<string>();
-  const markRelationSelection = (node: HTMLElement, value: string) => {
-    const frameGroupId = getFrameGroupId(node);
-
-    if (!frameGroupId) {
-      return;
-    }
-
-    relationSelectionFrameIds.add(frameGroupId);
-    setElementAttributeIfChanged(node, TEMPLATE_FRAME_RELATION_SELECTION_ATTR, value);
-  };
-  const clearStaleRelationSelections = () => {
-    frameNodes.forEach((node) => {
-      const frameGroupId = getFrameGroupId(node);
-
-      if (frameGroupId && relationSelectionFrameIds.has(frameGroupId)) {
-        return;
-      }
-
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
-    });
-  };
   root.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
     element.remove();
   });
   clearFrameMetadataRelationOutlineUi(root);
 
+  frameNodes.forEach((node) => {
+    node.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
+    node.removeAttribute(TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
+  });
+  root.removeAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
+
   if (root.getAttribute('data-selection-panel-tab') === 'position') {
-    frameNodes.forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
-    });
-    removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
     return;
   }
 
@@ -9209,18 +9145,12 @@ const applyFrameRelationSelectionUi = (
     root.getAttribute('data-selection-panel-tab') === 'metadata' && metadataFocusFrameIds.size > 0;
 
   if (shouldApplyMetadataActiveFilter) {
-    setElementAttributeIfChanged(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR, 'true');
+    root.setAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR, 'true');
     frameNodes.forEach((node) => {
-      setElementAttributeIfChanged(
-        node,
+      node.setAttribute(
         TEMPLATE_FRAME_METADATA_FOCUS_ATTR,
         metadataFocusFrameIds.has(getFrameGroupId(node)) ? 'active' : 'inactive'
       );
-    });
-  } else {
-    removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-    frameNodes.forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
     });
   }
 
@@ -9250,12 +9180,12 @@ const applyFrameRelationSelectionUi = (
     const isActive = activeRelationFrameIds.has(frameGroupId);
 
     if (hasLinkedValues) {
-      markRelationSelection(node, isActive ? 'linked-key' : 'passive-key');
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, isActive ? 'linked-key' : 'passive-key');
       return;
     }
 
     if (isLinkedValue) {
-      markRelationSelection(node, isActive ? 'linked-value' : 'passive-value');
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, isActive ? 'linked-value' : 'passive-value');
     }
   });
 
@@ -9266,20 +9196,19 @@ const applyFrameRelationSelectionUi = (
       const frameGroupId = getFrameGroupId(node);
 
       if (frameGroupId === linkedKeyFrameGroupId) {
-        markRelationSelection(node, 'linked-key');
+        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-key');
         return;
       }
 
       if (sourceIds.has(frameGroupId)) {
-        markRelationSelection(node, 'linked-value');
+        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-value');
         return;
       }
 
       if (relationMode.kind === 'parent-select' && !sourceIds.has(frameGroupId)) {
-        markRelationSelection(node, 'parent-candidate');
+        node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'parent-candidate');
       }
     });
-    clearStaleRelationSelections();
     return;
   }
 
@@ -9288,15 +9217,14 @@ const applyFrameRelationSelectionUi = (
     const frameGroupId = getFrameGroupId(node);
 
     if (frameGroupId === relationMode.sourceKeyFrameGroupId) {
-      markRelationSelection(node, 'linked-key');
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-key');
       return;
     }
 
     if (targetIds.has(frameGroupId)) {
-      markRelationSelection(node, 'linked-value');
+      node.setAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR, 'linked-value');
     }
   });
-  clearStaleRelationSelections();
 };
 
 const applyPositionImpactGroupSelectionUi = (
@@ -9307,12 +9235,12 @@ const applyPositionImpactGroupSelectionUi = (
 ) => {
   const frameNodes = collectFrameSelectionAnchors(root);
 
+  frameNodes.forEach((node) => {
+    node.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
+  });
+  root.removeAttribute(TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
+
   if (selectionPanelTab !== 'position') {
-    frameNodes.forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR);
-    });
-    removeElementAttributeIfPresent(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
     return;
   }
 
@@ -9330,11 +9258,6 @@ const applyPositionImpactGroupSelectionUi = (
   const normalizedAnchorFrameGroupId = positionRelationAnchorFrameGroupId.trim();
 
   if (normalizedSelectedFrameGroupIds.length <= 0 && !normalizedAnchorFrameGroupId) {
-    frameNodes.forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR);
-    });
-    removeElementAttributeIfPresent(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
     return;
   }
 
@@ -9377,32 +9300,19 @@ const applyPositionImpactGroupSelectionUi = (
   });
 
   if (activeFrameGroupIds.size <= 0) {
-    frameNodes.forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR);
-    });
-    removeElementAttributeIfPresent(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
     return;
   }
 
-  setElementAttributeIfChanged(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR, 'true');
+  root.setAttribute(TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR, 'true');
   frameNodes.forEach((node) => {
     const frameGroupId = getFrameGroupId(node);
     const groupId = frameGroupId ? groupIdByFrameGroupId.get(frameGroupId) : '';
-    const isActivePositionImpactFrame = Boolean(frameGroupId && activeFrameGroupIds.has(frameGroupId));
 
-    setElementAttributeIfChanged(
-      node,
-      TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR,
-      isActivePositionImpactFrame ? 'active' : 'inactive'
-    );
-
-    if (!isActivePositionImpactFrame || !frameGroupId) {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
+    if (!frameGroupId || !activeFrameGroupIds.has(frameGroupId)) {
       return;
     }
 
-    setElementAttributeIfChanged(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR, groupId || 'selected');
+    node.setAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR, groupId || 'selected');
   });
 };
 
@@ -10007,73 +9917,6 @@ const buildEdgeSelectionButton = (
   }
   button.setAttribute('aria-label', `${side} edge resize`);
   return button;
-};
-
-const syncEdgeSelectionButton = (
-  frameNode: HTMLElement,
-  side: TemplateEdgeSide,
-  edgeId: string,
-  selectionOrder: number | null,
-  mode: 'connected' | 'isolated' | 'idle',
-  isAnchorEdge: boolean,
-  role: TemplateEdgeSelectionRole | null,
-  hasMovementMismatch: boolean
-) => {
-  const matchingButtons = Array.from(frameNode.querySelectorAll<HTMLButtonElement>(FRAME_EDGE_BUTTON_SELECTOR)).filter(
-    (button) => button.getAttribute('data-edge-id') === edgeId
-  );
-  const button = matchingButtons[0] || null;
-
-  matchingButtons.slice(1).forEach((duplicateButton) => {
-    duplicateButton.remove();
-  });
-
-  if (!button) {
-    frameNode.appendChild(
-      buildEdgeSelectionButton(
-        side,
-        edgeId,
-        selectionOrder,
-        mode,
-        isAnchorEdge,
-        role,
-        hasMovementMismatch
-      )
-    );
-    return;
-  }
-
-  setElementAttributeIfChanged(button, 'data-v106-edge-button', 'true');
-  setElementAttributeIfChanged(button, 'data-frame-editor-ui', 'true');
-  setElementAttributeIfChanged(button, 'data-direction', getDirectionFromEdgeSide(side));
-  setElementAttributeIfChanged(button, 'data-edge-id', edgeId);
-  setElementAttributeIfChanged(button, 'data-side', side);
-  setElementAttributeIfChanged(button, 'data-edge-selection-mode', mode);
-  setElementAttributeIfChanged(button, 'aria-label', `${side} edge resize`);
-
-  if (selectionOrder !== null) {
-    setElementAttributeIfChanged(button, 'data-edge-selection-order', String(selectionOrder));
-  } else {
-    removeElementAttributeIfPresent(button, 'data-edge-selection-order');
-  }
-
-  if (isAnchorEdge) {
-    setElementAttributeIfChanged(button, 'data-edge-anchor', 'true');
-  } else {
-    removeElementAttributeIfPresent(button, 'data-edge-anchor');
-  }
-
-  if (role) {
-    setElementAttributeIfChanged(button, 'data-edge-selection-role', role);
-  } else {
-    removeElementAttributeIfPresent(button, 'data-edge-selection-role');
-  }
-
-  if (hasMovementMismatch) {
-    setElementAttributeIfChanged(button, 'data-edge-movement-mismatch', 'true');
-  } else {
-    removeElementAttributeIfPresent(button, 'data-edge-movement-mismatch');
-  }
 };
 
 const resolveVisibleBorderValue = (
@@ -10802,6 +10645,20 @@ const buildFrameDeleteButton = (kind: 'frame' | 'group', targetId: string, label
   return button;
 };
 
+const appendFrameDeleteButtonAtRect = (
+  pageInner: HTMLElement,
+  rect: FrameNodeRect,
+  kind: 'frame' | 'group',
+  targetId: string,
+  label: string
+) => {
+  const button = buildFrameDeleteButton(kind, targetId, label);
+  button.style.left = toFrameCssPx(rect.left + rect.width - 28);
+  button.style.top = toFrameCssPx(rect.top + 4);
+  button.style.right = 'auto';
+  pageInner.appendChild(button);
+};
+
 const appendFrameSelectionFill = (frameNode: HTMLElement, showDeleteButton = false) => {
   const shell = resolveFrameLayoutShell(frameNode);
   const fill = document.createElement('div');
@@ -10812,39 +10669,6 @@ const appendFrameSelectionFill = (frameNode: HTMLElement, showDeleteButton = fal
 
   const frameGroupId = getFrameGroupId(frameNode);
   if (showDeleteButton && frameGroupId) {
-    shell.appendChild(buildFrameDeleteButton('frame', frameGroupId, `${frameGroupId} 상자 삭제`));
-  }
-};
-
-const removeFrameSelectionChromeFromShell = (shell: HTMLElement) => {
-  shell.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}, .${FRAME_DELETE_BUTTON_CLASS}`).forEach((element) => {
-    element.remove();
-  });
-};
-
-const ensureFrameSelectionChrome = (
-  frameNode: HTMLElement,
-  frameGroupId: string,
-  selectionIndex: number,
-  showDeleteButton = false
-) => {
-  setElementAttributeIfChanged(frameNode, 'data-template-edge-host', 'true');
-  setElementAttributeIfChanged(frameNode, 'data-template-selected', 'true');
-  setElementAttributeIfChanged(frameNode, 'data-template-selection-order', String(selectionIndex + 1));
-
-  if (selectionIndex === 0) {
-    setElementAttributeIfChanged(frameNode, 'data-template-primary-selected', 'true');
-  }
-
-  const shell = resolveFrameLayoutShell(frameNode);
-  const selectionFills = Array.from(shell.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}`));
-  selectionFills.slice(1).forEach((fill) => {
-    fill.remove();
-  });
-
-  if (selectionFills.length <= 0) {
-    appendFrameSelectionFill(frameNode, showDeleteButton);
-  } else if (showDeleteButton && !hasFrameDeleteButtonForSelection(shell, frameGroupId)) {
     shell.appendChild(buildFrameDeleteButton('frame', frameGroupId, `${frameGroupId} 상자 삭제`));
   }
 };
@@ -10882,124 +10706,6 @@ const ensureSelectedFrameDeleteButtons = (root: HTMLElement) => {
   });
 };
 
-const cleanupStaleFrameSelectionChrome = (root: HTMLElement, expectedDirectSelectedIds: string[]) => {
-  const expectedDirectSelectedIdSet = new Set(expectedDirectSelectedIds);
-
-  root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
-    const anchorNode = resolveFrameSelectionAnchor(element) || element;
-    const frameGroupId = getFrameGroupId(anchorNode).trim();
-    const isExpectedDirectSelection = frameGroupId && expectedDirectSelectedIdSet.has(frameGroupId);
-
-    if (!isExpectedDirectSelection) {
-      element.removeAttribute('data-template-selected');
-      element.removeAttribute('data-template-primary-selected');
-      element.removeAttribute('data-template-selection-order');
-      removeFrameSelectionChromeFromShell(resolveFrameLayoutShell(anchorNode));
-      return;
-    }
-
-    const selectionIndex = expectedDirectSelectedIds.indexOf(frameGroupId);
-    setElementAttributeIfChanged(element, 'data-template-selection-order', String(selectionIndex + 1));
-    if (selectionIndex === 0) {
-      setElementAttributeIfChanged(element, 'data-template-primary-selected', 'true');
-    } else {
-      removeElementAttributeIfPresent(element, 'data-template-primary-selected');
-    }
-  });
-};
-
-const resolvePositionGroupProxySelectionRects = (
-  positionGroupProxySelection: PositionGroupProxySelection,
-  frameNodeById: Map<string, HTMLElement>
-) => {
-  const pageInnerBuckets = new Map<HTMLElement, FrameNodeRect[]>();
-
-  positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
-    const frameNode = frameNodeById.get(frameGroupId.trim()) || null;
-
-    if (!frameNode) {
-      return;
-    }
-
-    const shell = resolveFrameLayoutShell(frameNode);
-    const pageInner = shell.closest<HTMLElement>('.page-inner');
-
-    if (!pageInner) {
-      return;
-    }
-
-    const current = pageInnerBuckets.get(pageInner) || [];
-    current.push(readFrameElementRect(shell, pageInner));
-    pageInnerBuckets.set(pageInner, current);
-  });
-
-  return Array.from(pageInnerBuckets.entries())
-    .map(([pageInner, rects]) => {
-      if (rects.length <= 0) {
-        return null;
-      }
-
-      const minLeft = Math.min(...rects.map((rect) => rect.left));
-      const minTop = Math.min(...rects.map((rect) => rect.top));
-      const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
-      const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
-
-      return {
-        pageInner,
-        rect: {
-          left: minLeft,
-          top: minTop,
-          width: Math.max(1, maxRight - minLeft),
-          height: Math.max(1, maxBottom - minTop),
-        },
-      };
-    })
-    .filter((entry): entry is { pageInner: HTMLElement; rect: FrameNodeRect } => Boolean(entry));
-};
-
-const appendPositionGroupProxySelectionMarker = (
-  pageInner: HTMLElement,
-  groupId: string,
-  rect?: FrameNodeRect | null,
-  selectionOrder = 1
-) => {
-  const marker = document.createElement('div');
-  marker.setAttribute('data-frame-editor-ui', 'true');
-  marker.setAttribute('data-v106-position-group-proxy-overlay', groupId);
-  marker.setAttribute('aria-hidden', 'true');
-  marker.style.position = 'absolute';
-  marker.style.pointerEvents = 'none';
-
-  if (!rect) {
-    marker.style.display = 'none';
-    pageInner.appendChild(marker);
-    return;
-  }
-
-  marker.setAttribute('data-v106-position-group-proxy-selection-ui', 'true');
-  marker.setAttribute('data-template-selection-order', String(selectionOrder));
-  if (selectionOrder === 1) {
-    marker.setAttribute('data-template-primary-selected', 'true');
-  }
-  marker.style.left = toFrameCssPx(rect.left);
-  marker.style.top = toFrameCssPx(rect.top);
-  marker.style.width = toFrameCssPx(rect.width);
-  marker.style.height = toFrameCssPx(rect.height);
-  marker.style.zIndex = '20';
-  marker.style.overflow = 'visible';
-  marker.style.outline = '2px solid rgba(37, 99, 235, .96)';
-  marker.style.outlineOffset = '0';
-  marker.style.boxShadow = '0 0 0 4px rgba(96, 165, 250, .22), inset 0 0 0 1px rgba(255, 255, 255, .84)';
-
-  const fill = document.createElement('div');
-  fill.className = FRAME_SELECTION_FILL_CLASS;
-  fill.setAttribute('data-frame-editor-ui', 'true');
-  fill.setAttribute('aria-hidden', 'true');
-  marker.appendChild(fill);
-
-  pageInner.appendChild(marker);
-};
-
 const appendPositionGroupProxyOverlay = (
   root: HTMLElement,
   positionGroupProxySelections: PositionGroupProxySelection[] = []
@@ -11009,6 +10715,7 @@ const appendPositionGroupProxyOverlay = (
   }
 
   const frameNodeById = new Map<string, HTMLElement>();
+  const canShowDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
   collectFrameSelectionAnchors(root).forEach((node) => {
     const frameGroupId = getFrameGroupId(node);
     if (frameGroupId) {
@@ -11016,9 +10723,90 @@ const appendPositionGroupProxyOverlay = (
     }
   });
 
-  positionGroupProxySelections.forEach((positionGroupProxySelection, proxyIndex) => {
-    resolvePositionGroupProxySelectionRects(positionGroupProxySelection, frameNodeById).forEach(({ pageInner, rect }) => {
-      appendPositionGroupProxySelectionMarker(pageInner, positionGroupProxySelection.groupId, rect, proxyIndex + 1);
+  positionGroupProxySelections.forEach((positionGroupProxySelection) => {
+    const pageInnerBuckets = new Map<
+      HTMLElement,
+      Array<{
+        rect: FrameNodeRect;
+      }>
+    >();
+
+    positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = frameNodeById.get(frameGroupId);
+
+      if (!frameNode) {
+        return;
+      }
+
+      const shell = resolveFrameLayoutShell(frameNode);
+      const pageInner = shell.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        return;
+      }
+
+      const current = pageInnerBuckets.get(pageInner) || [];
+      current.push({ rect: readFrameElementRect(shell, pageInner) });
+      pageInnerBuckets.set(pageInner, current);
+    });
+
+    pageInnerBuckets.forEach((entries, pageInner) => {
+      if (entries.length <= 0) {
+        return;
+      }
+
+      const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
+      const minTop = Math.min(...entries.map((entry) => entry.rect.top));
+      const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
+      const maxBottom = Math.max(...entries.map((entry) => entry.rect.top + entry.rect.height));
+      const overlay = document.createElement('div');
+      overlay.setAttribute('data-frame-editor-ui', 'true');
+      overlay.setAttribute('data-v106-position-group-proxy-overlay', positionGroupProxySelection.groupId);
+      overlay.style.position = 'absolute';
+      overlay.style.pointerEvents = 'none';
+      overlay.style.zIndex = '29';
+      overlay.style.left = toFrameCssPx(minLeft);
+      overlay.style.top = toFrameCssPx(minTop);
+      overlay.style.width = toFrameCssPx(Math.max(1, maxRight - minLeft));
+      overlay.style.height = toFrameCssPx(Math.max(1, maxBottom - minTop));
+      overlay.style.outline = `3px solid ${positionGroupProxySelection.outlineColor || 'rgba(13, 148, 136, .98)'}`;
+      overlay.style.boxShadow = `0 0 0 5px ${positionGroupProxySelection.haloColor || 'rgba(45, 212, 191, .22)'}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
+      overlay.style.background = positionGroupProxySelection.fillColor || 'rgba(13, 148, 136, .14)';
+
+      const badge = document.createElement('div');
+      badge.setAttribute('data-frame-editor-ui', 'true');
+      badge.style.position = 'absolute';
+      badge.style.top = '-10px';
+      badge.style.left = '-10px';
+      badge.style.minWidth = '20px';
+      badge.style.height = '20px';
+      badge.style.padding = '0 6px';
+      badge.style.borderRadius = '999px';
+      badge.style.display = 'inline-flex';
+      badge.style.alignItems = 'center';
+      badge.style.justifyContent = 'center';
+      badge.style.background = positionGroupProxySelection.badgeColor || 'rgba(15, 23, 42, .96)';
+      badge.style.color = positionGroupProxySelection.badgeTextColor || '#fff';
+      badge.style.fontSize = '10px';
+      badge.style.fontWeight = '700';
+      badge.textContent = resolvePositionGroupProxySelectionBadgeLabel(positionGroupProxySelection);
+      overlay.appendChild(badge);
+      if (canShowDeleteButton) {
+        appendFrameDeleteButtonAtRect(
+          pageInner,
+          {
+            left: minLeft,
+            top: minTop,
+            width: Math.max(1, maxRight - minLeft),
+            height: Math.max(1, maxBottom - minTop),
+          },
+          'group',
+          positionGroupProxySelection.groupId,
+          `${normalizePositionGroupDisplayLabel(positionGroupProxySelection.label, positionGroupProxySelection.groupId)} 삭제`
+        );
+      }
+
+      pageInner.appendChild(overlay);
     });
   });
 };
@@ -11061,38 +10849,96 @@ const appendPositionGroupProxyOverlayFast = (
   frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
   if (!positionGroupProxySelections.length) {
-    root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]').forEach((element) => {
-      element.remove();
-    });
     return;
   }
 
-  const expectedGroupIds = new Set(
-    positionGroupProxySelections.map((proxySelection) => proxySelection.groupId.trim()).filter(Boolean)
-  );
-  positionGroupProxySelections.forEach((positionGroupProxySelection, proxyIndex) => {
-    const proxyGroupId = positionGroupProxySelection.groupId.trim();
+  const canShowDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
 
-    if (!proxyGroupId) {
-      return;
-    }
+  positionGroupProxySelections.forEach((positionGroupProxySelection) => {
+    const pageInnerBuckets = new Map<
+      HTMLElement,
+      Array<{
+        rect: FrameNodeRect;
+      }>
+    >();
 
-    root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]').forEach((element) => {
-      if ((element.getAttribute('data-v106-position-group-proxy-overlay') || '').trim() === proxyGroupId) {
-        element.remove();
+    positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = frameNodeById.get(frameGroupId.trim()) || null;
+
+      if (!frameNode) {
+        return;
       }
+
+      const shell = resolveFrameLayoutShell(frameNode);
+      const pageInner = shell.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        return;
+      }
+
+      const current = pageInnerBuckets.get(pageInner) || [];
+      current.push({ rect: readFrameElementRect(shell, pageInner) });
+      pageInnerBuckets.set(pageInner, current);
     });
 
-    resolvePositionGroupProxySelectionRects(positionGroupProxySelection, frameNodeById).forEach(({ pageInner, rect }) => {
-      appendPositionGroupProxySelectionMarker(pageInner, proxyGroupId, rect, proxyIndex + 1);
-    });
-  });
+    pageInnerBuckets.forEach((entries, pageInner) => {
+      if (entries.length <= 0) {
+        return;
+      }
 
-  root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]').forEach((element) => {
-    const groupId = element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '';
-    if (!expectedGroupIds.has(groupId)) {
-      element.remove();
-    }
+      const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
+      const minTop = Math.min(...entries.map((entry) => entry.rect.top));
+      const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
+      const maxBottom = Math.max(...entries.map((entry) => entry.rect.top + entry.rect.height));
+      const overlay = document.createElement('div');
+      overlay.setAttribute('data-frame-editor-ui', 'true');
+      overlay.setAttribute('data-v106-position-group-proxy-overlay', positionGroupProxySelection.groupId);
+      overlay.style.position = 'absolute';
+      overlay.style.pointerEvents = 'none';
+      overlay.style.zIndex = '29';
+      overlay.style.left = toFrameCssPx(minLeft);
+      overlay.style.top = toFrameCssPx(minTop);
+      overlay.style.width = toFrameCssPx(Math.max(1, maxRight - minLeft));
+      overlay.style.height = toFrameCssPx(Math.max(1, maxBottom - minTop));
+      overlay.style.outline = `3px solid ${positionGroupProxySelection.outlineColor || 'rgba(13, 148, 136, .98)'}`;
+      overlay.style.boxShadow = `0 0 0 5px ${positionGroupProxySelection.haloColor || 'rgba(45, 212, 191, .22)'}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
+      overlay.style.background = positionGroupProxySelection.fillColor || 'rgba(13, 148, 136, .14)';
+
+      const badge = document.createElement('div');
+      badge.setAttribute('data-frame-editor-ui', 'true');
+      badge.style.position = 'absolute';
+      badge.style.top = '-10px';
+      badge.style.left = '-10px';
+      badge.style.minWidth = '20px';
+      badge.style.height = '20px';
+      badge.style.padding = '0 6px';
+      badge.style.borderRadius = '999px';
+      badge.style.display = 'inline-flex';
+      badge.style.alignItems = 'center';
+      badge.style.justifyContent = 'center';
+      badge.style.background = positionGroupProxySelection.badgeColor || 'rgba(15, 23, 42, .96)';
+      badge.style.color = positionGroupProxySelection.badgeTextColor || '#fff';
+      badge.style.fontSize = '10px';
+      badge.style.fontWeight = '700';
+      badge.textContent = resolvePositionGroupProxySelectionBadgeLabel(positionGroupProxySelection);
+      overlay.appendChild(badge);
+      if (canShowDeleteButton) {
+        appendFrameDeleteButtonAtRect(
+          pageInner,
+          {
+            left: minLeft,
+            top: minTop,
+            width: Math.max(1, maxRight - minLeft),
+            height: Math.max(1, maxBottom - minTop),
+          },
+          'group',
+          positionGroupProxySelection.groupId,
+          `${normalizePositionGroupDisplayLabel(positionGroupProxySelection.label, positionGroupProxySelection.groupId)} 삭제`
+        );
+      }
+
+      pageInner.appendChild(overlay);
+    });
   });
 };
 
@@ -11104,14 +10950,12 @@ const applyPositionImpactGroupSelectionUiFast = (
   positionBoxGroups: PositionImpactGroup[] = [],
   frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((node) => {
+    node.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
+  });
+  root.removeAttribute(TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
+
   if (selectionPanelTab !== 'position') {
-    root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
-    });
-    root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}]`).forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR);
-    });
-    removeElementAttributeIfPresent(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
     return;
   }
 
@@ -11127,13 +10971,6 @@ const applyPositionImpactGroupSelectionUiFast = (
   const normalizedAnchorFrameGroupId = positionRelationAnchorFrameGroupId.trim();
 
   if (normalizedSelectedFrameGroupIds.length <= 0 && !normalizedAnchorFrameGroupId) {
-    root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
-    });
-    root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}]`).forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR);
-    });
-    removeElementAttributeIfPresent(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
     return;
   }
 
@@ -11176,32 +11013,17 @@ const applyPositionImpactGroupSelectionUiFast = (
   });
 
   if (activeFrameGroupIds.size <= 0) {
-    root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
-    });
-    root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}]`).forEach((node) => {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR);
-    });
-    removeElementAttributeIfPresent(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR);
     return;
   }
 
-  setElementAttributeIfChanged(root, TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR, 'true');
-  frameNodeById.forEach((frameNode, frameGroupId) => {
-    const isActivePositionImpactFrame = activeFrameGroupIds.has(frameGroupId);
-    setElementAttributeIfChanged(
-      frameNode,
-      TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR,
-      isActivePositionImpactFrame ? 'active' : 'inactive'
-    );
-
-    if (!isActivePositionImpactFrame) {
-      removeElementAttributeIfPresent(frameNode, TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
+  root.setAttribute(TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR, 'true');
+  activeFrameGroupIds.forEach((frameGroupId) => {
+    const frameNode = frameNodeById.get(frameGroupId) || null;
+    if (!frameNode) {
       return;
     }
 
-    setElementAttributeIfChanged(
-      frameNode,
+    frameNode.setAttribute(
       TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR,
       groupIdByFrameGroupId.get(frameGroupId) || 'selected'
     );
@@ -11212,10 +11034,7 @@ const applyFastFrameSelectionUi = (
   root: HTMLElement,
   selectedIds: string[],
   positionGroupProxySelections: PositionGroupProxySelection[] = [],
-  frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root),
-  options?: {
-    deferStaleSelectionCleanup?: boolean;
-  }
+  frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
   if (
     isStablePositionFrameSelectionUiAlreadyApplied(
@@ -11229,60 +11048,46 @@ const applyFastFrameSelectionUi = (
     return;
   }
 
-  const expectedDirectSelectedIds = resolveDirectFrameSelectionIds(selectedIds, positionGroupProxySelections);
+  clearFastSelectionEditorUi(root);
+
+  const normalizedSelectedIds = Array.from(
+    new Set(selectedIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+  );
+  const proxyMemberFrameGroupIdSet = new Set(
+    positionGroupProxySelections.flatMap((proxySelection) =>
+      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
   const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
 
-  expectedDirectSelectedIds.forEach((frameGroupId, selectionIndex) => {
+  normalizedSelectedIds.forEach((frameGroupId, selectionIndex) => {
     const node = frameNodeById.get(frameGroupId) || null;
 
     if (!node) {
       return;
     }
 
-    ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, canShowCanvasDeleteButton);
+    node.setAttribute('data-template-edge-host', 'true');
+
+    if (proxyMemberFrameGroupIdSet.has(frameGroupId)) {
+      return;
+    }
+
+    node.setAttribute('data-template-selected', 'true');
+    node.setAttribute('data-template-selection-order', String(selectionIndex + 1));
+
+    if (selectionIndex === 0) {
+      node.setAttribute('data-template-primary-selected', 'true');
+    }
+
+    appendFrameSelectionFill(node, canShowCanvasDeleteButton);
   });
 
   appendPositionGroupProxyOverlayFast(root, positionGroupProxySelections, frameNodeById);
-  if (!options?.deferStaleSelectionCleanup) {
-    cleanupStaleFrameSelectionChrome(root, expectedDirectSelectedIds);
-  }
-  root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
-    element.removeAttribute('data-template-edge-visual');
-    element.removeAttribute('data-template-edge-anchor-node');
-  });
-  root.querySelectorAll<HTMLElement>('[data-template-relative-anchor-target="true"]').forEach((element) => {
-    element.removeAttribute('data-template-relative-anchor-target');
-  });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR}="true"]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
-  });
-  root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR).forEach((button) => {
-    setElementAttributeIfChanged(button, 'data-edge-selection-mode', 'idle');
-    removeElementAttributeIfPresent(button, 'data-edge-selection-order');
-    removeElementAttributeIfPresent(button, 'data-edge-anchor');
-    removeElementAttributeIfPresent(button, 'data-edge-selection-role');
-    removeElementAttributeIfPresent(button, 'data-edge-movement-mismatch');
-  });
-  root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_BADGE_CLASS}`).forEach((element) => {
-    element.remove();
-  });
 };
 
 const normalizeFrameSelectionIds = (frameGroupIds: string[]) =>
   Array.from(new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))));
-
-const resolveDirectFrameSelectionIds = (
-  selectedIds: string[],
-  positionGroupProxySelections: PositionGroupProxySelection[] = []
-) => {
-  const proxyMemberFrameGroupIdSet = new Set(
-    positionGroupProxySelections.flatMap((proxySelection) =>
-      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
-    )
-  );
-
-  return normalizeFrameSelectionIds(selectedIds).filter((frameGroupId) => !proxyMemberFrameGroupIdSet.has(frameGroupId));
-};
 
 const hasStaleEdgeSelectionButtonState = (root: HTMLElement) =>
   Array.from(root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR)).some(
@@ -11314,7 +11119,7 @@ const hasFrameDeleteButtonForSelection = (shell: HTMLElement, frameGroupId: stri
       button.getAttribute(FRAME_DELETE_TARGET_ID_ATTR) === frameGroupId
   );
 
-const stripEditorUiForStableFrameSelectionRefresh = (root: HTMLElement) => {
+const stripEditorUiForStablePositionSelectionRefresh = (root: HTMLElement) => {
   root.querySelectorAll<HTMLElement>('[data-frame-editor-ui="true"]').forEach((element) => {
     if (
       element.matches(FRAME_EDGE_BUTTON_SELECTOR) ||
@@ -11328,68 +11133,6 @@ const stripEditorUiForStableFrameSelectionRefresh = (root: HTMLElement) => {
   });
   root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_BADGE_CLASS}`).forEach((element) => {
     element.remove();
-  });
-};
-
-const isStableDirectFrameSelectionUiAlreadyApplied = (
-  root: HTMLElement,
-  selectedIds: string[],
-  edgeSelectionState: TemplateEdgeSelectionStateDto,
-  edgeMovementMismatchIds: string[]
-) => {
-  if (root.getAttribute('data-selection-panel-tab') !== 'metadata') {
-    return false;
-  }
-
-  if (
-    edgeSelectionState.tokens.length > 0 ||
-    edgeMovementMismatchIds.length > 0 ||
-    hasStaleEdgeSelectionButtonState(root)
-  ) {
-    return false;
-  }
-
-  const normalizedSelectedIds = normalizeFrameSelectionIds(selectedIds);
-  const selectedEntries = Array.from(root.querySelectorAll<HTMLElement>('[data-template-selected="true"]')).map((element) => {
-    const anchorNode = resolveFrameSelectionAnchor(element) || element;
-    return {
-      element,
-      anchorNode,
-      frameGroupId: getFrameGroupId(anchorNode).trim(),
-    };
-  });
-
-  if (selectedEntries.length !== normalizedSelectedIds.length) {
-    return false;
-  }
-
-  const selectedEntryByFrameGroupId = new Map<string, (typeof selectedEntries)[number]>();
-  for (const selectedEntry of selectedEntries) {
-    if (!selectedEntry.frameGroupId || selectedEntryByFrameGroupId.has(selectedEntry.frameGroupId)) {
-      return false;
-    }
-
-    selectedEntryByFrameGroupId.set(selectedEntry.frameGroupId, selectedEntry);
-  }
-
-  if (root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}`).length !== normalizedSelectedIds.length) {
-    return false;
-  }
-
-  return normalizedSelectedIds.every((frameGroupId, selectionIndex) => {
-    const selectedEntry = selectedEntryByFrameGroupId.get(frameGroupId);
-
-    if (!selectedEntry) {
-      return false;
-    }
-
-    const shell = resolveFrameLayoutShell(selectedEntry.anchorNode);
-
-    return (
-      selectedEntry.element.getAttribute('data-template-selection-order') === String(selectionIndex + 1) &&
-      selectedEntry.element.getAttribute('data-template-primary-selected') === (selectionIndex === 0 ? 'true' : null) &&
-      Boolean(shell.querySelector(`.${FRAME_SELECTION_FILL_CLASS}`))
-    );
   });
 };
 
@@ -11409,6 +11152,10 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
     edgeMovementMismatchIds.length > 0 ||
     hasStaleEdgeSelectionButtonState(root)
   ) {
+    return false;
+  }
+
+  if (positionGroupProxySelections.length > 0 || root.querySelector('[data-v106-position-group-proxy-overlay]')) {
     return false;
   }
 
@@ -11437,6 +11184,10 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
     }
 
     selectedEntryByFrameGroupId.set(selectedEntry.frameGroupId, selectedEntry);
+  }
+
+  if (root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}`).length !== expectedDirectSelectedIds.length) {
+    return false;
   }
 
   if (root.querySelectorAll<HTMLElement>(`.${FRAME_DELETE_BUTTON_CLASS}`).length !== expectedDirectSelectedIds.length) {
@@ -11468,33 +11219,101 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
     return false;
   }
 
-  const expectedProxyGroupIds = Array.from(
-    new Set(positionGroupProxySelections.map((proxySelection) => proxySelection.groupId.trim()).filter(Boolean))
-  );
-  const proxyMarkerGroupIds = Array.from(root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]'))
-    .map((element) => element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '')
-    .filter(Boolean);
-
-  const proxyMarkerGroupIdSet = new Set(proxyMarkerGroupIds);
-
-  if (proxyMarkerGroupIdSet.size !== expectedProxyGroupIds.length) {
-    return false;
-  }
-
-  if (!expectedProxyGroupIds.every((groupId) => proxyMarkerGroupIdSet.has(groupId))) {
-    return false;
-  }
-
-  if (root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}`).length !== expectedDirectSelectedIds.length + proxyMarkerGroupIds.length) {
-    return false;
-  }
-
   return true;
 };
 
 const appendPositionGroupCatalogOverlay = (root: HTMLElement) => {
-  root.querySelectorAll<HTMLElement>('[data-v106-position-group-catalog-overlay]').forEach((element) => {
-    element.remove();
+  if (root.getAttribute('data-selection-panel-tab') !== 'position') {
+    return;
+  }
+
+  const groups = collectPositionBoxGroups(root, { includeSingletons: false }).filter(
+    (group) => group.frameGroupIds.length > 1
+  );
+
+  if (groups.length <= 0) {
+    return;
+  }
+
+  const frameNodeById = new Map<string, HTMLElement>();
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node);
+    if (frameGroupId) {
+      frameNodeById.set(frameGroupId, node);
+    }
+  });
+
+  groups.forEach((group) => {
+    const pageInnerBuckets = new Map<
+      HTMLElement,
+      Array<{
+        rect: FrameNodeRect;
+      }>
+    >();
+
+    group.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = frameNodeById.get(frameGroupId);
+      if (!frameNode) {
+        return;
+      }
+
+      const shell = resolveFrameLayoutShell(frameNode);
+      const pageInner = shell.closest<HTMLElement>('.page-inner');
+      if (!pageInner) {
+        return;
+      }
+
+      const current = pageInnerBuckets.get(pageInner) || [];
+      current.push({ rect: readFrameElementRect(shell, pageInner) });
+      pageInnerBuckets.set(pageInner, current);
+    });
+
+    pageInnerBuckets.forEach((entries, pageInner) => {
+      if (entries.length <= 1) {
+        return;
+      }
+
+      const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
+      const minTop = Math.min(...entries.map((entry) => entry.rect.top));
+      const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
+      const maxBottom = Math.max(...entries.map((entry) => entry.rect.top + entry.rect.height));
+      const overlay = document.createElement('div');
+      overlay.setAttribute('data-frame-editor-ui', 'true');
+      overlay.setAttribute('aria-hidden', 'true');
+      overlay.setAttribute('data-v106-position-group-catalog-overlay', group.id);
+      overlay.style.position = 'absolute';
+      overlay.style.pointerEvents = 'none';
+      overlay.style.zIndex = '18';
+      overlay.style.left = toFrameCssPx(minLeft);
+      overlay.style.top = toFrameCssPx(minTop);
+      overlay.style.width = toFrameCssPx(Math.max(1, maxRight - minLeft));
+      overlay.style.height = toFrameCssPx(Math.max(1, maxBottom - minTop));
+      overlay.style.outline = '2px solid rgba(217, 119, 6, .95)';
+      overlay.style.outlineOffset = '0';
+      overlay.style.boxShadow = '0 0 0 2px rgba(251, 191, 36, .32), inset 0 0 0 1px rgba(255, 255, 255, .72)';
+      overlay.style.background = 'rgba(251, 191, 36, .06)';
+
+      const badge = document.createElement('div');
+      badge.setAttribute('data-frame-editor-ui', 'true');
+      badge.style.position = 'absolute';
+      badge.style.top = '-10px';
+      badge.style.left = '-10px';
+      badge.style.minWidth = '22px';
+      badge.style.height = '20px';
+      badge.style.padding = '0 7px';
+      badge.style.borderRadius = '999px';
+      badge.style.display = 'inline-flex';
+      badge.style.alignItems = 'center';
+      badge.style.justifyContent = 'center';
+      badge.style.background = 'rgba(217, 119, 6, .96)';
+      badge.style.color = '#fff';
+      badge.style.fontSize = '11px';
+      badge.style.fontWeight = '700';
+      badge.textContent = normalizePositionGroupDisplayLabel(group.label, group.id);
+      overlay.appendChild(badge);
+
+      pageInner.appendChild(overlay);
+    });
   });
 };
 
@@ -11515,24 +11334,9 @@ const applyFrameSelectionUi = (
     edgeMovementMismatchIds,
     positionGroupProxySelections
   );
-  const preserveStableDirectSelectionUi = isStableDirectFrameSelectionUiAlreadyApplied(
-    root,
-    selectedIds,
-    edgeSelectionState,
-    edgeMovementMismatchIds
-  );
-  const preserveStableFrameSelectionUi = preserveStablePositionSelectionUi || preserveStableDirectSelectionUi;
-  const proxyMemberFrameGroupIdSet = new Set(
-    positionGroupProxySelections.flatMap((proxySelection) =>
-      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
-    )
-  );
-  const expectedDirectSelectedIds = resolveDirectFrameSelectionIds(selectedIds, positionGroupProxySelections);
-  const shouldApplySelectionWithoutClearingFirst =
-    expectedDirectSelectedIds.length > 0 || positionGroupProxySelections.length > 0;
 
   if (
-    preserveStableFrameSelectionUi &&
+    preserveStablePositionSelectionUi &&
     hasCompleteIdleEdgeButtonUi(root, edgeSnapshot) &&
     !(relativeGuideFrameGroupId || '').trim() &&
     !root.querySelector('[data-template-relative-anchor-target="true"]')
@@ -11540,28 +11344,20 @@ const applyFrameSelectionUi = (
     return;
   }
 
-  if (shouldApplySelectionWithoutClearingFirst) {
-    const frameNodeById = collectFrameSelectionAnchorByIdMap(root);
-    const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
-    expectedDirectSelectedIds.forEach((frameGroupId, selectionIndex) => {
-      const node = frameNodeById.get(frameGroupId) || null;
-
-      if (node) {
-        ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, canShowCanvasDeleteButton);
-      }
-    });
-  }
-
   stripSelectionAttrs(root, {
     preserveFrameVisualHints: true,
-    preserveFrameSelectionState: preserveStableFrameSelectionUi || shouldApplySelectionWithoutClearingFirst,
-    preserveDerivedSelectionState: true,
+    preserveFrameSelectionState: preserveStablePositionSelectionUi,
   });
-  if (preserveStableFrameSelectionUi || shouldApplySelectionWithoutClearingFirst) {
-    stripEditorUiForStableFrameSelectionRefresh(root);
+  if (preserveStablePositionSelectionUi) {
+    stripEditorUiForStablePositionSelectionRefresh(root);
   } else {
     TemplateFrameEditHtmlService.stripEditorUiState(root);
   }
+  const proxyMemberFrameGroupIdSet = new Set(
+    positionGroupProxySelections.flatMap((proxySelection) =>
+      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
   const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
 
   const edgeMetaMap = new Map<
@@ -11590,12 +11386,24 @@ const applyFrameSelectionUi = (
     const selectionIndex = selectedIds.indexOf(frameGroupId);
     const selectedSides = new Set<TemplateEdgeSide>();
 
-    setElementAttributeIfChanged(node, 'data-template-edge-host', 'true');
+    node.setAttribute('data-template-edge-host', 'true');
 
     const isProxyMemberSelection = proxyMemberFrameGroupIdSet.has(frameGroupId);
 
     if (selectionIndex >= 0 && !isProxyMemberSelection) {
-      ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, canShowCanvasDeleteButton);
+      node.setAttribute('data-template-selected', 'true');
+      node.setAttribute('data-template-selection-order', String(selectionIndex + 1));
+
+      if (selectionIndex === 0) {
+        node.setAttribute('data-template-primary-selected', 'true');
+      }
+
+      const shell = resolveFrameLayoutShell(node);
+      if (!shell.querySelector(`.${FRAME_SELECTION_FILL_CLASS}`)) {
+        appendFrameSelectionFill(node, canShowCanvasDeleteButton);
+      } else if (canShowCanvasDeleteButton && !hasFrameDeleteButtonForSelection(shell, frameGroupId)) {
+        shell.appendChild(buildFrameDeleteButton('frame', frameGroupId, `${frameGroupId} 상자 삭제`));
+      }
     }
 
     if (!edgeSnapshot) {
@@ -11621,15 +11429,16 @@ const applyFrameSelectionUi = (
         }
       }
 
-      syncEdgeSelectionButton(
-        node,
-        side,
-        edgeId,
-        edgeMeta?.selectionOrder ?? null,
-        edgeMeta?.mode || 'idle',
-        Boolean(edgeMeta?.isAnchorEdge),
-        edgeRole,
-        edgeMovementMismatchIds.includes(edgeId)
+      node.appendChild(
+        buildEdgeSelectionButton(
+          side,
+          edgeId,
+          edgeMeta?.selectionOrder ?? null,
+          edgeMeta?.mode || 'idle',
+          Boolean(edgeMeta?.isAnchorEdge),
+          edgeRole,
+          edgeMovementMismatchIds.includes(edgeId)
+        )
       );
     });
 
@@ -11637,8 +11446,7 @@ const applyFrameSelectionUi = (
   });
 
   appendConnectedFrameClusterOutlines(root);
-  appendPositionGroupProxyOverlayFast(root, positionGroupProxySelections);
-  cleanupStaleFrameSelectionChrome(root, expectedDirectSelectedIds);
+  appendPositionGroupProxyOverlay(root, positionGroupProxySelections);
   ensureSelectedFrameDeleteButtons(root);
   renderRelativeAnchorGuides(root, selectedIds, relativeGuideFrameGroupId);
 };
@@ -11726,6 +11534,41 @@ const applyFrameStylePatch = (
   }
 };
 
+const applyElementAppearanceStylePatch = (element: HTMLElement, patch: FrameStylePatch) => {
+  if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
+    element.style.width = `${Math.max(1, patch.width)}px`;
+  }
+
+  if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
+    element.style.height = `${Math.max(1, patch.height)}px`;
+  }
+
+  if (patch.backgroundColor !== undefined) {
+    element.style.backgroundColor = patch.backgroundColor || '';
+  }
+
+  if (patch.borderRadius !== undefined) {
+    element.style.borderRadius = patch.borderRadius ? `${Number.parseFloat(patch.borderRadius)}px` : '';
+  }
+
+  if (patch.paddingX !== undefined || patch.paddingY !== undefined) {
+    const paddingX = patch.paddingX !== undefined ? Number.parseFloat(patch.paddingX || '0') : NaN;
+    const paddingY = patch.paddingY !== undefined ? Number.parseFloat(patch.paddingY || '0') : NaN;
+    const safePaddingX = Number.isFinite(paddingX) ? paddingX : parseFramePx(element.style.paddingLeft || '0');
+    const safePaddingY = Number.isFinite(paddingY) ? paddingY : parseFramePx(element.style.paddingTop || '0');
+    element.style.padding = `${safePaddingY}px ${safePaddingX}px`;
+  }
+
+  if (
+    patch.borderColor !== undefined ||
+    patch.borderWidth !== undefined ||
+    patch.borderStyle !== undefined ||
+    patch.borderAlign !== undefined
+  ) {
+    applyElementBorderAppearanceStylePatch(element, patch);
+  }
+};
+
 export default function TemplateEditWorkspace({ initialTemplateId = '' }: TemplateEditWorkspaceProps) {
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
@@ -11750,6 +11593,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
   const [appearanceBoxModelTarget, setAppearanceBoxModelTarget] =
     React.useState<AppearanceBoxModelTarget>('content');
+  const [positionAppearanceTargetMode, setPositionAppearanceTargetMode] =
+    React.useState<PositionAppearanceTargetMode>('frame');
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
@@ -11831,14 +11676,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
   const previewEditorStateRetryCountRef = React.useRef(0);
   const deferredPreviewEditorStateRef = React.useRef(false);
-  const suppressNextSelectionLayoutReapplyRef = React.useRef<{
-    tab: SelectionPanelTab;
-    selectedFrameGroupIds: string[];
-  } | null>(null);
-  const suppressNextSelectionDerivedVisualsRef = React.useRef<{
-    tab: SelectionPanelTab;
-    selectedFrameGroupIds: string[];
-  } | null>(null);
   const positionGroupProxySelectionGroupIdRef = React.useRef('');
   const positionGroupProxySelectionShowAllGroupsRef = React.useRef(false);
   const positionGroupProxySelectionsOverrideRef = React.useRef<PositionGroupProxySelection[] | null>(null);
@@ -14959,6 +14796,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return selectedPositionResolvedBoxGroup || null;
   }, [positionBoxGroupById, positionSelectionStateRevision, selectedPositionResolvedBoxGroup, selectedFrameGroupIds, selectionPanelTab]);
+  const canEditSelectedPositionGroupAppearance = Boolean(
+    selectionPanelTab === 'position' &&
+      selectedPositionResolvedBoxGroup &&
+      selectedPositionResolvedBoxGroup.frameGroupIds.length > 1
+  );
+  const hasSelectedPositionGroupAppearanceContext = Boolean(
+    canEditSelectedPositionGroupAppearance || selectedPositionCurrentBoxGroups.length > 0
+  );
+  const effectivePositionAppearanceTargetMode: PositionAppearanceTargetMode =
+    canEditSelectedPositionGroupAppearance && positionAppearanceTargetMode === 'group' ? 'group' : 'frame';
   const selectedPositionActiveGroupChildGroupIds = React.useMemo(
     () =>
       selectedPositionActiveGroup
@@ -17144,17 +16991,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       const resolvedFrameNodeById = frameNodeById || collectFrameSelectionAnchorByIdMap(root);
-      const resolvedPositionGroupProxySelections = restoreActivePositionGroupProxySelections(
-        nextSelectedFrameGroupIds,
-        overridePositionGroupProxySelections ??
-          resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
-      );
       applyFastFrameSelectionUi(
         root,
         nextSelectedFrameGroupIds,
-        resolvedPositionGroupProxySelections,
-        resolvedFrameNodeById,
-        { deferStaleSelectionCleanup: true }
+        restoreActivePositionGroupProxySelections(
+          nextSelectedFrameGroupIds,
+          overridePositionGroupProxySelections ??
+            resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
+        ),
+        resolvedFrameNodeById
       );
       applyPositionImpactGroupSelectionUiFast(
         root,
@@ -17163,10 +17008,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         positionRelationAnchorFrameGroupId,
         positionBoxGroups,
         resolvedFrameNodeById
-      );
-      cleanupStaleFrameSelectionChrome(
-        root,
-        resolveDirectFrameSelectionIds(nextSelectedFrameGroupIds, resolvedPositionGroupProxySelections)
       );
     },
     [
@@ -17291,20 +17132,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   ? {
                       kind: 'frame',
                       frameGroupId: normalizedSelectionIds[0] || '',
-                  }
-                : null;
+                    }
+                  : null;
       positionActiveSelectionEntityRef.current = nextActivePositionSelectionEntity;
-      cancelScheduledPreviewEditorState();
-      previewEditorStateRetryCountRef.current = 0;
-      deferredPreviewEditorStateRef.current = false;
-      suppressNextSelectionLayoutReapplyRef.current = {
-        tab: selectionPanelTab,
-        selectedFrameGroupIds: normalizedSelectionIds.slice(),
-      };
-      suppressNextSelectionDerivedVisualsRef.current = {
-        tab: selectionPanelTab,
-        selectedFrameGroupIds: normalizedSelectionIds.slice(),
-      };
+      setPositionAppearanceTargetMode(
+        selectionPanelTab === 'position' && nextPositionGroupProxySelectionGroupId && !options?.disableAutoPositionGroupProxySelection
+          ? 'group'
+          : 'frame'
+      );
       selectedFrameGroupIdsRef.current = normalizedSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
       const commitSelectionReactState = () => {
@@ -17332,7 +17167,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [
       applyFastFrameBoxSelectionVisuals,
       applyRuntimeSelectionUi,
-      cancelScheduledPreviewEditorState,
       positionBoxGroups,
       resolvePositionGroupProxySelections,
       selectionPanelTab,
@@ -18130,23 +17964,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    const suppressedSelectionReapply = suppressNextSelectionLayoutReapplyRef.current;
-    if (suppressedSelectionReapply) {
-      const shouldSkipSelectionReapply =
-        suppressedSelectionReapply.tab === selectionPanelTab &&
-        edgeSelectionState.tokens.length === 0 &&
-        stringArraysEqual(
-          normalizeFrameSelectionIds(suppressedSelectionReapply.selectedFrameGroupIds),
-          normalizeFrameSelectionIds(selectedFrameGroupIds)
-        );
-
-      suppressNextSelectionLayoutReapplyRef.current = null;
-
-      if (shouldSkipSelectionReapply) {
-        return;
-      }
-    }
-
     if (!root.querySelector(FRAME_EDGE_BUTTON_SELECTOR)) {
       const liveSelectedFrameGroupIds =
         selectedFrameGroupIdsRef.current.length > 0
@@ -18266,23 +18083,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    const suppressedDerivedVisuals = suppressNextSelectionDerivedVisualsRef.current;
-    if (suppressedDerivedVisuals) {
-      const shouldSkipDerivedVisuals =
-        suppressedDerivedVisuals.tab === selectionPanelTab &&
-        edgeSelectionStateRef.current.tokens.length === 0 &&
-        stringArraysEqual(
-          normalizeFrameSelectionIds(suppressedDerivedVisuals.selectedFrameGroupIds),
-          normalizeFrameSelectionIds(selectedFrameGroupIds)
-        );
-
-      suppressNextSelectionDerivedVisualsRef.current = null;
-
-      if (shouldSkipDerivedVisuals) {
-        return;
-      }
-    }
-
     applyFrameRelationSelectionUi(root, frameRelationPreviewMode, selectedFrameGroupIds);
     applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
     applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
@@ -18304,10 +18104,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    if (
-      (selectionPanelTab === 'position' || selectionPanelTab === 'metadata') &&
-      edgeSelectionState.tokens.length === 0
-    ) {
+    if (selectionPanelTab === 'position' && edgeSelectionState.tokens.length === 0) {
       return;
     }
 
@@ -18333,6 +18130,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const resolveSelectionAppearanceStyleTargets = React.useCallback(
     (root: HTMLElement) => {
+      if (
+        selectionPanelTab === 'position' &&
+        effectivePositionAppearanceTargetMode === 'group' &&
+        selectedPositionResolvedBoxGroup
+      ) {
+        materializePositionGroupWrappers(root);
+        const wrapper =
+          collectPageInnerElements(root)
+            .map((pageInner) => resolvePositionGroupWrapperElement(pageInner, selectedPositionResolvedBoxGroup.id))
+            .find((element): element is HTMLElement => Boolean(element)) || null;
+
+        return {
+          kind: 'group' as const,
+          elements: wrapper ? [wrapper] : [],
+        };
+      }
+
       const activeSelectionIds = selectedFrameGroupIdsRef.current.length > 0
         ? selectedFrameGroupIdsRef.current
         : selectedFrameGroupIds;
@@ -18344,8 +18158,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
     },
     [
+      effectivePositionAppearanceTargetMode,
       getFrameNodes,
       selectedFrameGroupIds,
+      selectedPositionResolvedBoxGroup,
+      selectionPanelTab,
     ]
   );
 
@@ -18432,6 +18249,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   React.useEffect(() => {
     syncSelectionStyleDraft();
   }, [
+    effectivePositionAppearanceTargetMode,
     selectedFrameGroupIds,
     selectedPositionResolvedBoxGroup?.id,
     syncSelectionStyleDraft,
@@ -19390,7 +19208,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       nodes.forEach((node) => {
-        applyFrameStylePatch(node, patch);
+        if (styleTargets.kind === 'group') {
+          applyElementAppearanceStylePatch(node, patch);
+        } else {
+          applyFrameStylePatch(node, patch);
+        }
       });
       const shouldUpdateGeometry = typeof patch.width === 'number' || typeof patch.height === 'number';
 
@@ -24897,6 +24719,41 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [applyFrameBoxSelection, positionOrderLockSelectionMode]
   );
 
+  const switchPositionAppearanceTargetMode = React.useCallback(
+    (nextMode: PositionAppearanceTargetMode) => {
+      if (nextMode === 'group') {
+        if (!selectedPositionResolvedBoxGroup || selectedPositionResolvedBoxGroup.frameGroupIds.length <= 1) {
+          return;
+        }
+
+        setPositionAppearanceTargetMode('group');
+        selectPositionGroupFromGroupList(selectedPositionResolvedBoxGroup);
+        return;
+      }
+
+      if (!selectedPositionResolvedBoxGroup || selectedPositionResolvedBoxGroup.frameGroupIds.length <= 0) {
+        setPositionAppearanceTargetMode('frame');
+        return;
+      }
+
+      const childFrameGroupIds = selectedPositionResolvedBoxGroup.frameGroupIds
+        .map((frameGroupId) => frameGroupId.trim())
+        .filter((frameGroupId) => Boolean(frameGroupId));
+
+      if (childFrameGroupIds.length <= 0) {
+        return;
+      }
+
+      setPositionAppearanceTargetMode('frame');
+      applyFrameBoxSelection(childFrameGroupIds, {
+        disableAutoPositionGroupProxySelection: true,
+        showAllGroupProxySelections: false,
+        overridePositionGroupProxySelections: [],
+      });
+    },
+    [applyFrameBoxSelection, selectPositionGroupFromGroupList, selectedPositionResolvedBoxGroup]
+  );
+
   const renderPositionSummarySection = (title: string, children: React.ReactNode) => {
     const content = React.Children.toArray(children);
 
@@ -25630,9 +25487,42 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       <div className="space-y-3 rounded-xl border border-slate-200 p-4">
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2">
-            <label className="text-sm font-medium text-slate-800">상자 출력 형식</label>
+            <label className="text-sm font-medium text-slate-800">
+              {effectivePositionAppearanceTargetMode === 'group' ? '그룹 출력 형식' : '상자 출력 형식'}
+            </label>
+            {hasSelectedPositionGroupAppearanceContext ? (
+              <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white text-[11px] font-semibold">
+                <button
+                  type="button"
+                  className={`px-2 py-1 ${
+                    effectivePositionAppearanceTargetMode === 'group'
+                      ? 'bg-slate-950 text-white'
+                      : 'text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
+                  }`}
+                  disabled={!canEditSelectedPositionGroupAppearance}
+                  onClick={() => switchPositionAppearanceTargetMode('group')}
+                >
+                  그룹
+                </button>
+                <button
+                  type="button"
+                  className={`px-2 py-1 ${
+                    effectivePositionAppearanceTargetMode === 'frame'
+                      ? 'bg-slate-950 text-white'
+                      : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                  onClick={() => switchPositionAppearanceTargetMode('frame')}
+                >
+                  상자
+                </button>
+              </div>
+            ) : null}
           </div>
-          <p className="text-xs text-slate-500">선택한 상자의 출력 영역을 클릭해 크기, 배경, 외곽선을 편집합니다.</p>
+          <p className="text-xs text-slate-500">
+            {effectivePositionAppearanceTargetMode === 'group'
+              ? '선택한 상위 그룹의 출력 영역을 클릭해 크기, 배경, 외곽선을 편집합니다.'
+              : '선택한 상자의 출력 영역을 클릭해 크기, 배경, 외곽선을 편집합니다.'}
+          </p>
         </div>
 
         <div className="max-w-full overflow-visible pb-1 pt-6">
@@ -26288,21 +26178,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview .v102-frame-band-table {
           box-sizing: border-box !important;
         }
-        .template-edit-preview .template-position-group-wrapper,
-        .template-edit-preview [${TEMPLATE_POSITION_GROUP_NODE_ATTR}="true"] {
-          background: transparent !important;
-          border: 0 !important;
-          outline: none !important;
-          box-shadow: none !important;
-          filter: none !important;
-        }
-        .template-edit-preview [data-v106-position-group-proxy-overlay]:not([data-v106-position-group-proxy-selection-ui="true"]),
-        .template-edit-preview [data-v106-position-group-catalog-overlay] {
-          display: none !important;
-        }
-        .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"] {
-          display: block !important;
-        }
         .template-edit-preview[data-frame-create-mode="true"] {
           cursor: crosshair;
         }
@@ -26332,8 +26207,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             0 0 0 4px rgba(96, 165, 250, .22),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
-        .template-edit-preview [data-template-selected="true"]::before,
-        .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"]::before {
+        .template-edit-preview [data-template-selected="true"]::before {
           content: attr(data-template-selection-order);
           position: absolute;
           top: 4px;
@@ -26615,13 +26489,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             inset 0 0 0 2px rgba(217, 119, 6, .92),
             0 0 0 4px rgba(251, 191, 36, .18);
         }
-        .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}="inactive"] {
-          opacity: .1 !important;
+        .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] ${RAW_FRAME_NODE_SELECTOR} {
           transition: opacity .12s ease;
         }
-        .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}="active"] {
+        .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] ${RAW_FRAME_NODE_SELECTOR}:not([${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]) {
+          opacity: .1 !important;
+        }
+        .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] ${RAW_FRAME_NODE_SELECTOR}[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}] {
           opacity: 1 !important;
-          transition: opacity .12s ease;
         }
         .template-edit-preview[data-metadata-icon-visual-mode="false"] .${FRAME_KIND_MARKER_CLASS} {
           display: none;

@@ -10816,39 +10816,6 @@ const appendFrameSelectionFill = (frameNode: HTMLElement, showDeleteButton = fal
   }
 };
 
-const removeFrameSelectionChromeFromShell = (shell: HTMLElement) => {
-  shell.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}, .${FRAME_DELETE_BUTTON_CLASS}`).forEach((element) => {
-    element.remove();
-  });
-};
-
-const ensureFrameSelectionChrome = (
-  frameNode: HTMLElement,
-  frameGroupId: string,
-  selectionIndex: number,
-  showDeleteButton = false
-) => {
-  setElementAttributeIfChanged(frameNode, 'data-template-edge-host', 'true');
-  setElementAttributeIfChanged(frameNode, 'data-template-selected', 'true');
-  setElementAttributeIfChanged(frameNode, 'data-template-selection-order', String(selectionIndex + 1));
-
-  if (selectionIndex === 0) {
-    setElementAttributeIfChanged(frameNode, 'data-template-primary-selected', 'true');
-  }
-
-  const shell = resolveFrameLayoutShell(frameNode);
-  const selectionFills = Array.from(shell.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}`));
-  selectionFills.slice(1).forEach((fill) => {
-    fill.remove();
-  });
-
-  if (selectionFills.length <= 0) {
-    appendFrameSelectionFill(frameNode, showDeleteButton);
-  } else if (showDeleteButton && !hasFrameDeleteButtonForSelection(shell, frameGroupId)) {
-    shell.appendChild(buildFrameDeleteButton('frame', frameGroupId, `${frameGroupId} 상자 삭제`));
-  }
-};
-
 const ensureSelectedFrameDeleteButtons = (root: HTMLElement) => {
   if (root.getAttribute('data-selection-panel-tab') !== 'position') {
     return;
@@ -10882,121 +10849,14 @@ const ensureSelectedFrameDeleteButtons = (root: HTMLElement) => {
   });
 };
 
-const cleanupStaleFrameSelectionChrome = (root: HTMLElement, expectedDirectSelectedIds: string[]) => {
-  const expectedDirectSelectedIdSet = new Set(expectedDirectSelectedIds);
-
-  root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
-    const anchorNode = resolveFrameSelectionAnchor(element) || element;
-    const frameGroupId = getFrameGroupId(anchorNode).trim();
-    const isExpectedDirectSelection = frameGroupId && expectedDirectSelectedIdSet.has(frameGroupId);
-
-    if (!isExpectedDirectSelection) {
-      element.removeAttribute('data-template-selected');
-      element.removeAttribute('data-template-primary-selected');
-      element.removeAttribute('data-template-selection-order');
-      removeFrameSelectionChromeFromShell(resolveFrameLayoutShell(anchorNode));
-      return;
-    }
-
-    const selectionIndex = expectedDirectSelectedIds.indexOf(frameGroupId);
-    setElementAttributeIfChanged(element, 'data-template-selection-order', String(selectionIndex + 1));
-    if (selectionIndex === 0) {
-      setElementAttributeIfChanged(element, 'data-template-primary-selected', 'true');
-    } else {
-      removeElementAttributeIfPresent(element, 'data-template-primary-selected');
-    }
-  });
-};
-
-const resolvePositionGroupProxySelectionRects = (
-  positionGroupProxySelection: PositionGroupProxySelection,
-  frameNodeById: Map<string, HTMLElement>
-) => {
-  const pageInnerBuckets = new Map<HTMLElement, FrameNodeRect[]>();
-
-  positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
-    const frameNode = frameNodeById.get(frameGroupId.trim()) || null;
-
-    if (!frameNode) {
-      return;
-    }
-
-    const shell = resolveFrameLayoutShell(frameNode);
-    const pageInner = shell.closest<HTMLElement>('.page-inner');
-
-    if (!pageInner) {
-      return;
-    }
-
-    const current = pageInnerBuckets.get(pageInner) || [];
-    current.push(readFrameElementRect(shell, pageInner));
-    pageInnerBuckets.set(pageInner, current);
-  });
-
-  return Array.from(pageInnerBuckets.entries())
-    .map(([pageInner, rects]) => {
-      if (rects.length <= 0) {
-        return null;
-      }
-
-      const minLeft = Math.min(...rects.map((rect) => rect.left));
-      const minTop = Math.min(...rects.map((rect) => rect.top));
-      const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
-      const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
-
-      return {
-        pageInner,
-        rect: {
-          left: minLeft,
-          top: minTop,
-          width: Math.max(1, maxRight - minLeft),
-          height: Math.max(1, maxBottom - minTop),
-        },
-      };
-    })
-    .filter((entry): entry is { pageInner: HTMLElement; rect: FrameNodeRect } => Boolean(entry));
-};
-
-const appendPositionGroupProxySelectionMarker = (
-  pageInner: HTMLElement,
-  groupId: string,
-  rect?: FrameNodeRect | null,
-  selectionOrder = 1
-) => {
+const appendPositionGroupProxySelectionMarker = (pageInner: HTMLElement, groupId: string) => {
   const marker = document.createElement('div');
   marker.setAttribute('data-frame-editor-ui', 'true');
   marker.setAttribute('data-v106-position-group-proxy-overlay', groupId);
   marker.setAttribute('aria-hidden', 'true');
+  marker.style.display = 'none';
   marker.style.position = 'absolute';
   marker.style.pointerEvents = 'none';
-
-  if (!rect) {
-    marker.style.display = 'none';
-    pageInner.appendChild(marker);
-    return;
-  }
-
-  marker.setAttribute('data-v106-position-group-proxy-selection-ui', 'true');
-  marker.setAttribute('data-template-selection-order', String(selectionOrder));
-  if (selectionOrder === 1) {
-    marker.setAttribute('data-template-primary-selected', 'true');
-  }
-  marker.style.left = toFrameCssPx(rect.left);
-  marker.style.top = toFrameCssPx(rect.top);
-  marker.style.width = toFrameCssPx(rect.width);
-  marker.style.height = toFrameCssPx(rect.height);
-  marker.style.zIndex = '20';
-  marker.style.overflow = 'visible';
-  marker.style.outline = '2px solid rgba(37, 99, 235, .96)';
-  marker.style.outlineOffset = '0';
-  marker.style.boxShadow = '0 0 0 4px rgba(96, 165, 250, .22), inset 0 0 0 1px rgba(255, 255, 255, .84)';
-
-  const fill = document.createElement('div');
-  fill.className = FRAME_SELECTION_FILL_CLASS;
-  fill.setAttribute('data-frame-editor-ui', 'true');
-  fill.setAttribute('aria-hidden', 'true');
-  marker.appendChild(fill);
-
   pageInner.appendChild(marker);
 };
 
@@ -11016,9 +10876,28 @@ const appendPositionGroupProxyOverlay = (
     }
   });
 
-  positionGroupProxySelections.forEach((positionGroupProxySelection, proxyIndex) => {
-    resolvePositionGroupProxySelectionRects(positionGroupProxySelection, frameNodeById).forEach(({ pageInner, rect }) => {
-      appendPositionGroupProxySelectionMarker(pageInner, positionGroupProxySelection.groupId, rect, proxyIndex + 1);
+  positionGroupProxySelections.forEach((positionGroupProxySelection) => {
+    const pageInners = new Set<HTMLElement>();
+
+    positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = frameNodeById.get(frameGroupId);
+
+      if (!frameNode) {
+        return;
+      }
+
+      const shell = resolveFrameLayoutShell(frameNode);
+      const pageInner = shell.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        return;
+      }
+
+      pageInners.add(pageInner);
+    });
+
+    pageInners.forEach((pageInner) => {
+      appendPositionGroupProxySelectionMarker(pageInner, positionGroupProxySelection.groupId);
     });
   });
 };
@@ -11061,38 +10940,32 @@ const appendPositionGroupProxyOverlayFast = (
   frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
   if (!positionGroupProxySelections.length) {
-    root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]').forEach((element) => {
-      element.remove();
-    });
     return;
   }
 
-  const expectedGroupIds = new Set(
-    positionGroupProxySelections.map((proxySelection) => proxySelection.groupId.trim()).filter(Boolean)
-  );
-  positionGroupProxySelections.forEach((positionGroupProxySelection, proxyIndex) => {
-    const proxyGroupId = positionGroupProxySelection.groupId.trim();
+  positionGroupProxySelections.forEach((positionGroupProxySelection) => {
+    const pageInners = new Set<HTMLElement>();
 
-    if (!proxyGroupId) {
-      return;
-    }
+    positionGroupProxySelection.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = frameNodeById.get(frameGroupId.trim()) || null;
 
-    root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]').forEach((element) => {
-      if ((element.getAttribute('data-v106-position-group-proxy-overlay') || '').trim() === proxyGroupId) {
-        element.remove();
+      if (!frameNode) {
+        return;
       }
+
+      const shell = resolveFrameLayoutShell(frameNode);
+      const pageInner = shell.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        return;
+      }
+
+      pageInners.add(pageInner);
     });
 
-    resolvePositionGroupProxySelectionRects(positionGroupProxySelection, frameNodeById).forEach(({ pageInner, rect }) => {
-      appendPositionGroupProxySelectionMarker(pageInner, proxyGroupId, rect, proxyIndex + 1);
+    pageInners.forEach((pageInner) => {
+      appendPositionGroupProxySelectionMarker(pageInner, positionGroupProxySelection.groupId);
     });
-  });
-
-  root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]').forEach((element) => {
-    const groupId = element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '';
-    if (!expectedGroupIds.has(groupId)) {
-      element.remove();
-    }
   });
 };
 
@@ -11212,10 +11085,7 @@ const applyFastFrameSelectionUi = (
   root: HTMLElement,
   selectedIds: string[],
   positionGroupProxySelections: PositionGroupProxySelection[] = [],
-  frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root),
-  options?: {
-    deferStaleSelectionCleanup?: boolean;
-  }
+  frameNodeById: Map<string, HTMLElement> = collectFrameSelectionAnchorByIdMap(root)
 ) => {
   if (
     isStablePositionFrameSelectionUiAlreadyApplied(
@@ -11229,60 +11099,46 @@ const applyFastFrameSelectionUi = (
     return;
   }
 
-  const expectedDirectSelectedIds = resolveDirectFrameSelectionIds(selectedIds, positionGroupProxySelections);
+  clearFastSelectionEditorUi(root);
+
+  const normalizedSelectedIds = Array.from(
+    new Set(selectedIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+  );
+  const proxyMemberFrameGroupIdSet = new Set(
+    positionGroupProxySelections.flatMap((proxySelection) =>
+      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
   const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
 
-  expectedDirectSelectedIds.forEach((frameGroupId, selectionIndex) => {
+  normalizedSelectedIds.forEach((frameGroupId, selectionIndex) => {
     const node = frameNodeById.get(frameGroupId) || null;
 
     if (!node) {
       return;
     }
 
-    ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, canShowCanvasDeleteButton);
+    setElementAttributeIfChanged(node, 'data-template-edge-host', 'true');
+
+    if (proxyMemberFrameGroupIdSet.has(frameGroupId)) {
+      return;
+    }
+
+    setElementAttributeIfChanged(node, 'data-template-selected', 'true');
+    setElementAttributeIfChanged(node, 'data-template-selection-order', String(selectionIndex + 1));
+
+    if (selectionIndex === 0) {
+      setElementAttributeIfChanged(node, 'data-template-primary-selected', 'true');
+    }
+
+    appendFrameSelectionFill(node, canShowCanvasDeleteButton);
   });
 
   appendPositionGroupProxyOverlayFast(root, positionGroupProxySelections, frameNodeById);
-  if (!options?.deferStaleSelectionCleanup) {
-    cleanupStaleFrameSelectionChrome(root, expectedDirectSelectedIds);
-  }
-  root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
-    element.removeAttribute('data-template-edge-visual');
-    element.removeAttribute('data-template-edge-anchor-node');
-  });
-  root.querySelectorAll<HTMLElement>('[data-template-relative-anchor-target="true"]').forEach((element) => {
-    element.removeAttribute('data-template-relative-anchor-target');
-  });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR}="true"]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
-  });
-  root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR).forEach((button) => {
-    setElementAttributeIfChanged(button, 'data-edge-selection-mode', 'idle');
-    removeElementAttributeIfPresent(button, 'data-edge-selection-order');
-    removeElementAttributeIfPresent(button, 'data-edge-anchor');
-    removeElementAttributeIfPresent(button, 'data-edge-selection-role');
-    removeElementAttributeIfPresent(button, 'data-edge-movement-mismatch');
-  });
-  root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_BADGE_CLASS}`).forEach((element) => {
-    element.remove();
-  });
 };
 
 const normalizeFrameSelectionIds = (frameGroupIds: string[]) =>
   Array.from(new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))));
-
-const resolveDirectFrameSelectionIds = (
-  selectedIds: string[],
-  positionGroupProxySelections: PositionGroupProxySelection[] = []
-) => {
-  const proxyMemberFrameGroupIdSet = new Set(
-    positionGroupProxySelections.flatMap((proxySelection) =>
-      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
-    )
-  );
-
-  return normalizeFrameSelectionIds(selectedIds).filter((frameGroupId) => !proxyMemberFrameGroupIdSet.has(frameGroupId));
-};
 
 const hasStaleEdgeSelectionButtonState = (root: HTMLElement) =>
   Array.from(root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR)).some(
@@ -11439,6 +11295,10 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
     selectedEntryByFrameGroupId.set(selectedEntry.frameGroupId, selectedEntry);
   }
 
+  if (root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}`).length !== expectedDirectSelectedIds.length) {
+    return false;
+  }
+
   if (root.querySelectorAll<HTMLElement>(`.${FRAME_DELETE_BUTTON_CLASS}`).length !== expectedDirectSelectedIds.length) {
     return false;
   }
@@ -11475,17 +11335,12 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
     .map((element) => element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '')
     .filter(Boolean);
 
+  if (proxyMarkerGroupIds.length !== expectedProxyGroupIds.length) {
+    return false;
+  }
+
   const proxyMarkerGroupIdSet = new Set(proxyMarkerGroupIds);
-
-  if (proxyMarkerGroupIdSet.size !== expectedProxyGroupIds.length) {
-    return false;
-  }
-
   if (!expectedProxyGroupIds.every((groupId) => proxyMarkerGroupIdSet.has(groupId))) {
-    return false;
-  }
-
-  if (root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}`).length !== expectedDirectSelectedIds.length + proxyMarkerGroupIds.length) {
     return false;
   }
 
@@ -11493,8 +11348,97 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
 };
 
 const appendPositionGroupCatalogOverlay = (root: HTMLElement) => {
-  root.querySelectorAll<HTMLElement>('[data-v106-position-group-catalog-overlay]').forEach((element) => {
-    element.remove();
+  if (root.getAttribute('data-selection-panel-tab') !== 'position') {
+    return;
+  }
+
+  const groups = collectPositionBoxGroups(root, { includeSingletons: false }).filter(
+    (group) => group.frameGroupIds.length > 1
+  );
+
+  if (groups.length <= 0) {
+    return;
+  }
+
+  const frameNodeById = new Map<string, HTMLElement>();
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node);
+    if (frameGroupId) {
+      frameNodeById.set(frameGroupId, node);
+    }
+  });
+
+  groups.forEach((group) => {
+    const pageInnerBuckets = new Map<
+      HTMLElement,
+      Array<{
+        rect: FrameNodeRect;
+      }>
+    >();
+
+    group.frameGroupIds.forEach((frameGroupId) => {
+      const frameNode = frameNodeById.get(frameGroupId);
+      if (!frameNode) {
+        return;
+      }
+
+      const shell = resolveFrameLayoutShell(frameNode);
+      const pageInner = shell.closest<HTMLElement>('.page-inner');
+      if (!pageInner) {
+        return;
+      }
+
+      const current = pageInnerBuckets.get(pageInner) || [];
+      current.push({ rect: readFrameElementRect(shell, pageInner) });
+      pageInnerBuckets.set(pageInner, current);
+    });
+
+    pageInnerBuckets.forEach((entries, pageInner) => {
+      if (entries.length <= 1) {
+        return;
+      }
+
+      const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
+      const minTop = Math.min(...entries.map((entry) => entry.rect.top));
+      const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
+      const maxBottom = Math.max(...entries.map((entry) => entry.rect.top + entry.rect.height));
+      const overlay = document.createElement('div');
+      overlay.setAttribute('data-frame-editor-ui', 'true');
+      overlay.setAttribute('aria-hidden', 'true');
+      overlay.setAttribute('data-v106-position-group-catalog-overlay', group.id);
+      overlay.style.position = 'absolute';
+      overlay.style.pointerEvents = 'none';
+      overlay.style.zIndex = '18';
+      overlay.style.left = toFrameCssPx(minLeft);
+      overlay.style.top = toFrameCssPx(minTop);
+      overlay.style.width = toFrameCssPx(Math.max(1, maxRight - minLeft));
+      overlay.style.height = toFrameCssPx(Math.max(1, maxBottom - minTop));
+      overlay.style.outline = '2px solid rgba(217, 119, 6, .95)';
+      overlay.style.outlineOffset = '0';
+      overlay.style.boxShadow = '0 0 0 2px rgba(251, 191, 36, .32), inset 0 0 0 1px rgba(255, 255, 255, .72)';
+      overlay.style.background = 'rgba(251, 191, 36, .06)';
+
+      const badge = document.createElement('div');
+      badge.setAttribute('data-frame-editor-ui', 'true');
+      badge.style.position = 'absolute';
+      badge.style.top = '-10px';
+      badge.style.left = '-10px';
+      badge.style.minWidth = '22px';
+      badge.style.height = '20px';
+      badge.style.padding = '0 7px';
+      badge.style.borderRadius = '999px';
+      badge.style.display = 'inline-flex';
+      badge.style.alignItems = 'center';
+      badge.style.justifyContent = 'center';
+      badge.style.background = 'rgba(217, 119, 6, .96)';
+      badge.style.color = '#fff';
+      badge.style.fontSize = '11px';
+      badge.style.fontWeight = '700';
+      badge.textContent = normalizePositionGroupDisplayLabel(group.label, group.id);
+      overlay.appendChild(badge);
+
+      pageInner.appendChild(overlay);
+    });
   });
 };
 
@@ -11522,14 +11466,6 @@ const applyFrameSelectionUi = (
     edgeMovementMismatchIds
   );
   const preserveStableFrameSelectionUi = preserveStablePositionSelectionUi || preserveStableDirectSelectionUi;
-  const proxyMemberFrameGroupIdSet = new Set(
-    positionGroupProxySelections.flatMap((proxySelection) =>
-      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
-    )
-  );
-  const expectedDirectSelectedIds = resolveDirectFrameSelectionIds(selectedIds, positionGroupProxySelections);
-  const shouldApplySelectionWithoutClearingFirst =
-    expectedDirectSelectedIds.length > 0 || positionGroupProxySelections.length > 0;
 
   if (
     preserveStableFrameSelectionUi &&
@@ -11540,28 +11476,21 @@ const applyFrameSelectionUi = (
     return;
   }
 
-  if (shouldApplySelectionWithoutClearingFirst) {
-    const frameNodeById = collectFrameSelectionAnchorByIdMap(root);
-    const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
-    expectedDirectSelectedIds.forEach((frameGroupId, selectionIndex) => {
-      const node = frameNodeById.get(frameGroupId) || null;
-
-      if (node) {
-        ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, canShowCanvasDeleteButton);
-      }
-    });
-  }
-
   stripSelectionAttrs(root, {
     preserveFrameVisualHints: true,
-    preserveFrameSelectionState: preserveStableFrameSelectionUi || shouldApplySelectionWithoutClearingFirst,
+    preserveFrameSelectionState: preserveStableFrameSelectionUi,
     preserveDerivedSelectionState: true,
   });
-  if (preserveStableFrameSelectionUi || shouldApplySelectionWithoutClearingFirst) {
+  if (preserveStableFrameSelectionUi) {
     stripEditorUiForStableFrameSelectionRefresh(root);
   } else {
     TemplateFrameEditHtmlService.stripEditorUiState(root);
   }
+  const proxyMemberFrameGroupIdSet = new Set(
+    positionGroupProxySelections.flatMap((proxySelection) =>
+      proxySelection.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
   const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
 
   const edgeMetaMap = new Map<
@@ -11595,7 +11524,19 @@ const applyFrameSelectionUi = (
     const isProxyMemberSelection = proxyMemberFrameGroupIdSet.has(frameGroupId);
 
     if (selectionIndex >= 0 && !isProxyMemberSelection) {
-      ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, canShowCanvasDeleteButton);
+      setElementAttributeIfChanged(node, 'data-template-selected', 'true');
+      setElementAttributeIfChanged(node, 'data-template-selection-order', String(selectionIndex + 1));
+
+      if (selectionIndex === 0) {
+        setElementAttributeIfChanged(node, 'data-template-primary-selected', 'true');
+      }
+
+      const shell = resolveFrameLayoutShell(node);
+      if (!shell.querySelector(`.${FRAME_SELECTION_FILL_CLASS}`)) {
+        appendFrameSelectionFill(node, canShowCanvasDeleteButton);
+      } else if (canShowCanvasDeleteButton && !hasFrameDeleteButtonForSelection(shell, frameGroupId)) {
+        shell.appendChild(buildFrameDeleteButton('frame', frameGroupId, `${frameGroupId} 상자 삭제`));
+      }
     }
 
     if (!edgeSnapshot) {
@@ -11637,8 +11578,7 @@ const applyFrameSelectionUi = (
   });
 
   appendConnectedFrameClusterOutlines(root);
-  appendPositionGroupProxyOverlayFast(root, positionGroupProxySelections);
-  cleanupStaleFrameSelectionChrome(root, expectedDirectSelectedIds);
+  appendPositionGroupProxyOverlay(root, positionGroupProxySelections);
   ensureSelectedFrameDeleteButtons(root);
   renderRelativeAnchorGuides(root, selectedIds, relativeGuideFrameGroupId);
 };
@@ -17144,17 +17084,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       const resolvedFrameNodeById = frameNodeById || collectFrameSelectionAnchorByIdMap(root);
-      const resolvedPositionGroupProxySelections = restoreActivePositionGroupProxySelections(
-        nextSelectedFrameGroupIds,
-        overridePositionGroupProxySelections ??
-          resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
-      );
       applyFastFrameSelectionUi(
         root,
         nextSelectedFrameGroupIds,
-        resolvedPositionGroupProxySelections,
-        resolvedFrameNodeById,
-        { deferStaleSelectionCleanup: true }
+        restoreActivePositionGroupProxySelections(
+          nextSelectedFrameGroupIds,
+          overridePositionGroupProxySelections ??
+            resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
+        ),
+        resolvedFrameNodeById
       );
       applyPositionImpactGroupSelectionUiFast(
         root,
@@ -17163,10 +17101,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         positionRelationAnchorFrameGroupId,
         positionBoxGroups,
         resolvedFrameNodeById
-      );
-      cleanupStaleFrameSelectionChrome(
-        root,
-        resolveDirectFrameSelectionIds(nextSelectedFrameGroupIds, resolvedPositionGroupProxySelections)
       );
     },
     [
@@ -26296,12 +26230,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           box-shadow: none !important;
           filter: none !important;
         }
-        .template-edit-preview [data-v106-position-group-proxy-overlay]:not([data-v106-position-group-proxy-selection-ui="true"]),
-        .template-edit-preview [data-v106-position-group-catalog-overlay] {
+        .template-edit-preview [data-v106-position-group-proxy-overlay] {
           display: none !important;
-        }
-        .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"] {
-          display: block !important;
         }
         .template-edit-preview[data-frame-create-mode="true"] {
           cursor: crosshair;
@@ -26332,8 +26262,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             0 0 0 4px rgba(96, 165, 250, .22),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
-        .template-edit-preview [data-template-selected="true"]::before,
-        .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"]::before {
+        .template-edit-preview [data-template-selected="true"]::before {
           content: attr(data-template-selection-order);
           position: absolute;
           top: 4px;
