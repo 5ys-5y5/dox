@@ -9448,12 +9448,6 @@ const disableFrameTextInputEditing = (input: HTMLTextAreaElement | HTMLInputElem
   input.style.caretColor = '';
 };
 
-const resolveFrameTextInputElement = (target: HTMLElement | null) => {
-  const input = target?.closest<HTMLInputElement | HTMLTextAreaElement>('[data-template-frame-input="true"]') || null;
-
-  return input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement ? input : null;
-};
-
 const focusFrameTextInputForEditing = (input: HTMLTextAreaElement | HTMLInputElement) => {
   enableFrameTextInputForEditing(input);
   window.requestAnimationFrame(() => {
@@ -24812,7 +24806,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const pageInnerFromTarget = target.closest<HTMLElement>('.page-inner') || null;
       const frameNode =
         resolveFrameSelectionAnchor(frameAnchorTarget) ||
-        (selectionPanelTab !== 'position'
+        (selectionPanelTab === 'text'
           ? resolveFrameSelectionAnchorAtPoint(pageInnerFromTarget, event.clientX, event.clientY)
           : null);
       const pageInner =
@@ -25010,15 +25004,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         // 텍스트 탭의 일반 클릭은 직접 입력 편집을 우선하고, Shift/드래그 선택은 아래 공통 선택 흐름에 맡겨 일괄 서식을 유지한다.
         const textFrameGroupId = getFrameGroupId(frameNode);
         const textInput = frameNode.querySelector<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
-        const clickedTextInput = resolveFrameTextInputElement(target);
-
-        if (clickedTextInput) {
-          enableFrameTextInputForEditing(clickedTextInput);
-          return;
-        }
 
         if (textInput) {
-          event.preventDefault();
+          const clickedTextInput = target.closest<HTMLElement>('[data-template-frame-input="true"]');
+
+          if (!clickedTextInput) {
+            event.preventDefault();
+          }
+
           focusFrameTextInputForEditing(textInput);
         }
 
@@ -25234,19 +25227,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (selectionPanelTab !== 'position' && (edgeButton || resizeHandle)) {
         event.preventDefault();
-        return;
-      }
-
-      if (
-        selectionPanelTab === 'position' &&
-        canvasInteractionMode === 'select' &&
-        !positionOrderLockSelectionMode &&
-        positionGroupEditModeRef.current.kind === 'idle' &&
-        !edgeButton &&
-        !resizeHandle &&
-        pageInner
-      ) {
-        startMarqueeSelectionInteraction({ anchorFrameGroupId: frameGroupId });
         return;
       }
 
@@ -25517,11 +25497,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	        return;
 	      }
 
-      if (selectionPanelTab !== 'position' || canvasInteractionMode !== 'move') {
-        return;
-      }
+	      if (selectionPanelTab !== 'position' || canvasInteractionMode !== 'move') {
+	        return;
+	      }
 
-      if (isInteractiveTarget(target)) {
+	      if (isInteractiveTarget(target)) {
         return;
       }
 
@@ -26614,12 +26594,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const target = event.target instanceof HTMLElement ? event.target : null;
 
     if (selectionPanelTab === 'text' && target && previewRef.current) {
-      const clickedTextInput = resolveFrameTextInputElement(target);
-
-      if (clickedTextInput && previewRef.current.contains(clickedTextInput)) {
-        return;
-      }
-
       const frameNode =
         resolveFrameSelectionAnchor(target.closest<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR)) ||
         resolveFrameSelectionAnchorAtPoint(

@@ -24812,7 +24812,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const pageInnerFromTarget = target.closest<HTMLElement>('.page-inner') || null;
       const frameNode =
         resolveFrameSelectionAnchor(frameAnchorTarget) ||
-        (selectionPanelTab !== 'position'
+        (selectionPanelTab === 'text'
           ? resolveFrameSelectionAnchorAtPoint(pageInnerFromTarget, event.clientX, event.clientY)
           : null);
       const pageInner =
@@ -25237,19 +25237,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      if (
-        selectionPanelTab === 'position' &&
-        canvasInteractionMode === 'select' &&
-        !positionOrderLockSelectionMode &&
-        positionGroupEditModeRef.current.kind === 'idle' &&
-        !edgeButton &&
-        !resizeHandle &&
-        pageInner
-      ) {
-        startMarqueeSelectionInteraction({ anchorFrameGroupId: frameGroupId });
-        return;
-      }
-
       if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
         if (positionOrderLockSelectionMode) {
           event.preventDefault();
@@ -25517,11 +25504,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	        return;
 	      }
 
-      if (selectionPanelTab !== 'position' || canvasInteractionMode !== 'move') {
-        return;
-      }
+	      if (selectionPanelTab !== 'position' || canvasInteractionMode !== 'move') {
+	        return;
+	      }
 
-      if (isInteractiveTarget(target)) {
+	      if (isInteractiveTarget(target)) {
         return;
       }
 

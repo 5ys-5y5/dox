@@ -513,9 +513,6 @@ type PositionGroupEditMode =
 | `TEXT-AUTO-PEER-EDGE-01` | 자동 높이 상자는 선택 상자의 bottom edge와 같은 방향/같은 side를 공유하는 직접 peer를 찾아 같은 delta로 height를 보정한다. 반대편 또는 아래 행 항목은 크기를 유지하고 위치만 이동한다. | `docs/diff/2026-05-11_TEXT-AUTO-PEER-EDGE-01_TemplateEditWorkspace.before.tsx` | 완료 |
 | `TEXT-AUTO-PEER-EDGE-02` | 자동 크기 정책은 높이와 너비 모두 같은 기준을 사용한다. 현재 UI의 자동 높이 경로는 bottom peer를 적용했고, 이후 자동 너비 경로는 right/left peer에 동일한 직접 peer 보정 원칙을 적용해야 한다. | `docs/diff/2026-05-11_TEXT-AUTO-PEER-EDGE-01_uiupdate0511.before.md` | 완료 |
 | `TEXT-AUTO-PEER-EDGE-03` | 대표 템플릿에서 `status-history-1` 자동 높이 증가/복귀 시 직접 peer `band-4-cell-2`는 같은 height 변화량을 갖고, `band-5-cell-1..6`은 height 변화 없이 top만 이동함을 chrome-devtools MCP로 검증한다. | 테스트 기록 | 완료 |
-| `TEXT-INPUT-DRAG-SELECTION-01` | 텍스트 탭에서 실제 입력창 위 pointer/click은 브라우저 기본 caret/텍스트 드래그 선택을 보존한다. 입력창 직접 클릭 중에는 `setSelectionRange(end, end)`를 재실행하지 않는다. | `docs/diff/2026-05-12_TEXT-INPUT-DRAG-SELECTION-01_*` | 완료 |
-| `NON-TEXT-BOX-DRAG-RESTORE-01` | 텍스트 입력창 드래그 선택 보호는 `텍스트` 탭에만 한정한다. `속성`, `크기 및 위치` 등 텍스트 외 탭의 상자 위 드래그 선택 경로를 텍스트 입력 보호 로직으로 막지 않는다. | `docs/diff/2026-05-12_NON_TEXT_BOX_DRAG_RESTORE-01_*` | 완료 |
-| `BOX-MARQUEE-SELECTION-RESTORE-01` | `속성`, `크기 및 위치` 탭의 선택 모드에서는 상자 위에서 시작한 드래그도 캔버스 드래그 선택으로 처리한다. `속성` 탭은 상자 이동으로 해석하지 않는다. | `docs/diff/2026-05-12_BOX_MARQUEE_SELECTION_RESTORE-01_*` | 완료 |
 
 ## 9. 테스트 계획
 
@@ -652,18 +649,3 @@ type PositionGroupEditMode =
 - 2026-05-11: chrome-devtools MCP 검증. 콘솔 `error`/`warn` 메시지는 없었다. 기존 접근성 issue로 `No label associated with a form field`, `A form field element should have an id or name attribute`만 남아 있으며 이번 자동 높이 peer edge 변경과 직접 관련된 런타임 오류는 아니다.
 - 2026-05-11: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다. `npm run lint`는 `APP-NOSHADOW-02` 통과 후 ESLint 9 설정 파일(`eslint.config.*`) 부재로 실패했다.
 - 2026-05-11: Supabase MCP 검증. `tool_search`로 Supabase MCP 도구를 탐색했으나 세션에 Supabase namespace가 노출되지 않았다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다.
-- 2026-05-12: `TEXT-INPUT-DRAG-SELECTION-01` 구현 전 백업을 `docs/diff/2026-05-12_TEXT-INPUT-DRAG-SELECTION-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-12_TEXT-INPUT-DRAG-SELECTION-01_uiupdate0511.before.md`에 생성했다.
-- 2026-05-12: `TEXT-INPUT-DRAG-SELECTION-01` 구현. 텍스트 탭에서 pointer/click 대상이 실제 `[data-template-frame-input="true"]` 입력창이면 입력 가능 상태만 보장하고, 기존 `focusFrameTextInputForEditing*`의 커서 끝 이동 경로를 실행하지 않도록 했다. 상자 배경 클릭으로 입력 모드에 진입하는 경우에는 기존처럼 입력창 끝으로 포커스한다.
-- 2026-05-12: chrome-devtools MCP 검증. 대표 URL을 격리 컨텍스트에서 열고 `텍스트` 탭으로 전환했다. 실제 `textarea[data-template-frame-input="true"]`에 selection range `2..10`을 만든 뒤 pointerdown/pointerup/click 이벤트를 입력창 위에 전달하고 150ms 대기했다. 결과는 `selectionStart=2`, `selectionEnd=10`, 선택 텍스트 유지, 입력창 focus 유지, `readOnly=false`였다.
-- 2026-05-12: chrome-devtools MCP 검증. 콘솔 `error`/`warn` 메시지는 없었다. 기존 접근성 issue로 `No label associated with a form field`, `A form field element should have an id or name attribute`만 남아 있으며 이번 텍스트 드래그 선택 수정과 직접 관련된 런타임 오류는 아니다.
-- 2026-05-12: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다. `npm run lint`는 `APP-NOSHADOW-02` 통과 후 ESLint 9 설정 파일(`eslint.config.*`) 부재로 실패했다.
-- 2026-05-12: Supabase MCP 검증. `tool_search`로 Supabase MCP 도구를 탐색했으나 세션에 Supabase namespace가 노출되지 않았다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다.
-- 2026-05-12: `NON-TEXT-BOX-DRAG-RESTORE-01` 구현 전 백업을 `docs/diff/2026-05-12_NON_TEXT_BOX_DRAG_RESTORE-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-12_NON_TEXT_BOX_DRAG_RESTORE-01_uiupdate0511.before.md`에 생성했다.
-- 2026-05-12: `NON-TEXT-BOX-DRAG-RESTORE-01` 구현. 텍스트 입력창 직접 조작을 보호하는 조건이 다른 탭의 드래그 선택을 막지 않도록 범위를 `텍스트` 탭으로 좁혔다. 좌표가 `.v202-frame-group` 직접 target이 아닌 band 내부 DIV에 걸린 경우도 `속성` 탭에서 상자 선택 대상으로 해석되도록 비-위치 탭의 좌표 기반 frame 탐색을 복구했다.
-- 2026-05-12: `BOX-MARQUEE-SELECTION-RESTORE-01` 구현 전 백업을 `docs/diff/2026-05-12_BOX_MARQUEE_SELECTION_RESTORE-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-12_BOX_MARQUEE_SELECTION_RESTORE-01_uiupdate0511.before.md`에 생성했다.
-- 2026-05-12: `BOX-MARQUEE-SELECTION-RESTORE-01` 구현. `속성` 탭의 상자 위 드래그는 이동이 아니라 마퀴 선택으로 처리하도록 되돌렸다. `크기 및 위치` 탭의 선택 모드에서도 상자 위에서 시작한 드래그가 마퀴 선택으로 들어가며, 이동은 이동 모드에서만 실행한다.
-- 2026-05-12: chrome-devtools MCP 검증. 대표 URL 새로고침 후 선택 모드에서 `속성` 탭 `band-3-cell-1`부터 `band-5-cell-6`까지 상자 위 pointer drag를 실행했다. 결과는 선택 6개, 시작 상자 이동 없음이었다. 같은 절차를 `크기 및 위치` 탭 `band-6-cell-1`부터 `band-8-cell-4`까지 적용했을 때도 선택 6개, 시작 상자 이동 없음이었다.
-- 2026-05-12: chrome-devtools MCP 검증. `텍스트` 탭의 실제 textarea에서는 selection range `2..10`이 pointerup/click 이후에도 유지되어, 텍스트 드래그 선택 보호가 계속 동작함을 확인했다.
-- 2026-05-12: chrome-devtools MCP 검증. 콘솔 `error`/`warn` 메시지는 없었다. 기존 접근성 issue로 `No label associated with a form field`, `A form field element should have an id or name attribute`만 남아 있으며 이번 드래그 복구와 직접 관련된 런타임 오류는 아니다.
-- 2026-05-12: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다. `npm run lint`는 `APP-NOSHADOW-02` 통과 후 ESLint 9 설정 파일(`eslint.config.*`) 부재로 실패했다.
-- 2026-05-12: Supabase MCP 검증. `tool_search`로 Supabase MCP 도구를 탐색했으나 세션에 Supabase namespace가 노출되지 않았다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다.

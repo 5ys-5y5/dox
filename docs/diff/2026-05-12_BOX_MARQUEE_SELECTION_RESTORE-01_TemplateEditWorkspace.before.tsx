@@ -24819,7 +24819,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         pageInnerFromTarget || frameNode?.closest<HTMLElement>('.page-inner') || null;
       const hadSelectionBeforePointerDown = selectedFrameGroupIdsRef.current.length > 0;
       const startFrameDragInteraction = (anchorNode: HTMLElement, selectionFrameGroupIds: string[]) => {
-        if (!pageInner || selectionPanelTab !== 'position' || canvasInteractionMode !== 'move') {
+        if (!pageInner || selectionPanelTab === 'text' || canvasInteractionMode !== 'move') {
           return false;
         }
 
@@ -25203,7 +25203,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         Boolean(pageInner) &&
         (!frameNode ||
           (event.shiftKey && selectionPanelTab !== 'position') ||
-          (selectionPanelTab !== 'position' &&
+          (selectionPanelTab === 'text' &&
             Boolean(frameNode) &&
             (canvasInteractionMode === 'select' || (canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown))));
 
@@ -25234,19 +25234,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (selectionPanelTab !== 'position' && (edgeButton || resizeHandle)) {
         event.preventDefault();
-        return;
-      }
-
-      if (
-        selectionPanelTab === 'position' &&
-        canvasInteractionMode === 'select' &&
-        !positionOrderLockSelectionMode &&
-        positionGroupEditModeRef.current.kind === 'idle' &&
-        !edgeButton &&
-        !resizeHandle &&
-        pageInner
-      ) {
-        startMarqueeSelectionInteraction({ anchorFrameGroupId: frameGroupId });
         return;
       }
 
@@ -25517,11 +25504,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	        return;
 	      }
 
-      if (selectionPanelTab !== 'position' || canvasInteractionMode !== 'move') {
+      if (selectionPanelTab === 'text' || canvasInteractionMode !== 'move') {
         return;
       }
 
-      if (isInteractiveTarget(target)) {
+      if (selectionPanelTab === 'text' && isInteractiveTarget(target)) {
         return;
       }
 
