@@ -7506,76 +7506,14 @@ const applyTableBoundaryHeightDeltaPreservingFollowingRows = (
   return -applied;
 };
 
-const buildTemplateEdgeTopologySnapshotFromRoot = (root: HTMLElement): TemplateEdgeTopologySnapshotDto => {
-  const pages = Array.from(root.querySelectorAll<HTMLElement>('section.page'));
-  const positionGroupIdByFrameGroupId = new Map<string, string>();
-
-  collectPositionBoxGroups(root, { includeSingletons: true }).forEach((group) => {
-    group.frameGroupIds.forEach((frameGroupId) => {
-      const normalizedFrameGroupId = frameGroupId.trim();
-      if (normalizedFrameGroupId) {
-        positionGroupIdByFrameGroupId.set(normalizedFrameGroupId, group.id);
-      }
-    });
-  });
-
-  const frames: TemplateEdgeFrameDto[] = collectFrameSelectionAnchors(root).map((node) => {
-    const pageElement = node.closest<HTMLElement>('section.page');
-    const pageIndex = Math.max(0, pages.indexOf(pageElement || pages[0] || node));
-    const frameGroupId = getFrameGroupId(node);
-    const positionGroupId = positionGroupIdByFrameGroupId.get(frameGroupId) || '';
-
-    return {
-      frameGroupId,
-      pageId: `page-${pageIndex + 1}`,
-      rect: readFrameNodeRect(node),
-      positionGroupId: positionGroupId || null,
-    };
-  });
-
-  return TemplateEdgeTopologyService.createSnapshot({
-    frames,
-    tolerancePx: FRAME_RESIZE_TOLERANCE_PX,
-  });
-};
-
-const resolveFrameAutoHeightBottomDelta = (node: HTMLElement, delta: number) => {
-  const context = buildFrameResizeContext(node);
-
-  if (!context.pageInner || Math.abs(delta) < 0.5) {
-    return Math.abs(delta) < 0.5 ? 0 : delta;
-  }
-
-  if (delta > 0) {
-    return delta;
-  }
-
-  if (delta >= 0) {
-    return Math.abs(delta) < 0.5 ? 0 : delta;
-  }
-
-  if (!context.table || context.rowHeights.length === 0) {
-    return -Math.min(Math.abs(delta), Math.max(0, context.shellRect.height - MIN_FRAME_SIZE_PX));
-  }
-
-  const minimums = readTableRowMinimums(context.table, context.rowHeights);
-  const shrinkRange = {
-    startIndex: context.startRowIndex,
-    endIndex: context.endRowIndex - 1,
-    side: 'before' as const,
-  };
-  const capacity = getRangeShrinkCapacity(context.rowHeights, minimums, shrinkRange);
-
-  return -Math.min(Math.abs(delta), capacity);
-};
-
-const applyFrameAutoHeightDeltaLocal = (node: HTMLElement, delta: number) => {
+const applyFrameAutoHeightDelta = (node: HTMLElement, delta: number) => {
   const context = buildFrameResizeContext(node);
 
   if (!context.pageInner || Math.abs(delta) < 0.5) {
     return 0;
   }
 
+  const boundaryY = context.cellRect.top + context.cellRect.height;
   const resizesOuterBottom = context.singleCellBand || context.rowHeights.length <= context.endRowIndex;
   const shrinkRange = {
     startIndex: context.startRowIndex,
@@ -7595,88 +7533,12 @@ const applyFrameAutoHeightDeltaLocal = (node: HTMLElement, delta: number) => {
     );
   }
 
-  if (Math.abs(appliedDelta) > 0.5) {
-    stabilizeFrameContentHeight(node);
-  }
-
-  return appliedDelta;
-};
-
-const collectAutoSizeSameSidePeerNodes = (
-  root: HTMLElement,
-  frameGroupId: string,
-  side: Extract<TemplateEdgeSide, 'bottom' | 'right'>
-) => {
-  const snapshot = buildTemplateEdgeTopologySnapshotFromRoot(root);
-  const clickedEdgeId = `${frameGroupId}:${side}`;
-  const clickedEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, clickedEdgeId);
-
-  if (!clickedEdge) {
-    return [] as HTMLElement[];
-  }
-
-  const resizeIntent = TemplateEdgeResizeIntentService.resolveResizeIntent({
-    snapshot,
-    currentSelection: TemplateEdgeSelectionService.createEmptyState(),
-    clickedEdgeId,
-    withShift: false,
-  });
-  const peerFrameGroupIds = resizeIntent.selectedEdgeAutoMultiIds
-    .map((edgeId) => TemplateEdgeTopologyService.getEdgeById(snapshot, edgeId))
-    .filter(
-      (edge): edge is TemplateEdgeDescriptorDto =>
-        Boolean(edge) &&
-        edge.frameGroupId !== frameGroupId &&
-        edge.orientation === clickedEdge.orientation &&
-        edge.side === clickedEdge.side
-    )
-    .map((edge) => edge.frameGroupId);
-  const peerFrameGroupIdSet = new Set(peerFrameGroupIds);
-
-  return collectFrameSelectionAnchors(root).filter((candidate) => peerFrameGroupIdSet.has(getFrameGroupId(candidate)));
-};
-
-const applyFrameAutoHeightDelta = (node: HTMLElement, delta: number) => {
-  const context = buildFrameResizeContext(node);
-
-  if (!context.pageInner || Math.abs(delta) < 0.5) {
-    return 0;
-  }
-
-  const boundaryY = context.cellRect.top + context.cellRect.height;
-  const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
-  const frameGroupId = getFrameGroupId(node);
-  const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
-  const constrainedDelta =
-    sameSidePeerNodes.length > 0
-      ? resolveSharedEdgeResizeDelta(
-          delta,
-          [node, ...sameSidePeerNodes]
-            .map((candidate) => resolveFrameAutoHeightBottomDelta(candidate, delta))
-            .filter((candidateDelta) => Number.isFinite(candidateDelta))
-        )
-      : delta;
-  const appliedDelta = applyFrameAutoHeightDeltaLocal(node, constrainedDelta);
-
   if (Math.abs(appliedDelta) <= 0.5) {
     return 0;
   }
 
-  sameSidePeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyFrameAutoHeightDeltaLocal(peerNode, appliedDelta);
-
-    if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 's');
-    }
-  });
-
   if (!isAbsolutePositionedShell(context.shell)) {
-    shiftShellsBelowBoundary(
-      context.pageInner,
-      boundaryY,
-      appliedDelta,
-      [context.shell, ...sameSidePeerNodes.map((peerNode) => resolveFrameLayoutShell(peerNode))]
-    );
+    shiftShellsBelowBoundary(context.pageInner, boundaryY, appliedDelta, [context.shell]);
     updatePageInnerMinHeight(context.pageInner);
   }
 
