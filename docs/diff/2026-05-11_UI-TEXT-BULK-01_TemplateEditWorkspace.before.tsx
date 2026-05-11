@@ -551,7 +551,6 @@ type TemplateEditPreviewSurfaceProps = {
   metadataVisualMode: boolean;
   selectionPanelTab: SelectionPanelTab;
   showMetadataIcons: boolean;
-  summaryOverlay?: React.ReactNode;
   setPreviewNode: (node: HTMLDivElement | null) => void;
   handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   handlePreviewPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -559,16 +558,6 @@ type TemplateEditPreviewSurfaceProps = {
   handlePreviewPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void;
   handlePreviewClickCapture: (event: React.MouseEvent<HTMLDivElement>) => void;
   handlePreviewInput: (event: React.FormEvent<HTMLDivElement>) => void;
-};
-
-type SummaryOverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-
-type SummaryOverlayDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-  width: number;
-  height: number;
 };
 
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
@@ -620,8 +609,6 @@ const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR = 'data-template-frame-relati
 const TEMPLATE_FRAME_RELATION_SELECTION_ATTR = 'data-template-frame-relation-selection';
 const TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR = 'data-template-metadata-relation-outline';
 const TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR = 'data-template-metadata-relation-role';
-const TEMPLATE_FRAME_METADATA_FOCUS_ATTR = 'data-template-metadata-focus';
-const TEMPLATE_METADATA_ACTIVE_FILTER_ATTR = 'data-template-metadata-active-filter';
 const TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR = 'data-template-frame-position-impact-group';
 const TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR = 'data-template-frame-position-group-id';
 const TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR = 'data-template-frame-position-group-label';
@@ -637,13 +624,6 @@ const FRAME_RELATIVE_ANCHOR_GUIDE_CLASS = 'v106-frame-relative-anchor-guide';
 const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
 const CREATED_FRAME_GROUP_PREFIX = 'user-box';
 const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
-const SUMMARY_OVERLAY_INSET_PX = 12;
-const SUMMARY_OVERLAY_CORNER_CLASS: Record<SummaryOverlayCorner, string> = {
-  'top-left': 'left-3 top-3',
-  'top-right': 'right-3 top-3',
-  'bottom-left': 'bottom-3 left-3',
-  'bottom-right': 'bottom-3 right-3',
-};
 const SHARED_VIRTUAL_FRAME_DEFINITIONS_STORAGE_KEY = 'docs:template:shared-virtual-frame-definitions';
 const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
   selectedEdgeClickedIds: [],
@@ -843,7 +823,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   metadataVisualMode,
   selectionPanelTab,
   showMetadataIcons,
-  summaryOverlay,
   setPreviewNode,
   handlePreviewPointerDown,
   handlePreviewPointerMove,
@@ -852,129 +831,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   handlePreviewClickCapture,
   handlePreviewInput,
 }: TemplateEditPreviewSurfaceProps) {
-  const surfaceShellRef = React.useRef<HTMLDivElement | null>(null);
-  const summaryOverlayRef = React.useRef<HTMLDivElement | null>(null);
-  const summaryOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
-  const [summaryOverlayCorner, setSummaryOverlayCorner] = React.useState<SummaryOverlayCorner>('top-left');
-  const [summaryOverlayDragStyle, setSummaryOverlayDragStyle] = React.useState<React.CSSProperties | null>(null);
-
-  const readSummaryOverlayDragMetrics = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
-    const shell = surfaceShellRef.current;
-    const dragState = summaryOverlayDragStateRef.current;
-
-    if (!shell || !dragState) {
-      return null;
-    }
-
-    const shellRect = shell.getBoundingClientRect();
-    const maxLeft = Math.max(SUMMARY_OVERLAY_INSET_PX, shellRect.width - dragState.width - SUMMARY_OVERLAY_INSET_PX);
-    const maxTop = Math.max(SUMMARY_OVERLAY_INSET_PX, shellRect.height - dragState.height - SUMMARY_OVERLAY_INSET_PX);
-    const left = Math.min(
-      Math.max(event.clientX - shellRect.left - dragState.offsetX, SUMMARY_OVERLAY_INSET_PX),
-      maxLeft
-    );
-    const top = Math.min(
-      Math.max(event.clientY - shellRect.top - dragState.offsetY, SUMMARY_OVERLAY_INSET_PX),
-      maxTop
-    );
-
-    return {
-      left,
-      top,
-      width: Math.min(dragState.width, Math.max(160, shellRect.width - SUMMARY_OVERLAY_INSET_PX * 2)),
-      height: dragState.height,
-      shellWidth: shellRect.width,
-      shellHeight: shellRect.height,
-    };
-  }, []);
-
-  const handleSummaryOverlayPointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const overlay = summaryOverlayRef.current;
-
-    if (!overlay || event.button !== 0) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const overlayRect = overlay.getBoundingClientRect();
-    summaryOverlayDragStateRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - overlayRect.left,
-      offsetY: event.clientY - overlayRect.top,
-      width: overlayRect.width,
-      height: overlayRect.height,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }, []);
-
-  const handleSummaryOverlayPointerMove = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const dragState = summaryOverlayDragStateRef.current;
-
-      if (!dragState || dragState.pointerId !== event.pointerId) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      const metrics = readSummaryOverlayDragMetrics(event);
-
-      if (!metrics) {
-        return;
-      }
-
-      setSummaryOverlayDragStyle({
-        left: `${metrics.left}px`,
-        top: `${metrics.top}px`,
-        width: `${metrics.width}px`,
-      });
-    },
-    [readSummaryOverlayDragMetrics]
-  );
-
-  const finishSummaryOverlayDrag = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const dragState = summaryOverlayDragStateRef.current;
-
-      if (!dragState || dragState.pointerId !== event.pointerId) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      const metrics = readSummaryOverlayDragMetrics(event);
-
-      if (metrics) {
-        const nextVertical = metrics.top + metrics.height / 2 < metrics.shellHeight / 2 ? 'top' : 'bottom';
-        const nextHorizontal = metrics.left + metrics.width / 2 < metrics.shellWidth / 2 ? 'left' : 'right';
-        setSummaryOverlayCorner(`${nextVertical}-${nextHorizontal}` as SummaryOverlayCorner);
-      }
-
-      summaryOverlayDragStateRef.current = null;
-      setSummaryOverlayDragStyle(null);
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-    },
-    [readSummaryOverlayDragMetrics]
-  );
-
-  const cancelSummaryOverlayDrag = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const dragState = summaryOverlayDragStateRef.current;
-
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    event.stopPropagation();
-    summaryOverlayDragStateRef.current = null;
-    setSummaryOverlayDragStyle(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, []);
-
   if (!renderedPreviewHtml) {
     return (
       <CardContent className="p-6">
@@ -986,59 +842,21 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   }
 
   return (
-    <CardContent ref={surfaceShellRef} className="relative overflow-hidden p-0">
-      <div
-        ref={setPreviewNode}
-        className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 p-4 template-clone template-clone--raster-first-v2-structured"
-        data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
-        data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
-        data-selection-panel-tab={selectionPanelTab}
-        data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
-        onPointerDownCapture={handlePreviewPointerDown}
-        onPointerMoveCapture={handlePreviewPointerMove}
-        onPointerUpCapture={handlePreviewPointerUp}
-        onPointerCancelCapture={handlePreviewPointerCancel}
-        onClickCapture={handlePreviewClickCapture}
-        onInput={handlePreviewInput}
-        dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
-      />
-      {summaryOverlay ? (
-        <div
-          ref={summaryOverlayRef}
-          className={`absolute z-[70] w-96 max-w-[calc(100%_-_1.5rem)] ${
-            summaryOverlayDragStyle ? '' : SUMMARY_OVERLAY_CORNER_CLASS[summaryOverlayCorner]
-          }`}
-          style={summaryOverlayDragStyle || undefined}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
-            <button
-              type="button"
-              className="flex h-8 w-full cursor-move items-center justify-between border-b border-slate-200 bg-white/90 px-3 text-xs font-semibold text-slate-700"
-              aria-label="요약 위치 이동"
-              title="요약 위치 이동"
-              onPointerDown={handleSummaryOverlayPointerDown}
-              onPointerMove={handleSummaryOverlayPointerMove}
-              onPointerUp={finishSummaryOverlayDrag}
-              onPointerCancel={cancelSummaryOverlayDrag}
-              onLostPointerCapture={(event) => {
-                if (summaryOverlayDragStateRef.current?.pointerId === event.pointerId) {
-                  summaryOverlayDragStateRef.current = null;
-                  setSummaryOverlayDragStyle(null);
-                }
-              }}
-            >
-              <span>요약</span>
-              <Move className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-            <div className="max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2">
-              {summaryOverlay}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </CardContent>
+    <CardContent
+      ref={setPreviewNode}
+      className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 p-4 template-clone template-clone--raster-first-v2-structured"
+      data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
+      data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
+      data-selection-panel-tab={selectionPanelTab}
+      data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
+      onPointerDownCapture={handlePreviewPointerDown}
+      onPointerMoveCapture={handlePreviewPointerMove}
+      onPointerUpCapture={handlePreviewPointerUp}
+      onPointerCancelCapture={handlePreviewPointerCancel}
+      onClickCapture={handlePreviewClickCapture}
+      onInput={handlePreviewInput}
+      dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
+    />
   );
 });
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
@@ -8137,12 +7955,6 @@ const stripSelectionAttrs = (
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
   });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
-  });
-  if (root instanceof HTMLElement) {
-    root.removeAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-  }
   clearFrameMetadataRelationOutlineUi(root);
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
@@ -8903,9 +8715,7 @@ const applyFrameRelationSelectionUi = (
 
   frameNodes.forEach((node) => {
     node.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
-    node.removeAttribute(TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
   });
-  root.removeAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
 
   if (root.getAttribute('data-selection-panel-tab') === 'position') {
     return;
@@ -8932,11 +8742,8 @@ const applyFrameRelationSelectionUi = (
     }
   });
 
-  const normalizedSelectedFrameGroupIds = Array.from(
-    new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
-  );
   const activeRelationFrameIds = new Set<string>();
-  normalizedSelectedFrameGroupIds.forEach((frameGroupId) => {
+  selectedFrameGroupIds.forEach((frameGroupId) => {
     const linkedValueIds = valueIdsByKeyId.get(frameGroupId) || [];
     if (linkedValueIds.length > 0) {
       activeRelationFrameIds.add(frameGroupId);
@@ -8953,43 +8760,7 @@ const applyFrameRelationSelectionUi = (
     activeRelationFrameIds.add(parentGroupId);
     (valueIdsByKeyId.get(parentGroupId) || []).forEach((linkedValueId) => activeRelationFrameIds.add(linkedValueId));
   });
-  const metadataFocusFrameIds = new Set([...normalizedSelectedFrameGroupIds, ...activeRelationFrameIds]);
-
-  if (relationMode.kind === 'parent-select' || relationMode.kind === 'parent-linked') {
-    relationMode.sourceFrameGroupIds.forEach((frameGroupId) => {
-      const normalizedFrameGroupId = frameGroupId.trim();
-      if (normalizedFrameGroupId) {
-        metadataFocusFrameIds.add(normalizedFrameGroupId);
-      }
-    });
-    if (relationMode.kind === 'parent-linked' && relationMode.keyFrameGroupId.trim()) {
-      metadataFocusFrameIds.add(relationMode.keyFrameGroupId.trim());
-    }
-  } else if (relationMode.kind === 'value-select' || relationMode.kind === 'value-linked') {
-    if (relationMode.sourceKeyFrameGroupId.trim()) {
-      metadataFocusFrameIds.add(relationMode.sourceKeyFrameGroupId.trim());
-    }
-    relationMode.targetFrameGroupIds.forEach((frameGroupId) => {
-      const normalizedFrameGroupId = frameGroupId.trim();
-      if (normalizedFrameGroupId) {
-        metadataFocusFrameIds.add(normalizedFrameGroupId);
-      }
-    });
-  }
-
-  const hasSelectedMetadataFrames = normalizedSelectedFrameGroupIds.length > 0;
-  const shouldApplyMetadataActiveFilter =
-    root.getAttribute('data-selection-panel-tab') === 'metadata' && metadataFocusFrameIds.size > 0;
-
-  if (shouldApplyMetadataActiveFilter) {
-    root.setAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR, 'true');
-    frameNodes.forEach((node) => {
-      node.setAttribute(
-        TEMPLATE_FRAME_METADATA_FOCUS_ATTR,
-        metadataFocusFrameIds.has(getFrameGroupId(node)) ? 'active' : 'inactive'
-      );
-    });
-  }
+  const hasSelectedMetadataFrames = selectedFrameGroupIds.length > 0;
 
   valueIdsByKeyId.forEach((valueIds, keyId) => {
     const keyNode = frameNodeById.get(keyId) || null;
@@ -22048,6 +21819,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     applyRuntimeSelectionUi([], emptyEdgeSelection, []);
   }, [applyRuntimeSelectionUi, stopPointerInteraction]);
 
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'text' || selectedFrameGroupIdsRef.current.length <= 0) {
+      return;
+    }
+
+    clearFrameSelection();
+  }, [clearFrameSelection, selectedFrameGroupIds.length, selectionPanelTab]);
+
   const deleteCanvasSelectionEntity = React.useCallback(
     (kind: string | null | undefined, targetId: string | null | undefined) => {
       const root = previewRef.current;
@@ -22483,7 +22262,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         !resizeHandle &&
         !event.shiftKey
       ) {
-        // 텍스트 탭의 일반 클릭은 직접 입력 편집을 우선하고, Shift/드래그 선택은 아래 공통 선택 흐름에 맡겨 일괄 서식을 유지한다.
         const textFrameGroupId = getFrameGroupId(frameNode);
         const textInput = frameNode.querySelector<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
 
@@ -25872,30 +25650,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background-color: rgb(240 249 255) !important;
           box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"] {
-          opacity: .1 !important;
-          transition: opacity .12s ease;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"] {
-          opacity: 1 !important;
-          transition: opacity .12s ease;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: none !important;
-          box-shadow: none !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][data-template-selected="true"]::before {
-          content: none !important;
-          display: none !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
-          --v106-metadata-relation-inner-border: transparent;
-          box-shadow: none !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          box-shadow: none !important;
-        }
         .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(37, 99, 235, .42) !important;
           outline-offset: -1px;
@@ -26372,8 +26126,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         </CardContent>
       </Card>
 
-  <div className="min-w-0">
-        <Card ref={stylePanelRef} className="border-slate-200 min-w-0 overflow-hidden">
+  <div className="grid gap-6 xl:grid-cols-[1.55fr_0.95fr] min-w-0">
+        <Card className="border-slate-200 min-w-0 overflow-hidden">
           <CardHeader>
 	            <div className="flex items-center justify-between gap-3">
 	              <CardTitle>상자 편집 캔버스</CardTitle>
@@ -26435,17 +26189,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               </div>
             </div>
           </CardHeader>
-          <CardContent className="px-6 pb-3 pt-0">
-            <UnderlineTabs<SelectionPanelTab>
-              tabs={[
-                { key: 'position', label: '크기 및 위치' },
-                { key: 'metadata', label: '속성' },
-                { key: 'text', label: '텍스트' },
-              ]}
-              activeKey={selectionPanelTab}
-              onSelect={setSelectionPanelTab}
-            />
-          </CardContent>
           {selectionPanelTab === 'metadata' ? renderMetadataCanvasActionControls() : null}
           {selectionPanelTab === 'text' ? renderTextCanvasActionControls() : null}
           {selectionPanelTab === 'position' && selectedFrameGroupIds.length > 0 ? (
@@ -26799,7 +26542,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             metadataVisualMode={selectionPanelTab === 'metadata'}
             selectionPanelTab={selectionPanelTab}
             showMetadataIcons={showMetadataIcons}
-            summaryOverlay={renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}
             handlePreviewPointerDown={handlePreviewPointerDown}
             handlePreviewPointerMove={handlePreviewPointerMove}
@@ -26809,6 +26551,205 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             handlePreviewInput={handlePreviewInput}
           />
         </Card>
+
+        <div className="space-y-6 min-w-0">
+          <Card className="border-slate-200">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>선택 상태</CardTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowSelectionStatus((previous) => !previous)}
+                  disabled={!canShowSelectionStatus}
+                >
+                  {showSelectionStatus ? '상태 숨기기' : '상태 보기'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent ref={stylePanelRef} className="space-y-4">
+              {canShowSelectionStatus && showSelectionStatus ? (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold">진행 상태</div>
+                    <div className="mt-1 truncate text-sm font-semibold text-sky-950">{selectionSaveProgress.title}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={
+                        selectionSaveProgressCompleted
+                          ? 'green'
+                          : selectionSaveProgressFailed
+                            ? 'red'
+                            : selectionSaveProgressActive
+                              ? 'amber'
+                              : 'slate'
+                      }
+                    >
+                      {selectionSaveProgressCompleted
+                        ? '완료'
+                        : selectionSaveProgressFailed
+                          ? '오류'
+                          : selectionSaveProgressActive
+                            ? '진행 중'
+                            : '대기'}
+                    </Badge>
+                    <span className="font-semibold">{selectionSaveProgress.percent}%</span>
+                  </div>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-sky-100">
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={selectionSaveProgress.percent}
+                    className={`h-full rounded-full transition-[width] duration-300 ${
+                      selectionSaveProgressFailed
+                        ? 'bg-rose-500'
+                        : selectionSaveProgressCompleted
+                          ? 'bg-emerald-600'
+                          : 'bg-sky-600'
+                    }`}
+                    style={{ width: `${selectionSaveProgress.percent}%` }}
+                  />
+                </div>
+                <div className="mt-3 text-sm font-semibold">{selectionSaveProgress.stage}</div>
+                <div className="mt-1 text-[11px] leading-5 opacity-90">
+                  {selectionSaveProgress.phase === 'idle'
+                    ? '선택 상자의 메타데이터와 스타일을 점검하고, 저장 중에는 진행률과 결과를 이곳에 표시합니다.'
+                    : selectionSaveProgress.detail}
+                </div>
+                {selectionValidationIssues.length > 0 ? (
+                  <div className="mt-3 rounded-md border border-rose-200 bg-white/80 p-3 text-[11px] text-rose-950">
+                    <div className="font-semibold">문제가 된 상자</div>
+                    <ul className="mt-2 space-y-1">
+                      {selectionValidationIssues.map((issue, index) => (
+                        <li key={`${issue.frameGroupId}-${index}`}>
+                          {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                </div>
+              ) : null}
+              <UnderlineTabs<SelectionPanelTab>
+	                tabs={[
+	                  { key: 'position', label: '크기 및 위치' },
+	                  { key: 'metadata', label: '속성' },
+	                  { key: 'text', label: '텍스트' },
+                ]}
+                activeKey={selectionPanelTab}
+                onSelect={setSelectionPanelTab}
+              />
+
+              {selectionPanelTab === 'position' ? renderSelectionSummaryBox() : null}
+
+              {selectionPanelTab === 'metadata' ? (
+                renderSelectionSummaryBox()
+              ) : null}
+
+		              {selectionPanelTab === 'position' ? (
+		                <>
+		                  {positionBoxGroups.length > 0 ? (
+                    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-left text-xs leading-5 text-slate-700">
+                      <div className="text-left font-semibold text-slate-900">전체 그룹 ({positionBoxGroups.length}개)</div>
+                      {positionBoxGroupTreeRows.map(({ group, depth }) => {
+                        const isSelectedGroup = primarySelectedPositionBoxGroup?.id === group.id;
+                        const isExpanded = Boolean(expandedPositionBoxGroupIds[group.id]);
+                        const groupDisplayLabel = normalizePositionGroupDisplayLabel(group.label, group.id);
+                        const groupVisual = resolvePositionStableVisual(group.id, groupDisplayLabel);
+                        const orderedGroupFrameGroupIds = group.frameGroupIds
+                          .map((frameGroupId) => frameGroupId.trim())
+                          .filter((frameGroupId) => Boolean(frameGroupId))
+                          .sort(
+                            (left, right) =>
+                              comparePositionPhysicalSortInfo(
+                                positionFramePhysicalSortInfoById.get(left) || null,
+                                positionFramePhysicalSortInfoById.get(right) || null
+                              ) || left.localeCompare(right, 'ko')
+                          );
+
+                        return (
+                          <div
+                            key={group.id}
+                            style={{
+                              marginLeft: `${depth * 20}px`,
+                              borderColor: groupVisual.outlineColor,
+                              backgroundColor: groupVisual.fillColor,
+                              boxShadow: isSelectedGroup
+                                ? `0 0 0 2px ${groupVisual.haloColor}, inset 0 0 0 1px rgba(255, 255, 255, .82)`
+                                : 'inset 0 0 0 1px rgba(255, 255, 255, .72)',
+                            }}
+                            className="rounded border p-2 text-left text-xs"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                className="flex min-w-0 flex-1 items-center justify-start gap-2 self-stretch text-left"
+                                onClick={() => selectPositionGroupFromGroupList(group)}
+                              >
+                                <span
+                                  className="h-3 w-3 shrink-0 rounded-full"
+                                  style={{ backgroundColor: groupVisual.badgeColor }}
+                                  aria-hidden="true"
+                                />
+                                <span className="flex min-w-0 flex-1 flex-col items-start justify-start text-left leading-4">
+                                  <span className="block max-w-full truncate text-left font-semibold text-slate-900">{groupDisplayLabel}</span>
+                                  <span className="block text-left font-normal text-slate-600">포함 상자 {group.frameGroupIds.length}개</span>
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="h-5 min-w-5 rounded border border-slate-300 bg-white px-1 text-[11px] font-semibold leading-none text-slate-700"
+                                onClick={() =>
+                                  setExpandedPositionBoxGroupIds((previous) => ({
+                                    ...previous,
+                                    [group.id]: !previous[group.id],
+                                  }))
+                                }
+                                aria-label={isExpanded ? '소속 div 숨기기' : '소속 div 보기'}
+                              >
+                                {isExpanded ? '−' : '+'}
+                              </button>
+                            </div>
+                            {isExpanded ? (
+                              <div className="mt-2 flex flex-wrap items-start justify-start gap-1 text-left">
+                                {orderedGroupFrameGroupIds.map((normalizedFrameGroupId) => {
+                                  return (
+                                    <button
+                                      key={`${group.id}:${normalizedFrameGroupId}`}
+                                      type="button"
+                                      className="inline-flex max-w-full items-center justify-start rounded-full border bg-white px-2 py-0.5 text-left text-[10px] font-medium leading-4 text-slate-700 hover:bg-slate-50"
+                                      style={{
+                                        borderColor: groupVisual.outlineColor,
+                                        color: groupVisual.badgeColor,
+                                      }}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        selectPositionFrameFromGroupList(normalizedFrameGroupId);
+                                      }}
+                                      title={`${normalizedFrameGroupId} 상자 선택`}
+                                    >
+                                      <span className="truncate">{normalizedFrameGroupId}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+		                </>
+	              ) : null}
+
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

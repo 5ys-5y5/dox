@@ -551,7 +551,6 @@ type TemplateEditPreviewSurfaceProps = {
   metadataVisualMode: boolean;
   selectionPanelTab: SelectionPanelTab;
   showMetadataIcons: boolean;
-  summaryOverlay?: React.ReactNode;
   setPreviewNode: (node: HTMLDivElement | null) => void;
   handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   handlePreviewPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -559,16 +558,6 @@ type TemplateEditPreviewSurfaceProps = {
   handlePreviewPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void;
   handlePreviewClickCapture: (event: React.MouseEvent<HTMLDivElement>) => void;
   handlePreviewInput: (event: React.FormEvent<HTMLDivElement>) => void;
-};
-
-type SummaryOverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-
-type SummaryOverlayDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-  width: number;
-  height: number;
 };
 
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
@@ -620,8 +609,6 @@ const TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR = 'data-template-frame-relati
 const TEMPLATE_FRAME_RELATION_SELECTION_ATTR = 'data-template-frame-relation-selection';
 const TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR = 'data-template-metadata-relation-outline';
 const TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR = 'data-template-metadata-relation-role';
-const TEMPLATE_FRAME_METADATA_FOCUS_ATTR = 'data-template-metadata-focus';
-const TEMPLATE_METADATA_ACTIVE_FILTER_ATTR = 'data-template-metadata-active-filter';
 const TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR = 'data-template-frame-position-impact-group';
 const TEMPLATE_FRAME_POSITION_GROUP_ID_ATTR = 'data-template-frame-position-group-id';
 const TEMPLATE_FRAME_POSITION_GROUP_LABEL_ATTR = 'data-template-frame-position-group-label';
@@ -637,13 +624,6 @@ const FRAME_RELATIVE_ANCHOR_GUIDE_CLASS = 'v106-frame-relative-anchor-guide';
 const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
 const CREATED_FRAME_GROUP_PREFIX = 'user-box';
 const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
-const SUMMARY_OVERLAY_INSET_PX = 12;
-const SUMMARY_OVERLAY_CORNER_CLASS: Record<SummaryOverlayCorner, string> = {
-  'top-left': 'left-3 top-3',
-  'top-right': 'right-3 top-3',
-  'bottom-left': 'bottom-3 left-3',
-  'bottom-right': 'bottom-3 right-3',
-};
 const SHARED_VIRTUAL_FRAME_DEFINITIONS_STORAGE_KEY = 'docs:template:shared-virtual-frame-definitions';
 const emptyEdgeRoleDiagnosticsState: EdgeRoleDiagnosticsState = {
   selectedEdgeClickedIds: [],
@@ -843,7 +823,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   metadataVisualMode,
   selectionPanelTab,
   showMetadataIcons,
-  summaryOverlay,
   setPreviewNode,
   handlePreviewPointerDown,
   handlePreviewPointerMove,
@@ -852,129 +831,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   handlePreviewClickCapture,
   handlePreviewInput,
 }: TemplateEditPreviewSurfaceProps) {
-  const surfaceShellRef = React.useRef<HTMLDivElement | null>(null);
-  const summaryOverlayRef = React.useRef<HTMLDivElement | null>(null);
-  const summaryOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
-  const [summaryOverlayCorner, setSummaryOverlayCorner] = React.useState<SummaryOverlayCorner>('top-left');
-  const [summaryOverlayDragStyle, setSummaryOverlayDragStyle] = React.useState<React.CSSProperties | null>(null);
-
-  const readSummaryOverlayDragMetrics = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
-    const shell = surfaceShellRef.current;
-    const dragState = summaryOverlayDragStateRef.current;
-
-    if (!shell || !dragState) {
-      return null;
-    }
-
-    const shellRect = shell.getBoundingClientRect();
-    const maxLeft = Math.max(SUMMARY_OVERLAY_INSET_PX, shellRect.width - dragState.width - SUMMARY_OVERLAY_INSET_PX);
-    const maxTop = Math.max(SUMMARY_OVERLAY_INSET_PX, shellRect.height - dragState.height - SUMMARY_OVERLAY_INSET_PX);
-    const left = Math.min(
-      Math.max(event.clientX - shellRect.left - dragState.offsetX, SUMMARY_OVERLAY_INSET_PX),
-      maxLeft
-    );
-    const top = Math.min(
-      Math.max(event.clientY - shellRect.top - dragState.offsetY, SUMMARY_OVERLAY_INSET_PX),
-      maxTop
-    );
-
-    return {
-      left,
-      top,
-      width: Math.min(dragState.width, Math.max(160, shellRect.width - SUMMARY_OVERLAY_INSET_PX * 2)),
-      height: dragState.height,
-      shellWidth: shellRect.width,
-      shellHeight: shellRect.height,
-    };
-  }, []);
-
-  const handleSummaryOverlayPointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const overlay = summaryOverlayRef.current;
-
-    if (!overlay || event.button !== 0) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const overlayRect = overlay.getBoundingClientRect();
-    summaryOverlayDragStateRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - overlayRect.left,
-      offsetY: event.clientY - overlayRect.top,
-      width: overlayRect.width,
-      height: overlayRect.height,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }, []);
-
-  const handleSummaryOverlayPointerMove = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const dragState = summaryOverlayDragStateRef.current;
-
-      if (!dragState || dragState.pointerId !== event.pointerId) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      const metrics = readSummaryOverlayDragMetrics(event);
-
-      if (!metrics) {
-        return;
-      }
-
-      setSummaryOverlayDragStyle({
-        left: `${metrics.left}px`,
-        top: `${metrics.top}px`,
-        width: `${metrics.width}px`,
-      });
-    },
-    [readSummaryOverlayDragMetrics]
-  );
-
-  const finishSummaryOverlayDrag = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const dragState = summaryOverlayDragStateRef.current;
-
-      if (!dragState || dragState.pointerId !== event.pointerId) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      const metrics = readSummaryOverlayDragMetrics(event);
-
-      if (metrics) {
-        const nextVertical = metrics.top + metrics.height / 2 < metrics.shellHeight / 2 ? 'top' : 'bottom';
-        const nextHorizontal = metrics.left + metrics.width / 2 < metrics.shellWidth / 2 ? 'left' : 'right';
-        setSummaryOverlayCorner(`${nextVertical}-${nextHorizontal}` as SummaryOverlayCorner);
-      }
-
-      summaryOverlayDragStateRef.current = null;
-      setSummaryOverlayDragStyle(null);
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-    },
-    [readSummaryOverlayDragMetrics]
-  );
-
-  const cancelSummaryOverlayDrag = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const dragState = summaryOverlayDragStateRef.current;
-
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    event.stopPropagation();
-    summaryOverlayDragStateRef.current = null;
-    setSummaryOverlayDragStyle(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, []);
-
   if (!renderedPreviewHtml) {
     return (
       <CardContent className="p-6">
@@ -986,59 +842,21 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   }
 
   return (
-    <CardContent ref={surfaceShellRef} className="relative overflow-hidden p-0">
-      <div
-        ref={setPreviewNode}
-        className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 p-4 template-clone template-clone--raster-first-v2-structured"
-        data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
-        data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
-        data-selection-panel-tab={selectionPanelTab}
-        data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
-        onPointerDownCapture={handlePreviewPointerDown}
-        onPointerMoveCapture={handlePreviewPointerMove}
-        onPointerUpCapture={handlePreviewPointerUp}
-        onPointerCancelCapture={handlePreviewPointerCancel}
-        onClickCapture={handlePreviewClickCapture}
-        onInput={handlePreviewInput}
-        dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
-      />
-      {summaryOverlay ? (
-        <div
-          ref={summaryOverlayRef}
-          className={`absolute z-[70] w-96 max-w-[calc(100%_-_1.5rem)] ${
-            summaryOverlayDragStyle ? '' : SUMMARY_OVERLAY_CORNER_CLASS[summaryOverlayCorner]
-          }`}
-          style={summaryOverlayDragStyle || undefined}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
-            <button
-              type="button"
-              className="flex h-8 w-full cursor-move items-center justify-between border-b border-slate-200 bg-white/90 px-3 text-xs font-semibold text-slate-700"
-              aria-label="요약 위치 이동"
-              title="요약 위치 이동"
-              onPointerDown={handleSummaryOverlayPointerDown}
-              onPointerMove={handleSummaryOverlayPointerMove}
-              onPointerUp={finishSummaryOverlayDrag}
-              onPointerCancel={cancelSummaryOverlayDrag}
-              onLostPointerCapture={(event) => {
-                if (summaryOverlayDragStateRef.current?.pointerId === event.pointerId) {
-                  summaryOverlayDragStateRef.current = null;
-                  setSummaryOverlayDragStyle(null);
-                }
-              }}
-            >
-              <span>요약</span>
-              <Move className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-            <div className="max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2">
-              {summaryOverlay}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </CardContent>
+    <CardContent
+      ref={setPreviewNode}
+      className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 p-4 template-clone template-clone--raster-first-v2-structured"
+      data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
+      data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
+      data-selection-panel-tab={selectionPanelTab}
+      data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
+      onPointerDownCapture={handlePreviewPointerDown}
+      onPointerMoveCapture={handlePreviewPointerMove}
+      onPointerUpCapture={handlePreviewPointerUp}
+      onPointerCancelCapture={handlePreviewPointerCancel}
+      onClickCapture={handlePreviewClickCapture}
+      onInput={handlePreviewInput}
+      dangerouslySetInnerHTML={{ __html: renderedPreviewHtml }}
+    />
   );
 });
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
@@ -8137,12 +7955,6 @@ const stripSelectionAttrs = (
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
   });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}]`).forEach((element) => {
-    element.removeAttribute(TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
-  });
-  if (root instanceof HTMLElement) {
-    root.removeAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-  }
   clearFrameMetadataRelationOutlineUi(root);
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR}]`).forEach((element) => {
     element.removeAttribute(TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR);
@@ -8903,9 +8715,7 @@ const applyFrameRelationSelectionUi = (
 
   frameNodes.forEach((node) => {
     node.removeAttribute(TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
-    node.removeAttribute(TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
   });
-  root.removeAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
 
   if (root.getAttribute('data-selection-panel-tab') === 'position') {
     return;
@@ -8932,11 +8742,8 @@ const applyFrameRelationSelectionUi = (
     }
   });
 
-  const normalizedSelectedFrameGroupIds = Array.from(
-    new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
-  );
   const activeRelationFrameIds = new Set<string>();
-  normalizedSelectedFrameGroupIds.forEach((frameGroupId) => {
+  selectedFrameGroupIds.forEach((frameGroupId) => {
     const linkedValueIds = valueIdsByKeyId.get(frameGroupId) || [];
     if (linkedValueIds.length > 0) {
       activeRelationFrameIds.add(frameGroupId);
@@ -8953,43 +8760,7 @@ const applyFrameRelationSelectionUi = (
     activeRelationFrameIds.add(parentGroupId);
     (valueIdsByKeyId.get(parentGroupId) || []).forEach((linkedValueId) => activeRelationFrameIds.add(linkedValueId));
   });
-  const metadataFocusFrameIds = new Set([...normalizedSelectedFrameGroupIds, ...activeRelationFrameIds]);
-
-  if (relationMode.kind === 'parent-select' || relationMode.kind === 'parent-linked') {
-    relationMode.sourceFrameGroupIds.forEach((frameGroupId) => {
-      const normalizedFrameGroupId = frameGroupId.trim();
-      if (normalizedFrameGroupId) {
-        metadataFocusFrameIds.add(normalizedFrameGroupId);
-      }
-    });
-    if (relationMode.kind === 'parent-linked' && relationMode.keyFrameGroupId.trim()) {
-      metadataFocusFrameIds.add(relationMode.keyFrameGroupId.trim());
-    }
-  } else if (relationMode.kind === 'value-select' || relationMode.kind === 'value-linked') {
-    if (relationMode.sourceKeyFrameGroupId.trim()) {
-      metadataFocusFrameIds.add(relationMode.sourceKeyFrameGroupId.trim());
-    }
-    relationMode.targetFrameGroupIds.forEach((frameGroupId) => {
-      const normalizedFrameGroupId = frameGroupId.trim();
-      if (normalizedFrameGroupId) {
-        metadataFocusFrameIds.add(normalizedFrameGroupId);
-      }
-    });
-  }
-
-  const hasSelectedMetadataFrames = normalizedSelectedFrameGroupIds.length > 0;
-  const shouldApplyMetadataActiveFilter =
-    root.getAttribute('data-selection-panel-tab') === 'metadata' && metadataFocusFrameIds.size > 0;
-
-  if (shouldApplyMetadataActiveFilter) {
-    root.setAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR, 'true');
-    frameNodes.forEach((node) => {
-      node.setAttribute(
-        TEMPLATE_FRAME_METADATA_FOCUS_ATTR,
-        metadataFocusFrameIds.has(getFrameGroupId(node)) ? 'active' : 'inactive'
-      );
-    });
-  }
+  const hasSelectedMetadataFrames = selectedFrameGroupIds.length > 0;
 
   valueIdsByKeyId.forEach((valueIds, keyId) => {
     const keyNode = frameNodeById.get(keyId) || null;
@@ -25872,30 +25643,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background-color: rgb(240 249 255) !important;
           box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"] {
-          opacity: .1 !important;
-          transition: opacity .12s ease;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"] {
-          opacity: 1 !important;
-          transition: opacity .12s ease;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: none !important;
-          box-shadow: none !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][data-template-selected="true"]::before {
-          content: none !important;
-          display: none !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
-          --v106-metadata-relation-inner-border: transparent;
-          box-shadow: none !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
-          box-shadow: none !important;
-        }
         .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(37, 99, 235, .42) !important;
           outline-offset: -1px;
@@ -26799,7 +26546,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             metadataVisualMode={selectionPanelTab === 'metadata'}
             selectionPanelTab={selectionPanelTab}
             showMetadataIcons={showMetadataIcons}
-            summaryOverlay={renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}
             handlePreviewPointerDown={handlePreviewPointerDown}
             handlePreviewPointerMove={handlePreviewPointerMove}
