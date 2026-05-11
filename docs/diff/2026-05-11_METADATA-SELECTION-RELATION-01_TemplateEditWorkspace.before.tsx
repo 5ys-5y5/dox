@@ -9006,7 +9006,7 @@ const applyMetadataRelationOutlineEdges = (
       dot.setAttribute('data-v106-metadata-relation-role', entry.relationRole);
       dot.style.position = 'absolute';
       dot.style.pointerEvents = 'none';
-      dot.style.zIndex = '34';
+      dot.style.zIndex = '27';
       dot.style.left = toFrameCssPx(center.x - 2.5);
       dot.style.top = toFrameCssPx(center.y - 2.5);
       dot.style.width = '5px';
@@ -9036,7 +9036,7 @@ const applyMetadataRelationOutlineEdges = (
       line.setAttribute('data-v106-metadata-relation-connector', 'line');
       line.style.position = 'absolute';
       line.style.pointerEvents = 'none';
-      line.style.zIndex = '34';
+      line.style.zIndex = '26';
       line.style.left = toFrameCssPx(sourceCenter.x);
       line.style.top = toFrameCssPx(sourceCenter.y - lineThickness / 2);
       line.style.width = toFrameCssPx(length);
@@ -9166,13 +9166,10 @@ const applyFrameRelationSelectionUi = (
   const normalizedSelectedFrameGroupIds = Array.from(
     new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
   );
-  const hasSelectedMetadataFrames = normalizedSelectedFrameGroupIds.length > 0;
-  const selectedRelationKeyIds = new Set<string>();
   const activeRelationFrameIds = new Set<string>();
   normalizedSelectedFrameGroupIds.forEach((frameGroupId) => {
     const linkedValueIds = valueIdsByKeyId.get(frameGroupId) || [];
     if (linkedValueIds.length > 0) {
-      selectedRelationKeyIds.add(frameGroupId);
       activeRelationFrameIds.add(frameGroupId);
       linkedValueIds.forEach((linkedValueId) => activeRelationFrameIds.add(linkedValueId));
       return;
@@ -9183,7 +9180,6 @@ const applyFrameRelationSelectionUi = (
       return;
     }
 
-    selectedRelationKeyIds.add(parentGroupId);
     activeRelationFrameIds.add(frameGroupId);
     activeRelationFrameIds.add(parentGroupId);
     (valueIdsByKeyId.get(parentGroupId) || []).forEach((linkedValueId) => activeRelationFrameIds.add(linkedValueId));
@@ -9212,6 +9208,7 @@ const applyFrameRelationSelectionUi = (
     });
   }
 
+  const hasSelectedMetadataFrames = normalizedSelectedFrameGroupIds.length > 0;
   const shouldApplyMetadataActiveFilter =
     root.getAttribute('data-selection-panel-tab') === 'metadata' && metadataFocusFrameIds.size > 0;
 
@@ -9239,31 +9236,19 @@ const applyFrameRelationSelectionUi = (
 
   valueIdsByKeyId.forEach((valueIds, keyId) => {
     const keyNode = frameNodeById.get(keyId) || null;
-    const relationValueIds = (() => {
-      if (!hasSelectedMetadataFrames) {
-        return valueIds;
-      }
-
-      if (selectedRelationKeyIds.has(keyId)) {
-        return valueIds;
-      }
-
-      return [];
-    })();
-
-    if (hasSelectedMetadataFrames && !selectedRelationKeyIds.has(keyId) && relationValueIds.length <= 0) {
-      return;
-    }
-
     const relationMembers = [
       ...(keyNode ? [{ node: keyNode, relationRole: 'key' as const }] : []),
-      ...relationValueIds
+      ...valueIds
         .map((valueId) => frameNodeById.get(valueId) || null)
         .filter((node): node is HTMLElement => Boolean(node))
         .map((node) => ({ node, relationRole: 'value' as const })),
     ];
+    const shouldRenderRelationConnectors =
+      !hasSelectedMetadataFrames ||
+      relationMembers.some((member) => activeRelationFrameIds.has(getFrameGroupId(member.node)));
+
     applyMetadataRelationOutlineEdges(root, relationMembers, {
-      renderConnectors: true,
+      renderConnectors: shouldRenderRelationConnectors,
     });
   });
 
@@ -9273,11 +9258,6 @@ const applyFrameRelationSelectionUi = (
     const hasLinkedValues = (valueIdsByKeyId.get(frameGroupId)?.length || 0) > 0;
     const isLinkedValue = role === 'value' && Boolean(keyIdsByValueId.get(frameGroupId));
     const isActive = activeRelationFrameIds.has(frameGroupId);
-    const shouldMarkRelationFrame = !hasSelectedMetadataFrames || isActive;
-
-    if (!shouldMarkRelationFrame) {
-      return;
-    }
 
     if (hasLinkedValues) {
       markRelationSelection(node, isActive ? 'linked-key' : 'passive-key');
@@ -26639,22 +26619,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="left"] {
           --v106-metadata-relation-offset-left: 5px;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([data-template-selected="true"]),
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([data-template-selected="true"]) {
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"],
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"] {
           --v106-metadata-relation-opacity: 1;
-          --v106-metadata-relation-inner-border: transparent;
+          --v106-metadata-relation-inner-border: rgb(148 163 184);
           --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
           outline: none !important;
           outline-offset: 0;
-          box-shadow: none !important;
-          background-image: linear-gradient(var(--v106-metadata-relation-fill-color), var(--v106-metadata-relation-fill-color)) !important;
+          box-shadow: inset 0 0 0 2px var(--v106-metadata-relation-inner-border) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"],
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"] {
-          --v106-metadata-relation-opacity: 0;
-          --v106-metadata-relation-inner-border: transparent;
-          --v106-metadata-relation-fill-color: transparent;
-          background-image: none !important;
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][data-template-selected="true"] {
+          --v106-metadata-relation-opacity: 1;
+          --v106-metadata-relation-inner-border: rgb(var(--v106-metadata-relation-strong-rgb));
+          --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
+          box-shadow: inset 0 0 0 2px var(--v106-metadata-relation-inner-border) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
@@ -26686,34 +26664,28 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background-color: rgb(240 249 255) !important;
           box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: 2px solid rgba(37, 99, 235, .96) !important;
-          outline-offset: 0;
-          box-shadow:
-            0 0 0 4px rgba(96, 165, 250, .22),
-            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: 2px solid rgba(13, 148, 136, .98) !important;
-          outline-offset: 0;
-          box-shadow:
-            0 0 0 4px rgba(45, 212, 191, .22),
-            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]::before {
-          background: rgba(13, 148, 136, .98) !important;
-          box-shadow: none !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]::before {
-          content: attr(data-template-selection-order) !important;
-          display: inline-flex !important;
-        }
         .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"] {
           opacity: 1 !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"] {
           opacity: 1 !important;
           z-index: 31 !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+          outline: none !important;
+          box-shadow: none !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][data-template-selected="true"]::before {
+          content: none !important;
+          display: none !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
+          --v106-metadata-relation-inner-border: transparent;
+          box-shadow: none !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+          box-shadow: none !important;
         }
         .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(37, 99, 235, .42) !important;

@@ -396,14 +396,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 | `METADATA-RELATED-NOOUTLINE-01` | 속성 탭 연관 항목 윤곽선 제거 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_METADATA-RELATED-NOOUTLINE-01_*.before.*` | 완료 |
 | `METADATA-RELATED-NOOUTLINE-02` | 직접 선택 항목은 번호와 선택 윤곽선을 유지하고, 직접 선택되지 않은 연관 항목은 회색 윤곽선/배경/그림자를 출력하지 않는다. | `TemplateEditWorkspace.before.tsx` | 완료 |
 | `METADATA-RELATED-NOOUTLINE-03` | 정적 검증, chrome-devtools 실제 클릭 검증, Supabase MCP 제한 사항을 테스트 기록에 남긴다. | 테스트 기록 | 완료 |
-| `METADATA-SELECTION-GREEN-01` | 속성 탭 선택 테두리 복구 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_METADATA-SELECTION-GREEN-01_*.before.*` | 완료 |
-| `METADATA-SELECTION-GREEN-02` | 직접 선택 항목의 초록색 primary 선택 테두리/번호 배지를 관계 윤곽선 스타일보다 우선 적용한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `METADATA-SELECTION-GREEN-03` | 직접 선택되지 않은 연관 항목은 일반 미선택 항목처럼 관계용 윤곽선/배경/그림자 없이 출력하고, 관계 line/dot은 유지한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `METADATA-SELECTION-GREEN-04` | 정적 검증, chrome-devtools 실제 클릭 검증, Supabase MCP 제한 사항을 테스트 기록에 남긴다. | 테스트 기록 | 완료 |
-| `METADATA-RELATED-ROLE-VISIBLE-01` | 속성 탭 연관 항목 키/밸류 식별 UI 복구 전 원본을 `docs/diff`에 백업한다. | `docs/diff/2026-05-11_METADATA-RELATED-ROLE-VISIBLE-01_*.before.*` | 완료 |
-| `METADATA-RELATED-ROLE-VISIBLE-02` | 직접 선택 항목은 초록 선택 활성화 표시를 유지하고, 직접 선택되지 않은 연관 항목은 미선택 상태처럼 key/value 색상 식별이 보이게 한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `METADATA-RELATED-ROLE-VISIBLE-03` | 연관 항목을 tone-down overlay 뒤로 밀지 않고, 관계 line/dot과 key/value 배경 식별을 함께 유지한다. | `TemplateEditWorkspace.before.tsx` | 완료 |
-| `METADATA-RELATED-ROLE-VISIBLE-04` | 정적 검증, chrome-devtools 실제 클릭 검증, Supabase MCP 제한 사항을 테스트 기록에 남긴다. | 테스트 기록 | 완료 |
 
 ## 9. 테스트 계획
 
@@ -809,39 +801,6 @@ export type TemplateEditWorkspaceLayoutSlots = {
 - 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
 - 2026-05-11: chrome-devtools MCP 콘솔 확인 결과 error/warn 메시지는 없었다.
 - 2026-05-11: `supabase` MCP는 현재 세션에 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-속성 탭 선택 초록색 테두리 복구 및 연관 항목 미선택화:
-
-- 2026-05-11: `METADATA-SELECTION-GREEN-01` 백업 완료.
-  - `docs/diff/2026-05-11_METADATA-SELECTION-GREEN-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_METADATA-SELECTION-GREEN-01_0511ui.before.md`
-- 2026-05-11: 관계 outline을 가진 직접 선택 항목에서 관계용 역할 색 `box-shadow`가 primary 선택 테두리를 덮지 않도록 제거했다. metadata visual mode의 primary 선택 규칙은 `[data-template-primary-selected="true"][data-template-selected="true"]` 기준으로 초록색 outline과 번호 배지를 명시한다.
-- 2026-05-11: 직접 선택되지 않은 연관 항목은 관계용 회색 윤곽선, 역할 배경, 내부 그림자가 출력되지 않도록 유지한다. 관계 확인용 line/dot은 기존 value-family 기준대로 유지한다.
-- 2026-05-11: chrome-devtools MCP에서 페이지를 reload하고 `속성` 탭으로 전환한 뒤 접근성 스냅샷의 `B90467CA-12` 텍스트 상자를 화면 클릭 방식으로 선택해 확인했다. 첫 클릭은 DevTools safety guard가 차단했고, 최신 스냅샷 갱신 후 같은 화면 클릭 방식으로 재시도해 성공했다. `div` selector를 직접 타겟하지 않았다.
-  - 선택 상태: `selectedCount=1`, `relationSelections=3`, connector line `2`, connector dot `3`.
-  - 직접 선택 항목 `band-5-cell-2`: `outline=2px solid rgba(13, 148, 136, 0.98)`, `boxShadow=rgba(45, 212, 191, 0.22) 0px 0px 0px 4px, rgba(255, 255, 255, 0.84) 0px 0px 0px 1px inset`, `beforeContent="1"`, `beforeBackground=rgba(13, 148, 136, 0.98)`.
-  - 직접 선택되지 않은 연관 항목 `문서번호:2402-049192`, `band-5-cell-1`: `selected=null`, `outline=3px none rgb(17, 24, 39)`, `boxShadow=none`, `backgroundImage=none`, `beforeContent=none`.
-  - 관계 line/dot은 line `2`, dot `3`, z-index `34`로 유지된다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: chrome-devtools MCP 콘솔 확인 결과 error/warn 메시지는 없었다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
-
-속성 탭 연관 항목 key/value 식별 UI 복구:
-
-- 2026-05-11: `METADATA-RELATED-ROLE-VISIBLE-01` 백업 완료.
-  - `docs/diff/2026-05-11_METADATA-RELATED-ROLE-VISIBLE-01_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-11_METADATA-RELATED-ROLE-VISIBLE-01_0511ui.before.md`
-- 2026-05-11: 직접 선택되지 않은 연관 항목을 overlay 뒤로 보내지 않고 `data-template-metadata-focus="active"` 상태는 유지한다. 대신 이전 수정에서 `--v106-metadata-relation-opacity: 0`, `background-image: none`으로 숨겼던 key/value 관계 배경을 복구했다.
-- 2026-05-11: 투명 테두리 박스의 사선 패턴이 연관 value 배경보다 우선하는 경우가 있어, 직접 선택되지 않은 `linked-key`/`linked-value` relation outline 항목 범위에서만 key/value 관계 배경 `linear-gradient(var(--v106-metadata-relation-fill-color), ...)`를 명시했다.
-- 2026-05-11: chrome-devtools MCP에서 페이지를 reload하고 `속성` 탭으로 전환한 뒤 접근성 스냅샷의 `B90467CA-12` 텍스트 상자를 화면 클릭 방식으로 선택해 확인했다. `div` selector를 직접 타겟하지 않았다.
-  - 선택 상태: `selectedCount=1`, `relationSelections=3`, connector line `2`, connector dot `3`.
-  - 직접 선택 항목 `band-5-cell-2`: `outline=2px solid rgba(13, 148, 136, 0.98)`, `beforeContent="1"`, `backgroundImage=none`.
-  - 직접 선택되지 않은 연관 value `문서번호:2402-049192`: `roleVisual=value`, `relationRole=value`, `backgroundImage=linear-gradient(rgb(240, 249, 255), rgb(240, 249, 255))`, `boxShadow=none`.
-  - 직접 선택되지 않은 연관 key `band-5-cell-1`: `roleVisual=key`, `relationRole=key`, `backgroundImage=linear-gradient(rgb(255, 251, 235), rgb(255, 251, 235))`, `boxShadow=none`.
-  - 관계 line/dot은 line `2`, dot `3`, z-index `34`로 유지된다.
-- 2026-05-11: 추가 검증으로 `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`, `npm run check:no-shadow-app`, `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/0511ui.md`를 실행했고 모두 통과했다.
-- 2026-05-11: chrome-devtools MCP 콘솔 확인 결과 error/warn 메시지는 없었다.
-- 2026-05-11: `supabase` MCP는 `tool_search`에서 노출되지 않았다. 이번 변경은 DB 스키마/데이터 변경이 없으므로 사용자 실행 SQL도 없다.
 
 후속 구현자는 아래 양식을 채운다.
 

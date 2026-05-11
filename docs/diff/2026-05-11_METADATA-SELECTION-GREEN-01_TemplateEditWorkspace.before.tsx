@@ -26641,20 +26641,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([data-template-selected="true"]),
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([data-template-selected="true"]) {
-          --v106-metadata-relation-opacity: 1;
-          --v106-metadata-relation-inner-border: transparent;
-          --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
-          outline: none !important;
-          outline-offset: 0;
-          box-shadow: none !important;
-          background-image: linear-gradient(var(--v106-metadata-relation-fill-color), var(--v106-metadata-relation-fill-color)) !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"],
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"] {
           --v106-metadata-relation-opacity: 0;
           --v106-metadata-relation-inner-border: transparent;
           --v106-metadata-relation-fill-color: transparent;
+          outline: none !important;
+          outline-offset: 0;
+          box-shadow: none !important;
           background-image: none !important;
+        }
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"],
+        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"] {
+          --v106-metadata-relation-opacity: 1;
+          --v106-metadata-relation-inner-border: rgb(var(--v106-metadata-relation-strong-rgb));
+          --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
+          outline: none !important;
+          outline-offset: 0;
+          box-shadow: inset 0 0 0 2px var(--v106-metadata-relation-inner-border) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
@@ -26693,16 +26695,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             0 0 0 4px rgba(96, 165, 250, .22),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: 2px solid rgba(13, 148, 136, .98) !important;
-          outline-offset: 0;
+        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+          outline-color: rgba(13, 148, 136, .98) !important;
           box-shadow:
             0 0 0 4px rgba(45, 212, 191, .22),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]::before {
-          background: rgba(13, 148, 136, .98) !important;
-          box-shadow: none !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]::before {
           content: attr(data-template-selection-order) !important;

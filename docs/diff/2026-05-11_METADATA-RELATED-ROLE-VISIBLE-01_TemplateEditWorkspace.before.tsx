@@ -26641,13 +26641,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([data-template-selected="true"]),
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([data-template-selected="true"]) {
-          --v106-metadata-relation-opacity: 1;
+          --v106-metadata-relation-opacity: 0;
           --v106-metadata-relation-inner-border: transparent;
-          --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
+          --v106-metadata-relation-fill-color: transparent;
           outline: none !important;
           outline-offset: 0;
           box-shadow: none !important;
-          background-image: linear-gradient(var(--v106-metadata-relation-fill-color), var(--v106-metadata-relation-fill-color)) !important;
+          background-image: none !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"],
         .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"] {
