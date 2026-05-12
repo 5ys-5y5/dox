@@ -459,7 +459,6 @@ type MarqueeSelectionState = {
   scale: number;
   pageInner: HTMLElement;
   anchorFrameGroupId: string | null;
-  positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
   baseSelectionIds: string[];
   baseProxySelections?: PositionGroupProxySelection[];
   lastSelectionIds: string[];
@@ -14105,20 +14104,6 @@ const applyFrameStylePatch = (
   }
 };
 
-const frameStylePatchCanChangeContentMeasurement = (patch: FrameStylePatch) =>
-  patch.width !== undefined ||
-  patch.height !== undefined ||
-  patch.fontSize !== undefined ||
-  patch.lineHeight !== undefined ||
-  patch.fontFamily !== undefined ||
-  patch.fontWeight !== undefined ||
-  patch.fontStyle !== undefined ||
-  patch.paddingX !== undefined ||
-  patch.paddingY !== undefined ||
-  patch.borderWidth !== undefined ||
-  patch.borderStyle !== undefined ||
-  patch.borderAlign !== undefined;
-
 export default function TemplateEditWorkspace({ initialTemplateId = '' }: TemplateEditWorkspaceProps) {
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
@@ -22374,13 +22359,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
       const hasExplicitWidthPatch = typeof patch.width === 'number' && Number.isFinite(patch.width);
       const hasExplicitHeightPatch = typeof patch.height === 'number' && Number.isFinite(patch.height);
-      const shouldRecalculateAutoSize = frameStylePatchCanChangeContentMeasurement(patch);
-      const autoSizeResult = shouldRecalculateAutoSize
-        ? applyTemplateAutoSizeBoxes(root, activeSelectionIds, {
-            skipWidth: hasExplicitWidthPatch,
-            skipHeight: hasExplicitHeightPatch,
-          })
-        : { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] };
+      const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds, {
+        skipWidth: hasExplicitWidthPatch,
+        skipHeight: hasExplicitHeightPatch,
+      });
       const shouldUpdateGeometry =
         hasExplicitWidthPatch ||
         hasExplicitHeightPatch ||
@@ -22389,12 +22371,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
-      syncDraftPreviewHtmlRef({
-        materializePositionGroups: shouldUpdateGeometry,
-        updatePreviewDomVersion: shouldUpdateGeometry,
-        updateRenderedHtml: shouldUpdateGeometry,
-      });
-      if (!shouldUpdateGeometry && shouldRecalculateAutoSize) {
+      syncDraftPreviewHtmlRef({ materializePositionGroups: shouldUpdateGeometry });
+      if (!shouldUpdateGeometry) {
         schedulePreviewEditorState();
       }
       syncSelectionStyleDraft();
@@ -26623,12 +26601,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
       const startMarqueeSelectionInteraction = ({
         anchorFrameGroupId = '',
-        positionShiftClickFallbackEntry = null,
         baseSelectionIds,
         baseProxySelections,
       }: {
         anchorFrameGroupId?: string;
-        positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
         baseSelectionIds?: string[];
         baseProxySelections?: PositionGroupProxySelection[];
       } = {}) => {
@@ -26732,7 +26708,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           scale: previewZoom / 100,
           pageInner,
           anchorFrameGroupId: anchorFrameGroupId || null,
-          positionShiftClickFallbackEntry,
           baseSelectionIds: resolvedBaseSelectionIds.slice(),
           baseProxySelections: selectionPanelTab === 'position' ? baseProxySelections : undefined,
           lastSelectionIds: resolvedBaseSelectionIds.slice(),
@@ -26908,13 +26883,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            return;
 	          }
 
-          if (event.shiftKey) {
-            startMarqueeSelectionInteraction({
-              baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-              positionShiftClickFallbackEntry: nextEntry,
-            });
-            return;
-          }
+	          if (event.shiftKey) {
+	            applyShiftMergedPositionEntitySelection(nextEntry);
+	            return;
+	          }
 
 	          if (nextEntry.kind === 'group') {
 	            const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
@@ -27126,39 +27098,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-	        if (!nextEntry) {
-	          if (event.shiftKey) {
-	            startMarqueeSelectionInteraction({
-	              baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	              positionShiftClickFallbackEntry: {
-	                kind: 'frame',
-	                frameGroupId,
-	              },
-	            });
-	            return;
+        if (!nextEntry) {
+          if (event.shiftKey) {
+            applyShiftMergedPositionEntitySelection({
+              kind: 'frame',
+              frameGroupId,
+            });
+            return;
 	          }
 
-	          applyFrameBoxSelection([frameGroupId], {
-	            disableAutoPositionGroupProxySelection: true,
-	            positionSelectionEntity: {
-	              kind: 'frame',
-	              frameGroupId,
-	            },
-	          });
-	          if (startSelectionMarqueeAfterClickSelection([])) {
-	            return;
-	          }
-	          startFrameDragInteraction(frameNode, [frameGroupId]);
-	          return;
-	        }
+		          applyFrameBoxSelection([frameGroupId], {
+		            disableAutoPositionGroupProxySelection: true,
+		            positionSelectionEntity: {
+		              kind: 'frame',
+		              frameGroupId,
+		            },
+		          });
+		          if (startSelectionMarqueeAfterClickSelection([])) {
+		            return;
+		          }
+		          startFrameDragInteraction(frameNode, [frameGroupId]);
+		          return;
+		        }
 
-	        if (event.shiftKey) {
-	          startMarqueeSelectionInteraction({
-	            baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	            positionShiftClickFallbackEntry: nextEntry,
-	          });
-	          return;
-	        }
+        if (event.shiftKey) {
+          applyShiftMergedPositionEntitySelection(nextEntry);
+          return;
+        }
 
         if (nextEntry.kind === 'group') {
           const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
@@ -28164,16 +28130,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-        if (selectionPanelTab === 'position' && marqueeSelectionState.positionShiftClickFallbackEntry) {
-          applyShiftMergedPositionEntitySelection(marqueeSelectionState.positionShiftClickFallbackEntry);
-          if (deferredPreviewEditorStateRef.current) {
-            deferredPreviewEditorStateRef.current = false;
-            schedulePreviewEditorState();
-          }
-          return;
-        }
-
-	        if (marqueeSelectionState.anchorFrameGroupId) {
+        if (marqueeSelectionState.anchorFrameGroupId) {
           const nextSelectionIds = getNextFrameSelection(
             marqueeSelectionState.baseSelectionIds,
             marqueeSelectionState.anchorFrameGroupId,
@@ -28288,14 +28245,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-	    [
-	      applyFrameBoxSelection,
-	      applyFastFrameBoxSelectionVisuals,
-	      applyPositionOrderLockMarqueeSelection,
-	      applyRuntimeSelectionUi,
-	      applyShiftMergedPositionEntitySelection,
-	      clearTransientCanvasOverlays,
-	      commitCreatedFrameShell,
+    [
+      applyFrameBoxSelection,
+      applyFastFrameBoxSelectionVisuals,
+      applyPositionOrderLockMarqueeSelection,
+      applyRuntimeSelectionUi,
+      clearTransientCanvasOverlays,
+      commitCreatedFrameShell,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
       selectionPanelTab,

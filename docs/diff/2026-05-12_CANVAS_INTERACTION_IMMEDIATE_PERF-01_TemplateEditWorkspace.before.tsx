@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
+import { flushSync } from 'react-dom';
 import { renderToStaticMarkup } from 'react-dom/server.browser';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -419,7 +420,6 @@ type DragState = {
     node: HTMLElement;
     rect: FrameNodeRect;
   }>;
-  snapSiblingRects: FrameNodeRect[];
 };
 
 type ResizeState = {
@@ -432,7 +432,6 @@ type ResizeState = {
   node: HTMLElement;
   rect: FrameNodeRect;
   widthInstructions?: FrameWidthResizeInstruction[];
-  snapSiblingRects?: FrameNodeRect[];
   edgeResizeTargets?: EdgeResizeTarget[];
   edgeSelectionAfterResize?: TemplateEdgeSelectionStateDto;
   edgeRoleById?: TemplateEdgeRoleMapDto;
@@ -459,7 +458,6 @@ type MarqueeSelectionState = {
   scale: number;
   pageInner: HTMLElement;
   anchorFrameGroupId: string | null;
-  positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
   baseSelectionIds: string[];
   baseProxySelections?: PositionGroupProxySelection[];
   lastSelectionIds: string[];
@@ -14105,20 +14103,6 @@ const applyFrameStylePatch = (
   }
 };
 
-const frameStylePatchCanChangeContentMeasurement = (patch: FrameStylePatch) =>
-  patch.width !== undefined ||
-  patch.height !== undefined ||
-  patch.fontSize !== undefined ||
-  patch.lineHeight !== undefined ||
-  patch.fontFamily !== undefined ||
-  patch.fontWeight !== undefined ||
-  patch.fontStyle !== undefined ||
-  patch.paddingX !== undefined ||
-  patch.paddingY !== undefined ||
-  patch.borderWidth !== undefined ||
-  patch.borderStyle !== undefined ||
-  patch.borderAlign !== undefined;
-
 export default function TemplateEditWorkspace({ initialTemplateId = '' }: TemplateEditWorkspaceProps) {
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
@@ -20243,16 +20227,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
 
       if (selectionPanelTab === 'position') {
+        flushSync(commitSelectionReactState);
         applyFastFrameBoxSelectionVisuals(
           normalizedSelectionIds,
           emptyEdgeSelection,
           nextPositionGroupProxySelections,
           options?.fastFrameNodeById
         );
-        React.startTransition(commitSelectionReactState);
       } else {
+        commitSelectionReactState();
         applyRuntimeSelectionUi(normalizedSelectionIds, emptyEdgeSelection, nextPositionGroupProxySelections);
-        React.startTransition(commitSelectionReactState);
       }
     },
     [
@@ -22374,13 +22358,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
       const hasExplicitWidthPatch = typeof patch.width === 'number' && Number.isFinite(patch.width);
       const hasExplicitHeightPatch = typeof patch.height === 'number' && Number.isFinite(patch.height);
-      const shouldRecalculateAutoSize = frameStylePatchCanChangeContentMeasurement(patch);
-      const autoSizeResult = shouldRecalculateAutoSize
-        ? applyTemplateAutoSizeBoxes(root, activeSelectionIds, {
-            skipWidth: hasExplicitWidthPatch,
-            skipHeight: hasExplicitHeightPatch,
-          })
-        : { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] };
+      const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds, {
+        skipWidth: hasExplicitWidthPatch,
+        skipHeight: hasExplicitHeightPatch,
+      });
       const shouldUpdateGeometry =
         hasExplicitWidthPatch ||
         hasExplicitHeightPatch ||
@@ -22389,12 +22370,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
-      syncDraftPreviewHtmlRef({
-        materializePositionGroups: shouldUpdateGeometry,
-        updatePreviewDomVersion: shouldUpdateGeometry,
-        updateRenderedHtml: shouldUpdateGeometry,
-      });
-      if (!shouldUpdateGeometry && shouldRecalculateAutoSize) {
+      syncDraftPreviewHtmlRef({ materializePositionGroups: shouldUpdateGeometry });
+      if (!shouldUpdateGeometry) {
         schedulePreviewEditorState();
       }
       syncSelectionStyleDraft();
@@ -26593,14 +26570,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           normalizedSelectionIdSet.add(getFrameGroupId(anchorNode));
         }
 
-        const pageFrameNodes = getFrameNodes(pageInner);
-        const selectionOnPage = pageFrameNodes.filter(
+        const selectionOnPage = getFrameNodes(pageInner).filter(
           (node) =>
             normalizedSelectionIdSet.has(getFrameGroupId(node)) &&
             node.closest<HTMLElement>('.page-inner') === pageInner
         );
-        const dragNodes = selectionOnPage.length ? selectionOnPage : [anchorNode];
-        const dragNodeSet = new Set(dragNodes);
 
         event.preventDefault();
         lockPreviewEditorStateDuringInteraction();
@@ -26614,21 +26588,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           active: false,
           pageInner,
           anchorRect: readFrameMoveRect(anchorNode),
-          nodes: dragNodes.map((node) => ({ node, rect: readFrameMoveRect(node) })),
-          snapSiblingRects: pageFrameNodes
-            .filter((node) => !dragNodeSet.has(node))
-            .map((node) => readFrameMoveRect(node)),
+          nodes: selectionOnPage.length
+            ? selectionOnPage.map((node) => ({ node, rect: readFrameMoveRect(node) }))
+            : [{ node: anchorNode, rect: readFrameMoveRect(anchorNode) }],
         };
         return true;
       };
       const startMarqueeSelectionInteraction = ({
         anchorFrameGroupId = '',
-        positionShiftClickFallbackEntry = null,
         baseSelectionIds,
         baseProxySelections,
       }: {
         anchorFrameGroupId?: string;
-        positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
         baseSelectionIds?: string[];
         baseProxySelections?: PositionGroupProxySelection[];
       } = {}) => {
@@ -26732,7 +26703,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           scale: previewZoom / 100,
           pageInner,
           anchorFrameGroupId: anchorFrameGroupId || null,
-          positionShiftClickFallbackEntry,
           baseSelectionIds: resolvedBaseSelectionIds.slice(),
           baseProxySelections: selectionPanelTab === 'position' ? baseProxySelections : undefined,
           lastSelectionIds: resolvedBaseSelectionIds.slice(),
@@ -26908,13 +26878,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            return;
 	          }
 
-          if (event.shiftKey) {
-            startMarqueeSelectionInteraction({
-              baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-              positionShiftClickFallbackEntry: nextEntry,
-            });
-            return;
-          }
+	          if (event.shiftKey) {
+	            applyShiftMergedPositionEntitySelection(nextEntry);
+	            return;
+	          }
 
 	          if (nextEntry.kind === 'group') {
 	            const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
@@ -27126,39 +27093,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-	        if (!nextEntry) {
-	          if (event.shiftKey) {
-	            startMarqueeSelectionInteraction({
-	              baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	              positionShiftClickFallbackEntry: {
-	                kind: 'frame',
-	                frameGroupId,
-	              },
-	            });
-	            return;
+        if (!nextEntry) {
+          if (event.shiftKey) {
+            applyShiftMergedPositionEntitySelection({
+              kind: 'frame',
+              frameGroupId,
+            });
+            return;
 	          }
 
-	          applyFrameBoxSelection([frameGroupId], {
-	            disableAutoPositionGroupProxySelection: true,
-	            positionSelectionEntity: {
-	              kind: 'frame',
-	              frameGroupId,
-	            },
-	          });
-	          if (startSelectionMarqueeAfterClickSelection([])) {
-	            return;
-	          }
-	          startFrameDragInteraction(frameNode, [frameGroupId]);
-	          return;
-	        }
+		          applyFrameBoxSelection([frameGroupId], {
+		            disableAutoPositionGroupProxySelection: true,
+		            positionSelectionEntity: {
+		              kind: 'frame',
+		              frameGroupId,
+		            },
+		          });
+		          if (startSelectionMarqueeAfterClickSelection([])) {
+		            return;
+		          }
+		          startFrameDragInteraction(frameNode, [frameGroupId]);
+		          return;
+		        }
 
-	        if (event.shiftKey) {
-	          startMarqueeSelectionInteraction({
-	            baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	            positionShiftClickFallbackEntry: nextEntry,
-	          });
-	          return;
-	        }
+        if (event.shiftKey) {
+          applyShiftMergedPositionEntitySelection(nextEntry);
+          return;
+        }
 
         if (nextEntry.kind === 'group') {
           const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
@@ -27268,13 +27229,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      applyFrameBoxSelection(stableSelection);
 
 	      if (resizeHandle) {
-	        const direction = (resizeHandle.getAttribute('data-direction') || 'se') as TemplateFrameResizeDirection;
-	        const resizeContext = buildFrameResizeContext(frameNode);
-        const resizeSiblingRects = getFrameNodes(pageInner)
-          .filter((node) => node !== frameNode)
-          .map((node) => readFrameNodeRect(node));
-	        event.preventDefault();
-	        lockPreviewEditorStateDuringInteraction();
+        const direction = (resizeHandle.getAttribute('data-direction') || 'se') as TemplateFrameResizeDirection;
+        const resizeContext = buildFrameResizeContext(frameNode);
+        event.preventDefault();
+        lockPreviewEditorStateDuringInteraction();
         safeSetPointerCapture(event.currentTarget, event.pointerId);
         activePointerOwnerRef.current = event.currentTarget;
         resizeStateRef.current = {
@@ -27290,11 +27248,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             direction.includes('e') || direction.includes('w')
               ? collectWidthResizeInstructions(resizeContext, direction.includes('w') ? 'left' : 'right')
               : undefined,
-          snapSiblingRects: filterResizeSnapRects(resizeSiblingRects, readFrameNodeRect(frameNode), direction),
           edgeResizeTargets: undefined,
-        };
-        return;
-      }
+	        };
+	        return;
+	      }
 
       if (selectionPanelTab !== 'position' || canvasInteractionMode !== 'move') {
         return;
@@ -27308,15 +27265,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       lockPreviewEditorStateDuringInteraction();
       safeSetPointerCapture(event.currentTarget, event.pointerId);
       activePointerOwnerRef.current = event.currentTarget;
-      const pageFrameNodes = getFrameNodes(pageInner);
-      const selectionOnPage = pageFrameNodes.filter(
+      const selectionOnPage = getFrameNodes(pageInner).filter(
         (node) =>
           getFrameGroupId(node) === frameGroupId ||
           (stableSelection.includes(getFrameGroupId(node)) &&
             node.closest<HTMLElement>('.page-inner') === pageInner)
       );
-      const dragNodes = selectionOnPage.length ? selectionOnPage : [frameNode];
-      const dragNodeSet = new Set(dragNodes);
 
       dragStateRef.current = {
         pointerId: event.pointerId,
@@ -27326,10 +27280,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         active: false,
         pageInner,
         anchorRect: readFrameMoveRect(frameNode),
-        nodes: dragNodes.map((node) => ({ node, rect: readFrameMoveRect(node) })),
-        snapSiblingRects: pageFrameNodes
-          .filter((node) => !dragNodeSet.has(node))
-          .map((node) => readFrameMoveRect(node)),
+        nodes: selectionOnPage.length
+          ? selectionOnPage.map((node) => ({ node, rect: readFrameMoveRect(node) }))
+          : [{ node: frameNode, rect: readFrameMoveRect(frameNode) }],
       };
     },
     [
@@ -27493,13 +27446,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         },
         dragState.scale
       );
+      const siblingRects = getFrameNodes(dragState.pageInner)
+        .filter((node) => !dragState.nodes.some((selected) => selected.node === node))
+        .map((node) => readFrameMoveRect(node));
       const snapResult = TemplateFrameEditGeometryService.snapMovedRect({
         rect: {
           ...dragState.anchorRect,
           left: dragState.anchorRect.left + delta.x,
           top: dragState.anchorRect.top + delta.y,
         },
-        siblingRects: dragState.snapSiblingRects,
+        siblingRects,
         bounds: pageBounds,
       });
       const resolvedRect =
@@ -27665,6 +27621,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       let activeEdgeResizeTargets = resizeState.edgeResizeTargets || [];
 
       if (activeEdgeResizeTargets.length > 0) {
+        const liveResizeRoot = previewRef.current || resizeState.pageInner;
+        const liveResizeSnapshot = liveResizeRoot ? buildLiveEdgeTopologySnapshot(liveResizeRoot) : null;
+
+        if (liveResizeRoot && liveResizeSnapshot) {
+          const liveResizeTargets = refreshLockedEdgeResizeTargets(
+            liveResizeRoot,
+            liveResizeSnapshot,
+            resizeState.edgeResizeTargets || []
+          );
+
+          if (liveResizeTargets.length > 0) {
+            activeEdgeResizeTargets = liveResizeTargets;
+          }
+        }
         const boundedEdgeRect = clampFrameNodeRect(nextRect, pageBounds);
         const totalRequestedDeltaX = resizeState.direction.includes('w')
           ? boundedEdgeRect.left - resizeState.rect.left
@@ -27971,10 +27941,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           }
         }
       } else {
+        const siblingRects = filterResizeSnapRects(
+          getFrameNodes(resizeState.pageInner)
+            .filter((node) => node !== resizeState.node)
+            .map((node) => readFrameNodeRect(node)),
+          resizeState.rect,
+          resizeState.direction
+        );
         const snapResult = TemplateFrameEditGeometryService.snapResizedRect({
           rect: clampFrameNodeRect(nextRect, pageBounds),
           direction: resizeState.direction,
-          siblingRects: resizeState.snapSiblingRects || [],
+          siblingRects,
           bounds: pageBounds,
         });
         const resolvedRect =
@@ -28004,27 +27981,29 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       ensureRelativeAnchorConfigs(resizeState.pageInner);
-      applyRelativeAnchoredFrameRects(
-        resizeState.pageInner,
-        activeEdgeResizeTargets.length
-          ? Array.from(
-            new Set(
-              activeEdgeResizeTargets.flatMap((edgeTarget) =>
-                [...edgeTarget.members, ...edgeTarget.physicalPeerMembers]
-                  .map((member) => getFrameGroupId(member.node))
-                  .filter((frameGroupId) => Boolean(frameGroupId))
+        applyRelativeAnchoredFrameRects(
+          resizeState.pageInner,
+          activeEdgeResizeTargets.length
+            ? Array.from(
+              new Set(
+                activeEdgeResizeTargets.flatMap((edgeTarget) =>
+                  [...edgeTarget.members, ...edgeTarget.physicalPeerMembers]
+                    .map((member) => getFrameGroupId(member.node))
+                    .filter((frameGroupId) => Boolean(frameGroupId))
+                )
               )
             )
-          )
           : [getFrameGroupId(resizeState.node)]
       );
       if (previewRef.current) {
         syncLiveAppliedEdgeDeltas(previewRef.current, resizeState);
       }
+      applyRuntimeSelectionVisuals([], resizeState.edgeSelectionAfterResize || edgeSelectionStateRef.current);
     }
   }, [
     applyFastFrameBoxSelectionVisuals,
     applyRuntimeSelectionUi,
+    applyRuntimeSelectionVisuals,
     buildLiveEdgeTopologySnapshot,
     buildWidthInstructionKey,
     collectDirectRoleResizeTargets,
@@ -28037,6 +28016,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     normalizeLiveVerticalPhysicalPeersToDragDirection,
     realignLiveVerticalEdgeTargets,
     resolveLiveEdgeAutosnapCorrection,
+    refreshLockedEdgeResizeTargets,
     resolveLiveEdgeResizeTargets,
     selectionPanelTab,
     positionOrderLockSelectionMode,
@@ -28164,16 +28144,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-        if (selectionPanelTab === 'position' && marqueeSelectionState.positionShiftClickFallbackEntry) {
-          applyShiftMergedPositionEntitySelection(marqueeSelectionState.positionShiftClickFallbackEntry);
-          if (deferredPreviewEditorStateRef.current) {
-            deferredPreviewEditorStateRef.current = false;
-            schedulePreviewEditorState();
-          }
-          return;
-        }
-
-	        if (marqueeSelectionState.anchorFrameGroupId) {
+        if (marqueeSelectionState.anchorFrameGroupId) {
           const nextSelectionIds = getNextFrameSelection(
             marqueeSelectionState.baseSelectionIds,
             marqueeSelectionState.anchorFrameGroupId,
@@ -28288,14 +28259,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-	    [
-	      applyFrameBoxSelection,
-	      applyFastFrameBoxSelectionVisuals,
-	      applyPositionOrderLockMarqueeSelection,
-	      applyRuntimeSelectionUi,
-	      applyShiftMergedPositionEntitySelection,
-	      clearTransientCanvasOverlays,
-	      commitCreatedFrameShell,
+    [
+      applyFrameBoxSelection,
+      applyFastFrameBoxSelectionVisuals,
+      applyPositionOrderLockMarqueeSelection,
+      applyRuntimeSelectionUi,
+      clearTransientCanvasOverlays,
+      commitCreatedFrameShell,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
       selectionPanelTab,
@@ -28440,7 +28410,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           : null;
 
       if (root && frameNode && frameGroupId && (readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))) {
-        applyTemplateAutoSizeBoxes(root, [frameGroupId]);
+        const autoSizeResult = applyTemplateAutoSizeBoxes(root, [frameGroupId]);
+
+        if (autoSizeResult.changedCount > 0) {
+          syncDraftPreviewHtmlRef({
+            materializePositionGroups: false,
+            recordHistory: false,
+            updatePreviewDomVersion: false,
+            updateRenderedHtml: false,
+          });
+        }
 
         if (shouldRestoreTextInputFocus) {
           restoreFrameTextInputFocus(root, frameGroupId, selectionStart, selectionEnd);

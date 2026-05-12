@@ -459,7 +459,6 @@ type MarqueeSelectionState = {
   scale: number;
   pageInner: HTMLElement;
   anchorFrameGroupId: string | null;
-  positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
   baseSelectionIds: string[];
   baseProxySelections?: PositionGroupProxySelection[];
   lastSelectionIds: string[];
@@ -26623,12 +26622,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
       const startMarqueeSelectionInteraction = ({
         anchorFrameGroupId = '',
-        positionShiftClickFallbackEntry = null,
         baseSelectionIds,
         baseProxySelections,
       }: {
         anchorFrameGroupId?: string;
-        positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
         baseSelectionIds?: string[];
         baseProxySelections?: PositionGroupProxySelection[];
       } = {}) => {
@@ -26732,7 +26729,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           scale: previewZoom / 100,
           pageInner,
           anchorFrameGroupId: anchorFrameGroupId || null,
-          positionShiftClickFallbackEntry,
           baseSelectionIds: resolvedBaseSelectionIds.slice(),
           baseProxySelections: selectionPanelTab === 'position' ? baseProxySelections : undefined,
           lastSelectionIds: resolvedBaseSelectionIds.slice(),
@@ -26908,13 +26904,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            return;
 	          }
 
-          if (event.shiftKey) {
-            startMarqueeSelectionInteraction({
-              baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-              positionShiftClickFallbackEntry: nextEntry,
-            });
-            return;
-          }
+	          if (event.shiftKey) {
+	            applyShiftMergedPositionEntitySelection(nextEntry);
+	            return;
+	          }
 
 	          if (nextEntry.kind === 'group') {
 	            const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
@@ -27126,39 +27119,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-	        if (!nextEntry) {
-	          if (event.shiftKey) {
-	            startMarqueeSelectionInteraction({
-	              baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	              positionShiftClickFallbackEntry: {
-	                kind: 'frame',
-	                frameGroupId,
-	              },
-	            });
-	            return;
+        if (!nextEntry) {
+          if (event.shiftKey) {
+            applyShiftMergedPositionEntitySelection({
+              kind: 'frame',
+              frameGroupId,
+            });
+            return;
 	          }
 
-	          applyFrameBoxSelection([frameGroupId], {
-	            disableAutoPositionGroupProxySelection: true,
-	            positionSelectionEntity: {
-	              kind: 'frame',
-	              frameGroupId,
-	            },
-	          });
-	          if (startSelectionMarqueeAfterClickSelection([])) {
-	            return;
-	          }
-	          startFrameDragInteraction(frameNode, [frameGroupId]);
-	          return;
-	        }
+		          applyFrameBoxSelection([frameGroupId], {
+		            disableAutoPositionGroupProxySelection: true,
+		            positionSelectionEntity: {
+		              kind: 'frame',
+		              frameGroupId,
+		            },
+		          });
+		          if (startSelectionMarqueeAfterClickSelection([])) {
+		            return;
+		          }
+		          startFrameDragInteraction(frameNode, [frameGroupId]);
+		          return;
+		        }
 
-	        if (event.shiftKey) {
-	          startMarqueeSelectionInteraction({
-	            baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	            positionShiftClickFallbackEntry: nextEntry,
-	          });
-	          return;
-	        }
+        if (event.shiftKey) {
+          applyShiftMergedPositionEntitySelection(nextEntry);
+          return;
+        }
 
         if (nextEntry.kind === 'group') {
           const nextGroup = positionBoxGroups.find((group) => group.id === nextEntry.groupId) || null;
@@ -28164,16 +28151,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-        if (selectionPanelTab === 'position' && marqueeSelectionState.positionShiftClickFallbackEntry) {
-          applyShiftMergedPositionEntitySelection(marqueeSelectionState.positionShiftClickFallbackEntry);
-          if (deferredPreviewEditorStateRef.current) {
-            deferredPreviewEditorStateRef.current = false;
-            schedulePreviewEditorState();
-          }
-          return;
-        }
-
-	        if (marqueeSelectionState.anchorFrameGroupId) {
+        if (marqueeSelectionState.anchorFrameGroupId) {
           const nextSelectionIds = getNextFrameSelection(
             marqueeSelectionState.baseSelectionIds,
             marqueeSelectionState.anchorFrameGroupId,
@@ -28288,14 +28266,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-	    [
-	      applyFrameBoxSelection,
-	      applyFastFrameBoxSelectionVisuals,
-	      applyPositionOrderLockMarqueeSelection,
-	      applyRuntimeSelectionUi,
-	      applyShiftMergedPositionEntitySelection,
-	      clearTransientCanvasOverlays,
-	      commitCreatedFrameShell,
+    [
+      applyFrameBoxSelection,
+      applyFastFrameBoxSelectionVisuals,
+      applyPositionOrderLockMarqueeSelection,
+      applyRuntimeSelectionUi,
+      clearTransientCanvasOverlays,
+      commitCreatedFrameShell,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
       selectionPanelTab,
