@@ -130,9 +130,6 @@ type AppearanceBoxModelTarget = 'content' | 'border' | 'corner';
 type AppearanceColorPickerField = 'backgroundColor' | 'borderColor';
 type TextAutoSizeMode = 'fixed' | 'height' | 'width';
 type TextAutoSizeAnchorSide = Extract<TemplateEdgeSide, 'top' | 'bottom' | 'left' | 'right'>;
-type TextAutoHeightAnchorSide = Extract<TextAutoSizeAnchorSide, 'top' | 'bottom'>;
-type TextAutoWidthAnchorSide = Extract<TextAutoSizeAnchorSide, 'left' | 'right'>;
-type TextAutoSizeSecondaryFitAxis = 'height' | 'width';
 
 type SelectionMetadataApplyResult = {
   ok: boolean;
@@ -219,11 +216,6 @@ type TemplateFrameRelativeAnchorConfig = {
   anchorY: TemplateFrameRelativeVerticalPin;
   offsetX: number;
   offsetY: number;
-};
-
-type PositionGroupRectSnapshotEntry = {
-  pageInner: HTMLElement;
-  rect: FrameNodeRect;
 };
 
 type CanvasHistoryEntry = {
@@ -2572,20 +2564,6 @@ const readFrameAutoWidthBox = (node: HTMLElement) => readFrameMetadataAttr(node,
 const isTextAutoSizeAnchorSide = (value: string): value is TextAutoSizeAnchorSide =>
   value === 'top' || value === 'bottom' || value === 'left' || value === 'right';
 
-const isTextAutoHeightAnchorSide = (value: string): value is TextAutoHeightAnchorSide =>
-  value === 'top' || value === 'bottom';
-
-const isTextAutoWidthAnchorSide = (value: string): value is TextAutoWidthAnchorSide =>
-  value === 'left' || value === 'right';
-
-const normalizeTextAutoHeightAnchorSide = (
-  side: string | null | undefined
-): TextAutoHeightAnchorSide => (side === 'top' ? 'top' : 'bottom');
-
-const normalizeTextAutoWidthAnchorSide = (
-  side: string | null | undefined
-): TextAutoWidthAnchorSide => (side === 'left' ? 'left' : 'right');
-
 const readFrameAutoSizeAnchorSide = (
   node: HTMLElement,
   fallback: TextAutoSizeAnchorSide = readFrameAutoWidthBox(node) ? 'right' : 'bottom'
@@ -2593,12 +2571,6 @@ const readFrameAutoSizeAnchorSide = (
   const storedSide = readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR);
 
   return isTextAutoSizeAnchorSide(storedSide) ? storedSide : fallback;
-};
-
-const readStoredFrameAutoSizeAnchorSide = (node: HTMLElement): TextAutoSizeAnchorSide | null => {
-  const storedSide = readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR);
-
-  return isTextAutoSizeAnchorSide(storedSide) ? storedSide : null;
 };
 
 const readFrameAutoHeightBaseHeight = (node: HTMLElement, currentHeight: number) => {
@@ -2631,30 +2603,6 @@ const collectFrameAutoSizeAttrTargets = (node: HTMLElement) => {
   return Array.from(new Set([node, persistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
 };
 
-const writeFrameAutoHeightBaseAttrs = (node: HTMLElement, height: number) => {
-  if (!Number.isFinite(height) || height <= 0) {
-    return;
-  }
-
-  const nextHeight = String(Number(Math.max(MIN_FRAME_SIZE_PX, height).toFixed(3)));
-
-  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
-    target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR, nextHeight);
-  });
-};
-
-const writeFrameAutoWidthBaseAttrs = (node: HTMLElement, width: number) => {
-  if (!Number.isFinite(width) || width <= 0) {
-    return;
-  }
-
-  const nextWidth = String(Number(Math.max(MIN_FRAME_SIZE_PX, width).toFixed(3)));
-
-  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
-    target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR, nextWidth);
-  });
-};
-
 const writeFrameAutoSizeAnchorAttrs = (node: HTMLElement, side: TextAutoSizeAnchorSide) => {
   collectFrameAutoSizeAttrTargets(node).forEach((target) => {
     target.setAttribute(TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR, side);
@@ -2668,11 +2616,9 @@ const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) 
   const baseWidth = Number(rect.width.toFixed(3));
   const currentAnchorSide = readFrameAutoSizeAnchorSide(node, mode === 'width' ? 'right' : 'bottom');
   const nextAnchorSide =
-    mode === 'width'
-      ? normalizeTextAutoWidthAnchorSide(currentAnchorSide)
-      : mode === 'height'
-        ? normalizeTextAutoHeightAnchorSide(currentAnchorSide)
-        : currentAnchorSide;
+    mode === 'width' && currentAnchorSide !== 'left' && currentAnchorSide !== 'right'
+      ? 'right'
+      : currentAnchorSide;
 
   targets.forEach((target) => {
     if (mode === 'height') {
@@ -10126,36 +10072,6 @@ const focusFrameTextInputForEditingByFrameGroupId = (root: HTMLElement, frameGro
   });
 };
 
-const restoreFrameTextInputFocus = (
-  root: HTMLElement,
-  frameGroupId: string,
-  selectionStart: number | null,
-  selectionEnd: number | null
-) => {
-  const normalizedFrameGroupId = frameGroupId.trim();
-
-  if (!normalizedFrameGroupId) {
-    return;
-  }
-
-  const liveInput = root.querySelector<HTMLTextAreaElement | HTMLInputElement>(
-    `[data-template-frame-input="true"][data-template-frame-group="${escapeCssAttributeValue(normalizedFrameGroupId)}"]`
-  );
-
-  if (!liveInput) {
-    return;
-  }
-
-  enableFrameTextInputForEditing(liveInput);
-  liveInput.focus({ preventScroll: true });
-  const valueLength = liveInput.value.length;
-  const nextSelectionStart =
-    typeof selectionStart === 'number' ? Math.max(0, Math.min(selectionStart, valueLength)) : valueLength;
-  const nextSelectionEnd =
-    typeof selectionEnd === 'number' ? Math.max(nextSelectionStart, Math.min(selectionEnd, valueLength)) : nextSelectionStart;
-  liveInput.setSelectionRange(nextSelectionStart, nextSelectionEnd);
-};
-
 const applyFrameTextEditingMode = (root: HTMLElement, enabled: boolean) => {
   root.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]').forEach((input) => {
     if (enabled) {
@@ -11376,20 +11292,12 @@ const resolveFrameContentTarget = (node: HTMLElement) => {
   );
 };
 
-const readComputedVerticalBorderPx = (computedStyle: CSSStyleDeclaration) =>
-  parseFramePx(computedStyle.borderTopWidth) + parseFramePx(computedStyle.borderBottomWidth);
-
 const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const targetRect = target.getBoundingClientRect();
   const computedStyle = getComputedStyle(target);
   const clone = target.cloneNode(false) as HTMLTextAreaElement | HTMLInputElement;
-  const verticalBorderPx = readComputedVerticalBorderPx(computedStyle);
 
-  clone.value = target.value;
-  if (clone instanceof HTMLTextAreaElement) {
-    clone.rows = 1;
-    clone.setAttribute('rows', '1');
-  }
+  clone.value = target.value || target.textContent || '';
   clone.removeAttribute('id');
   clone.removeAttribute('name');
   clone.removeAttribute('readonly');
@@ -11397,7 +11305,6 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   clone.style.position = 'fixed';
   clone.style.left = '-10000px';
   clone.style.top = '0';
-  clone.style.display = 'block';
   clone.style.width = toFrameCssPx(targetRect.width || parseFramePx(computedStyle.width));
   clone.style.height = '0px';
   clone.style.minHeight = '0px';
@@ -11418,14 +11325,13 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
 
   const measuredHeight = clone.scrollHeight || clone.getBoundingClientRect().height || target.scrollHeight || 0;
   clone.remove();
-
-  return Math.ceil(measuredHeight + verticalBorderPx);
+  return measuredHeight;
 };
 
 const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const computedStyle = getComputedStyle(target);
   const clone = document.createElement('div');
-  const text = target.value;
+  const text = target.value || target.textContent || '';
 
   clone.textContent = text || ' ';
   clone.style.position = 'fixed';
@@ -11505,58 +11411,8 @@ const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
   return Math.ceil(Math.max(baseWidth, currentRect.width + resolvedExtraWidth));
 };
 
-const measureContentFitFrameHeight = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
-  const contentTarget = resolveFrameContentTarget(node);
-  const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
-  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
-  const contentHeightDelta = measureTargets.reduce((maxDelta, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const naturalTextControlHeight =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlHeight(target)
-        : 0;
-    const requiredTargetHeight =
-      naturalTextControlHeight > 0
-        ? naturalTextControlHeight
-        : target.scrollHeight || target.getBoundingClientRect().height || target.offsetHeight || target.clientHeight || 0;
-    const visibleTargetHeight = targetRect.height || target.offsetHeight || target.clientHeight;
-
-    return Math.max(maxDelta, requiredTargetHeight - visibleTargetHeight);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedContentHeightDelta = Number.isFinite(contentHeightDelta) ? contentHeightDelta : 0;
-
-  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.height + resolvedContentHeightDelta));
-};
-
-const measureContentFitFrameWidth = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
-  const contentTarget = resolveFrameContentTarget(node);
-  const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
-  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
-  const contentWidthDelta = measureTargets.reduce((maxDelta, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const naturalTextControlWidth =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlWidth(target)
-        : 0;
-    const requiredTargetWidth =
-      naturalTextControlWidth > 0
-        ? naturalTextControlWidth
-        : Math.max(target.scrollWidth || 0, target.clientWidth || 0, target.offsetWidth || 0);
-    const visibleTargetWidth = targetRect.width || target.offsetWidth || target.clientWidth;
-
-    return Math.max(maxDelta, requiredTargetWidth - visibleTargetWidth);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedContentWidthDelta = Number.isFinite(contentWidthDelta) ? contentWidthDelta : 0;
-
-  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.width + resolvedContentWidthDelta));
-};
-
 type TemplateAutoSizeApplyOptions = {
   applyRelativeAnchors?: boolean;
-  skipHeight?: boolean;
-  skipWidth?: boolean;
 };
 
 const cloneFrameRelativeAnchorConfig = (
@@ -11581,26 +11437,6 @@ const snapshotFrameRelativeAnchorConfigs = (root: ParentNode) => {
   return snapshot;
 };
 
-const snapshotPositionGroupRects = (root: ParentNode) => {
-  const snapshot = new Map<string, PositionGroupRectSnapshotEntry>();
-
-  collectPositionGroupWrapperElements(root).forEach((wrapper) => {
-    const groupId = readPositionGroupWrapperId(wrapper);
-    const pageInner = wrapper.closest<HTMLElement>('.page-inner') || null;
-
-    if (!groupId || !pageInner) {
-      return;
-    }
-
-    snapshot.set(groupId, {
-      pageInner,
-      rect: readFrameElementRect(wrapper, pageInner),
-    });
-  });
-
-  return snapshot;
-};
-
 const restoreFrameRelativeAnchorConfigs = (
   root: ParentNode,
   snapshot: Map<string, TemplateFrameRelativeAnchorConfig>
@@ -11616,54 +11452,6 @@ const restoreFrameRelativeAnchorConfigs = (
     if (config) {
       writeFrameRelativeAnchorAttrs(node, config);
     }
-  });
-};
-
-const preserveGroupRelativeAnchorGapsAfterAutoSize = (
-  root: ParentNode,
-  groupRectSnapshot: Map<string, PositionGroupRectSnapshotEntry>
-) => {
-  if (groupRectSnapshot.size <= 0) {
-    return;
-  }
-
-  collectFrameSelectionAnchors(root).forEach((node) => {
-    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
-    const config = readFrameRelativeAnchorConfig(node, pageInner);
-
-    if (!pageInner || !config || config.positionMode !== 'relative' || config.anchorKind !== 'group') {
-      return;
-    }
-
-    const anchorGroupId = String(config.anchorId || '').trim();
-    const previousAnchorEntry = groupRectSnapshot.get(anchorGroupId) || null;
-    const nextAnchorRect = readPositionGroupWrapperRect(pageInner, anchorGroupId);
-
-    if (!previousAnchorEntry || !nextAnchorRect) {
-      return;
-    }
-
-    const nextConfig = { ...config };
-    const previousAnchorRect = previousAnchorEntry.rect;
-    const verticalGapFromBottom = config.offsetY - previousAnchorRect.height;
-    const horizontalGapFromRight = config.offsetX - previousAnchorRect.width;
-
-    if (verticalGapFromBottom >= -FRAME_RESIZE_TOLERANCE_PX) {
-      nextConfig.offsetY = nextAnchorRect.height + verticalGapFromBottom;
-    }
-
-    if (horizontalGapFromRight >= -FRAME_RESIZE_TOLERANCE_PX) {
-      nextConfig.offsetX = nextAnchorRect.width + horizontalGapFromRight;
-    }
-
-    if (
-      Math.abs(nextConfig.offsetX - config.offsetX) <= 0.01 &&
-      Math.abs(nextConfig.offsetY - config.offsetY) <= 0.01
-    ) {
-      return;
-    }
-
-    writeFrameRelativeAnchorAttrs(node, nextConfig);
   });
 };
 
@@ -11694,7 +11482,7 @@ const applyTemplateAutoHeightBoxes = (
       const currentRect = readFrameNodeRect(node);
       const requiredHeight = measureRequiredAutoHeightFrameHeight(node);
       const requestedDelta = requiredHeight - currentRect.height;
-      const anchorSide = normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'));
+      const anchorSide = readFrameAutoSizeAnchorSide(node, 'bottom');
 
       if (!Number.isFinite(requiredHeight)) {
         skippedCount += 1;
@@ -11753,7 +11541,7 @@ const applyTemplateAutoWidthBoxes = (
       const currentRect = readFrameNodeRect(node);
       const requiredWidth = measureRequiredAutoWidthFrameWidth(node);
       const requestedDelta = requiredWidth - currentRect.width;
-      const anchorSide = normalizeTextAutoWidthAnchorSide(readFrameAutoSizeAnchorSide(node, 'right'));
+      const anchorSide = readFrameAutoSizeAnchorSide(node, 'right');
 
       if (!Number.isFinite(requiredWidth)) {
         skippedCount += 1;
@@ -11785,98 +11573,17 @@ const applyTemplateAutoWidthBoxes = (
   };
 };
 
-const applyTemplateSecondaryContentFit = (
-  root: HTMLElement,
-  frameGroupIds: string[] | undefined,
-  axis: TextAutoSizeSecondaryFitAxis
-): {
-  changedCount: number;
-  skippedCount: number;
-  changedFrameGroupIds: string[];
-} => {
-  const targetFrameGroupIdSet = frameGroupIds?.length
-    ? new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
-    : null;
-  const changedFrameGroupIds: string[] = [];
-  let skippedCount = 0;
-
-  materializePositionGroupWrappers(root);
-  const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
-  const positionGroupRectSnapshot = snapshotPositionGroupRects(root);
-
-  collectFrameSelectionAnchors(root)
-    .filter((node) => {
-      const frameGroupId = getFrameGroupId(node);
-      return Boolean(frameGroupId) && (!targetFrameGroupIdSet || targetFrameGroupIdSet.has(frameGroupId));
-    })
-    .filter((node) => (axis === 'width' ? readFrameAutoHeightBox(node) : readFrameAutoWidthBox(node)))
-    .sort((left, right) =>
-      axis === 'width'
-        ? readFrameNodeRect(left).left - readFrameNodeRect(right).left
-        : readFrameNodeRect(left).top - readFrameNodeRect(right).top
-    )
-    .forEach((node) => {
-      const frameGroupId = getFrameGroupId(node);
-      const currentRect = readFrameNodeRect(node);
-      const requiredSize = axis === 'width' ? measureContentFitFrameWidth(node) : measureContentFitFrameHeight(node);
-      const currentSize = axis === 'width' ? currentRect.width : currentRect.height;
-      const requestedDelta = requiredSize - currentSize;
-
-      if (!Number.isFinite(requiredSize)) {
-        skippedCount += 1;
-        return;
-      }
-
-      if (Math.abs(requestedDelta) <= 0.5) {
-        return;
-      }
-
-      const appliedDelta =
-        axis === 'width'
-          ? applyFrameAutoWidthDelta(node, requestedDelta, 'right')
-          : applyFrameAutoHeightDelta(node, requestedDelta, 'bottom');
-
-      if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(frameGroupId);
-      } else {
-        skippedCount += 1;
-      }
-    });
-
-  if (changedFrameGroupIds.length > 0) {
-    restoreFrameRelativeAnchorConfigs(root, relativeAnchorSnapshot);
-    ensureRelativeAnchorConfigs(root);
-    materializePositionGroupWrappers(root);
-    preserveGroupRelativeAnchorGapsAfterAutoSize(root, positionGroupRectSnapshot);
-    applyRelativeAnchoredFrameRectsInRoot(root);
-  }
-
-  return {
-    changedCount: changedFrameGroupIds.length,
-    skippedCount,
-    changedFrameGroupIds,
-  };
-};
-
 const applyTemplateAutoSizeBoxes = (
   root: HTMLElement,
-  frameGroupIds?: string[],
-  options: TemplateAutoSizeApplyOptions = {}
+  frameGroupIds?: string[]
 ): {
   changedCount: number;
   skippedCount: number;
   changedFrameGroupIds: string[];
 } => {
-  materializePositionGroupWrappers(root);
   const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
-  const positionGroupRectSnapshot = snapshotPositionGroupRects(root);
-  const emptyResult = { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
-  const heightResult = options.skipHeight
-    ? emptyResult
-    : applyTemplateAutoHeightBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
-  const widthResult = options.skipWidth
-    ? emptyResult
-    : applyTemplateAutoWidthBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
+  const heightResult = applyTemplateAutoHeightBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
+  const widthResult = applyTemplateAutoWidthBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
   const changedFrameGroupIds = Array.from(
     new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds])
   );
@@ -11884,8 +11591,6 @@ const applyTemplateAutoSizeBoxes = (
   if (changedFrameGroupIds.length > 0) {
     restoreFrameRelativeAnchorConfigs(root, relativeAnchorSnapshot);
     ensureRelativeAnchorConfigs(root);
-    materializePositionGroupWrappers(root);
-    preserveGroupRelativeAnchorGapsAfterAutoSize(root, positionGroupRectSnapshot);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
 
@@ -13944,82 +13649,6 @@ const applyFrameSelectionUi = (
   renderRelativeAnchorGuides(root, selectedIds, relativeGuideFrameGroupId);
 };
 
-const resolvePositionStyleWidthResizeSide = (node: HTMLElement): TextAutoWidthAnchorSide => {
-  const storedSide = readStoredFrameAutoSizeAnchorSide(node);
-
-  return storedSide && isTextAutoWidthAnchorSide(storedSide) ? storedSide : 'right';
-};
-
-const resolvePositionStyleHeightResizeSide = (node: HTMLElement): TextAutoHeightAnchorSide => {
-  const storedSide = readStoredFrameAutoSizeAnchorSide(node);
-
-  return storedSide && isTextAutoHeightAnchorSide(storedSide) ? storedSide : 'bottom';
-};
-
-const applyPositionStyleWidth = (node: HTMLElement, targetWidth: number) => {
-  if (!Number.isFinite(targetWidth)) {
-    return 0;
-  }
-
-  const currentRect = readFrameNodeRect(node);
-  const requestedWidthDelta = Math.max(MIN_FRAME_SIZE_PX, targetWidth) - currentRect.width;
-
-  if (Math.abs(requestedWidthDelta) < 0.5) {
-    return 0;
-  }
-
-  const resizeSide = resolvePositionStyleWidthResizeSide(node);
-  const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), resizeSide);
-  const edgeDelta = resizeSide === 'left' ? -requestedWidthDelta : requestedWidthDelta;
-  const appliedEdgeDelta = applyFrameResizeWidthDelta(node, edgeDelta, widthInstruction ? [widthInstruction] : undefined);
-  const appliedWidthDelta = resizeSide === 'left' ? -appliedEdgeDelta : appliedEdgeDelta;
-
-  if (Math.abs(appliedWidthDelta) > 0.5) {
-    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
-    if (pageInner) {
-      rebaseRelativeAnchorConfigForResizeDirection(node, pageInner, resizeSide === 'left' ? 'w' : 'e');
-    }
-  }
-
-  if (readFrameAutoWidthBox(node)) {
-    writeFrameAutoWidthBaseAttrs(node, readFrameNodeRect(node).width);
-  }
-
-  return appliedWidthDelta;
-};
-
-const applyPositionStyleHeight = (node: HTMLElement, targetHeight: number) => {
-  if (!Number.isFinite(targetHeight)) {
-    return 0;
-  }
-
-  const currentRect = readFrameNodeRect(node);
-  const requestedHeightDelta = Math.max(MIN_FRAME_SIZE_PX, targetHeight) - currentRect.height;
-
-  if (Math.abs(requestedHeightDelta) < 0.5) {
-    return 0;
-  }
-
-  const resizeSide = resolvePositionStyleHeightResizeSide(node);
-  const appliedHeightDelta =
-    resizeSide === 'top'
-      ? -applyFrameResizeTopDelta(node, -requestedHeightDelta)
-      : applyFrameResizeHeightDelta(node, requestedHeightDelta);
-
-  if (Math.abs(appliedHeightDelta) > 0.5) {
-    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
-    if (pageInner) {
-      rebaseRelativeAnchorConfigForResizeDirection(node, pageInner, resizeSide === 'top' ? 'n' : 's');
-    }
-  }
-
-  if (readFrameAutoHeightBox(node)) {
-    writeFrameAutoHeightBaseAttrs(node, readFrameNodeRect(node).height);
-  }
-
-  return appliedHeightDelta;
-};
-
 const applyFrameStylePatch = (
   node: HTMLElement,
   patch: FrameStylePatch
@@ -14028,14 +13657,14 @@ const applyFrameStylePatch = (
   const persistedFrameNode = resolvePersistedFrameNode(node);
 
   if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
-    applyPositionStyleWidth(node, patch.width);
+    applyFrameResizeWidthDelta(node, patch.width - readFrameNodeRect(node).width);
     if (contentTarget !== node) {
       contentTarget.style.width = '100%';
     }
   }
 
   if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
-    applyPositionStyleHeight(node, patch.height);
+    applyFrameResizeHeightDelta(node, patch.height - readFrameNodeRect(node).height);
     if (contentTarget !== node) {
       contentTarget.style.height = '100%';
     }
@@ -14272,27 +13901,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         mixed: false,
         anchorSide: 'bottom' as TextAutoSizeAnchorSide,
         anchorSideMixed: false,
-        heightAnchorSide: 'bottom' as TextAutoHeightAnchorSide,
-        heightAnchorSideMixed: false,
-        widthAnchorSide: 'right' as TextAutoWidthAnchorSide,
-        widthAnchorSideMixed: false,
       };
     }
 
     const selectedIdSet = new Set(selectedFrameGroupIds);
     const selectedNodes = collectFrameSelectionAnchors(root).filter((node) => selectedIdSet.has(getFrameGroupId(node)));
-    const heightNodes = selectedNodes.filter((node) => readFrameAutoHeightBox(node));
-    const widthNodes = selectedNodes.filter((node) => readFrameAutoWidthBox(node));
-    const heightCount = heightNodes.length;
-    const widthCount = widthNodes.length;
+    const heightCount = selectedNodes.filter((node) => readFrameAutoHeightBox(node)).length;
+    const widthCount = selectedNodes.filter((node) => readFrameAutoWidthBox(node)).length;
     const fixedCount = Math.max(0, selectedNodes.length - heightCount - widthCount);
     const anchorSides = Array.from(new Set(selectedNodes.map((node) => readFrameAutoSizeAnchorSide(node))));
-    const heightAnchorSides = Array.from(
-      new Set(heightNodes.map((node) => normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'))))
-    );
-    const widthAnchorSides = Array.from(
-      new Set(widthNodes.map((node) => normalizeTextAutoWidthAnchorSide(readFrameAutoSizeAnchorSide(node, 'right'))))
-    );
 
     return {
       totalCount: selectedNodes.length,
@@ -14307,10 +13924,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         [heightCount > 0, widthCount > 0, fixedCount > 0].filter(Boolean).length > 1,
       anchorSide: anchorSides[0] || ('bottom' as TextAutoSizeAnchorSide),
       anchorSideMixed: anchorSides.length > 1,
-      heightAnchorSide: heightAnchorSides[0] || ('bottom' as TextAutoHeightAnchorSide),
-      heightAnchorSideMixed: heightAnchorSides.length > 1,
-      widthAnchorSide: widthAnchorSides[0] || ('right' as TextAutoWidthAnchorSide),
-      widthAnchorSideMixed: widthAnchorSides.length > 1,
     };
   }, [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
   const selectionValidationErrorFrameIds = React.useMemo(
@@ -14735,8 +14348,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const syncDraftPreviewHtmlRef = React.useCallback((options?: {
     materializePositionGroups?: boolean;
-    recordHistory?: boolean;
-    updatePreviewDomVersion?: boolean;
     updateRenderedHtml?: boolean;
   }) => {
     const root = previewRef.current;
@@ -14752,13 +14363,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const nextDraftHtml = extractEditorHtml(root);
     const nextRenderHtml = extractPreviewRenderHtml(root);
     draftPreviewHtmlRef.current = nextDraftHtml;
-    if (options?.updatePreviewDomVersion !== false) {
-      setPreviewDomVersion((previous) => previous + 1);
-    }
+    setPreviewDomVersion((previous) => previous + 1);
     if (options?.updateRenderedHtml !== false) {
       setPreviewHtml(nextRenderHtml);
     }
-    if (options?.recordHistory !== false && !canvasHistoryNavigationInProgressRef.current) {
+    if (!canvasHistoryNavigationInProgressRef.current) {
       pushCanvasHistoryEntry({
         renderHtml: nextRenderHtml,
         draftHtml: nextDraftHtml,
@@ -22356,15 +21965,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       nodes.forEach((node) => {
         applyFrameStylePatch(node, patch);
       });
-      const hasExplicitWidthPatch = typeof patch.width === 'number' && Number.isFinite(patch.width);
-      const hasExplicitHeightPatch = typeof patch.height === 'number' && Number.isFinite(patch.height);
-      const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds, {
-        skipWidth: hasExplicitWidthPatch,
-        skipHeight: hasExplicitHeightPatch,
-      });
+      const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds);
       const shouldUpdateGeometry =
-        hasExplicitWidthPatch ||
-        hasExplicitHeightPatch ||
+        typeof patch.width === 'number' ||
+        typeof patch.height === 'number' ||
         autoSizeResult.changedCount > 0;
 
       if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0) {
@@ -22444,16 +22048,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const activeSelectionIdSet = new Set(activeSelectionIds);
-    const targetsAutoHeight = isTextAutoHeightAnchorSide(side);
-    const targetsAutoWidth = isTextAutoWidthAnchorSide(side);
-    const nodes = collectFrameSelectionAnchors(root)
-      .filter((node) => activeSelectionIdSet.has(getFrameGroupId(node)))
-      .filter((node) =>
-        targetsAutoHeight ? readFrameAutoHeightBox(node) : targetsAutoWidth ? readFrameAutoWidthBox(node) : false
-      );
+    const nodes = collectFrameSelectionAnchors(root).filter((node) => activeSelectionIdSet.has(getFrameGroupId(node)));
 
     if (nodes.length <= 0) {
-      setMessage('해당 자동 크기 모드의 상자를 찾지 못했습니다.');
+      setMessage('자동 크기 기준을 설정할 상자를 찾지 못했습니다.');
       return;
     }
 
@@ -22461,8 +22059,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       writeFrameAutoSizeAnchorAttrs(node, side);
     });
 
-    const targetFrameGroupIds = nodes.map((node) => getFrameGroupId(node)).filter(Boolean);
-    const autoSizeResult = applyTemplateAutoSizeBoxes(root, targetFrameGroupIds);
+    const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds);
     syncDraftPreviewHtmlRef({ materializePositionGroups: false });
     schedulePreviewEditorState();
     syncSelectionStyleDraft();
@@ -22473,46 +22070,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       `자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자` +
         (autoSizeResult.changedCount > 0 ? `, ${autoSizeResult.changedCount}개 크기 재계산` : '') +
         (autoSizeResult.skippedCount > 0 ? `, ${autoSizeResult.skippedCount}개 제외` : '')
-    );
-  }, [
-    requestPreviewTextFit,
-    schedulePreviewEditorState,
-    syncDraftPreviewHtmlRef,
-    syncSelectionStyleDraft,
-  ]);
-
-  const fitTextAutoSizeSecondaryAxisForSelection = React.useCallback((axis: TextAutoSizeSecondaryFitAxis) => {
-    const root = previewRef.current;
-    const activeSelectionIds = Array.from(
-      new Set(selectedFrameGroupIdsRef.current.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
-    );
-
-    if (!root || activeSelectionIds.length <= 0) {
-      setMessage('내용에 맞출 상자를 먼저 선택하세요.');
-      return;
-    }
-
-    const activeSelectionIdSet = new Set(activeSelectionIds);
-    const nodes = collectFrameSelectionAnchors(root)
-      .filter((node) => activeSelectionIdSet.has(getFrameGroupId(node)))
-      .filter((node) => (axis === 'width' ? readFrameAutoHeightBox(node) : readFrameAutoWidthBox(node)));
-
-    if (nodes.length <= 0) {
-      setMessage(axis === 'width' ? '너비를 맞출 자동 높이 상자를 찾지 못했습니다.' : '높이를 맞출 자동 너비 상자를 찾지 못했습니다.');
-      return;
-    }
-
-    const targetFrameGroupIds = nodes.map((node) => getFrameGroupId(node)).filter(Boolean);
-    const fitResult = applyTemplateSecondaryContentFit(root, targetFrameGroupIds, axis);
-
-    syncDraftPreviewHtmlRef({ materializePositionGroups: false });
-    schedulePreviewEditorState();
-    syncSelectionStyleDraft();
-    requestPreviewTextFit();
-    setMessage(
-      `${axis === 'width' ? '너비' : '높이'} 내용 맞춤: ${nodes.length}개 상자` +
-        (fitResult.changedCount > 0 ? `, ${fitResult.changedCount}개 크기 재계산` : '') +
-        (fitResult.skippedCount > 0 ? `, ${fitResult.skippedCount}개 제외` : '')
     );
   }, [
     requestPreviewTextFit,
@@ -28399,30 +27956,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const root = previewRef.current;
       const frameNode = resolveFrameSelectionAnchor(frameTextInput.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
       const frameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
-      const shouldRestoreTextInputFocus = document.activeElement === frameTextInput;
-      const selectionStart =
-        frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
-          ? frameTextInput.selectionStart
-          : null;
-      const selectionEnd =
-        frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
-          ? frameTextInput.selectionEnd
-          : null;
 
       if (root && frameNode && frameGroupId && (readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))) {
         const autoSizeResult = applyTemplateAutoSizeBoxes(root, [frameGroupId]);
 
         if (autoSizeResult.changedCount > 0) {
-          syncDraftPreviewHtmlRef({
-            materializePositionGroups: false,
-            recordHistory: false,
-            updatePreviewDomVersion: false,
-            updateRenderedHtml: false,
-          });
-        }
-
-        if (shouldRestoreTextInputFocus) {
-          restoreFrameTextInputFocus(root, frameGroupId, selectionStart, selectionEnd);
+          syncDraftPreviewHtmlRef({ materializePositionGroups: false, updateRenderedHtml: false });
         }
       }
       return;
@@ -29490,9 +29029,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       `inline-flex h-8 items-center justify-center rounded-md border px-2 text-xs font-semibold transition ${
         active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
       }`;
-    const autoSizeAnchorButtonClass = (active: boolean) =>
+    const autoSizeAnchorButtonClass = (side: TextAutoSizeAnchorSide) =>
       `inline-flex h-8 items-center justify-center rounded-md border px-2 text-xs font-semibold transition ${
-        active
+        selectedTextAutoSizeState.anchorSide === side && !selectedTextAutoSizeState.anchorSideMixed
           ? 'border-slate-950 bg-slate-950 text-white'
           : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
       }`;
@@ -29631,57 +29170,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 </button>
               </div>
               {selectedTextAutoSizeState.heightCount > 0 ? (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {[
                     { side: 'top' as const, label: '위로 확장' },
                     { side: 'bottom' as const, label: '아래로 확장' },
-                  ].map(({ side, label }) => (
-                    <button
-                      key={`text-auto-height-anchor:${side}`}
-                      type="button"
-                      className={autoSizeAnchorButtonClass(
-                        selectedTextAutoSizeState.heightAnchorSide === side &&
-                          !selectedTextAutoSizeState.heightAnchorSideMixed
-                      )}
-                      onClick={() => setTextAutoSizeAnchorForSelection(side)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    className={autoSizeAnchorButtonClass(false)}
-                    onClick={() => fitTextAutoSizeSecondaryAxisForSelection('width')}
-                  >
-                    너비 내용에 맞추기
-                  </button>
-                </div>
-              ) : null}
-              {selectedTextAutoSizeState.widthCount > 0 ? (
-                <div className="grid grid-cols-3 gap-2">
-                  {[
                     { side: 'left' as const, label: '왼쪽으로 확장' },
                     { side: 'right' as const, label: '오른쪽으로 확장' },
                   ].map(({ side, label }) => (
                     <button
-                      key={`text-auto-width-anchor:${side}`}
+                      key={`text-auto-size-anchor:${side}`}
                       type="button"
-                      className={autoSizeAnchorButtonClass(
-                        selectedTextAutoSizeState.widthAnchorSide === side &&
-                          !selectedTextAutoSizeState.widthAnchorSideMixed
-                      )}
+                      className={autoSizeAnchorButtonClass(side)}
                       onClick={() => setTextAutoSizeAnchorForSelection(side)}
                     >
                       {label}
                     </button>
                   ))}
-                  <button
-                    type="button"
-                    className={autoSizeAnchorButtonClass(false)}
-                    onClick={() => fitTextAutoSizeSecondaryAxisForSelection('height')}
-                  >
-                    높이 내용에 맞추기
-                  </button>
                 </div>
               ) : null}
             </div>

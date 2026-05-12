@@ -11376,20 +11376,12 @@ const resolveFrameContentTarget = (node: HTMLElement) => {
   );
 };
 
-const readComputedVerticalBorderPx = (computedStyle: CSSStyleDeclaration) =>
-  parseFramePx(computedStyle.borderTopWidth) + parseFramePx(computedStyle.borderBottomWidth);
-
 const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const targetRect = target.getBoundingClientRect();
   const computedStyle = getComputedStyle(target);
   const clone = target.cloneNode(false) as HTMLTextAreaElement | HTMLInputElement;
-  const verticalBorderPx = readComputedVerticalBorderPx(computedStyle);
 
-  clone.value = target.value;
-  if (clone instanceof HTMLTextAreaElement) {
-    clone.rows = 1;
-    clone.setAttribute('rows', '1');
-  }
+  clone.value = target.value || target.textContent || '';
   clone.removeAttribute('id');
   clone.removeAttribute('name');
   clone.removeAttribute('readonly');
@@ -11397,7 +11389,6 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   clone.style.position = 'fixed';
   clone.style.left = '-10000px';
   clone.style.top = '0';
-  clone.style.display = 'block';
   clone.style.width = toFrameCssPx(targetRect.width || parseFramePx(computedStyle.width));
   clone.style.height = '0px';
   clone.style.minHeight = '0px';
@@ -11418,14 +11409,13 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
 
   const measuredHeight = clone.scrollHeight || clone.getBoundingClientRect().height || target.scrollHeight || 0;
   clone.remove();
-
-  return Math.ceil(measuredHeight + verticalBorderPx);
+  return measuredHeight;
 };
 
 const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const computedStyle = getComputedStyle(target);
   const clone = document.createElement('div');
-  const text = target.value;
+  const text = target.value || target.textContent || '';
 
   clone.textContent = text || ' ';
   clone.style.position = 'fixed';
@@ -11519,7 +11509,7 @@ const measureContentFitFrameHeight = (node: HTMLElement) => {
     const requiredTargetHeight =
       naturalTextControlHeight > 0
         ? naturalTextControlHeight
-        : target.scrollHeight || target.getBoundingClientRect().height || target.offsetHeight || target.clientHeight || 0;
+        : Math.max(target.scrollHeight || 0, target.clientHeight || 0, target.offsetHeight || 0);
     const visibleTargetHeight = targetRect.height || target.offsetHeight || target.clientHeight;
 
     return Math.max(maxDelta, requiredTargetHeight - visibleTargetHeight);

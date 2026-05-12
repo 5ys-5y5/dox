@@ -2595,12 +2595,6 @@ const readFrameAutoSizeAnchorSide = (
   return isTextAutoSizeAnchorSide(storedSide) ? storedSide : fallback;
 };
 
-const readStoredFrameAutoSizeAnchorSide = (node: HTMLElement): TextAutoSizeAnchorSide | null => {
-  const storedSide = readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR);
-
-  return isTextAutoSizeAnchorSide(storedSide) ? storedSide : null;
-};
-
 const readFrameAutoHeightBaseHeight = (node: HTMLElement, currentHeight: number) => {
   const baseHeight = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR));
 
@@ -2629,30 +2623,6 @@ const collectFrameAutoSizeAttrTargets = (node: HTMLElement) => {
     null;
 
   return Array.from(new Set([node, persistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
-};
-
-const writeFrameAutoHeightBaseAttrs = (node: HTMLElement, height: number) => {
-  if (!Number.isFinite(height) || height <= 0) {
-    return;
-  }
-
-  const nextHeight = String(Number(Math.max(MIN_FRAME_SIZE_PX, height).toFixed(3)));
-
-  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
-    target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR, nextHeight);
-  });
-};
-
-const writeFrameAutoWidthBaseAttrs = (node: HTMLElement, width: number) => {
-  if (!Number.isFinite(width) || width <= 0) {
-    return;
-  }
-
-  const nextWidth = String(Number(Math.max(MIN_FRAME_SIZE_PX, width).toFixed(3)));
-
-  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
-    target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR, nextWidth);
-  });
 };
 
 const writeFrameAutoSizeAnchorAttrs = (node: HTMLElement, side: TextAutoSizeAnchorSide) => {
@@ -11376,20 +11346,12 @@ const resolveFrameContentTarget = (node: HTMLElement) => {
   );
 };
 
-const readComputedVerticalBorderPx = (computedStyle: CSSStyleDeclaration) =>
-  parseFramePx(computedStyle.borderTopWidth) + parseFramePx(computedStyle.borderBottomWidth);
-
 const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const targetRect = target.getBoundingClientRect();
   const computedStyle = getComputedStyle(target);
   const clone = target.cloneNode(false) as HTMLTextAreaElement | HTMLInputElement;
-  const verticalBorderPx = readComputedVerticalBorderPx(computedStyle);
 
-  clone.value = target.value;
-  if (clone instanceof HTMLTextAreaElement) {
-    clone.rows = 1;
-    clone.setAttribute('rows', '1');
-  }
+  clone.value = target.value || target.textContent || '';
   clone.removeAttribute('id');
   clone.removeAttribute('name');
   clone.removeAttribute('readonly');
@@ -11397,7 +11359,6 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   clone.style.position = 'fixed';
   clone.style.left = '-10000px';
   clone.style.top = '0';
-  clone.style.display = 'block';
   clone.style.width = toFrameCssPx(targetRect.width || parseFramePx(computedStyle.width));
   clone.style.height = '0px';
   clone.style.minHeight = '0px';
@@ -11418,14 +11379,13 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
 
   const measuredHeight = clone.scrollHeight || clone.getBoundingClientRect().height || target.scrollHeight || 0;
   clone.remove();
-
-  return Math.ceil(measuredHeight + verticalBorderPx);
+  return measuredHeight;
 };
 
 const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const computedStyle = getComputedStyle(target);
   const clone = document.createElement('div');
-  const text = target.value;
+  const text = target.value || target.textContent || '';
 
   clone.textContent = text || ' ';
   clone.style.position = 'fixed';
@@ -11519,7 +11479,7 @@ const measureContentFitFrameHeight = (node: HTMLElement) => {
     const requiredTargetHeight =
       naturalTextControlHeight > 0
         ? naturalTextControlHeight
-        : target.scrollHeight || target.getBoundingClientRect().height || target.offsetHeight || target.clientHeight || 0;
+        : Math.max(target.scrollHeight || 0, target.clientHeight || 0, target.offsetHeight || 0);
     const visibleTargetHeight = targetRect.height || target.offsetHeight || target.clientHeight;
 
     return Math.max(maxDelta, requiredTargetHeight - visibleTargetHeight);
@@ -11555,8 +11515,6 @@ const measureContentFitFrameWidth = (node: HTMLElement) => {
 
 type TemplateAutoSizeApplyOptions = {
   applyRelativeAnchors?: boolean;
-  skipHeight?: boolean;
-  skipWidth?: boolean;
 };
 
 const cloneFrameRelativeAnchorConfig = (
@@ -11860,8 +11818,7 @@ const applyTemplateSecondaryContentFit = (
 
 const applyTemplateAutoSizeBoxes = (
   root: HTMLElement,
-  frameGroupIds?: string[],
-  options: TemplateAutoSizeApplyOptions = {}
+  frameGroupIds?: string[]
 ): {
   changedCount: number;
   skippedCount: number;
@@ -11870,13 +11827,8 @@ const applyTemplateAutoSizeBoxes = (
   materializePositionGroupWrappers(root);
   const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
   const positionGroupRectSnapshot = snapshotPositionGroupRects(root);
-  const emptyResult = { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
-  const heightResult = options.skipHeight
-    ? emptyResult
-    : applyTemplateAutoHeightBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
-  const widthResult = options.skipWidth
-    ? emptyResult
-    : applyTemplateAutoWidthBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
+  const heightResult = applyTemplateAutoHeightBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
+  const widthResult = applyTemplateAutoWidthBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
   const changedFrameGroupIds = Array.from(
     new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds])
   );
@@ -13944,82 +13896,6 @@ const applyFrameSelectionUi = (
   renderRelativeAnchorGuides(root, selectedIds, relativeGuideFrameGroupId);
 };
 
-const resolvePositionStyleWidthResizeSide = (node: HTMLElement): TextAutoWidthAnchorSide => {
-  const storedSide = readStoredFrameAutoSizeAnchorSide(node);
-
-  return storedSide && isTextAutoWidthAnchorSide(storedSide) ? storedSide : 'right';
-};
-
-const resolvePositionStyleHeightResizeSide = (node: HTMLElement): TextAutoHeightAnchorSide => {
-  const storedSide = readStoredFrameAutoSizeAnchorSide(node);
-
-  return storedSide && isTextAutoHeightAnchorSide(storedSide) ? storedSide : 'bottom';
-};
-
-const applyPositionStyleWidth = (node: HTMLElement, targetWidth: number) => {
-  if (!Number.isFinite(targetWidth)) {
-    return 0;
-  }
-
-  const currentRect = readFrameNodeRect(node);
-  const requestedWidthDelta = Math.max(MIN_FRAME_SIZE_PX, targetWidth) - currentRect.width;
-
-  if (Math.abs(requestedWidthDelta) < 0.5) {
-    return 0;
-  }
-
-  const resizeSide = resolvePositionStyleWidthResizeSide(node);
-  const widthInstruction = buildSelfWidthResizeInstruction(buildFrameResizeContext(node), resizeSide);
-  const edgeDelta = resizeSide === 'left' ? -requestedWidthDelta : requestedWidthDelta;
-  const appliedEdgeDelta = applyFrameResizeWidthDelta(node, edgeDelta, widthInstruction ? [widthInstruction] : undefined);
-  const appliedWidthDelta = resizeSide === 'left' ? -appliedEdgeDelta : appliedEdgeDelta;
-
-  if (Math.abs(appliedWidthDelta) > 0.5) {
-    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
-    if (pageInner) {
-      rebaseRelativeAnchorConfigForResizeDirection(node, pageInner, resizeSide === 'left' ? 'w' : 'e');
-    }
-  }
-
-  if (readFrameAutoWidthBox(node)) {
-    writeFrameAutoWidthBaseAttrs(node, readFrameNodeRect(node).width);
-  }
-
-  return appliedWidthDelta;
-};
-
-const applyPositionStyleHeight = (node: HTMLElement, targetHeight: number) => {
-  if (!Number.isFinite(targetHeight)) {
-    return 0;
-  }
-
-  const currentRect = readFrameNodeRect(node);
-  const requestedHeightDelta = Math.max(MIN_FRAME_SIZE_PX, targetHeight) - currentRect.height;
-
-  if (Math.abs(requestedHeightDelta) < 0.5) {
-    return 0;
-  }
-
-  const resizeSide = resolvePositionStyleHeightResizeSide(node);
-  const appliedHeightDelta =
-    resizeSide === 'top'
-      ? -applyFrameResizeTopDelta(node, -requestedHeightDelta)
-      : applyFrameResizeHeightDelta(node, requestedHeightDelta);
-
-  if (Math.abs(appliedHeightDelta) > 0.5) {
-    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
-    if (pageInner) {
-      rebaseRelativeAnchorConfigForResizeDirection(node, pageInner, resizeSide === 'top' ? 'n' : 's');
-    }
-  }
-
-  if (readFrameAutoHeightBox(node)) {
-    writeFrameAutoHeightBaseAttrs(node, readFrameNodeRect(node).height);
-  }
-
-  return appliedHeightDelta;
-};
-
 const applyFrameStylePatch = (
   node: HTMLElement,
   patch: FrameStylePatch
@@ -14028,14 +13904,14 @@ const applyFrameStylePatch = (
   const persistedFrameNode = resolvePersistedFrameNode(node);
 
   if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
-    applyPositionStyleWidth(node, patch.width);
+    applyFrameResizeWidthDelta(node, patch.width - readFrameNodeRect(node).width);
     if (contentTarget !== node) {
       contentTarget.style.width = '100%';
     }
   }
 
   if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
-    applyPositionStyleHeight(node, patch.height);
+    applyFrameResizeHeightDelta(node, patch.height - readFrameNodeRect(node).height);
     if (contentTarget !== node) {
       contentTarget.style.height = '100%';
     }
@@ -22356,15 +22232,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       nodes.forEach((node) => {
         applyFrameStylePatch(node, patch);
       });
-      const hasExplicitWidthPatch = typeof patch.width === 'number' && Number.isFinite(patch.width);
-      const hasExplicitHeightPatch = typeof patch.height === 'number' && Number.isFinite(patch.height);
-      const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds, {
-        skipWidth: hasExplicitWidthPatch,
-        skipHeight: hasExplicitHeightPatch,
-      });
+      const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds);
       const shouldUpdateGeometry =
-        hasExplicitWidthPatch ||
-        hasExplicitHeightPatch ||
+        typeof patch.width === 'number' ||
+        typeof patch.height === 'number' ||
         autoSizeResult.changedCount > 0;
 
       if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0) {
