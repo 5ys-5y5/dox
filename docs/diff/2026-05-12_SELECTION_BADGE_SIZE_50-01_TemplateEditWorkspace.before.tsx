@@ -28861,12 +28861,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"]::before {
           content: attr(data-template-selection-order);
           position: absolute;
-          top: 2px;
-          left: 2px;
+          top: 4px;
+          left: 4px;
           right: auto;
           z-index: 32;
-          min-width: 11px;
-          height: 11px;
+          min-width: 22px;
+          height: 22px;
           border-radius: 999px;
           display: inline-flex;
           align-items: center;
@@ -28874,7 +28874,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background: var(--template-selection-badge-color, rgba(37, 99, 235, .98));
           color: var(--template-selection-badge-text-color, white);
           box-shadow: none !important;
-          font-size: 6px;
+          font-size: 11px;
           line-height: 1;
           font-weight: 700;
           pointer-events: none;
@@ -28897,12 +28897,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           min-width: 0;
           max-width: 120px;
           width: auto;
-          height: 22px;
           padding: 0 8px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-size: 11px;
         }
         .template-edit-preview [${TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR}="true"] {
           position: relative;

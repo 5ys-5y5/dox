@@ -1035,8 +1035,8 @@ const syncPositionSelectionVisualStyles = (root: HTMLElement) => {
       groupId;
     const visual = resolvePositionStableVisual(groupId, groupLabel, selectionOrder);
     applyPositionSelectionVisualStyle(element, visual, groupLabel);
-    element.style.outline = 'none';
-    element.style.boxShadow = `0 0 0 1px ${visual.outlineColor}, inset 0 0 0 1px ${visual.outlineColor}, 0 0 0 4px ${visual.haloColor}`;
+    element.style.outline = `2px solid ${visual.outlineColor}`;
+    element.style.boxShadow = `0 0 0 4px ${visual.haloColor}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
   });
 };
 
@@ -1819,9 +1819,9 @@ const FRAME_BOX_KIND_BUTTON_LABELS: Record<TemplateFrameBoxKind, string> = {
   signature: '서명',
 };
 const FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameBoxKind, string> = {
-  text: 'border-transparent bg-slate-700 text-white',
-  attachment: 'border-transparent bg-purple-600 text-white',
-  signature: 'border-transparent bg-red-600 text-white',
+  text: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  attachment: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  signature: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
 };
 const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
   text: '텍스트',
@@ -1846,9 +1846,9 @@ const FRAME_ROLE_SHORT_LABELS: Record<TemplateFrameRole | 'group', string> = {
   key_value: '독립 값',
 };
 const FRAME_ROLE_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameRole, string> = {
-  key: 'border-transparent bg-amber-500 text-white',
-  value: 'border-transparent bg-sky-500 text-white',
-  key_value: 'border-transparent bg-slate-500 text-white',
+  key: 'border-amber-200 bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  value: 'border-sky-200 bg-sky-50 text-sky-700 ring-1 ring-sky-200',
+  key_value: 'border-emerald-200 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
 };
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
   key: '다른 value 상자를 묶을 수 있는 기준 역할입니다. 연결이 없어도 key 역할 자체는 유지됩니다.',
@@ -12173,10 +12173,9 @@ const appendPositionGroupProxySelectionMarker = (
   marker.style.height = toFrameCssPx(rect.height);
   marker.style.zIndex = '32';
   marker.style.overflow = 'visible';
-  marker.style.outline = 'none';
+  marker.style.outline = '2px solid rgba(37, 99, 235, .96)';
   marker.style.outlineOffset = '0';
-  marker.style.boxShadow =
-    '0 0 0 1px rgba(37, 99, 235, .96), inset 0 0 0 1px rgba(37, 99, 235, .96), 0 0 0 4px rgba(96, 165, 250, .22)';
+  marker.style.boxShadow = '0 0 0 4px rgba(96, 165, 250, .22), inset 0 0 0 1px rgba(255, 255, 255, .84)';
 
   const fill = document.createElement('div');
   fill.className = FRAME_SELECTION_FILL_CLASS;
@@ -13920,80 +13919,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const getFrameNodes = React.useCallback(
     (scope?: ParentNode | null) => collectFrameSelectionAnchors(scope || previewRef.current),
     []
-  );
-  // 복수 선택의 속성 오버레이는 공통 draft가 아니라 선택된 상자들의 실제 값 집합을 그대로 보여준다.
-  const selectedMetadataValues = React.useMemo(() => {
-    const root = previewRef.current;
-    const boxKinds = new Set<TemplateFrameBoxKind>();
-    const roles = new Set<TemplateFrameRole>();
-    const runtimeModes = new Set<TemplateFrameRuntimeMode>();
-
-    if (!root || selectedFrameGroupIds.length === 0) {
-      return { boxKinds, roles, runtimeModes };
-    }
-
-    const selectedIdSet = new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
-
-    getFrameNodes(root).forEach((node) => {
-      if (!selectedIdSet.has(getFrameGroupId(node))) {
-        return;
-      }
-
-      const boxKind = readFrameBoxKind(node);
-      if (boxKind) {
-        boxKinds.add(boxKind);
-      }
-
-      const role = readFrameRole(node);
-      if (TEMPLATE_FRAME_ROLE_OPTIONS.includes(role as TemplateFrameRole)) {
-        roles.add(role as TemplateFrameRole);
-      }
-
-      const runtimeMode = readFrameRuntimeMode(node);
-      if (runtimeMode) {
-        runtimeModes.add(runtimeMode);
-      }
-    });
-
-    return { boxKinds, roles, runtimeModes };
-  }, [getFrameNodes, previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
-  const displayedMetadataBoxKinds = React.useMemo(() => {
-    const stagedBoxKind = frameMetadataDraft.boxKind;
-
-    if (hasSelectedMetadataTarget && stagedBoxKind && stagedBoxKind !== syncedFrameMetadataDraftRef.current.boxKind) {
-      return new Set<TemplateFrameBoxKind>([stagedBoxKind]);
-    }
-
-    return selectedMetadataValues.boxKinds;
-  }, [frameMetadataDraft.boxKind, hasSelectedMetadataTarget, selectedMetadataValues]);
-  const displayedMetadataRoles = React.useMemo(() => {
-    const stagedRole = frameMetadataDraft.role;
-
-    if (hasSelectedMetadataTarget && stagedRole && stagedRole !== syncedFrameMetadataDraftRef.current.role) {
-      return new Set<TemplateFrameRole>([stagedRole]);
-    }
-
-    return selectedMetadataValues.roles;
-  }, [frameMetadataDraft.role, hasSelectedMetadataTarget, selectedMetadataValues]);
-  const displayedMetadataRuntimeModes = React.useMemo(() => {
-    const stagedRuntimeMode = frameMetadataDraft.runtimeMode;
-
-    if (
-      hasSelectedMetadataTarget &&
-      stagedRuntimeMode &&
-      stagedRuntimeMode !== syncedFrameMetadataDraftRef.current.runtimeMode
-    ) {
-      return new Set<TemplateFrameRuntimeMode>([stagedRuntimeMode]);
-    }
-
-    return selectedMetadataValues.runtimeModes;
-  }, [frameMetadataDraft.runtimeMode, hasSelectedMetadataTarget, selectedMetadataValues]);
-  const displayedRuntimeModeLabels = React.useMemo(
-    () =>
-      getAllRuntimeModes()
-        .filter((runtimeMode) => displayedMetadataRuntimeModes.has(runtimeMode))
-        .map((runtimeMode) => FRAME_RUNTIME_MODE_LABELS[runtimeMode]),
-    [displayedMetadataRuntimeModes]
   );
   const persistVirtualFrameDefinitions = React.useCallback(
     (nextDefinitions: VirtualFrameDefinition[]) => {
@@ -28413,7 +28338,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         <div className="space-y-2">
           <div className="grid grid-cols-3 gap-2">
             {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
-              const isActive = hasSelectedMetadataTarget && displayedMetadataBoxKinds.has(boxKind);
+              const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
 
               return (
                 <button
@@ -28453,23 +28378,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 </option>
               ))}
             </select>
-            {hasSelectedMetadataTarget && displayedRuntimeModeLabels.length > 1 ? (
-              <div className="flex flex-wrap gap-1">
-                {displayedRuntimeModeLabels.map((label) => (
-                  <span
-                    key={`metadata-selected-runtime-mode:${label}`}
-                    className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800"
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <div className="text-[11px] leading-4 text-slate-600">
-              {hasSelectedMetadataTarget && displayedRuntimeModeLabels.length > 1
-                ? `선택된 상세 기능 ${displayedRuntimeModeLabels.length}개가 함께 표시됩니다.`
-                : frameRuntimeModeHelpText}
-            </div>
+            <div className="text-[11px] leading-4 text-slate-600">{frameRuntimeModeHelpText}</div>
           </div>
 
         </div>
@@ -28482,7 +28391,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         <div className="space-y-2">
           <div className="grid grid-cols-3 gap-2">
             {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
-              const isActive = hasSelectedMetadataTarget && displayedMetadataRoles.has(role);
+              const isActive = hasSelectedMetadataTarget && frameMetadataDraft.role === role;
 
               return (
                 <button
@@ -28845,15 +28754,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ) !important;
         }
         .template-edit-preview [data-template-selected="true"] {
-          --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(37, 99, 235, .96));
           position: relative;
           overflow: visible !important;
           z-index: 20 !important;
-          outline: none !important;
+          outline: 2px solid var(--template-selection-outline-color, rgba(37, 99, 235, .96)) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-selection-centered-border-color),
-            inset 0 0 0 1px var(--v106-selection-centered-border-color),
             0 0 0 4px var(--template-selection-halo-color, rgba(96, 165, 250, .22)),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -28861,12 +28767,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"]::before {
           content: attr(data-template-selection-order);
           position: absolute;
-          top: 2px;
-          left: 2px;
+          top: 4px;
+          left: 4px;
           right: auto;
           z-index: 32;
-          min-width: 11px;
-          height: 11px;
+          min-width: 22px;
+          height: 22px;
           border-radius: 999px;
           display: inline-flex;
           align-items: center;
@@ -28874,17 +28780,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background: var(--template-selection-badge-color, rgba(37, 99, 235, .98));
           color: var(--template-selection-badge-text-color, white);
           box-shadow: none !important;
-          font-size: 6px;
+          font-size: 11px;
           line-height: 1;
           font-weight: 700;
           pointer-events: none;
         }
         .template-edit-preview [data-template-primary-selected="true"] {
-          --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(13, 148, 136, .98));
-          outline: none !important;
+          outline-color: var(--template-selection-outline-color, rgba(13, 148, 136, .98)) !important;
           box-shadow:
-            0 0 0 1px var(--v106-selection-centered-border-color),
-            inset 0 0 0 1px var(--v106-selection-centered-border-color),
             0 0 0 4px var(--template-selection-halo-color, rgba(45, 212, 191, .22)),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -28897,12 +28800,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           min-width: 0;
           max-width: 120px;
           width: auto;
-          height: 22px;
           padding: 0 8px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-size: 11px;
         }
         .template-edit-preview [${TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR}="true"] {
           position: relative;
@@ -28925,11 +28826,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             inset 0 0 0 1px rgba(255, 255, 255, .72) !important;
         }
         .template-edit-preview [${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"] {
-          outline: none !important;
+          outline: 2px solid rgba(225, 29, 72, .98) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px rgba(225, 29, 72, .98),
-            inset 0 0 0 1px rgba(225, 29, 72, .98),
             0 0 0 4px rgba(251, 113, 133, .24),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -29107,54 +29006,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
-          --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
-          background-color: rgb(100 116 139 / .3) !important;
-          background-color: color-mix(in srgb, var(--v106-metadata-selected-fill-color) 30%, transparent) !important;
-          background-image: none !important;
-          outline: none !important;
+          outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-metadata-selected-outline-color),
-            inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="text"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="attachment"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-purple-600, rgb(147 51 234));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="signature"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-red-600, rgb(220 38 38));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-amber-500, rgb(245 158 11));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-sky-500, rgb(14 165 233));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) > .${FRAME_SELECTION_FILL_CLASS} {
-          inset: 0;
-          display: none !important;
-          background: transparent !important;
-          box-shadow: none !important;
+            0 0 0 4px rgba(96, 165, 250, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: none !important;
+          outline: 2px solid rgba(13, 148, 136, .98) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-metadata-selected-outline-color),
-            inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
+            0 0 0 4px rgba(45, 212, 191, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]::before {
-          background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
+          background: rgba(13, 148, 136, .98) !important;
           box-shadow: none !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]::before {
-          background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
           content: attr(data-template-selection-order) !important;
           display: inline-flex !important;
         }
@@ -29999,9 +29868,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             actionOverlay={resolveCanvasActionOverlay()}
             actionOverlayLabel={canvasActionOverlayLabel}
             actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
-            metadataNameOverlay={
-              selectionPanelTab === 'metadata' && selectedFrameGroupIds.length <= 1 ? renderMetadataNameOverlay : null
-            }
+            metadataNameOverlay={selectionPanelTab === 'metadata' ? renderMetadataNameOverlay : null}
             metadataRolePrimaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRolePrimaryOverlay : null}
             metadataRoleSecondaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRoleSecondaryOverlay : null}
             styleOverlay={renderPositionStyleOverlay()}

@@ -578,22 +578,17 @@ type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
 };
 
-type TemplateFloatingOverlayContent = React.ReactNode | (() => React.ReactNode);
-
 type TemplateEditPreviewSurfaceProps = {
   renderedPreviewHtml: string;
   boxCreationMode: boolean;
   metadataVisualMode: boolean;
   selectionPanelTab: SelectionPanelTab;
   showMetadataIcons: boolean;
-  actionOverlay?: TemplateFloatingOverlayContent;
+  actionOverlay?: React.ReactNode;
   actionOverlayLabel?: string;
   actionOverlayExpandedWidthClassName?: string;
-  metadataNameOverlay?: TemplateFloatingOverlayContent;
-  metadataRolePrimaryOverlay?: TemplateFloatingOverlayContent;
-  metadataRoleSecondaryOverlay?: TemplateFloatingOverlayContent;
-  styleOverlay?: TemplateFloatingOverlayContent;
-  summaryOverlay?: TemplateFloatingOverlayContent;
+  styleOverlay?: React.ReactNode;
+  summaryOverlay?: React.ReactNode;
   setPreviewNode: (node: HTMLDivElement | null) => void;
   handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   handlePreviewPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -604,13 +599,7 @@ type TemplateEditPreviewSurfaceProps = {
 };
 
 type SummaryOverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-type TemplateFloatingOverlayId =
-  | 'summary'
-  | 'style'
-  | 'action'
-  | 'metadataName'
-  | 'metadataRolePrimary'
-  | 'metadataRoleSecondary';
+type TemplateFloatingOverlayId = 'summary' | 'style' | 'action';
 
 type SummaryOverlayDragState = {
   overlayId: TemplateFloatingOverlayId;
@@ -681,9 +670,6 @@ const TEMPLATE_FRAME_COLOR_GROUP_ATTR = 'data-template-frame-color-group';
 const TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR = 'data-template-frame-visual-emphasis';
 const TEMPLATE_FRAME_ROLE_VISUAL_ATTR = 'data-template-frame-role-visual';
 const TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR = 'data-template-frame-box-kind-visual';
-const TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR = 'data-v106-frame-visual-hints-signature';
-const TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR = 'data-v106-edit-permissions-tab';
-const TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR = 'data-v106-content-stabilized';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR = 'data-template-frame-relative-anchor-x';
@@ -695,7 +681,6 @@ const TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR = 'data-template-metadata-re
 const TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR = 'data-template-metadata-relation-role';
 const TEMPLATE_FRAME_METADATA_FOCUS_ATTR = 'data-template-metadata-focus';
 const TEMPLATE_METADATA_ACTIVE_FILTER_ATTR = 'data-template-metadata-active-filter';
-const TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR = 'data-v106-metadata-relation-render-signature';
 const TEMPLATE_FRAME_POSITION_IMPACT_GROUP_ATTR = 'data-template-frame-position-impact-group';
 const TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR = 'data-template-position-impact-focus';
 const TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR = 'data-template-position-impact-active-filter';
@@ -719,12 +704,7 @@ const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
 const SUMMARY_OVERLAY_INSET_PX = 12;
 const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
 const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
-const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['style', 'action'];
-const METADATA_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = [
-  'metadataName',
-  'metadataRolePrimary',
-  'metadataRoleSecondary',
-];
+const FLOATING_ACTION_OVERLAY_TOP_STACK_OFFSET_PX = SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX + SUMMARY_OVERLAY_INSET_PX;
 
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
   if (element.getAttribute(attrName) === nextValue) {
@@ -1035,8 +1015,8 @@ const syncPositionSelectionVisualStyles = (root: HTMLElement) => {
       groupId;
     const visual = resolvePositionStableVisual(groupId, groupLabel, selectionOrder);
     applyPositionSelectionVisualStyle(element, visual, groupLabel);
-    element.style.outline = 'none';
-    element.style.boxShadow = `0 0 0 1px ${visual.outlineColor}, inset 0 0 0 1px ${visual.outlineColor}, 0 0 0 4px ${visual.haloColor}`;
+    element.style.outline = `2px solid ${visual.outlineColor}`;
+    element.style.boxShadow = `0 0 0 4px ${visual.haloColor}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
   });
 };
 
@@ -1085,9 +1065,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   actionOverlay,
   actionOverlayLabel = '기능 버튼',
   actionOverlayExpandedWidthClassName,
-  metadataNameOverlay,
-  metadataRolePrimaryOverlay,
-  metadataRoleSecondaryOverlay,
   styleOverlay,
   summaryOverlay,
   setPreviewNode,
@@ -1103,9 +1080,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     summary: null,
     style: null,
     action: null,
-    metadataName: null,
-    metadataRolePrimary: null,
-    metadataRoleSecondary: null,
   });
   const floatingOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
   const pendingFloatingOverlayDragStyleResetRef = React.useRef<TemplateFloatingOverlayId | null>(null);
@@ -1113,23 +1087,14 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     summary: 'top-left',
     style: 'top-right',
     action: 'top-right',
-    metadataName: 'top-right',
-    metadataRolePrimary: 'top-right',
-    metadataRoleSecondary: 'top-right',
   });
   const [styleOverlayCollapsed, setStyleOverlayCollapsed] = React.useState(true);
   const [summaryOverlayCollapsed, setSummaryOverlayCollapsed] = React.useState(true);
   const [actionOverlayCollapsed, setActionOverlayCollapsed] = React.useState(false);
-  const [metadataNameOverlayCollapsed, setMetadataNameOverlayCollapsed] = React.useState(true);
-  const [metadataRolePrimaryOverlayCollapsed, setMetadataRolePrimaryOverlayCollapsed] = React.useState(true);
-  const [metadataRoleSecondaryOverlayCollapsed, setMetadataRoleSecondaryOverlayCollapsed] = React.useState(true);
   const [floatingOverlayViewportRevision, setFloatingOverlayViewportRevision] = React.useState(0);
   const hasSummaryOverlay = Boolean(summaryOverlay);
   const hasStyleOverlay = Boolean(styleOverlay);
   const hasActionOverlay = Boolean(actionOverlay);
-  const hasMetadataNameOverlay = Boolean(metadataNameOverlay);
-  const hasMetadataRolePrimaryOverlay = Boolean(metadataRolePrimaryOverlay);
-  const hasMetadataRoleSecondaryOverlay = Boolean(metadataRoleSecondaryOverlay);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1183,15 +1148,9 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     summaryOverlayCollapsed,
     styleOverlayCollapsed,
     actionOverlayCollapsed,
-    metadataNameOverlayCollapsed,
-    metadataRolePrimaryOverlayCollapsed,
-    metadataRoleSecondaryOverlayCollapsed,
     hasSummaryOverlay,
     hasStyleOverlay,
     hasActionOverlay,
-    hasMetadataNameOverlay,
-    hasMetadataRolePrimaryOverlay,
-    hasMetadataRoleSecondaryOverlay,
   ]);
 
   const readFloatingOverlayVisibleBounds = React.useCallback(() => {
@@ -1225,67 +1184,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     };
   }, [floatingOverlayViewportRevision]);
 
-  const readFloatingOverlayCollapsed = (overlayId: TemplateFloatingOverlayId) => {
-    switch (overlayId) {
-      case 'summary':
-        return summaryOverlayCollapsed;
-      case 'style':
-        return styleOverlayCollapsed;
-      case 'action':
-        return actionOverlayCollapsed;
-      case 'metadataName':
-        return metadataNameOverlayCollapsed;
-      case 'metadataRolePrimary':
-        return metadataRolePrimaryOverlayCollapsed;
-      case 'metadataRoleSecondary':
-        return metadataRoleSecondaryOverlayCollapsed;
-      default:
-        return true;
-    }
-  };
-
-  const hasFloatingOverlayContent = (overlayId: TemplateFloatingOverlayId) => {
-    switch (overlayId) {
-      case 'summary':
-        return hasSummaryOverlay;
-      case 'style':
-        return hasStyleOverlay;
-      case 'action':
-        return hasActionOverlay;
-      case 'metadataName':
-        return hasMetadataNameOverlay;
-      case 'metadataRolePrimary':
-        return hasMetadataRolePrimaryOverlay;
-      case 'metadataRoleSecondary':
-        return hasMetadataRoleSecondaryOverlay;
-      default:
-        return false;
-    }
-  };
-
-  const readFloatingOverlayStackOrder = () =>
-    selectionPanelTab === 'metadata' ? METADATA_FLOATING_OVERLAY_STACK_ORDER : POSITION_FLOATING_OVERLAY_STACK_ORDER;
-
-  const readFloatingOverlayFallbackHeight = React.useCallback((overlayId: TemplateFloatingOverlayId, isCollapsed: boolean) => {
-    if (isCollapsed) {
-      return SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX;
-    }
-
-    if (overlayId === 'action') {
-      return 220;
-    }
-
-    if (overlayId === 'metadataName') {
-      return 150;
-    }
-
-    if (overlayId === 'metadataRolePrimary' || overlayId === 'metadataRoleSecondary') {
-      return 220;
-    }
-
-    return 260;
-  }, []);
-
   const resolveFloatingOverlayPinnedStyle = React.useCallback(
     (
       overlayId: TemplateFloatingOverlayId,
@@ -1300,40 +1198,24 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 
       const overlayNode = floatingOverlayNodeRefs.current[overlayId];
       const fallbackWidth = isCollapsed ? 96 : overlayId === 'action' ? 176 : 480;
-      const fallbackHeight = readFloatingOverlayFallbackHeight(overlayId, isCollapsed);
+      const fallbackHeight = isCollapsed ? SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX : overlayId === 'action' ? 220 : 260;
       const overlayWidth = overlayNode?.offsetWidth || fallbackWidth;
       const overlayHeight = overlayNode?.offsetHeight || fallbackHeight;
       const availableWidth = Math.max(
         SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX,
         visibleBounds.width - SUMMARY_OVERLAY_INSET_PX * 2
       );
-      const stackOrder = readFloatingOverlayStackOrder();
-      const stackIndex = stackOrder.indexOf(overlayId);
-      const stackPeerIds =
-        stackIndex < 0
-          ? []
-          : corner.startsWith('top')
-            ? stackOrder.slice(0, stackIndex)
-            : stackOrder.slice(stackIndex + 1);
-      const verticalStackOffset = stackPeerIds.reduce((offset, stackOverlayId) => {
-        if (!hasFloatingOverlayContent(stackOverlayId) || floatingOverlayCorners[stackOverlayId] !== corner) {
-          return offset;
-        }
-
-        const stackOverlayNode = floatingOverlayNodeRefs.current[stackOverlayId];
-        const stackOverlayHeight =
-          stackOverlayNode?.offsetHeight ||
-          readFloatingOverlayFallbackHeight(stackOverlayId, readFloatingOverlayCollapsed(stackOverlayId));
-
-        return offset + stackOverlayHeight + SUMMARY_OVERLAY_INSET_PX;
-      }, 0);
+      const verticalStackOffset =
+        overlayId === 'action' && hasStyleOverlay && corner.startsWith('top')
+          ? FLOATING_ACTION_OVERLAY_TOP_STACK_OFFSET_PX
+          : 0;
       const minLeft = visibleBounds.left + SUMMARY_OVERLAY_INSET_PX;
       const maxLeft = Math.max(minLeft, visibleBounds.right - overlayWidth - SUMMARY_OVERLAY_INSET_PX);
       const baseMinTop = visibleBounds.top + SUMMARY_OVERLAY_INSET_PX;
       const minTop = baseMinTop + verticalStackOffset;
       const maxTop = Math.max(baseMinTop, visibleBounds.bottom - overlayHeight - SUMMARY_OVERLAY_INSET_PX);
       const pinnedLeft = corner.endsWith('left') ? minLeft : maxLeft;
-      const pinnedTop = corner.startsWith('top') ? Math.min(minTop, maxTop) : Math.max(baseMinTop, maxTop - verticalStackOffset);
+      const pinnedTop = corner.startsWith('top') ? Math.min(minTop, maxTop) : maxTop;
 
       return {
         left: `${pinnedLeft}px`,
@@ -1341,22 +1223,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         maxWidth: `${availableWidth}px`,
       };
     },
-    [
-      floatingOverlayCorners,
-      hasActionOverlay,
-      hasMetadataNameOverlay,
-      hasMetadataRolePrimaryOverlay,
-      hasMetadataRoleSecondaryOverlay,
-      hasStyleOverlay,
-      metadataNameOverlayCollapsed,
-      metadataRolePrimaryOverlayCollapsed,
-      metadataRoleSecondaryOverlayCollapsed,
-      actionOverlayCollapsed,
-      styleOverlayCollapsed,
-      selectionPanelTab,
-      readFloatingOverlayFallbackHeight,
-      readFloatingOverlayVisibleBounds,
-    ]
+    [hasStyleOverlay, readFloatingOverlayVisibleBounds]
   );
 
   const resetFloatingOverlayDirectDragStyle = React.useCallback((overlayId: TemplateFloatingOverlayId) => {
@@ -1574,24 +1441,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     },
     [finishFloatingOverlayDrag]
   );
-  const finishMetadataNameOverlayDrag = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => setMetadataNameOverlayCollapsed((current) => !current));
-    },
-    [finishFloatingOverlayDrag]
-  );
-  const finishMetadataRolePrimaryOverlayDrag = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => setMetadataRolePrimaryOverlayCollapsed((current) => !current));
-    },
-    [finishFloatingOverlayDrag]
-  );
-  const finishMetadataRoleSecondaryOverlayDrag = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => setMetadataRoleSecondaryOverlayCollapsed((current) => !current));
-    },
-    [finishFloatingOverlayDrag]
-  );
 
   const cancelFloatingOverlayDrag = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     const dragState = floatingOverlayDragStateRef.current;
@@ -1620,15 +1469,13 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     collapsed: boolean,
     setCollapsed: React.Dispatch<React.SetStateAction<boolean>> | null,
     finishDrag: (event: React.PointerEvent<HTMLButtonElement>) => void,
-    content: TemplateFloatingOverlayContent | null | undefined,
+    content: React.ReactNode,
     options: {
       alwaysExpanded?: boolean;
       expandedWidthClassName?: string;
     } = {}
   ) => {
-    const contentRenderer = typeof content === 'function' ? (content as () => React.ReactNode) : null;
-
-    if (!contentRenderer && !content) {
+    if (!content) {
       return null;
     }
 
@@ -1637,15 +1484,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     const expandedWidthClassName = options.expandedWidthClassName || 'w-[30rem] max-w-[calc(100%_-_1.5rem)]';
     const overlayWidthClassName = isCollapsed ? 'w-max max-w-[calc(100%_-_1.5rem)]' : expandedWidthClassName;
     const overlayZIndexClassName =
-      overlayId === 'metadataRoleSecondary'
-        ? 'z-[74]'
-        : overlayId === 'metadataRolePrimary'
-          ? 'z-[73]'
-          : overlayId === 'action' || overlayId === 'metadataName'
-            ? 'z-[72]'
-            : overlayId === 'style'
-              ? 'z-[71]'
-              : 'z-[70]';
+      overlayId === 'action' ? 'z-[72]' : overlayId === 'style' ? 'z-[71]' : 'z-[70]';
     const pinnedOverlayStyle = resolveFloatingOverlayPinnedStyle(overlayId, overlayCorner, isCollapsed);
 
     return (
@@ -1720,7 +1559,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
           </button>
           {isCollapsed ? null : (
             <div className="max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2">
-              {contentRenderer ? contentRenderer() : content}
+              {content}
             </div>
           )}
         </div>
@@ -1757,33 +1596,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       />
       {renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay)}
       {renderFloatingOverlaySection('style', '스타일', styleOverlayCollapsed, setStyleOverlayCollapsed, finishStyleOverlayDrag, styleOverlay)}
-      {renderFloatingOverlaySection(
-        'metadataName',
-        '상자명',
-        metadataNameOverlayCollapsed,
-        setMetadataNameOverlayCollapsed,
-        finishMetadataNameOverlayDrag,
-        metadataNameOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection(
-        'metadataRolePrimary',
-        '상자 역할 - 1',
-        metadataRolePrimaryOverlayCollapsed,
-        setMetadataRolePrimaryOverlayCollapsed,
-        finishMetadataRolePrimaryOverlayDrag,
-        metadataRolePrimaryOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection(
-        'metadataRoleSecondary',
-        '상자 역할 - 2',
-        metadataRoleSecondaryOverlayCollapsed,
-        setMetadataRoleSecondaryOverlayCollapsed,
-        finishMetadataRoleSecondaryOverlayDrag,
-        metadataRoleSecondaryOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
       {renderFloatingOverlaySection('action', actionOverlayLabel, actionOverlayCollapsed, setActionOverlayCollapsed, finishActionOverlayDrag, actionOverlay, {
         expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
       })}
@@ -1819,9 +1631,9 @@ const FRAME_BOX_KIND_BUTTON_LABELS: Record<TemplateFrameBoxKind, string> = {
   signature: '서명',
 };
 const FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameBoxKind, string> = {
-  text: 'border-transparent bg-slate-700 text-white',
-  attachment: 'border-transparent bg-purple-600 text-white',
-  signature: 'border-transparent bg-red-600 text-white',
+  text: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  attachment: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  signature: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
 };
 const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
   text: '텍스트',
@@ -1846,9 +1658,9 @@ const FRAME_ROLE_SHORT_LABELS: Record<TemplateFrameRole | 'group', string> = {
   key_value: '독립 값',
 };
 const FRAME_ROLE_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameRole, string> = {
-  key: 'border-transparent bg-amber-500 text-white',
-  value: 'border-transparent bg-sky-500 text-white',
-  key_value: 'border-transparent bg-slate-500 text-white',
+  key: 'border-amber-200 bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  value: 'border-sky-200 bg-sky-50 text-sky-700 ring-1 ring-sky-200',
+  key_value: 'border-emerald-200 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
 };
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
   key: '다른 value 상자를 묶을 수 있는 기준 역할입니다. 연결이 없어도 key 역할 자체는 유지됩니다.',
@@ -2742,11 +2554,6 @@ const applyFrameMetadataPatch = (node: HTMLElement, patch: FrameMetadataPatch) =
     persistedFrameNode?.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
     null;
   const targets = Array.from(new Set([node, persistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
-  targets.forEach((target) => {
-    const previewRoot = target.closest<HTMLElement>('.template-edit-preview');
-    previewRoot?.removeAttribute(TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR);
-    previewRoot?.removeAttribute(TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR);
-  });
 
   targets.forEach((target) => {
     if (patch.label !== undefined) {
@@ -9079,32 +8886,18 @@ const appendFrameKindMarker = (
   const shell = resolveFrameLayoutShell(frameNode);
   const hostRect = shell.getBoundingClientRect();
   const compact = hostRect.width < 72 || hostRect.height < 16;
-  const markers = Array.from(shell.querySelectorAll<HTMLElement>(`:scope > .${FRAME_KIND_MARKER_CLASS}`));
-  const marker = markers[0] || document.createElement('div');
-  const nextBoxKind = boxKind || 'null';
-  const nextRole = role || 'null';
-  const nextCompact = compact ? 'true' : 'false';
-  const nextTooltip = `${boxKind ? FRAME_BOX_KIND_SHORT_LABELS[boxKind] : 'null'} · ${
-    role ? FRAME_ROLE_SHORT_LABELS[role] : 'null'
-  }`;
-  const nextMarkup = renderFrameMetadataMarkerMarkup(boxKind, role, compact);
-
-  markers.slice(1).forEach((duplicateMarker) => {
-    duplicateMarker.remove();
-  });
+  const marker = document.createElement('div');
   marker.className = FRAME_KIND_MARKER_CLASS;
-  setElementAttributeIfChanged(marker, 'data-box-kind', nextBoxKind);
-  setElementAttributeIfChanged(marker, 'data-frame-role', nextRole);
-  setElementAttributeIfChanged(marker, 'data-compact', nextCompact);
-  setElementAttributeIfChanged(marker, 'data-tooltip', nextTooltip);
-  setElementAttributeIfChanged(shell, 'data-template-frame-marker-host', 'true');
-  if (marker.innerHTML !== nextMarkup) {
-    marker.innerHTML = nextMarkup;
-  }
-  if (!marker.parentElement) {
-    shell.appendChild(marker);
-  }
-  return marker;
+  marker.setAttribute('data-box-kind', boxKind || 'null');
+  marker.setAttribute('data-frame-role', role || 'null');
+  marker.setAttribute('data-compact', compact ? 'true' : 'false');
+  marker.setAttribute(
+    'data-tooltip',
+    `${boxKind ? FRAME_BOX_KIND_SHORT_LABELS[boxKind] : 'null'} · ${role ? FRAME_ROLE_SHORT_LABELS[role] : 'null'}`
+  );
+  shell.setAttribute('data-template-frame-marker-host', 'true');
+  marker.innerHTML = renderFrameMetadataMarkerMarkup(boxKind, role, compact);
+  shell.appendChild(marker);
 };
 
 const renderRelativeAnchorGuides = (
@@ -9707,60 +9500,38 @@ const focusFrameTextInputForEditingByFrameGroupId = (root: HTMLElement, frameGro
 };
 
 const applyFrameTextEditingMode = (root: HTMLElement, enabled: boolean) => {
-  root.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]').forEach((input) => {
-    if (enabled) {
-      enableFrameTextInputForEditing(input);
-      return;
-    }
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    node
+      .querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]')
+      .forEach((input) => {
+        if (enabled) {
+          enableFrameTextInputForEditing(input);
+          return;
+        }
 
-    disableFrameTextInputEditing(input);
+        disableFrameTextInputEditing(input);
+      });
   });
 };
 
 const applyPreviewEditPermissions = (root: HTMLElement, selectionPanelTab: SelectionPanelTab = 'position') => {
-  if (root.getAttribute(TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR) === selectionPanelTab) {
-    return;
-  }
-
-  setElementAttributeIfChanged(root, TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR, selectionPanelTab);
   root.querySelectorAll<HTMLElement>('[data-template-edit-scope]').forEach((element) => {
     element.setAttribute('contenteditable', 'true');
     element.setAttribute('data-template-edit-enabled', 'true');
   });
   applyFrameTextEditingMode(root, selectionPanelTab === 'text');
-  if (root.getAttribute(TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR) !== 'true') {
-    primeFrameContentScaleMetrics(root);
-    collectFrameSelectionAnchors(root).forEach((node) => {
-      stabilizeFrameContentHeight(node);
-    });
-    setElementAttributeIfChanged(root, TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR, 'true');
-  }
+  primeFrameContentScaleMetrics(root);
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    stabilizeFrameContentHeight(node);
+  });
 };
 
 const applyFrameCanvasVisualHints = (root: HTMLElement) => {
   const frameNodes = collectFrameSelectionAnchors(root);
-  const visualHintsSignature = frameNodes
-    .map((node) =>
-      [
-        getFrameGroupId(node),
-        readFrameBoxKind(node),
-        readFrameRole(node),
-        readFrameParentGroupId(node),
-      ].join(':')
-    )
-    .join('|');
-
-  if (
-    root.getAttribute(TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR) === visualHintsSignature &&
-    root.querySelector(`.${FRAME_KIND_MARKER_CLASS}`)
-  ) {
-    return;
-  }
-
-  setElementAttributeIfChanged(root, TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR, visualHintsSignature);
   const parentGroupIds = new Set(frameNodes.map((node) => readFrameParentGroupId(node)).filter(Boolean));
-  const activeMarkerNodes = new Set<HTMLElement>();
-  const activeMarkerHosts = new Set<HTMLElement>();
+  root.querySelectorAll<HTMLElement>(`.${FRAME_KIND_MARKER_CLASS}`).forEach((element) => {
+    element.remove();
+  });
 
   frameNodes.forEach((node) => {
     const boxKind = readFrameBoxKind(node);
@@ -9768,38 +9539,22 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
     const frameGroupId = getFrameGroupId(node);
     const isKeyLike = role ? role === 'key' || role === 'group' || parentGroupIds.has(frameGroupId) : false;
 
-    setElementAttributeIfChanged(node, TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR, isKeyLike ? 'full' : 'muted');
+    node.setAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR, isKeyLike ? 'full' : 'muted');
     if (role) {
-      setElementAttributeIfChanged(node, TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
+      node.setAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
     } else {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_ROLE_VISUAL_ATTR);
+      node.removeAttribute(TEMPLATE_FRAME_ROLE_VISUAL_ATTR);
     }
     if (boxKind) {
-      setElementAttributeIfChanged(node, TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
+      node.setAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
     } else {
-      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
+      node.removeAttribute(TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
     }
-    const marker = appendFrameKindMarker(node, boxKind, role);
-    activeMarkerNodes.add(marker);
-    activeMarkerHosts.add(resolveFrameLayoutShell(node));
-  });
-
-  root.querySelectorAll<HTMLElement>(`.${FRAME_KIND_MARKER_CLASS}`).forEach((element) => {
-    if (!activeMarkerNodes.has(element)) {
-      element.remove();
-    }
-  });
-  root.querySelectorAll<HTMLElement>('[data-template-frame-marker-host="true"]').forEach((element) => {
-    if (!activeMarkerHosts.has(element)) {
-      element.removeAttribute('data-template-frame-marker-host');
-    }
+    appendFrameKindMarker(node, boxKind, role);
   });
 };
 
 const clearFrameMetadataRelationOutlineUi = (root: ParentNode) => {
-  if (root instanceof HTMLElement) {
-    root.removeAttribute(TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR);
-  }
   root.querySelectorAll<HTMLElement>(`.${FRAME_RELATION_BADGE_CLASS}`).forEach((element) => {
     element.remove();
   });
@@ -10104,41 +9859,6 @@ const applyFrameRelationSelectionUi = (
   relationMode: FrameRelationPreviewMode,
   selectedFrameGroupIds: string[] = []
 ) => {
-  const activeSelectionPanelTab = root.getAttribute('data-selection-panel-tab');
-  const normalizedSelectedFrameGroupIds = Array.from(
-    new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
-  );
-
-  if (activeSelectionPanelTab !== 'metadata') {
-    if (
-      root.hasAttribute(TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR) ||
-      root.hasAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR) ||
-      root.querySelector(
-        `[${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}], [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}], [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}], .${FRAME_RELATION_BADGE_CLASS}`
-      )
-    ) {
-      clearFrameMetadataRelationOutlineUi(root);
-      collectFrameSelectionAnchors(root).forEach((node) => {
-        removeElementAttributeIfPresent(node, TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
-        removeElementAttributeIfPresent(node, TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
-      });
-      removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-      clearSelectionTonedownOverlays(root, 'metadata');
-    }
-    return;
-  }
-
-  const relationRenderSignature = JSON.stringify({
-    relationMode,
-    selectedFrameGroupIds: normalizedSelectedFrameGroupIds,
-  });
-  if (
-    root.getAttribute(TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR) === relationRenderSignature &&
-    root.querySelector(`[${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}], [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`)
-  ) {
-    return;
-  }
-
   const frameNodes = collectFrameSelectionAnchors(root);
   const relationSelectionFrameIds = new Set<string>();
   const markRelationSelection = (node: HTMLElement, value: string) => {
@@ -10166,7 +9886,16 @@ const applyFrameRelationSelectionUi = (
     element.remove();
   });
   clearFrameMetadataRelationOutlineUi(root);
-  setElementAttributeIfChanged(root, TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR, relationRenderSignature);
+
+  if (root.getAttribute('data-selection-panel-tab') === 'position') {
+    frameNodes.forEach((node) => {
+      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
+      removeElementAttributeIfPresent(node, TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
+    });
+    removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
+    clearSelectionTonedownOverlays(root, 'metadata');
+    return;
+  }
 
   const valueIdsByKeyId = new Map<string, string[]>();
   const keyIdsByValueId = new Map<string, string>();
@@ -10189,6 +9918,9 @@ const applyFrameRelationSelectionUi = (
     }
   });
 
+  const normalizedSelectedFrameGroupIds = Array.from(
+    new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+  );
   const hasSelectedMetadataFrames = normalizedSelectedFrameGroupIds.length > 0;
   const selectedRelationKeyIds = new Set<string>();
   const activeRelationFrameIds = new Set<string>();
@@ -10235,7 +9967,8 @@ const applyFrameRelationSelectionUi = (
     });
   }
 
-  const shouldApplyMetadataActiveFilter = metadataFocusFrameIds.size > 0;
+  const shouldApplyMetadataActiveFilter =
+    root.getAttribute('data-selection-panel-tab') === 'metadata' && metadataFocusFrameIds.size > 0;
 
   if (shouldApplyMetadataActiveFilter) {
     setElementAttributeIfChanged(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR, 'true');
@@ -12173,10 +11906,9 @@ const appendPositionGroupProxySelectionMarker = (
   marker.style.height = toFrameCssPx(rect.height);
   marker.style.zIndex = '32';
   marker.style.overflow = 'visible';
-  marker.style.outline = 'none';
+  marker.style.outline = '2px solid rgba(37, 99, 235, .96)';
   marker.style.outlineOffset = '0';
-  marker.style.boxShadow =
-    '0 0 0 1px rgba(37, 99, 235, .96), inset 0 0 0 1px rgba(37, 99, 235, .96), 0 0 0 4px rgba(96, 165, 250, .22)';
+  marker.style.boxShadow = '0 0 0 4px rgba(96, 165, 250, .22), inset 0 0 0 1px rgba(255, 255, 255, .84)';
 
   const fill = document.createElement('div');
   fill.className = FRAME_SELECTION_FILL_CLASS;
@@ -12318,29 +12050,6 @@ const clearFastSelectionEditorUi = (root: HTMLElement) => {
     .forEach((element) => {
       element.remove();
     });
-};
-
-const clearPositionOnlyEditorUi = (root: HTMLElement) => {
-  root
-    .querySelectorAll<HTMLElement>(
-      [
-        FRAME_EDGE_BUTTON_SELECTOR,
-        FRAME_RESIZE_HANDLE_SELECTOR,
-        `.${FRAME_DELETE_BUTTON_CLASS}`,
-        `[${FRAME_OUTLINE_OVERLAY_ATTR}="true"]`,
-        `[${FRAME_CLUSTER_OUTLINE_OVERLAY_ATTR}="true"]`,
-      ].join(', ')
-    )
-    .forEach((element) => {
-      element.remove();
-    });
-  root.querySelectorAll<HTMLElement>('[data-template-edge-visual="true"], [data-template-edge-anchor-node="true"]').forEach((element) => {
-    removeElementAttributeIfPresent(element, 'data-template-edge-visual');
-    removeElementAttributeIfPresent(element, 'data-template-edge-anchor-node');
-  });
-  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR}="true"]`).forEach((element) => {
-    removeElementAttributeIfPresent(element, TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
-  });
 };
 
 const appendPositionGroupProxyOverlayFast = (
@@ -13920,80 +13629,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const getFrameNodes = React.useCallback(
     (scope?: ParentNode | null) => collectFrameSelectionAnchors(scope || previewRef.current),
     []
-  );
-  // 복수 선택의 속성 오버레이는 공통 draft가 아니라 선택된 상자들의 실제 값 집합을 그대로 보여준다.
-  const selectedMetadataValues = React.useMemo(() => {
-    const root = previewRef.current;
-    const boxKinds = new Set<TemplateFrameBoxKind>();
-    const roles = new Set<TemplateFrameRole>();
-    const runtimeModes = new Set<TemplateFrameRuntimeMode>();
-
-    if (!root || selectedFrameGroupIds.length === 0) {
-      return { boxKinds, roles, runtimeModes };
-    }
-
-    const selectedIdSet = new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
-
-    getFrameNodes(root).forEach((node) => {
-      if (!selectedIdSet.has(getFrameGroupId(node))) {
-        return;
-      }
-
-      const boxKind = readFrameBoxKind(node);
-      if (boxKind) {
-        boxKinds.add(boxKind);
-      }
-
-      const role = readFrameRole(node);
-      if (TEMPLATE_FRAME_ROLE_OPTIONS.includes(role as TemplateFrameRole)) {
-        roles.add(role as TemplateFrameRole);
-      }
-
-      const runtimeMode = readFrameRuntimeMode(node);
-      if (runtimeMode) {
-        runtimeModes.add(runtimeMode);
-      }
-    });
-
-    return { boxKinds, roles, runtimeModes };
-  }, [getFrameNodes, previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
-  const displayedMetadataBoxKinds = React.useMemo(() => {
-    const stagedBoxKind = frameMetadataDraft.boxKind;
-
-    if (hasSelectedMetadataTarget && stagedBoxKind && stagedBoxKind !== syncedFrameMetadataDraftRef.current.boxKind) {
-      return new Set<TemplateFrameBoxKind>([stagedBoxKind]);
-    }
-
-    return selectedMetadataValues.boxKinds;
-  }, [frameMetadataDraft.boxKind, hasSelectedMetadataTarget, selectedMetadataValues]);
-  const displayedMetadataRoles = React.useMemo(() => {
-    const stagedRole = frameMetadataDraft.role;
-
-    if (hasSelectedMetadataTarget && stagedRole && stagedRole !== syncedFrameMetadataDraftRef.current.role) {
-      return new Set<TemplateFrameRole>([stagedRole]);
-    }
-
-    return selectedMetadataValues.roles;
-  }, [frameMetadataDraft.role, hasSelectedMetadataTarget, selectedMetadataValues]);
-  const displayedMetadataRuntimeModes = React.useMemo(() => {
-    const stagedRuntimeMode = frameMetadataDraft.runtimeMode;
-
-    if (
-      hasSelectedMetadataTarget &&
-      stagedRuntimeMode &&
-      stagedRuntimeMode !== syncedFrameMetadataDraftRef.current.runtimeMode
-    ) {
-      return new Set<TemplateFrameRuntimeMode>([stagedRuntimeMode]);
-    }
-
-    return selectedMetadataValues.runtimeModes;
-  }, [frameMetadataDraft.runtimeMode, hasSelectedMetadataTarget, selectedMetadataValues]);
-  const displayedRuntimeModeLabels = React.useMemo(
-    () =>
-      getAllRuntimeModes()
-        .filter((runtimeMode) => displayedMetadataRuntimeModes.has(runtimeMode))
-        .map((runtimeMode) => FRAME_RUNTIME_MODE_LABELS[runtimeMode]),
-    [displayedMetadataRuntimeModes]
   );
   const persistVirtualFrameDefinitions = React.useCallback(
     (nextDefinitions: VirtualFrameDefinition[]) => {
@@ -18591,35 +18226,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       );
       applyPreviewEditPermissions(root, selectionPanelTab);
       applyFrameCanvasVisualHints(root);
-      if (selectionPanelTab !== 'position') {
-        syncPreviewSurfaceScale(root);
-        const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
-
-        if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
-          setPreviewHtml(nextRenderHtml);
-        }
-
-        clearPositionOnlyEditorUi(root);
-        applyFastFrameSelectionUi(
-          root,
-          selectedFrameGroupIdsRef.current,
-          [],
-          collectFrameSelectionAnchorByIdMap(root)
-        );
-        applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
-        applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
-        applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
-        applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
-        applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-        setEdgeRoleDiagnostics((previous) =>
-          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-            ? previous
-            : emptyEdgeRoleDiagnosticsState
-        );
-        requestPreviewTextFit();
-        return;
-      }
-
       const materializedPositionGroups = materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
       normalizePositionGroupRelativeAnchors(root);
@@ -18747,28 +18353,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
       applyPreviewEditPermissions(root, selectionPanelTab);
-      if (selectionPanelTab !== 'position') {
-        clearPositionOnlyEditorUi(root);
-        applyFrameCanvasVisualHints(root);
-        applyFastFrameSelectionUi(
-          root,
-          nextSelectedFrameGroupIds,
-          [],
-          collectFrameSelectionAnchorByIdMap(root)
-        );
-        applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
-        applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-        applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
-        applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
-        applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-        setEdgeRoleDiagnostics((previous) =>
-          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-            ? previous
-            : emptyEdgeRoleDiagnosticsState
-        );
-        return;
-      }
-
       materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
       normalizePositionGroupRelativeAnchors(root);
@@ -18833,22 +18417,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
       applyPreviewEditPermissions(root, selectionPanelTab);
-      if (selectionPanelTab !== 'position') {
-        clearPositionOnlyEditorUi(root);
-        applyFrameCanvasVisualHints(root);
-        applyFastFrameSelectionUi(
-          root,
-          nextSelectedFrameGroupIds,
-          [],
-          collectFrameSelectionAnchorByIdMap(root)
-        );
-        applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
-        applyPositionImpactGroupSelectionUi(root, selectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-        applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
-        applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
-        return;
-      }
-
       materializePositionGroupWrappers(root);
       applyFrameCanvasVisualHints(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
@@ -19693,10 +19261,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     draftPreviewHtmlRef.current = renderedPreviewHtml;
-    root.removeAttribute(TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR);
-    root.removeAttribute(TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR);
-    root.removeAttribute(TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR);
-    root.removeAttribute(TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR);
     let cancelled = false;
     const applyEditorState = async () => {
       schedulePreviewEditorState();
@@ -19715,7 +19279,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-        if (selectionPanelTab === 'position' && !root.querySelector(FRAME_EDGE_BUTTON_SELECTOR)) {
+        if (!root.querySelector(FRAME_EDGE_BUTTON_SELECTOR)) {
           schedulePreviewEditorState();
         }
       });
@@ -19731,12 +19295,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       cancelScheduledPreviewEditorState();
       pageInnerObservers.forEach((observer) => observer.disconnect());
     };
-  }, [cancelScheduledPreviewEditorState, renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
+  }, [cancelScheduledPreviewEditorState, renderedPreviewHtml, schedulePreviewEditorState]);
 
   React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!root || !renderedPreviewHtml || typeof window === 'undefined' || selectionPanelTab !== 'position') {
+    if (!root || !renderedPreviewHtml || typeof window === 'undefined') {
       return;
     }
 
@@ -19764,12 +19328,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     return () => {
       window.clearInterval(timerId);
     };
-  }, [renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
+  }, [renderedPreviewHtml, schedulePreviewEditorState]);
 
   React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!root || !renderedPreviewHtml || typeof window === 'undefined' || selectionPanelTab !== 'position') {
+    if (!root || !renderedPreviewHtml || typeof window === 'undefined') {
       return;
     }
 
@@ -19784,7 +19348,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [boxCreationMode, boxCreationPositionMode, renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
+  }, [boxCreationMode, boxCreationPositionMode, renderedPreviewHtml, schedulePreviewEditorState]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -19824,35 +19388,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
       applyPreviewEditPermissions(root, selectionPanelTab);
       applyFrameCanvasVisualHints(root);
-      if (selectionPanelTab !== 'position') {
-        syncPreviewSurfaceScale(root);
-        const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
-
-        if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
-          setPreviewHtml(nextRenderHtml);
-        }
-
-        clearPositionOnlyEditorUi(root);
-        applyFastFrameSelectionUi(
-          root,
-          selectedFrameGroupIdsRef.current,
-          [],
-          collectFrameSelectionAnchorByIdMap(root)
-        );
-        applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIdsRef.current);
-        applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIdsRef.current, positionRelationAnchorFrameGroupId);
-        applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
-        applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
-        applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-        setEdgeRoleDiagnostics((previous) =>
-          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-            ? previous
-            : emptyEdgeRoleDiagnosticsState
-        );
-        requestPreviewTextFit();
-        return true;
-      }
-
       const materializedPositionGroups = materializePositionGroupWrappers(root);
       ensureRelativeAnchorConfigs(root);
       normalizePositionGroupRelativeAnchors(root);
@@ -19949,29 +19484,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (shouldSkipSelectionReapply) {
         return;
       }
-    }
-
-    if (selectionPanelTab !== 'position') {
-      applyPreviewEditPermissions(root, selectionPanelTab);
-      clearPositionOnlyEditorUi(root);
-      applyFrameCanvasVisualHints(root);
-      applyFastFrameSelectionUi(
-        root,
-        selectedFrameGroupIds,
-        [],
-        collectFrameSelectionAnchorByIdMap(root)
-      );
-      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIds);
-      applyPositionImpactGroupSelectionUi(root, selectionPanelTab, selectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
-      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
-      applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-      setEdgeRoleDiagnostics((previous) =>
-        edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-          ? previous
-          : emptyEdgeRoleDiagnosticsState
-      );
-      return;
     }
 
     if (!root.querySelector(FRAME_EDGE_BUTTON_SELECTOR)) {
@@ -20131,7 +19643,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    if (selectionPanelTab !== 'position' || edgeSelectionState.tokens.length === 0) {
+    if (
+      (selectionPanelTab === 'position' || selectionPanelTab === 'metadata') &&
+      edgeSelectionState.tokens.length === 0
+    ) {
       return;
     }
 
@@ -28358,10 +27873,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
-  const renderMetadataNameOverlay = () => (
+  const renderMetadataCanvasActionControls = () => (
     <div className="space-y-3">
         {selectionValidationIssues.length > 0 ? (
-          <div className="text-xs text-rose-950">
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-950">
             <div className="font-semibold">메타데이터 설정 오류</div>
             <div className="mt-1 text-[11px] leading-5">
               빨간색으로 표시된 상자는 아래 사유로 메타데이터를 반영할 수 없습니다.
@@ -28376,7 +27891,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ) : null}
           </div>
         ) : null}
-        <div className="space-y-2">
+        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
           <div className="space-y-1">
             <label className="text-xs font-semibold text-slate-800">상자명</label>
             <Input
@@ -28405,15 +27920,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         </div>
 
-    </div>
-  );
-
-  const renderMetadataRolePrimaryOverlay = () => (
-    <div className="space-y-3">
-        <div className="space-y-2">
+        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+          <div className="text-xs font-semibold text-slate-900">상자 역할 - 1</div>
           <div className="grid grid-cols-3 gap-2">
             {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
-              const isActive = hasSelectedMetadataTarget && displayedMetadataBoxKinds.has(boxKind);
+              const isActive = hasSelectedMetadataTarget && frameMetadataDraft.boxKind === boxKind;
 
               return (
                 <button
@@ -28453,36 +27964,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 </option>
               ))}
             </select>
-            {hasSelectedMetadataTarget && displayedRuntimeModeLabels.length > 1 ? (
-              <div className="flex flex-wrap gap-1">
-                {displayedRuntimeModeLabels.map((label) => (
-                  <span
-                    key={`metadata-selected-runtime-mode:${label}`}
-                    className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800"
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <div className="text-[11px] leading-4 text-slate-600">
-              {hasSelectedMetadataTarget && displayedRuntimeModeLabels.length > 1
-                ? `선택된 상세 기능 ${displayedRuntimeModeLabels.length}개가 함께 표시됩니다.`
-                : frameRuntimeModeHelpText}
-            </div>
+            <div className="text-[11px] leading-4 text-slate-600">{frameRuntimeModeHelpText}</div>
           </div>
 
         </div>
 
-    </div>
-  );
-
-  const renderMetadataRoleSecondaryOverlay = () => (
-    <div className="space-y-3">
-        <div className="space-y-2">
+        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+          <div className="text-xs font-semibold text-slate-900">상자 역할 - 2</div>
           <div className="grid grid-cols-3 gap-2">
             {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
-              const isActive = hasSelectedMetadataTarget && displayedMetadataRoles.has(role);
+              const isActive = hasSelectedMetadataTarget && frameMetadataDraft.role === role;
 
               return (
                 <button
@@ -28543,7 +28034,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               </Button>
             )
           ) : (
-            <div className="space-y-2 text-amber-900">
+            <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
               <div className="text-[11px] font-semibold text-amber-900">
                 {metadataVirtualConnectionDraft.mode === 'key'
                   ? metadataRelationSelectionMode.kind === 'parent'
@@ -28719,13 +28210,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     </div>
   );
 
-  const resolveCanvasActionOverlay = () => {
+  const renderCanvasActionOverlay = () => {
     if (selectionPanelTab === 'position') {
-      return renderPositionActionOverlay;
+      return renderPositionActionOverlay();
+    }
+
+    if (selectionPanelTab === 'metadata') {
+      return renderMetadataCanvasActionControls();
     }
 
     if (selectionPanelTab === 'text') {
-      return renderTextCanvasActionControls;
+      return renderTextCanvasActionControls();
     }
 
     return null;
@@ -28845,15 +28340,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ) !important;
         }
         .template-edit-preview [data-template-selected="true"] {
-          --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(37, 99, 235, .96));
           position: relative;
           overflow: visible !important;
           z-index: 20 !important;
-          outline: none !important;
+          outline: 2px solid var(--template-selection-outline-color, rgba(37, 99, 235, .96)) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-selection-centered-border-color),
-            inset 0 0 0 1px var(--v106-selection-centered-border-color),
             0 0 0 4px var(--template-selection-halo-color, rgba(96, 165, 250, .22)),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -28861,12 +28353,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"]::before {
           content: attr(data-template-selection-order);
           position: absolute;
-          top: 2px;
-          left: 2px;
+          top: 4px;
+          left: 4px;
           right: auto;
           z-index: 32;
-          min-width: 11px;
-          height: 11px;
+          min-width: 22px;
+          height: 22px;
           border-radius: 999px;
           display: inline-flex;
           align-items: center;
@@ -28874,17 +28366,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background: var(--template-selection-badge-color, rgba(37, 99, 235, .98));
           color: var(--template-selection-badge-text-color, white);
           box-shadow: none !important;
-          font-size: 6px;
+          font-size: 11px;
           line-height: 1;
           font-weight: 700;
           pointer-events: none;
         }
         .template-edit-preview [data-template-primary-selected="true"] {
-          --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(13, 148, 136, .98));
-          outline: none !important;
+          outline-color: var(--template-selection-outline-color, rgba(13, 148, 136, .98)) !important;
           box-shadow:
-            0 0 0 1px var(--v106-selection-centered-border-color),
-            inset 0 0 0 1px var(--v106-selection-centered-border-color),
             0 0 0 4px var(--template-selection-halo-color, rgba(45, 212, 191, .22)),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -28897,12 +28386,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           min-width: 0;
           max-width: 120px;
           width: auto;
-          height: 22px;
           padding: 0 8px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-size: 11px;
         }
         .template-edit-preview [${TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR}="true"] {
           position: relative;
@@ -28925,11 +28412,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             inset 0 0 0 1px rgba(255, 255, 255, .72) !important;
         }
         .template-edit-preview [${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"] {
-          outline: none !important;
+          outline: 2px solid rgba(225, 29, 72, .98) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px rgba(225, 29, 72, .98),
-            inset 0 0 0 1px rgba(225, 29, 72, .98),
             0 0 0 4px rgba(251, 113, 133, .24),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -29107,54 +28592,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
-          --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
-          background-color: rgb(100 116 139 / .3) !important;
-          background-color: color-mix(in srgb, var(--v106-metadata-selected-fill-color) 30%, transparent) !important;
-          background-image: none !important;
-          outline: none !important;
+          outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-metadata-selected-outline-color),
-            inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="text"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="attachment"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-purple-600, rgb(147 51 234));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="signature"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-red-600, rgb(220 38 38));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-amber-500, rgb(245 158 11));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-sky-500, rgb(14 165 233));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) > .${FRAME_SELECTION_FILL_CLASS} {
-          inset: 0;
-          display: none !important;
-          background: transparent !important;
-          box-shadow: none !important;
+            0 0 0 4px rgba(96, 165, 250, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: none !important;
+          outline: 2px solid rgba(13, 148, 136, .98) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-metadata-selected-outline-color),
-            inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
+            0 0 0 4px rgba(45, 212, 191, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]::before {
-          background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
+          background: rgba(13, 148, 136, .98) !important;
           box-shadow: none !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]::before {
-          background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
           content: attr(data-template-selection-order) !important;
           display: inline-flex !important;
         }
@@ -29996,14 +29451,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             metadataVisualMode={selectionPanelTab === 'metadata'}
             selectionPanelTab={selectionPanelTab}
             showMetadataIcons={showMetadataIcons}
-            actionOverlay={resolveCanvasActionOverlay()}
+            actionOverlay={renderCanvasActionOverlay()}
             actionOverlayLabel={canvasActionOverlayLabel}
             actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
-            metadataNameOverlay={
-              selectionPanelTab === 'metadata' && selectedFrameGroupIds.length <= 1 ? renderMetadataNameOverlay : null
-            }
-            metadataRolePrimaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRolePrimaryOverlay : null}
-            metadataRoleSecondaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRoleSecondaryOverlay : null}
             styleOverlay={renderPositionStyleOverlay()}
             summaryOverlay={renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}

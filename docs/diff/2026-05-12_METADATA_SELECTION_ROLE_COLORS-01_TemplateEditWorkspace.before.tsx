@@ -1035,8 +1035,8 @@ const syncPositionSelectionVisualStyles = (root: HTMLElement) => {
       groupId;
     const visual = resolvePositionStableVisual(groupId, groupLabel, selectionOrder);
     applyPositionSelectionVisualStyle(element, visual, groupLabel);
-    element.style.outline = 'none';
-    element.style.boxShadow = `0 0 0 1px ${visual.outlineColor}, inset 0 0 0 1px ${visual.outlineColor}, 0 0 0 4px ${visual.haloColor}`;
+    element.style.outline = `2px solid ${visual.outlineColor}`;
+    element.style.boxShadow = `0 0 0 4px ${visual.haloColor}, inset 0 0 0 1px rgba(255, 255, 255, .84)`;
   });
 };
 
@@ -1819,9 +1819,9 @@ const FRAME_BOX_KIND_BUTTON_LABELS: Record<TemplateFrameBoxKind, string> = {
   signature: '서명',
 };
 const FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameBoxKind, string> = {
-  text: 'border-transparent bg-slate-700 text-white',
-  attachment: 'border-transparent bg-purple-600 text-white',
-  signature: 'border-transparent bg-red-600 text-white',
+  text: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  attachment: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
+  signature: 'border-slate-950 bg-slate-950 text-white ring-1 ring-slate-950',
 };
 const FRAME_BOX_KIND_MARKER_LABELS: Record<TemplateFrameBoxKind, string> = {
   text: '텍스트',
@@ -1846,9 +1846,9 @@ const FRAME_ROLE_SHORT_LABELS: Record<TemplateFrameRole | 'group', string> = {
   key_value: '독립 값',
 };
 const FRAME_ROLE_ACTIVE_BUTTON_CLASSES: Record<TemplateFrameRole, string> = {
-  key: 'border-transparent bg-amber-500 text-white',
-  value: 'border-transparent bg-sky-500 text-white',
-  key_value: 'border-transparent bg-slate-500 text-white',
+  key: 'border-amber-200 bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  value: 'border-sky-200 bg-sky-50 text-sky-700 ring-1 ring-sky-200',
+  key_value: 'border-emerald-200 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
 };
 const FRAME_ROLE_DESCRIPTIONS: Record<TemplateFrameRole, string> = {
   key: '다른 value 상자를 묶을 수 있는 기준 역할입니다. 연결이 없어도 key 역할 자체는 유지됩니다.',
@@ -12173,10 +12173,9 @@ const appendPositionGroupProxySelectionMarker = (
   marker.style.height = toFrameCssPx(rect.height);
   marker.style.zIndex = '32';
   marker.style.overflow = 'visible';
-  marker.style.outline = 'none';
+  marker.style.outline = '2px solid rgba(37, 99, 235, .96)';
   marker.style.outlineOffset = '0';
-  marker.style.boxShadow =
-    '0 0 0 1px rgba(37, 99, 235, .96), inset 0 0 0 1px rgba(37, 99, 235, .96), 0 0 0 4px rgba(96, 165, 250, .22)';
+  marker.style.boxShadow = '0 0 0 4px rgba(96, 165, 250, .22), inset 0 0 0 1px rgba(255, 255, 255, .84)';
 
   const fill = document.createElement('div');
   fill.className = FRAME_SELECTION_FILL_CLASS;
@@ -28845,15 +28844,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ) !important;
         }
         .template-edit-preview [data-template-selected="true"] {
-          --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(37, 99, 235, .96));
           position: relative;
           overflow: visible !important;
           z-index: 20 !important;
-          outline: none !important;
+          outline: 2px solid var(--template-selection-outline-color, rgba(37, 99, 235, .96)) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-selection-centered-border-color),
-            inset 0 0 0 1px var(--v106-selection-centered-border-color),
             0 0 0 4px var(--template-selection-halo-color, rgba(96, 165, 250, .22)),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -28861,12 +28857,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"]::before {
           content: attr(data-template-selection-order);
           position: absolute;
-          top: 2px;
-          left: 2px;
+          top: 4px;
+          left: 4px;
           right: auto;
           z-index: 32;
-          min-width: 11px;
-          height: 11px;
+          min-width: 22px;
+          height: 22px;
           border-radius: 999px;
           display: inline-flex;
           align-items: center;
@@ -28874,17 +28870,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background: var(--template-selection-badge-color, rgba(37, 99, 235, .98));
           color: var(--template-selection-badge-text-color, white);
           box-shadow: none !important;
-          font-size: 6px;
+          font-size: 11px;
           line-height: 1;
           font-weight: 700;
           pointer-events: none;
         }
         .template-edit-preview [data-template-primary-selected="true"] {
-          --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(13, 148, 136, .98));
-          outline: none !important;
+          outline-color: var(--template-selection-outline-color, rgba(13, 148, 136, .98)) !important;
           box-shadow:
-            0 0 0 1px var(--v106-selection-centered-border-color),
-            inset 0 0 0 1px var(--v106-selection-centered-border-color),
             0 0 0 4px var(--template-selection-halo-color, rgba(45, 212, 191, .22)),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -28897,12 +28890,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           min-width: 0;
           max-width: 120px;
           width: auto;
-          height: 22px;
           padding: 0 8px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-size: 11px;
         }
         .template-edit-preview [${TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR}="true"] {
           position: relative;
@@ -28925,11 +28916,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             inset 0 0 0 1px rgba(255, 255, 255, .72) !important;
         }
         .template-edit-preview [${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"] {
-          outline: none !important;
+          outline: 2px solid rgba(225, 29, 72, .98) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px rgba(225, 29, 72, .98),
-            inset 0 0 0 1px rgba(225, 29, 72, .98),
             0 0 0 4px rgba(251, 113, 133, .24),
             inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
@@ -29107,54 +29096,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
-          --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
-          background-color: rgb(100 116 139 / .3) !important;
-          background-color: color-mix(in srgb, var(--v106-metadata-selected-fill-color) 30%, transparent) !important;
-          background-image: none !important;
-          outline: none !important;
+          outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-metadata-selected-outline-color),
-            inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="text"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="attachment"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-purple-600, rgb(147 51 234));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="signature"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-outline-color: var(--color-red-600, rgb(220 38 38));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-amber-500, rgb(245 158 11));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-sky-500, rgb(14 165 233));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
-        }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) > .${FRAME_SELECTION_FILL_CLASS} {
-          inset: 0;
-          display: none !important;
-          background: transparent !important;
-          box-shadow: none !important;
+            0 0 0 4px rgba(96, 165, 250, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
-          outline: none !important;
+          outline: 2px solid rgba(13, 148, 136, .98) !important;
           outline-offset: 0;
           box-shadow:
-            0 0 0 1px var(--v106-metadata-selected-outline-color),
-            inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
+            0 0 0 4px rgba(45, 212, 191, .22),
+            inset 0 0 0 1px rgba(255, 255, 255, .84) !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]::before {
-          background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
+          background: rgba(13, 148, 136, .98) !important;
           box-shadow: none !important;
         }
         .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]::before {
-          background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
           content: attr(data-template-selection-order) !important;
           display: inline-flex !important;
         }

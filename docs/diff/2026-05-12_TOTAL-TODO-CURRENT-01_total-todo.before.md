@@ -6,54 +6,19 @@
     - [외부대기] 본인 인증 기능
 - 서류 관리
   - 서류 누락 방지
-    - [운영검증중] 서류 클라우드 관리
-    - [운영검증중] 현장별 필요 서류 누락 방지 기능
+    - [진행중] 서류 클라우드 관리
+    - [진행중] 현장별 필요 서류 누락 방지 기능
   - 반복 서류 자동 생성
-    - [운영검증중] 템플릿 등록
+    - [진행중] 템플릿 등록
     - [진행중] 템플릿 추출
   - 현장 입력과 승인 처리
-    - [운영검증중] 서류와 연계된 현장별 사진 라벨링 보관
-    - [운영검증중] 일괄 정보 입력
-    - [운영검증중] 일괄 요청
-    - [외부대기] 변환 저장
+    - [진행중] 서류와 연계된 현장별 사진 라벨링 보관
+    - [진행중] 일괄 정보 입력
+    - [진행중] 일괄 요청
+    - [진행중] 변환 저장
 - 독립 알림 서비스
-  - [외부설정대기] 문자 발송
-  - [외부설정대기] 이메일 발송
-
-# 2026-05-12 현재 서비스 코드 상태
-
-- 점검 기준:
-  - `/Users/gy/Documents/dev/docs/src/services`
-  - `/Users/gy/Documents/dev/docs/src/app/api`
-  - `/Users/gy/Documents/dev/docs/src/app/*/page.tsx`
-  - `/Users/gy/Documents/dev/docs/src/lib/*Dtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/*.sql`
-- 현재 저장소의 실행 전 SQL 파일은 `docs/` 바로 아래에 없고, 부트스트랩 SQL은 `docs/applied/` 아래 아카이브로만 남아 있다.
-- 현재 작업 트리에는 이 문서와 무관한 삭제 변경이 이미 존재한다. 이 문서 개정은 해당 삭제 변경을 복구하거나 되돌리지 않는다.
-
-## 도메인별 현재 상태
-
-- 전자서명 무결성: `src/services/signService.ts` 가 `schema('signing')` 만 사용한다. 요청 생성, 해시 고정, 서명 실행 전 해시 재검사, 감사 로그, 서명 검증이 구현되어 있다. 단, `SIGNABLE_STATUSES = ['pending', 'authenticated']` 이므로 본인확인 실연동 전 임시 `pending -> signed` 허용은 아직 남아 있다.
-- 본인 인증: `src/services/signAuthService.ts` 가 인증 요청, 상태 조회, 취소, callback, verify, 민감정보 hash/protect 저장, verified 인증 목록 조회를 제공한다. BaroCert/PASS/NICE 같은 실제 공급사 adapter 는 환경 키와 callback 검증 조건이 준비될 때까지 외부대기다.
-- 서류 클라우드 관리: `src/services/documentService.ts` 가 문서 레지스트리, 버전, 출력본, value file, 사진 증빙 요약을 `documents` 스키마에서 관리한다. `/documents` 화면은 문서 중심 작업 패널, 요청 링크 생성/이메일 발송, PDF/DOCX/HWP 출력, 사진 증빙 업로드까지 포함한다.
-- 현장 체크리스트: `src/services/siteChecklistService.ts` 가 현장 생성, 규칙 저장, 체크리스트 재계산, 문서 상태 연결, 사진 증빙 요약 연결을 구현한다.
-- 템플릿 등록: `src/services/templateService.ts` 가 템플릿 목록/생성/조회/수정/삭제와 필드/라벨/서명 영역 저장을 구현한다. `/templates` 는 원본 입력에서 HTML 초안 생성 후 저장까지 이어진다.
-- 템플릿 추출: `/templates/extract` 기본 엔진은 `v47` 표시명 `v2.21` 이다. `src/services/templateExtractVersionService.ts` 는 `v1.05~v1.32`, `v2.01~v2.21` 비교 경로를 유지하고, `v32/v33/v34/v35/v36/v42/v43/v44/v45/v46/v47` 은 `src/services/templateExtractPdfRasterFirstReplicaService.ts` 의 Python raster-first converter 로 분기한다.
-- 템플릿 추출 런타임 의존성: `v47` 경로는 `scripts/template-extract-raster-first-replica.py` 를 호출하며 `cv2`, `fitz`, `numpy`, `pytesseract`, Tesseract OCR 런타임이 필요하다. 라우트는 `full/frames` 추출 단계, `fv1.11-*` frame group version, image/non-image frame text 후처리를 받는다.
-- 사진 라벨링: `src/services/photoLabelService.ts` 와 `src/services/photoLabelRequirementService.ts` 가 Storage 업로드, bucket 자동 생성 재시도, legacy insert fallback, 사진 메타데이터/EXIF, 수동/추천 라벨, 현장별 요구 라벨과 누락 경고를 구현한다.
-- 일괄 정보 입력: `src/services/bulkEditService.ts` 가 preview/commit, 타입 불일치 차단, 객체/배열 차단, 서명 라벨 본인확인 검증, 다중 문서 서명 차단, 문서 새 버전 생성을 구현한다.
-- 일괄 요청: `src/services/requestLinkService.ts` 가 요청 링크 생성, token hash 저장, dispatch URL 재발급, 공개 조회, 허용 라벨 제출, 1회성/만료 검증, 감사 로그, 문서 새 버전 생성을 구현한다.
-- 변환 저장: `src/services/exportService.ts` 가 PDF/DOCX job과 artifact 메타데이터를 생성하고, 다운로드 시 최소 PDF/DOCX 바이트를 on-demand 렌더링한다. `src/services/exportHwpHandoffService.ts` 는 HWP handoff/callback 계약을 구현했지만 실제 외부 HWP 변환기는 별도 연동 대기다.
-- 문자 발송: `src/services/messagingService.ts` 와 `src/services/solapiSmsService.ts` 가 발신번호/수신번호, 기본 설정, 문서별 기본 발신/수신 바인딩, 다중 수신자 fan-out 발송, dispatch/target/event 이력, Solapi 상태 동기화를 구현한다. 실제 발송은 `SOLAPI_API_KEY`, `SOLAPI_API_SECRET` 설정이 필요하다.
-- 이메일 발송: `src/services/emailDispatchService.ts` 와 `src/services/messagingService.ts` 가 Resend 기반 이메일 발송, dispatch/target/event 이력, `/messaging` 운영 화면 발송/조회 흐름을 구현한다. 실제 발송은 `RESEND_API_KEY`, `REQUEST_LINK_EMAIL_FROM` 설정이 필요하다.
-
-## 현재 병목
-
-- 템플릿 추출은 `v47`이 활성 UI 기본값이지만, `TemplateExtractVersionService.normalizeVersion()` 의 무효 입력 fallback 은 아직 `19`다. API 클라이언트는 `engineVersion` 을 명시해야 의도한 `v47` 경로를 탄다.
-- `v47`은 Python/OCR 런타임 의존성이 커서 배포 환경에 `requirements.txt` 설치와 Tesseract 설치가 필요하다.
-- 전자서명은 본인확인 내부 상태 흐름이 구현되어 있으나, 실 공급사 검증 전까지 `pending -> signed` 임시 허용을 제거할 수 없다.
-- PDF/DOCX 출력은 실제 다운로드 가능한 최소 렌더러다. 원문 양식 fidelity 높은 렌더링과 HWP 실변환은 아직 외부 변환기/전용 렌더러 연동이 필요하다.
-- 알림은 도메인 코드와 이력 저장은 구현되어 있으나, Solapi/Resend 키와 운영 계정 설정 없이는 `provider_not_configured` 로 남는다.
+  - [진행중] 문자 발송
+  - [진행중] 이메일 발송
 
 # BUILDHTML 진행 방향 고정
 
@@ -462,18 +427,22 @@
 
 # 현재 우선 구현 순서
 
-1. 템플릿 추출 `v47(v2.21)` 의 Python/OCR 런타임과 기준 PDF 3종 실제 품질 검증
-2. `/documents` 문서 작업 센터의 요청 링크, 출력본, 사진 증빙 통합 흐름 운영 검증
-3. Solapi/Resend 운영 키와 발신자/수신자 설정 검증
-4. HWP 외부 변환기 handoff/callback 실연동
-5. PDF/DOCX 렌더러 fidelity 개선
-6. 본인 인증 공급사 실연동과 `pending -> signed` 임시 허용 제거
-7. 템플릿 등록/수정/삭제, 일괄 수정, 요청 링크, 사진 증빙의 회귀 테스트 정리
+1. 서류 클라우드 관리 통합 완성
+2. 현장별 필요 서류 누락 방지 기능
+3. 템플릿 등록
+4. 템플릿 추출
+5. 서류와 연계된 현장별 사진 라벨링 보관
+6. 일괄 정보 입력
+7. 일괄 요청
+8. 변환 저장
+9. 문자/이메일 발송 운영 완성
+10. 본인 인증 기능 마무리
 
-- 서류 클라우드, 현장 체크리스트, 템플릿 등록, 사진 라벨링, 일괄 수정, 요청 링크, 알림 이력, 변환 job 골격은 코드상 1차 구현이 끝나 운영검증 단계다.
-- 현재 신규 기능 구현보다 중요한 것은 실제 연결 DB/Storage/provider 설정에서 end-to-end 흐름을 검증하고, 실패 지점을 문서와 체크리스트에 좁게 남기는 것이다.
-- 본인 인증 기능은 내부 골격이 있으나 실 공급사 연동 전까지 임시 인증/서명 전이를 유지한다. `AUTH-04~07`, `SIGN-INTEGRITY-05` 는 공급사 키, callback URL, 검증 계약이 준비된 뒤 진행한다.
-- 템플릿 추출은 계속 진행중이다. `v47` 기본 경로가 최신이므로, 새 개선은 `v48` 같은 고정 버전으로 추가하고 기존 `v47` 의미를 바꾸지 않는다.
+- 본인 인증 기능은 가장 마지막에 진행한다.
+- 외부 사업자 등록, 공급사 키, callback 검증 조건이 준비되기 전에는 서비스 기능을 먼저 완성한다.
+- 즉 현재 단계에서는 `AUTH-04~07`, `SIGN-INTEGRITY-05` 를 서두르지 않고, 다른 도메인이 “인증이 이미 된다”는 전제 아래서 먼저 끝까지 연결한다.
+- 반면 서류 관리, 요청 링크, 변환 저장, 알림 발송은 독립 서비스 단위로 먼저 설계, 구현, 테스트할 수 있다.
+- 따라서 현재는 문서/요청/변환/알림 흐름을 먼저 닫고, 본인 인증은 마지막 통합 단계에서 반영하는 것이 전체 진도를 가장 안정적으로 올리는 순서다.
 
 # 무결성 기능
 
@@ -548,20 +517,20 @@
   - 알림 발송 전체
 - API 계약:
   - `POST /api/sign` with `action: AUTH_REQUEST`
-    - 입력 DTO: `requestId`, `providerGroup`, `provider`, `providerProduct?`, `documentContent`, `consentText`, `termsVersion`
-    - 출력 DTO: `authentication`, `dispatch`
+    - 입력 DTO: `requestId`, `providerKey`, `consentText`, `requester`
+    - 출력 DTO: `authRequestId`, `providerKey`, `status`, `redirectUrl?`
   - `POST /api/sign` with `action: AUTH_STATUS`
-    - 입력 DTO: `requestId`, `authenticationId?`
-    - 출력 DTO: `authentication`, `providerConfigured`, `providerMissingEnv`
+    - 입력 DTO: `authRequestId`
+    - 출력 DTO: `status`, `providerPayloadSummary`
   - `POST /api/sign` with `action: AUTH_CANCEL`
-    - 입력 DTO: `requestId`, `authenticationId`, `reason?`
-    - 출력 DTO: `authentication`
+    - 입력 DTO: `authRequestId`
+    - 출력 DTO: `status`
   - `POST /api/sign` with `action: AUTH_VERIFY`
-    - 입력 DTO: `requestId?`, `authenticationId?`, `receiptId?`, `documentContent?`, `consentText?`, `verificationPayload?`, `signerName?`, `birthdate?`, `phone?`, `ci?`, `di?`
-    - 출력 DTO: `authentication`, `requestStatus`
+    - 입력 DTO: `authRequestId`, `verificationPayload`
+    - 출력 DTO: `status`, `verifiedAt`, `authenticatedRequestStatus`
   - `POST /api/sign` with `action: AUTH_CALLBACK`
-    - 입력 DTO: `requestId?`, `authenticationId?`, `receiptId?`, `providerGroup?`, `provider?`, `callbackPayload`, `autoVerify?`
-    - 출력 DTO: `authentication` 또는 `callback`, `verification`
+    - 입력 DTO: `providerKey`, `callbackPayload`
+    - 출력 DTO: `status`, `mappedAuthStatus`
 - 데이터 소유권:
   - `sign_authentications`
   - 인증 결과 해시
@@ -594,7 +563,7 @@
 
 # 서류 클라우드 관리
 
-- 구현 상태: [운영검증중] 문서 작업 센터, 상세/버전/출력본/value file/요청 링크/사진 증빙 통합 흐름 구현 완료
+- 구현 상태: [진행중] 2차 상세 조회/버전 추가 구현 완료
 - 기능 목적:
   - 모든 문서를 현장, 종류, 버전, 상태 기준으로 보관하고 조회할 수 있게 만든다.
 - 단독 서비스로서의 가치:
@@ -611,13 +580,13 @@
   - 알림 발송
 - API 계약:
   - `POST /api/documents`
-    - 입력 DTO: `siteId`, `documentTypeKey`, `title?`, `templateId?`, `htmlCanonical`, `labelValues`, `valueFiles?`
-    - 출력 DTO: `document`, `latestVersion`, `artifacts`, `valueFiles`
+    - 입력 DTO: `siteId`, `documentTypeKey`, `templateId?`, `htmlCanonical`, `labelValues`
+    - 출력 DTO: `documentId`, `versionId`, `status`
   - `GET /api/documents/:documentId`
-    - 출력 DTO: `document`, `latestVersion`, `versions`, `artifacts`, `valueFiles`, `photoEvidence`
+    - 출력 DTO: `document`, `latestVersion`, `artifacts`
   - `POST /api/documents/:documentId/version`
-    - 입력 DTO: `htmlCanonical`, `labelValues`, `valueFiles?`, `changeReason`, `createdBy?`
-    - 출력 DTO: `document`, `latestVersion`, `valueFiles`
+    - 입력 DTO: `htmlCanonical`, `labelValues`, `changeReason`
+    - 출력 DTO: `versionId`, `versionNumber`
   - `GET /api/documents`
     - 쿼리: `siteId`, `status`, `documentTypeKey`, `latestOnly`
 - 데이터 소유권:
@@ -639,12 +608,11 @@
   - [✓] `DOC-CLOUD-03` 최신본과 이력 조회 API를 제공한다.
   - [✓] `DOC-CLOUD-04` soft delete 정책을 정의한다.
   - [✓] `DOC-CLOUD-05` 한 문서 기준으로 버전, 출력본, 요청 링크, 사진 증빙 상태를 함께 보여준다.
-  - [✓] `DOC-CLOUD-06` 문서 상세에서 요청 링크, 출력본, 사진 관리, 템플릿 화면으로 바로 이어지는 실행 액션을 제공한다.
-  - [✓] `DOC-CLOUD-07` `/documents` 기본 화면을 문서 작업 센터로 단순화하고, 등록/버전 편집은 `고급 편집` 아래로 내린다.
-  - [✓] `DOC-CLOUD-08` `/documents` 요청 링크 영역에서 허용 항목을 직접 입력하지 않고, 문서 미리보기에서 클릭해 선택하게 한다.
-  - [✓] `DOC-CLOUD-09` `/documents` 기본 작업 화면을 큰 문서 미리보기와 오른쪽 작업 패널의 단계형 구조로 재구성한다.
-  - [✓] `DOC-CLOUD-10` `/documents` 사진 증빙 작업도 같은 화면에서 업로드와 증빙 연결까지 끝내게 한다.
-  - [✓] `DIVTYPE-01` 문서 값 첨부파일을 `documents.document_value_files` 로 버전 스냅샷 저장한다.
+  - [진행중] `DOC-CLOUD-06` 문서 상세에서 요청 링크, 출력본, 사진 관리, 템플릿 화면으로 바로 이어지는 실행 액션을 제공한다.
+  - [진행중] `DOC-CLOUD-07` `/documents` 기본 화면을 문서 작업 센터로 단순화하고, 등록/버전 편집은 `고급 편집` 아래로 내린다.
+  - [진행중] `DOC-CLOUD-08` `/documents` 요청 링크 영역에서 허용 항목을 직접 입력하지 않고, 문서 미리보기에서 클릭해 선택하게 한다.
+  - [진행중] `DOC-CLOUD-09` `/documents` 기본 작업 화면을 큰 문서 미리보기와 오른쪽 작업 패널의 단계형 구조로 재구성한다.
+  - [진행중] `DOC-CLOUD-10` `/documents` 사진 증빙 작업도 같은 화면에서 업로드와 증빙 연결까지 끝내게 한다.
 - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/app/documents/page.tsx`
   - `/Users/gy/Documents/dev/docs/src/app/api/documents/route.ts`
@@ -652,11 +620,11 @@
   - `/Users/gy/Documents/dev/docs/src/app/api/documents/[documentId]/version/route.ts`
   - `/Users/gy/Documents/dev/docs/src/services/documentService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/documentDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-document-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-document-bootstrap.sql`
 
 # 현장별 필요 서류 누락 방지 기능
 
-- 구현 상태: [운영검증중] 규칙 저장/체크리스트 계산/문서 상태/사진 증빙 요약 연결 구현 완료
+- 구현 상태: [진행중] 1차 규칙 저장/체크리스트 계산 구현 완료
 - 기능 목적:
   - 현장을 만들 때 필요한 서류를 자동 계산하고 누락 서류를 바로 보여준다.
 - 단독 서비스로서의 가치:
@@ -700,11 +668,11 @@
   - `/Users/gy/Documents/dev/docs/src/app/api/sites/[siteId]/checklist/route.ts`
   - `/Users/gy/Documents/dev/docs/src/services/siteChecklistService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/siteChecklistDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-site-checklist-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-site-checklist-bootstrap.sql`
 
 # 템플릿 등록
 
-- 구현 상태: [운영검증중] 템플릿 CRUD, 필드/라벨/서명 영역 저장, 원본 기반 HTML 초안 생성 흐름 구현 완료
+- 구현 상태: [진행중] 1차 저장 구조와 문서 중심 등록 흐름 구현 완료
 - 기능 목적:
   - 업로드된 양식을 재사용 가능한 HTML 템플릿과 라벨 구조로 변환한다.
 - 단독 서비스로서의 가치:
@@ -723,14 +691,6 @@
   - `POST /api/templates`
     - 입력 DTO: `templateName`, `sourceDocumentName?`, `sourceDocumentId?`, `draftHtml`, `layoutResizeMode`
     - 출력 DTO: `template`
-  - `POST /api/templates` with `action: generate_draft`
-    - 입력 DTO: `sourceTitle?`, `sourceKind?`, `sourceContent?` 또는 multipart `file`
-    - 출력 DTO: `draftHtml`, `recommendedFields`, `recommendedSignatureAreas`
-  - `PATCH /api/templates/:templateId`
-    - 입력 DTO: `templateName?`, `sourceDocumentName?`, `draftHtml?`, `layoutResizeMode?`
-    - 출력 DTO: `template`
-  - `DELETE /api/templates/:templateId`
-    - 출력 DTO: `templateId`
   - `POST /api/templates/:templateId/fields`
     - 입력 DTO: `fields[]`, `signatureAreas[]`
     - 출력 DTO: `templateId`, `savedFieldCount`, `savedSignatureAreaCount`, `labelBindingCount`
@@ -757,7 +717,6 @@
   - [✓] `TPL-REG-04` 서명 영역도 라벨과 좌표로 저장한다.
   - [✓] `TPL-REG-05` 최근 템플릿 목록과 자동 조회 흐름을 제공한다.
   - [✓] `TPL-REG-06` 최근 템플릿 선택 상태와 열기 UX를 분명하게 표시한다.
-  - [✓] `TPL-REG-07` 템플릿 수정/삭제 API와 화면 편집 흐름을 제공한다.
 - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/app/templates/page.tsx`
   - `/Users/gy/Documents/dev/docs/src/app/api/templates/route.ts`
@@ -765,11 +724,11 @@
   - `/Users/gy/Documents/dev/docs/src/app/api/templates/[templateId]/fields/route.ts`
   - `/Users/gy/Documents/dev/docs/src/services/templateService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/templateDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-template-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-template-bootstrap.sql`
 
 # 템플릿 추출
 
-- 구현 상태: [진행중] `v47(v2.21)` raster-first PDF 추출 경로가 UI 기본값. txt/html/docx/pdf 업로드, 버전 비교, frame text 후처리, 승인 흐름 구현 완료. 실제 품질/런타임 검증 진행중.
+- 구현 상태: [진행중] 1차 파일 추출/승인 흐름 구현 완료
 - 기능 목적:
   - 값이 이미 입력된 문서를 읽고 재사용 가능한 템플릿 초안을 생성한다.
 - 단독 서비스로서의 가치:
@@ -788,9 +747,8 @@
   - 외부 OCR 또는 실제 LLM 문서 이해 엔진 운영
 - API 계약:
   - `POST /api/templates/extract`
-    - 입력 DTO: `sourceTitle?`, `sourceKind`, `sourceContent`, `similarTemplateIds?`, `engineVersion?`, `extractionStage?`, `frameGroupVersion?`
-    - multipart 입력 DTO: `file`, `engineVersion`, `extractionStage`, `frameGroupVersion`, `frameTextExtractionMode?`, `frameTextExtractionVersion?`, `imageFrameTextExtractionVersion?`
-    - 출력 DTO: `draft`, `candidates[]`, `reviewSummary`, `pipelineTrace?`, `qualityReport?`
+    - 입력 DTO: `sourceTitle?`, `sourceKind`, `sourceContent`, `similarTemplateIds?`
+    - 출력 DTO: `draft`, `candidates[]`, `reviewSummary`
   - `GET /api/templates/extract/:draftId`
     - 출력 DTO: `draft`, `candidates[]`, `reviewSummary`
   - `POST /api/templates/extract/:draftId/approve`
@@ -815,9 +773,6 @@
   - [✓] `TPL-EXT-03` 낮은 확신 필드를 `검토 필요`로 남긴다.
   - [✓] `TPL-EXT-04` 승인 전에는 정식 템플릿으로 승격하지 않는다.
   - [✓] `TPL-EXT-05` 파일 업로드에서 본문을 추출해 기존 draft 생성 흐름으로 넘긴다.
-  - [✓] `TPL-EXT-06` PDF 추출 엔진을 고정 버전 목록으로 선택하고 비교할 수 있게 한다.
-  - [✓] `TPL-EXT-47` 기본 PDF 추출 경로를 `v47(v2.21)` Python raster-first converter 로 연결한다.
-  - [진행중] `TPL-EXT-RUNTIME-01` 배포 환경에 `cv2`, `fitz`, `numpy`, `pytesseract`, Tesseract OCR 런타임을 준비하고 기준 PDF 3종을 재검증한다.
 - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/route.ts`
   - `/Users/gy/Documents/dev/docs/src/app/api/templates/extract/[draftId]/route.ts`
@@ -826,11 +781,11 @@
   - `/Users/gy/Documents/dev/docs/src/services/templateExtractService.ts`
   - `/Users/gy/Documents/dev/docs/src/services/templateExtractFileService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/templateExtractDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-template-extract-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-template-extract-bootstrap.sql`
 
 # 서류와 연계된 현장별 사진 라벨링 보관
 
-- 구현 상태: [운영검증중] Storage 업로드, EXIF/위치 메타데이터, 문서 연계형 증빙 업로드, 누락 경고 구현 완료
+- 구현 상태: [진행중] 실제 업로드/누락 경고/문서 연계형 업로드 흐름 구현 완료, 최종 사용성 정리 진행중
 - 기능 목적:
   - 현장 사진을 서류 라벨과 연결해 보관하고 필요한 사진 누락을 줄인다.
 - 단독 서비스로서의 가치:
@@ -883,9 +838,6 @@
   - [✓] `PHOTO-LABEL-04` 문서 요구 라벨 누락 경고를 제공한다.
   - [✓] `PHOTO-LABEL-05` 실제 사진 업로드와 Storage 저장을 제공한다.
   - [✓] `PHOTO-LABEL-07` 문서를 먼저 고르고 필요한 사진 항목을 체크한 뒤 업로드/저장하는 단계형 화면을 제공한다.
-  - [✓] `PHOTO-LABEL-08` Storage bucket 누락 시 자동 생성 재시도와 오류 원인 표시를 제공한다.
-  - [✓] `PHOTO-LABEL-09` photo registry schema cache 지연 시 legacy insert fallback 을 제공한다.
-  - [✓] `PHOTO-LABEL-11` 사진 선택 즉시 EXIF 촬영 시각/위치를 읽어 저장 전 수정할 수 있게 한다.
 - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/app/photos/page.tsx`
   - `/Users/gy/Documents/dev/docs/src/app/api/photos/route.ts`
@@ -896,13 +848,13 @@
   - `/Users/gy/Documents/dev/docs/src/services/photoLabelService.ts`
   - `/Users/gy/Documents/dev/docs/src/services/photoLabelRequirementService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/photoLabelDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-photo-label-bootstrap.sql`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-photo-label-gap-bootstrap.sql`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-photo-storage-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-photo-label-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-photo-label-gap-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-photo-storage-bootstrap.sql`
 
 # 일괄 정보 입력
 
-- 구현 상태: [운영검증중] preview/commit, 서명 라벨 본인확인 검증, 화면 내 mock 본인확인 생성/검증 흐름 구현 완료
+- 구현 상태: [진행중] 1차 preview/commit 구조 구현 완료
 - 기능 목적:
   - 같은 라벨을 가진 여러 문서에 같은 정보를 한 번에 넣거나 수정하거나 삭제한다.
 - 단독 서비스로서의 가치:
@@ -937,24 +889,21 @@
   - 변경 미리보기 저장소
   - 작업 이력 저장소
 - 체크리스트:
-  - [✓] `BULK-EDIT-01` 같은 타입의 라벨만 묶어 처리한다.
-  - [✓] `BULK-EDIT-02` 적용 전 미리보기를 제공한다.
-  - [✓] `BULK-EDIT-03` 실제 반영 이력을 저장한다.
-  - [✓] `BULK-EDIT-04` 서명 라벨은 추가 권한과 본인확인 조건을 붙인다.
-  - [✓] `BULK-EDIT-05` JSON 중심 화면을 단계형 단일 변경 UI 로 단순화한다.
-  - [✓] `BULK-EDIT-06` bulk-ops 화면 안에서 서명용 본인확인 요청 생성/검증 완료 처리를 제공한다.
-  - [✓] `BULK-EDIT-07` pending 인증과 verified 인증 선택 상태를 분리해 검증 직후 미리보기까지 이어지게 한다.
+  - [진행중] `BULK-EDIT-01` 같은 타입의 라벨만 묶어 처리한다.
+  - [진행중] `BULK-EDIT-02` 적용 전 미리보기를 제공한다.
+  - [진행중] `BULK-EDIT-03` 실제 반영 이력을 저장한다.
+  - [진행중] `BULK-EDIT-04` 서명 라벨은 추가 권한과 본인확인 조건을 붙인다.
 - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/app/bulk-ops/page.tsx`
   - `/Users/gy/Documents/dev/docs/src/app/api/bulk-ops/preview/route.ts`
   - `/Users/gy/Documents/dev/docs/src/app/api/bulk-ops/commit/route.ts`
   - `/Users/gy/Documents/dev/docs/src/services/bulkEditService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/bulkOperationDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-bulk-ops-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-bulk-ops-bootstrap.sql`
 
 # 일괄 요청
 
-- 구현 상태: [운영검증중] 생성/목록/dispatch URL 재발급/공개 열람/허용 라벨 제출/감사로그 구현 완료
+- 구현 상태: [진행중] 1차 생성/열람/제출/감사로그 구현 완료
 - 기능 목적:
   - 특정 라벨만 제한적으로 수정할 수 있는 요청 링크를 메일, 문자로 보낸다.
 - 단독 서비스로서의 가치:
@@ -971,11 +920,8 @@
   - 실제 메일/SMS 발송 연동
 - API 계약:
   - `POST /api/request-links`
-    - 입력 DTO: `documentId`, `allowedLabels[]`, `recipientChannel`, `recipientTarget`, `recipientName?`, `expiresAt`, `oneTimeUse?`, `requestedBy?`
+    - 입력 DTO: `documentId`, `allowedLabels[]`, `recipient`, `expiresAt`
     - 출력 DTO: `requestLinkId`, `token`, `maskedUrl`
-  - `GET /api/request-links`
-    - 쿼리: `siteId?`, `limit?`, `dispatchUrlFor?`
-    - 출력 DTO: 최근 요청 링크 목록 또는 재발급된 `maskedUrl`
   - `GET /api/request-links/:token`
     - 출력 DTO: `documentSummary`, `allowedLabels[]`, `expiresAt`
   - `POST /api/request-links/:token/submit`
@@ -995,13 +941,10 @@
   - 제출 API
   - 알림 발송 연동
 - 체크리스트:
-  - [✓] `REQ-LINK-01` 허용 라벨 범위를 토큰과 함께 저장한다.
-  - [✓] `REQ-LINK-02` 만료일과 1회성 여부를 검증한다.
-  - [✓] `REQ-LINK-03` 허용되지 않은 라벨 수정은 차단한다.
-  - [✓] `REQ-LINK-04` 누가 언제 무엇을 바꿨는지 감사 로그를 남긴다.
-  - [✓] `REQ-LINK-05` 발송 직전 dispatch URL 을 새 토큰으로 재발급한다.
-  - [✓] `REQ-LINK-06` 요청 링크 화면을 링크 생성/전송 실행 중심으로 단순화한다.
-  - [✓] `REQ-LINK-10` messaging 도메인의 문서별 기본 발신/수신 설정을 요청 링크 발송 기본값으로 사용한다.
+  - [진행중] `REQ-LINK-01` 허용 라벨 범위를 토큰과 함께 저장한다.
+  - [진행중] `REQ-LINK-02` 만료일과 1회성 여부를 검증한다.
+  - [진행중] `REQ-LINK-03` 허용되지 않은 라벨 수정은 차단한다.
+  - [진행중] `REQ-LINK-04` 누가 언제 무엇을 바꿨는지 감사 로그를 남긴다.
 - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/app/api/request-links/route.ts`
   - `/Users/gy/Documents/dev/docs/src/app/api/request-links/[token]/route.ts`
@@ -1010,11 +953,11 @@
   - `/Users/gy/Documents/dev/docs/src/app/request-links/[token]/page.tsx`
   - `/Users/gy/Documents/dev/docs/src/services/requestLinkService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/requestLinkDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-request-links-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-request-links-bootstrap.sql`
 
 # 문자 발송
 
-- 구현 상태: [외부설정대기] Solapi SMS와 Resend email 독립 도메인 구현 완료, provider 키/운영 계정 설정 대기
+- 구현 상태: [진행중] Solapi 기반 독립 도메인 1차 구현 진행중
 - 기능 목적:
   - 발신번호에서 수신번호로 링크 또는 안내 메시지를 문자로 발송한다.
 - 단독 서비스로서의 가치:
@@ -1030,16 +973,9 @@
   - 본인 인증
 - API 계약:
   - `POST /api/messaging/sms/senders`
-  - `GET /api/messaging/sms/senders`
   - `POST /api/messaging/sms/recipients`
-  - `GET /api/messaging/sms/recipients`
-  - `GET /api/messaging/sms/settings`
-  - `POST /api/messaging/sms/settings`
   - `POST /api/messaging/sms/send`
-  - `POST /api/messaging/sms/sync`
-  - `GET /api/messaging/sms/dispatches`
   - `POST /api/messaging/email/send`
-  - `GET /api/messaging/email/dispatches`
 - 데이터 소유권:
   - 발신번호 레지스트리
   - 수신번호 레지스트리
@@ -1057,17 +993,14 @@
   - sender/recipient 저장소
   - dispatch 저장소
 - 체크리스트:
-  - [✓] `MESSAGING-01` messaging 스키마와 독립 API를 만든다.
-  - [✓] `MESSAGING-02` Solapi 발송 인증과 dispatch 이력을 남긴다.
-  - [✓] `MESSAGING-03` delivery callback 또는 상태 동기화를 붙인다.
-  - [✓] `MESSAGING-04` request-links 에서 messaging 계약만 호출하도록 유지한다.
-  - [✓] `MESSAGING-05` 기본 발신번호와 메시지 접두사를 messaging 정본 설정으로 관리한다.
-  - [✓] `MESSAGING-06` 여러 수신번호를 한 번에 선택해 recipient 별 target 이력으로 발송한다.
-  - [✓] `MESSAGING-07` request-links 에서 이메일 발송도 messaging 계약으로 분리한다.
-  - [✓] `MESSAGING-11` 문자 발송 운영 화면을 `/messaging` 으로 분리한다.
-  - [✓] `MESSAGING-14` messaging 운영 화면에서 이메일 발송 이력을 조회한다.
-  - [✓] `MESSAGING-15` messaging 운영 화면에서도 이메일 발송을 직접 실행한다.
-  - [외부설정대기] `MESSAGING-PROVIDER-01` Solapi/Resend 운영 키와 발신자 검증을 실제 계정에서 확인한다.
+  - [진행중] `MESSAGING-01` messaging 스키마와 독립 API를 만든다.
+  - [진행중] `MESSAGING-02` Solapi 발송 인증과 dispatch 이력을 남긴다.
+  - [진행중] `MESSAGING-03` delivery callback 또는 상태 동기화를 붙인다.
+  - [진행중] `MESSAGING-04` request-links 에서 messaging 계약만 호출하도록 유지한다.
+  - [진행중] `MESSAGING-05` 기본 발신번호와 메시지 접두사를 messaging 정본 설정으로 관리한다.
+  - [진행중] `MESSAGING-07` request-links 에서 이메일 발송도 messaging 계약으로 분리한다.
+  - [진행중] `MESSAGING-14` messaging 운영 화면에서 이메일 발송 이력을 조회한다.
+  - [진행중] `MESSAGING-15` messaging 운영 화면에서도 이메일 발송을 직접 실행한다.
   - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/lib/messagingDtos.ts`
   - `/Users/gy/Documents/dev/docs/src/services/messagingService.ts`
@@ -1079,11 +1012,11 @@
   - `/Users/gy/Documents/dev/docs/src/app/api/messaging/sms/settings/route.ts`
   - `/Users/gy/Documents/dev/docs/src/app/api/messaging/email/send/route.ts`
   - `/Users/gy/Documents/dev/docs/src/app/request-links/page.tsx`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-messaging-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-messaging-bootstrap.sql`
 
 # 변환 저장
 
-- 구현 상태: [외부대기] PDF/DOCX 다운로드와 HWP handoff/callback 계약 구현 완료, HWP 실제 변환기 연동 대기
+- 구현 상태: [진행중] 1차 job/artifact 메타데이터 구조 구현 완료
 - 기능 목적:
   - HTML 정본을 PDF, DOCX, HWP 형식으로 안전하게 변환하고 이력을 남긴다.
 - 단독 서비스로서의 가치:
@@ -1104,13 +1037,6 @@
     - 출력 DTO: `exportJobId`, `status`
   - `GET /api/exports/:exportJobId`
     - 출력 DTO: `status`, `artifactId?`, `error?`
-  - `GET /api/exports/:exportJobId/download`
-    - 출력 DTO: PDF 또는 DOCX 파일 바이트
-  - `POST /api/exports/:exportJobId/handoff`
-    - 출력 DTO: HWP 외부 변환기 handoff payload, callback token
-  - `POST /api/exports/hwp-callback`
-    - 입력 DTO: `exportJobId`, `callbackToken`, `status`, `storagePath?`, `fileSizeBytes?`
-    - 출력 DTO: HWP 완료/실패 상태와 artifact
   - `GET /api/documents/:documentId/artifacts`
     - 출력 DTO: `artifacts[]`
 - 데이터 소유권:
@@ -1126,14 +1052,13 @@
   - 변환 워커
   - 출력본 저장소
 - 체크리스트:
-  - [✓] `EXPORT-01` HTML 정본 기준으로 PDF 변환을 지원한다.
-  - [✓] `EXPORT-02` DOCX 변환을 지원한다.
-  - [✓] `EXPORT-03` HWP 변환 경로를 정의한다.
-  - [✓] `EXPORT-04` 각 출력물이 어떤 문서 버전에서 생성되었는지 저장한다.
-  - [✓] `EXPORT-05` PDF 실제 다운로드 응답을 지원한다.
-  - [✓] `EXPORT-06` DOCX 실제 다운로드 응답을 지원한다.
-  - [✓] `EXPORT-07` HWP 외부 변환기 handoff/callback 계약을 지원한다.
-  - [외부대기] `EXPORT-HWP-01` 외부 HWP 변환기와 실제 네트워크 handoff 를 연결한다.
+  - [진행중] `EXPORT-01` HTML 정본 기준으로 PDF 변환을 지원한다.
+  - [진행중] `EXPORT-02` DOCX 변환을 지원한다.
+  - [진행중] `EXPORT-03` HWP 변환 경로를 정의한다.
+  - [진행중] `EXPORT-04` 각 출력물이 어떤 문서 버전에서 생성되었는지 저장한다.
+  - [진행중] `EXPORT-05` PDF 실제 다운로드 응답을 지원한다.
+  - [진행중] `EXPORT-06` DOCX 실제 다운로드 응답을 지원한다.
+  - [진행중] `EXPORT-07` HWP 외부 변환기 handoff/callback 계약을 지원한다.
 - 1차 제안 파일:
   - `/Users/gy/Documents/dev/docs/src/app/exports/page.tsx`
   - `/Users/gy/Documents/dev/docs/src/app/api/exports/route.ts`
@@ -1141,7 +1066,7 @@
   - `/Users/gy/Documents/dev/docs/src/app/api/documents/[documentId]/artifacts/route.ts`
   - `/Users/gy/Documents/dev/docs/src/services/exportService.ts`
   - `/Users/gy/Documents/dev/docs/src/lib/exportDtos.ts`
-  - `/Users/gy/Documents/dev/docs/docs/applied/run-this-supabase-export-bootstrap.sql`
+  - `/Users/gy/Documents/dev/docs/docs/run-this-supabase-export-bootstrap.sql`
 
 # 문서 개정 체크리스트
 
@@ -1153,49 +1078,29 @@
 - [진행중] `SIGN-SCHEMA-01` signing 스키마 전환 설계와 1차 구현 파일 목록을 문서에 반영했다.
 - [✓] `SIGN-SCHEMA-02` `src/services/signService.ts`, `src/services/signAuthService.ts` 가 `schema('signing')` 을 사용하도록 정렬했다.
 - [✓] `SIGN-SCHEMA-03` `docs/applied/setup-db.sql`, `docs/applied/run-this-supabase-auth-bootstrap.sql`, `docs/applied/run-this-supabase-signing-schema-migration.sql`, `docs/applied/verify-signing-schema-migration.sql` 을 작성했다.
-- [✓] `DOC-CLOUD-01` `src/services/documentService.ts`, `src/lib/documentDtos.ts`, `src/app/api/documents/route.ts`, `src/app/documents/page.tsx`, `docs/applied/run-this-supabase-document-bootstrap.sql` 을 작성했다.
+- [✓] `DOC-CLOUD-01` `src/services/documentService.ts`, `src/lib/documentDtos.ts`, `src/app/api/documents/route.ts`, `src/app/documents/page.tsx`, `docs/run-this-supabase-document-bootstrap.sql` 을 작성했다.
 - [✓] `DOC-CLOUD-03` `src/app/api/documents/[documentId]/route.ts`, `src/app/api/documents/[documentId]/version/route.ts`, `src/services/documentService.ts`, `src/app/documents/page.tsx` 에 상세 조회와 버전 추가를 구현했다.
-- [✓] `SITE-CHECK-01` `src/lib/siteChecklistDtos.ts`, `src/services/siteChecklistService.ts`, `src/app/api/sites/route.ts`, `src/app/api/sites/checklist/route.ts`, `src/app/api/sites/[siteId]/checklist/route.ts`, `src/app/sites/page.tsx`, `docs/applied/run-this-supabase-site-checklist-bootstrap.sql` 을 작성했다.
-- [✓] `TPL-REG-01` `src/lib/templateDtos.ts`, `src/services/templateService.ts`, `src/app/api/templates/route.ts`, `src/app/api/templates/[templateId]/route.ts`, `src/app/api/templates/[templateId]/fields/route.ts`, `src/app/templates/page.tsx`, `docs/applied/run-this-supabase-template-bootstrap.sql` 을 작성했다.
+- [✓] `SITE-CHECK-01` `src/lib/siteChecklistDtos.ts`, `src/services/siteChecklistService.ts`, `src/app/api/sites/route.ts`, `src/app/api/sites/checklist/route.ts`, `src/app/api/sites/[siteId]/checklist/route.ts`, `src/app/sites/page.tsx`, `docs/run-this-supabase-site-checklist-bootstrap.sql` 을 작성했다.
+- [✓] `TPL-REG-01` `src/lib/templateDtos.ts`, `src/services/templateService.ts`, `src/app/api/templates/route.ts`, `src/app/api/templates/[templateId]/route.ts`, `src/app/api/templates/[templateId]/fields/route.ts`, `src/app/templates/page.tsx`, `docs/run-this-supabase-template-bootstrap.sql` 을 작성했다.
 - [✓] `TPL-REG-05` `src/services/templateService.ts`, `src/app/api/templates/route.ts`, `src/app/templates/page.tsx`, `src/app/templates/extract/page.tsx` 에 최근 템플릿 목록과 생성된 템플릿 바로 열기 흐름을 추가했다.
 - [✓] `TPL-REG-06` `src/app/templates/page.tsx` 에 선택됨 표시와 목록 열기 UX를 추가했다.
-- [✓] `TPL-EXT-01` `src/lib/templateExtractDtos.ts`, `src/services/templateExtractService.ts`, `src/app/api/templates/extract/route.ts`, `src/app/api/templates/extract/[draftId]/route.ts`, `src/app/api/templates/extract/[draftId]/approve/route.ts`, `src/app/templates/extract/page.tsx`, `docs/applied/run-this-supabase-template-extract-bootstrap.sql` 을 작성했다.
-- [✓] `TPL-EXT-05` `src/services/templateExtractFileService.ts`, `src/app/api/templates/extract/route.ts`, `src/services/templateExtractService.ts`, `src/app/templates/extract/page.tsx` 에 txt/html/docx/pdf 업로드 본문 추출과 기존 draft 생성 연결 흐름을 추가했다.
-- [✓] `TPL-EXT-47` `src/services/templateExtractVersionService.ts`, `src/services/templateExtractPdfRasterFirstReplicaService.ts`, `scripts/template-extract-raster-first-replica.py`, `src/app/templates/extract/page.tsx` 에 `v47(v2.21)` PDF raster-first 기본 경로를 연결했다.
-- [✓] `PHOTO-LABEL-01` `src/lib/photoLabelDtos.ts`, `src/services/photoLabelService.ts`, `src/app/api/photos/route.ts`, `src/app/api/photos/labels/route.ts`, `src/app/photos/page.tsx`, `docs/applied/run-this-supabase-photo-label-bootstrap.sql` 을 작성했다.
-- [✓] `PHOTO-LABEL-04` `src/services/photoLabelRequirementService.ts`, `src/app/api/photos/requirements/route.ts`, `src/app/api/sites/[siteId]/photo-label-gaps/route.ts`, `src/app/photos/page.tsx`, `docs/applied/run-this-supabase-photo-label-gap-bootstrap.sql` 에 요구 라벨 규칙 저장과 누락 경고 계산 흐름을 추가했다.
-- [✓] `PHOTO-LABEL-05` `src/app/api/photos/upload/route.ts`, `src/services/photoLabelService.ts`, `src/lib/photoLabelDtos.ts`, `src/app/photos/page.tsx`, `docs/applied/run-this-supabase-photo-storage-bootstrap.sql` 에 실제 Storage 업로드와 업로드 메타데이터 기록 흐름을 추가했다.
-- [✓] `BULK-EDIT-01` `src/lib/bulkOperationDtos.ts`, `src/services/bulkEditService.ts`, `src/app/api/bulk-ops/preview/route.ts`, `src/app/api/bulk-ops/commit/route.ts`, `src/app/bulk-ops/page.tsx`, `docs/applied/run-this-supabase-bulk-ops-bootstrap.sql` 에 일반 라벨 preview/commit 흐름을 추가했다.
-- [✓] `BULK-EDIT-04` `src/services/bulkEditService.ts`, `src/services/signAuthService.ts`, `src/app/api/sign/authentications/route.ts`, `src/app/bulk-ops/page.tsx` 에 서명 라벨 본인확인 조건을 연결했다.
+- [✓] `TPL-EXT-01` `src/lib/templateExtractDtos.ts`, `src/services/templateExtractService.ts`, `src/app/api/templates/extract/route.ts`, `src/app/api/templates/extract/[draftId]/route.ts`, `src/app/api/templates/extract/[draftId]/approve/route.ts`, `src/app/templates/extract/page.tsx`, `docs/run-this-supabase-template-extract-bootstrap.sql` 을 작성했다.
+- [진행중] `TPL-EXT-05` `src/services/templateExtractFileService.ts`, `src/app/api/templates/extract/route.ts`, `src/services/templateExtractService.ts`, `src/app/templates/extract/page.tsx` 에 txt/html/docx 업로드 본문 추출과 기존 draft 생성 연결 흐름을 추가했다.
+- [✓] `PHOTO-LABEL-01` `src/lib/photoLabelDtos.ts`, `src/services/photoLabelService.ts`, `src/app/api/photos/route.ts`, `src/app/api/photos/labels/route.ts`, `src/app/photos/page.tsx`, `docs/run-this-supabase-photo-label-bootstrap.sql` 을 작성했다.
+- [✓] `PHOTO-LABEL-04` `src/services/photoLabelRequirementService.ts`, `src/app/api/photos/requirements/route.ts`, `src/app/api/sites/[siteId]/photo-label-gaps/route.ts`, `src/app/photos/page.tsx`, `docs/run-this-supabase-photo-label-gap-bootstrap.sql` 에 요구 라벨 규칙 저장과 누락 경고 계산 흐름을 추가했다.
+- [✓] `PHOTO-LABEL-05` `src/app/api/photos/upload/route.ts`, `src/services/photoLabelService.ts`, `src/lib/photoLabelDtos.ts`, `src/app/photos/page.tsx`, `docs/run-this-supabase-photo-storage-bootstrap.sql` 에 실제 Storage 업로드와 업로드 메타데이터 기록 흐름을 추가했다.
+- [진행중] `BULK-EDIT-01` `src/lib/bulkOperationDtos.ts`, `src/services/bulkEditService.ts`, `src/app/api/bulk-ops/preview/route.ts`, `src/app/api/bulk-ops/commit/route.ts`, `src/app/bulk-ops/page.tsx`, `docs/run-this-supabase-bulk-ops-bootstrap.sql` 에 일반 라벨 preview/commit 1차 흐름을 추가했다.
 - [진행중] `APP-HOME-01` `src/app/page.tsx`, `src/app/globals.css` 에 구현 페이지 홈 진입점과 전역 그림자 제거 규칙을 추가했다.
-- [✓] `REQ-LINK-01` `src/lib/requestLinkDtos.ts`, `src/services/requestLinkService.ts`, `src/app/api/request-links/route.ts`, `src/app/api/request-links/[token]/route.ts`, `src/app/api/request-links/[token]/submit/route.ts`, `src/app/request-links/page.tsx`, `src/app/request-links/[token]/page.tsx`, `docs/applied/run-this-supabase-request-links-bootstrap.sql` 에 제한 입력 링크 흐름을 추가했다.
-- [✓] `EXPORT-01` `src/lib/exportDtos.ts`, `src/services/exportService.ts`, `src/app/api/exports/route.ts`, `src/app/api/exports/[exportJobId]/route.ts`, `src/app/api/documents/[documentId]/artifacts/route.ts`, `src/app/exports/page.tsx`, `docs/applied/run-this-supabase-export-bootstrap.sql` 에 export job과 artifact 메타데이터 흐름을 추가했다.
-- [✓] `EXPORT-05` `src/services/exportRendererService.ts`, `src/app/api/exports/[exportJobId]/download/route.ts`, `src/services/exportService.ts`, `src/app/exports/page.tsx` 에 PDF 다운로드 흐름을 추가했다.
-- [✓] `EXPORT-06` `src/services/exportRendererService.ts`, `src/services/exportService.ts`, `src/app/exports/page.tsx` 에 DOCX 다운로드 흐름을 추가했다.
-- [✓] `EXPORT-07` `src/services/exportHwpHandoffService.ts`, `src/app/api/exports/[exportJobId]/handoff/route.ts`, `src/app/api/exports/hwp-callback/route.ts`, `src/app/exports/page.tsx` 에 HWP handoff/callback 흐름을 추가했다.
-- [✓] `EXPORT-UI-01` `src/app/exports/page.tsx` 에 내부 job/artifact 복잡성을 숨기고 PDF/DOCX/HWP 버튼 중심 화면으로 단순화했다.
-- [✓] `TOTAL-TODO-CURRENT-01` 현재 서비스 코드 상태를 재점검해 이 문서 상단 상태와 도메인별 구현 상태를 2026-05-12 기준으로 갱신했다.
+- [진행중] `REQ-LINK-01` `src/lib/requestLinkDtos.ts`, `src/services/requestLinkService.ts`, `src/app/api/request-links/route.ts`, `src/app/api/request-links/[token]/route.ts`, `src/app/api/request-links/[token]/submit/route.ts`, `src/app/request-links/page.tsx`, `src/app/request-links/[token]/page.tsx`, `docs/run-this-supabase-request-links-bootstrap.sql` 에 제한 입력 링크 1차 흐름을 추가했다.
+- [진행중] `EXPORT-01` `src/lib/exportDtos.ts`, `src/services/exportService.ts`, `src/app/api/exports/route.ts`, `src/app/api/exports/[exportJobId]/route.ts`, `src/app/api/documents/[documentId]/artifacts/route.ts`, `src/app/exports/page.tsx`, `docs/run-this-supabase-export-bootstrap.sql` 에 export job과 artifact 메타데이터 1차 흐름을 추가했다.
+- [진행중] `EXPORT-05` `src/services/exportRendererService.ts`, `src/app/api/exports/[exportJobId]/download/route.ts`, `src/services/exportService.ts`, `src/app/exports/page.tsx` 에 PDF 다운로드 2차 흐름을 추가했다.
+- [진행중] `EXPORT-06` `src/services/exportRendererService.ts`, `src/services/exportService.ts`, `src/app/exports/page.tsx` 에 DOCX 다운로드 2차 흐름을 추가했다.
+- [진행중] `EXPORT-07` `src/services/exportHwpHandoffService.ts`, `src/app/api/exports/[exportJobId]/handoff/route.ts`, `src/app/api/exports/hwp-callback/route.ts`, `src/app/exports/page.tsx` 에 HWP handoff/callback 2차 흐름을 추가했다.
+- [진행중] `EXPORT-UI-01` `src/app/exports/page.tsx` 에 내부 job/artifact 복잡성을 숨기고 PDF/DOCX/HWP 버튼 중심 화면으로 단순화했다.
 - [ ] `DOC-DESIGN-06` 다음 구현 턴에서 실제 선택 기능에 맞는 좁은 화이트리스트를 다시 확정한다.
 
 # 테스트 기록
 
-- 날짜: 2026-05-12
-  - 체크리스트 ID: `TOTAL-TODO-CURRENT-01`
-  - 코드 상태 점검:
-    - `rg --files` 로 현재 라우트/서비스/DTO 파일 목록을 확인했다.
-    - `src/services/signService.ts`, `src/services/signAuthService.ts`, `src/services/documentService.ts`, `src/services/siteChecklistService.ts`, `src/services/templateService.ts`, `src/services/templateExtractVersionService.ts`, `src/services/templateExtractPdfRasterFirstReplicaService.ts`, `src/services/photoLabelService.ts`, `src/services/bulkEditService.ts`, `src/services/requestLinkService.ts`, `src/services/exportService.ts`, `src/services/exportHwpHandoffService.ts`, `src/services/messagingService.ts`, `src/services/solapiSmsService.ts`, `src/services/emailDispatchService.ts` 를 현재 구현 기준으로 대조했다.
-    - `src/app/api` 라우트 목록과 `src/app/*/page.tsx` 사용자 화면 목록을 확인했다.
-    - `docs/applied/*.sql` 에 현재 부트스트랩 SQL이 아카이브되어 있고, `docs/` 바로 아래 실행 대기 SQL 파일은 없는 것을 확인했다.
-  - 문서 수정:
-    - 상단 미니맵, 현재 서비스 코드 상태, 현재 우선 구현 순서, 도메인별 구현 상태와 체크리스트 상태를 갱신했다.
-    - 수정 전 원본은 `docs/diff/2026-05-12_TOTAL-TODO-CURRENT-01_total-todo.before.md` 로 백업했다.
-  - 로컬 검증:
-    - `npm run check:no-shadow-app` 성공.
-    - 이 기록 작성 시점에는 문서 수정만 수행했으며, UI/DB 런타임은 변경하지 않았다.
-  - 남은 위험:
-    - Supabase/Chrome MCP 실검증은 이번 문서 개정 범위에서 수행하지 않았다.
-    - `v47(v2.21)` 템플릿 추출은 Python OCR 의존성이 있으므로 실제 배포 환경에서 별도 스모크 테스트가 필요하다.
-    - Solapi/Resend/HWP 외부 연동은 provider 키와 외부 변환기 설정 후 별도 검증해야 한다.
 - 날짜: 2026-04-11
   - 체크리스트 ID: `DOC-DESIGN-01`, `DOC-DESIGN-02`, `DOC-DESIGN-03`, `DOC-DESIGN-04`, `DOC-DESIGN-05`
   - Supabase MCP: `list_tables`, `get_project_url` 호출을 시도했으나 둘 다 `MCP error -32600: You do not have permission to perform this action`으로 실패했다.

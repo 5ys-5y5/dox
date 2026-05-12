@@ -526,7 +526,6 @@ type PositionGroupEditMode =
 | `METADATA-SELECTION-ROLE-COLORS-01` | `속성` 탭 선택 상자는 `상자 역할 - 1` 값으로 윤곽선 색을, `상자 역할 - 2` 값으로 padding 없는 내부 배경색을 출력한다. `상자 역할 - 1/2` 활성 버튼은 테두리/링 없이 단일 색상으로 표시한다. | `docs/diff/2026-05-12_METADATA_SELECTION_ROLE_COLORS-01_*` | 완료 |
 | `SELECTION-CENTERED-BORDER-AND-METADATA-BG-01` | `크기 및 위치`, `속성`, `텍스트` 탭의 선택선은 outline 외곽선이 아니라 경계선 중심 기준의 바깥 1px/안쪽 1px box-shadow로 출력한다. `속성` 탭 선택 배경은 `상자 역할 - 2` 활성 버튼과 같은 Tailwind 색상 변수로 실제 상자 배경에 출력하고, 선택 fill은 숨겨 내용 위에 올라오지 않게 한다. | `docs/diff/2026-05-12_SELECTION_CENTERED_BORDER_AND_METADATA_BG-01_*` | 완료 |
 | `METADATA-ROLE2-BG-OPACITY-01` | `속성` 탭 선택 상자의 `상자 역할 - 2` 배경은 기존 역할 색상을 유지하되 실제 상자 뒤 배경의 불투명도를 30% 수준으로 낮춘다. 선택선과 역할-1 윤곽선 색상은 변경하지 않는다. | `docs/diff/2026-05-12_METADATA_ROLE2_BG_OPACITY-01_*` | 완료 |
-| `SELECTION-BADGE-SIZE-50-01` | 상자와 그룹 선택 시 출력되는 선택 순서 번호 뱃지는 기존 대비 약 50% 크기로 줄인다. 간격 설정 모드의 항목명 라벨 뱃지는 번호 뱃지가 아니므로 기존 가독성 크기를 유지한다. | `docs/diff/2026-05-12_SELECTION_BADGE_SIZE_50-01_*` | 완료 |
 
 ## 9. 테스트 계획
 
@@ -733,10 +732,5 @@ type PositionGroupEditMode =
 - 2026-05-12: `METADATA-ROLE2-BG-OPACITY-01` 구현 전 백업을 `docs/diff/2026-05-12_METADATA_ROLE2_BG_OPACITY-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-12_METADATA_ROLE2_BG_OPACITY-01_uiupdate0511.before.md`에 생성했다.
 - 2026-05-12: `METADATA-ROLE2-BG-OPACITY-01` 구현. `속성` 탭 선택 상자의 역할-2 배경은 기존 `--v106-metadata-selected-fill-color`를 유지하고 `color-mix(... 30%, transparent)`로 실제 상자 뒤 배경의 불투명도만 30% 수준으로 낮춘다. 선택 fill은 계속 숨겨 내용 위에 올라오지 않는다.
 - 2026-05-12: chrome-devtools MCP 검증. 대표 URL의 `속성` 탭에서 실제 pointer/mouse 이벤트로 `작 성 자` 상자를 선택했다. 선택 상자의 computed `backgroundColor`는 `color(... / 0.3)`로 계산됐고, `outlineStyle`은 `none`, 선택 fill은 `display: none`이었다. 콘솔에는 기존 접근성 issue 2건만 표시됐으며 이번 변경과 직접 관련된 `error`/`warn`은 없었다.
-- 2026-05-12: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다.
-- 2026-05-12: Supabase MCP 검증. `get_advisors(type=performance)`를 실행했다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다. 반환된 성능 advisory는 기존 DB 인덱스/RLS 관련 항목이며 이번 UI 변경 범위와 직접 관련 없다.
-- 2026-05-12: `SELECTION-BADGE-SIZE-50-01` 구현 전 백업을 `docs/diff/2026-05-12_SELECTION_BADGE_SIZE_50-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-12_SELECTION_BADGE_SIZE_50-01_uiupdate0511.before.md`에 생성했다.
-- 2026-05-12: `SELECTION-BADGE-SIZE-50-01` 구현. 공통 선택 번호 뱃지의 위치 오프셋은 `4px -> 2px`, 최소 너비와 높이는 `22px -> 11px`, 글자 크기는 `11px -> 6px`로 줄였다. 상자와 그룹 프록시가 같은 규칙을 사용하므로 두 선택 번호 모두 같은 크기로 출력된다. 간격 설정 모드의 항목명 라벨은 번호가 아니므로 기존 높이와 글자 크기를 유지하도록 별도 override를 남겼다.
-- 2026-05-12: chrome-devtools MCP 검증. 대표 URL의 `크기 및 위치` 탭에서 실제 pointer/mouse 이벤트로 `작 성 자` 상자를 선택했다. 선택 상자의 `::before` computed style은 `minWidth=11px`, `height=11px`, `fontSize=6px`, `top=2px`, `left=2px`, `content="1"`이었다. 같은 CSS selector를 쓰는 그룹 프록시 뱃지는 임시 probe로 `content="2"` 상태를 계산해 `minWidth=11px`, `height=11px`, `fontSize=6px`, `top=2px`, `left=2px`를 확인했다. 콘솔에는 기존 접근성 issue 2건만 표시됐으며 이번 변경과 직접 관련된 `error`/`warn`은 없었다.
 - 2026-05-12: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다.
 - 2026-05-12: Supabase MCP 검증. `get_advisors(type=performance)`를 실행했다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다. 반환된 성능 advisory는 기존 DB 인덱스/RLS 관련 항목이며 이번 UI 변경 범위와 직접 관련 없다.
