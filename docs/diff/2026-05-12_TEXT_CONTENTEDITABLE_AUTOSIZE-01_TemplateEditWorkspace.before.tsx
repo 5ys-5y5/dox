@@ -222,6 +222,11 @@ type TemplateFrameRelativeAnchorConfig = {
   offsetY: number;
 };
 
+type PositionGroupRectSnapshotEntry = {
+  pageInner: HTMLElement;
+  rect: FrameNodeRect;
+};
+
 type CanvasHistoryEntry = {
   renderHtml: string;
   draftHtml: string;
@@ -8077,7 +8082,7 @@ const applyFrameAutoHeightDelta = (
   const boundaryY = usesTopAnchor ? context.cellRect.top : context.cellRect.top + context.cellRect.height;
   const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
   const frameGroupId = getFrameGroupId(node);
-  const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
+  const sameSidePeerNodes = !usesTopAnchor && frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
   const constrainedDelta =
     sameSidePeerNodes.length > 0
       ? resolveSharedEdgeResizeDelta(
@@ -8094,13 +8099,11 @@ const applyFrameAutoHeightDelta = (
     return 0;
   }
 
-  const applyPeerLocalDelta = usesTopAnchor ? applyFrameAutoHeightFromTopDeltaLocal : applyFrameAutoHeightDeltaLocal;
-
   sameSidePeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyPeerLocalDelta(peerNode, appliedDelta);
+    const peerAppliedDelta = applyFrameAutoHeightDeltaLocal(peerNode, appliedDelta);
 
     if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, usesTopAnchor ? 'n' : 's');
+      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 's');
     }
   });
 
@@ -8277,7 +8280,7 @@ const applyFrameAutoWidthDelta = (
   const boundaryX = usesLeftAnchor ? context.cellRect.left : context.cellRect.left + context.cellRect.width;
   const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
   const frameGroupId = getFrameGroupId(node);
-  const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right') : [];
+  const sameSidePeerNodes = !usesLeftAnchor && frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right') : [];
   const constrainedDelta =
     sameSidePeerNodes.length > 0
       ? resolveSharedEdgeResizeDelta(
@@ -8294,13 +8297,11 @@ const applyFrameAutoWidthDelta = (
     return 0;
   }
 
-  const applyPeerLocalDelta = usesLeftAnchor ? applyFrameAutoWidthFromLeftDeltaLocal : applyFrameAutoWidthRightDeltaLocal;
-
   sameSidePeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyPeerLocalDelta(peerNode, appliedDelta);
+    const peerAppliedDelta = applyFrameAutoWidthRightDeltaLocal(peerNode, appliedDelta);
 
     if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, usesLeftAnchor ? 'w' : 'e');
+      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 'e');
     }
   });
 
@@ -11909,6 +11910,114 @@ type TemplateAutoSizeApplyOptions = {
   skipWidth?: boolean;
 };
 
+const cloneFrameRelativeAnchorConfig = (
+  config: TemplateFrameRelativeAnchorConfig
+): TemplateFrameRelativeAnchorConfig => ({
+  ...config,
+});
+
+const snapshotFrameRelativeAnchorConfigs = (root: ParentNode) => {
+  const snapshot = new Map<string, TemplateFrameRelativeAnchorConfig>();
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
+    const config = readFrameRelativeAnchorConfig(node, pageInner);
+
+    if (frameGroupId && config?.positionMode === 'relative' && config.anchorKind !== 'page-corner') {
+      snapshot.set(frameGroupId, cloneFrameRelativeAnchorConfig(config));
+    }
+  });
+
+  return snapshot;
+};
+
+const snapshotPositionGroupRects = (root: ParentNode) => {
+  const snapshot = new Map<string, PositionGroupRectSnapshotEntry>();
+
+  collectPositionGroupWrapperElements(root).forEach((wrapper) => {
+    const groupId = readPositionGroupWrapperId(wrapper);
+    const pageInner = wrapper.closest<HTMLElement>('.page-inner') || null;
+
+    if (!groupId || !pageInner) {
+      return;
+    }
+
+    snapshot.set(groupId, {
+      pageInner,
+      rect: readFrameElementRect(wrapper, pageInner),
+    });
+  });
+
+  return snapshot;
+};
+
+const restoreFrameRelativeAnchorConfigs = (
+  root: ParentNode,
+  snapshot: Map<string, TemplateFrameRelativeAnchorConfig>
+) => {
+  if (snapshot.size <= 0) {
+    return;
+  }
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    const config = frameGroupId ? snapshot.get(frameGroupId) : null;
+
+    if (config) {
+      writeFrameRelativeAnchorAttrs(node, config);
+    }
+  });
+};
+
+const preserveGroupRelativeAnchorGapsAfterAutoSize = (
+  root: ParentNode,
+  groupRectSnapshot: Map<string, PositionGroupRectSnapshotEntry>
+) => {
+  if (groupRectSnapshot.size <= 0) {
+    return;
+  }
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
+    const config = readFrameRelativeAnchorConfig(node, pageInner);
+
+    if (!pageInner || !config || config.positionMode !== 'relative' || config.anchorKind !== 'group') {
+      return;
+    }
+
+    const anchorGroupId = String(config.anchorId || '').trim();
+    const previousAnchorEntry = groupRectSnapshot.get(anchorGroupId) || null;
+    const nextAnchorRect = readPositionGroupWrapperRect(pageInner, anchorGroupId);
+
+    if (!previousAnchorEntry || !nextAnchorRect) {
+      return;
+    }
+
+    const nextConfig = { ...config };
+    const previousAnchorRect = previousAnchorEntry.rect;
+    const verticalGapFromBottom = config.offsetY - previousAnchorRect.height;
+    const horizontalGapFromRight = config.offsetX - previousAnchorRect.width;
+
+    if (verticalGapFromBottom >= -FRAME_RESIZE_TOLERANCE_PX) {
+      nextConfig.offsetY = nextAnchorRect.height + verticalGapFromBottom;
+    }
+
+    if (horizontalGapFromRight >= -FRAME_RESIZE_TOLERANCE_PX) {
+      nextConfig.offsetX = nextAnchorRect.width + horizontalGapFromRight;
+    }
+
+    if (
+      Math.abs(nextConfig.offsetX - config.offsetX) <= 0.01 &&
+      Math.abs(nextConfig.offsetY - config.offsetY) <= 0.01
+    ) {
+      return;
+    }
+
+    writeFrameRelativeAnchorAttrs(node, nextConfig);
+  });
+};
+
 const applyTemplateAutoHeightBoxes = (
   root: HTMLElement,
   frameGroupIds?: string[],
@@ -11923,7 +12032,6 @@ const applyTemplateAutoHeightBoxes = (
     : null;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
-  const processedFrameGroupIdSet = new Set<string>();
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -11934,36 +12042,13 @@ const applyTemplateAutoHeightBoxes = (
     .sort((left, right) => readFrameNodeRect(left).top - readFrameNodeRect(right).top)
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
+      const currentRect = readFrameNodeRect(node);
+      const requiredHeight = measureRequiredAutoHeightFrameHeight(node);
+      const requestedDelta = requiredHeight - currentRect.height;
       const anchorSide = normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom')] : [node];
-      const uniqueClusterNodes = Array.from(
-        new Map(
-          clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
-            Boolean(clusterFrameGroupId)
-          )
-        ).values()
-      );
 
-      if (uniqueClusterNodes.some((clusterNode) => processedFrameGroupIdSet.has(getFrameGroupId(clusterNode).trim()))) {
-        return;
-      }
-
-      uniqueClusterNodes.forEach((clusterNode) => {
-        processedFrameGroupIdSet.add(getFrameGroupId(clusterNode).trim());
-      });
-
-      const currentClusterHeight = uniqueClusterNodes.reduce(
-        (maxHeight, clusterNode) => Math.max(maxHeight, readFrameNodeRect(clusterNode).height),
-        Number.NEGATIVE_INFINITY
-      );
-      const requiredClusterHeight = uniqueClusterNodes.reduce((maxHeight, clusterNode) => {
-        const requiredHeight = measureRequiredAutoHeightFrameHeight(clusterNode);
-        return Number.isFinite(requiredHeight) ? Math.max(maxHeight, requiredHeight) : maxHeight;
-      }, Number.NEGATIVE_INFINITY);
-      const requestedDelta = requiredClusterHeight - currentClusterHeight;
-
-      if (!Number.isFinite(requiredClusterHeight) || !Number.isFinite(currentClusterHeight)) {
-        skippedCount += uniqueClusterNodes.length;
+      if (!Number.isFinite(requiredHeight)) {
+        skippedCount += 1;
         return;
       }
 
@@ -11974,9 +12059,9 @@ const applyTemplateAutoHeightBoxes = (
       const appliedDelta = applyFrameAutoHeightDelta(node, requestedDelta, anchorSide);
 
       if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(...uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)));
+        changedFrameGroupIds.push(frameGroupId);
       } else {
-        skippedCount += uniqueClusterNodes.length;
+        skippedCount += 1;
       }
     });
 
@@ -12006,7 +12091,6 @@ const applyTemplateAutoWidthBoxes = (
     : null;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
-  const processedFrameGroupIdSet = new Set<string>();
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -12017,36 +12101,13 @@ const applyTemplateAutoWidthBoxes = (
     .sort((left, right) => readFrameNodeRect(left).left - readFrameNodeRect(right).left)
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
+      const currentRect = readFrameNodeRect(node);
+      const requiredWidth = measureRequiredAutoWidthFrameWidth(node);
+      const requestedDelta = requiredWidth - currentRect.width;
       const anchorSide = normalizeTextAutoWidthAnchorSide(readFrameAutoSizeAnchorSide(node, 'right'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right')] : [node];
-      const uniqueClusterNodes = Array.from(
-        new Map(
-          clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
-            Boolean(clusterFrameGroupId)
-          )
-        ).values()
-      );
 
-      if (uniqueClusterNodes.some((clusterNode) => processedFrameGroupIdSet.has(getFrameGroupId(clusterNode).trim()))) {
-        return;
-      }
-
-      uniqueClusterNodes.forEach((clusterNode) => {
-        processedFrameGroupIdSet.add(getFrameGroupId(clusterNode).trim());
-      });
-
-      const currentClusterWidth = uniqueClusterNodes.reduce(
-        (maxWidth, clusterNode) => Math.max(maxWidth, readFrameNodeRect(clusterNode).width),
-        Number.NEGATIVE_INFINITY
-      );
-      const requiredClusterWidth = uniqueClusterNodes.reduce((maxWidth, clusterNode) => {
-        const requiredWidth = measureRequiredAutoWidthFrameWidth(clusterNode);
-        return Number.isFinite(requiredWidth) ? Math.max(maxWidth, requiredWidth) : maxWidth;
-      }, Number.NEGATIVE_INFINITY);
-      const requestedDelta = requiredClusterWidth - currentClusterWidth;
-
-      if (!Number.isFinite(requiredClusterWidth) || !Number.isFinite(currentClusterWidth)) {
-        skippedCount += uniqueClusterNodes.length;
+      if (!Number.isFinite(requiredWidth)) {
+        skippedCount += 1;
         return;
       }
 
@@ -12057,9 +12118,9 @@ const applyTemplateAutoWidthBoxes = (
       const appliedDelta = applyFrameAutoWidthDelta(node, requestedDelta, anchorSide);
 
       if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(...uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)));
+        changedFrameGroupIds.push(frameGroupId);
       } else {
-        skippedCount += uniqueClusterNodes.length;
+        skippedCount += 1;
       }
     });
 
@@ -12091,6 +12152,8 @@ const applyTemplateSecondaryContentFit = (
   let skippedCount = 0;
 
   materializePositionGroupWrappers(root);
+  const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
+  const positionGroupRectSnapshot = snapshotPositionGroupRects(root);
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -12132,8 +12195,10 @@ const applyTemplateSecondaryContentFit = (
     });
 
   if (changedFrameGroupIds.length > 0) {
-    materializePositionGroupWrappers(root);
+    restoreFrameRelativeAnchorConfigs(root, relativeAnchorSnapshot);
     ensureRelativeAnchorConfigs(root);
+    materializePositionGroupWrappers(root);
+    preserveGroupRelativeAnchorGapsAfterAutoSize(root, positionGroupRectSnapshot);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
 
@@ -12154,6 +12219,8 @@ const applyTemplateAutoSizeBoxes = (
   changedFrameGroupIds: string[];
 } => {
   materializePositionGroupWrappers(root);
+  const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
+  const positionGroupRectSnapshot = snapshotPositionGroupRects(root);
   const emptyResult = { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
   const heightResult = options.skipHeight
     ? emptyResult
@@ -12166,8 +12233,10 @@ const applyTemplateAutoSizeBoxes = (
   );
 
   if (changedFrameGroupIds.length > 0) {
-    materializePositionGroupWrappers(root);
+    restoreFrameRelativeAnchorConfigs(root, relativeAnchorSnapshot);
     ensureRelativeAnchorConfigs(root);
+    materializePositionGroupWrappers(root);
+    preserveGroupRelativeAnchorGapsAfterAutoSize(root, positionGroupRectSnapshot);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
 
@@ -20202,48 +20271,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
         schedulePreviewEditorState();
-        void (async () => {
-          await document.fonts?.ready?.catch(() => undefined);
-
-          if (previewRef.current !== node) {
-            return;
-          }
-
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
-
-          const liveNode = previewRef.current;
-
-          if (!liveNode || liveNode !== node) {
-            return;
-          }
-
-          ensurePreviewFrameBandNormalization(liveNode);
-          syncPreviewSurfaceCloneAttrs(liveNode);
-          syncPreviewSurfaceSelectionPanelTabAttr(liveNode, selectionPanelTab);
-          syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-            liveNode,
-            selectionPanelTab === 'position' && positionOrderLockSelectionMode
-          );
-          applyPreviewEditPermissions(liveNode, selectionPanelTab);
-
-          if (selectionPanelTab === 'position') {
-            materializePositionGroupWrappers(liveNode);
-            ensureRelativeAnchorConfigs(liveNode);
-            normalizePositionGroupRelativeAnchors(liveNode);
-            applyRelativeAnchoredFrameRectsInRoot(liveNode);
-          }
-
-          const autoSizeResult = applyTemplateAutoSizeBoxes(liveNode);
-
-          if (autoSizeResult.changedCount > 0) {
-            syncDraftPreviewHtmlRef({ recordHistory: false });
-          }
-        })();
       }
     },
     [
@@ -22863,13 +22890,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       writeFrameAutoSizeAnchorAttrs(node, side);
     });
 
+    const targetFrameGroupIds = nodes.map((node) => getFrameGroupId(node)).filter(Boolean);
+    const autoSizeResult = applyTemplateAutoSizeBoxes(root, targetFrameGroupIds);
     syncDraftPreviewHtmlRef({ materializePositionGroups: false });
     schedulePreviewEditorState();
     syncSelectionStyleDraft();
     requestPreviewTextFit();
     const directionLabel =
       side === 'top' ? '위로 확장' : side === 'bottom' ? '아래로 확장' : side === 'left' ? '왼쪽으로 확장' : '오른쪽으로 확장';
-    setMessage(`자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자`);
+    setMessage(
+      `자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자` +
+        (autoSizeResult.changedCount > 0 ? `, ${autoSizeResult.changedCount}개 크기 재계산` : '') +
+        (autoSizeResult.skippedCount > 0 ? `, ${autoSizeResult.skippedCount}개 제외` : '')
+    );
   }, [
     requestPreviewTextFit,
     schedulePreviewEditorState,
@@ -28828,7 +28861,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const frameTextInput = target.closest<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
-    const frameEditableScope = target.closest<HTMLElement>('[data-template-edit-scope]');
 
 	    if (templateUsagePreviewMode) {
       const root = previewRef.current;
@@ -28853,11 +28885,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      return;
 	    }
 
-    if (selectionPanelTab === 'text') {
+    if (selectionPanelTab === 'text' && frameTextInput) {
+      markTemplateValueElementEdited(frameTextInput);
       const root = previewRef.current;
-      const frameNode = resolveFrameSelectionAnchor(
-        (frameTextInput || frameEditableScope || target).closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)
-      );
+      const frameNode = resolveFrameSelectionAnchor(frameTextInput.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
       const frameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
       const shouldRestoreTextInputFocus = document.activeElement === frameTextInput;
       const selectionStart =
@@ -28870,7 +28901,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           : null;
 
       if (root && frameNode && frameGroupId && (readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))) {
-        markTemplateValueElementEdited(frameTextInput || frameEditableScope || target);
         applyTemplateAutoSizeBoxes(root, [frameGroupId]);
 
         if (shouldRestoreTextInputFocus) {

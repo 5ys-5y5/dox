@@ -8077,7 +8077,7 @@ const applyFrameAutoHeightDelta = (
   const boundaryY = usesTopAnchor ? context.cellRect.top : context.cellRect.top + context.cellRect.height;
   const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
   const frameGroupId = getFrameGroupId(node);
-  const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
+  const sameSidePeerNodes = !usesTopAnchor && frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
   const constrainedDelta =
     sameSidePeerNodes.length > 0
       ? resolveSharedEdgeResizeDelta(
@@ -8094,13 +8094,11 @@ const applyFrameAutoHeightDelta = (
     return 0;
   }
 
-  const applyPeerLocalDelta = usesTopAnchor ? applyFrameAutoHeightFromTopDeltaLocal : applyFrameAutoHeightDeltaLocal;
-
   sameSidePeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyPeerLocalDelta(peerNode, appliedDelta);
+    const peerAppliedDelta = applyFrameAutoHeightDeltaLocal(peerNode, appliedDelta);
 
     if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, usesTopAnchor ? 'n' : 's');
+      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 's');
     }
   });
 
@@ -8277,7 +8275,7 @@ const applyFrameAutoWidthDelta = (
   const boundaryX = usesLeftAnchor ? context.cellRect.left : context.cellRect.left + context.cellRect.width;
   const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
   const frameGroupId = getFrameGroupId(node);
-  const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right') : [];
+  const sameSidePeerNodes = !usesLeftAnchor && frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right') : [];
   const constrainedDelta =
     sameSidePeerNodes.length > 0
       ? resolveSharedEdgeResizeDelta(
@@ -8294,13 +8292,11 @@ const applyFrameAutoWidthDelta = (
     return 0;
   }
 
-  const applyPeerLocalDelta = usesLeftAnchor ? applyFrameAutoWidthFromLeftDeltaLocal : applyFrameAutoWidthRightDeltaLocal;
-
   sameSidePeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyPeerLocalDelta(peerNode, appliedDelta);
+    const peerAppliedDelta = applyFrameAutoWidthRightDeltaLocal(peerNode, appliedDelta);
 
     if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, usesLeftAnchor ? 'w' : 'e');
+      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 'e');
     }
   });
 
@@ -11935,7 +11931,10 @@ const applyTemplateAutoHeightBoxes = (
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
       const anchorSide = normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom')] : [node];
+      const clusterNodes =
+        anchorSide === 'bottom'
+          ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom')]
+          : [node];
       const uniqueClusterNodes = Array.from(
         new Map(
           clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
@@ -12018,7 +12017,10 @@ const applyTemplateAutoWidthBoxes = (
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
       const anchorSide = normalizeTextAutoWidthAnchorSide(readFrameAutoSizeAnchorSide(node, 'right'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right')] : [node];
+      const clusterNodes =
+        anchorSide === 'right'
+          ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right')]
+          : [node];
       const uniqueClusterNodes = Array.from(
         new Map(
           clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
@@ -22863,13 +22865,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       writeFrameAutoSizeAnchorAttrs(node, side);
     });
 
+    const targetFrameGroupIds = nodes.map((node) => getFrameGroupId(node)).filter(Boolean);
+    const autoSizeResult = applyTemplateAutoSizeBoxes(root, targetFrameGroupIds);
     syncDraftPreviewHtmlRef({ materializePositionGroups: false });
     schedulePreviewEditorState();
     syncSelectionStyleDraft();
     requestPreviewTextFit();
     const directionLabel =
       side === 'top' ? '위로 확장' : side === 'bottom' ? '아래로 확장' : side === 'left' ? '왼쪽으로 확장' : '오른쪽으로 확장';
-    setMessage(`자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자`);
+    setMessage(
+      `자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자` +
+        (autoSizeResult.changedCount > 0 ? `, ${autoSizeResult.changedCount}개 크기 재계산` : '') +
+        (autoSizeResult.skippedCount > 0 ? `, ${autoSizeResult.skippedCount}개 제외` : '')
+    );
   }, [
     requestPreviewTextFit,
     schedulePreviewEditorState,

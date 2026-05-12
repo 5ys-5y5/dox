@@ -10,8 +10,6 @@ import {
   ChevronUp,
   CircleDot,
   CornerDownRight,
-  Eye,
-  EyeOff,
   FileText,
   GripHorizontal,
   Italic,
@@ -220,6 +218,11 @@ type TemplateFrameRelativeAnchorConfig = {
   anchorY: TemplateFrameRelativeVerticalPin;
   offsetX: number;
   offsetY: number;
+};
+
+type PositionGroupRectSnapshotEntry = {
+  pageInner: HTMLElement;
+  rect: FrameNodeRect;
 };
 
 type CanvasHistoryEntry = {
@@ -595,7 +598,6 @@ type TemplateEditPreviewSurfaceProps = {
   boxCreationMode: boolean;
   canvasIconScale: CanvasIconScale;
   metadataVisualMode: boolean;
-  templateUsagePreviewMode: boolean;
   selectionPanelTab: SelectionPanelTab;
   showMetadataIcons: boolean;
   actionOverlay?: TemplateFloatingOverlayContent;
@@ -699,13 +701,6 @@ const TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR = 'data-template-frame-visual-emphasis
 const TEMPLATE_FRAME_ROLE_VISUAL_ATTR = 'data-template-frame-role-visual';
 const TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR = 'data-template-frame-box-kind-visual';
 const TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR = 'data-v106-frame-visual-hints-signature';
-const TEMPLATE_USAGE_PREVIEW_MODE_ATTR = 'data-template-usage-preview-mode';
-const TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR = 'data-template-usage-preview-value-box';
-const TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR = 'data-template-usage-preview-control';
-const TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR = 'data-template-usage-preview-file-input';
-const TEMPLATE_USAGE_PREVIEW_FILE_NAME_ATTR = 'data-template-usage-preview-file-name';
-const TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR = 'data-template-usage-preview-signature-canvas';
-const TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR = 'data-template-usage-preview-signature-clear';
 const TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR = 'data-v106-edit-permissions-tab';
 const TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR = 'data-v106-content-stabilized';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
@@ -1108,7 +1103,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   boxCreationMode,
   canvasIconScale,
   metadataVisualMode,
-  templateUsagePreviewMode,
   selectionPanelTab,
   showMetadataIcons,
   actionOverlay,
@@ -1827,7 +1821,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
         data-canvas-icon-scale={canvasIconScale}
         data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
-        data-template-usage-preview-mode={templateUsagePreviewMode ? 'true' : 'false'}
         data-selection-panel-tab={selectionPanelTab}
         data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
         onPointerDownCapture={handlePreviewPointerDown}
@@ -8077,7 +8070,7 @@ const applyFrameAutoHeightDelta = (
   const boundaryY = usesTopAnchor ? context.cellRect.top : context.cellRect.top + context.cellRect.height;
   const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
   const frameGroupId = getFrameGroupId(node);
-  const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
+  const sameSidePeerNodes = !usesTopAnchor && frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
   const constrainedDelta =
     sameSidePeerNodes.length > 0
       ? resolveSharedEdgeResizeDelta(
@@ -8094,13 +8087,11 @@ const applyFrameAutoHeightDelta = (
     return 0;
   }
 
-  const applyPeerLocalDelta = usesTopAnchor ? applyFrameAutoHeightFromTopDeltaLocal : applyFrameAutoHeightDeltaLocal;
-
   sameSidePeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyPeerLocalDelta(peerNode, appliedDelta);
+    const peerAppliedDelta = applyFrameAutoHeightDeltaLocal(peerNode, appliedDelta);
 
     if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, usesTopAnchor ? 'n' : 's');
+      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 's');
     }
   });
 
@@ -8277,7 +8268,7 @@ const applyFrameAutoWidthDelta = (
   const boundaryX = usesLeftAnchor ? context.cellRect.left : context.cellRect.left + context.cellRect.width;
   const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
   const frameGroupId = getFrameGroupId(node);
-  const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right') : [];
+  const sameSidePeerNodes = !usesLeftAnchor && frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right') : [];
   const constrainedDelta =
     sameSidePeerNodes.length > 0
       ? resolveSharedEdgeResizeDelta(
@@ -8294,13 +8285,11 @@ const applyFrameAutoWidthDelta = (
     return 0;
   }
 
-  const applyPeerLocalDelta = usesLeftAnchor ? applyFrameAutoWidthFromLeftDeltaLocal : applyFrameAutoWidthRightDeltaLocal;
-
   sameSidePeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyPeerLocalDelta(peerNode, appliedDelta);
+    const peerAppliedDelta = applyFrameAutoWidthRightDeltaLocal(peerNode, appliedDelta);
 
     if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, usesLeftAnchor ? 'w' : 'e');
+      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 'e');
     }
   });
 
@@ -11389,343 +11378,6 @@ const resolveFrameContentTarget = (node: HTMLElement) => {
   );
 };
 
-const isTemplateUsageValueRole = (role: TemplateFrameRole | 'group' | '') => role === 'value' || role === 'key_value';
-
-const clearElementChildren = (element: HTMLElement) => {
-  while (element.firstChild) {
-    element.removeChild(element.firstChild);
-  }
-};
-
-const replaceFrameContentTarget = (node: HTMLElement, replacement: HTMLElement) => {
-  const target = resolveFrameContentTarget(node);
-
-  if (
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLInputElement ||
-    (target !== node && target.hasAttribute('data-template-frame-input'))
-  ) {
-    target.replaceWith(replacement);
-    return replacement;
-  }
-
-  clearElementChildren(target);
-  target.appendChild(replacement);
-  return replacement;
-};
-
-const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
-  const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '입력값';
-  const input =
-    node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
-    node.querySelector<HTMLInputElement>('[data-template-frame-input="true"]');
-
-  if (input) {
-    input.value = '';
-    input.defaultValue = '';
-    input.setAttribute('value', '');
-    input.setAttribute('placeholder', label);
-    input.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
-    input.removeAttribute('readonly');
-    input.removeAttribute('disabled');
-    input.readOnly = false;
-    input.disabled = false;
-    input.tabIndex = 0;
-    if (input instanceof HTMLTextAreaElement) {
-      input.textContent = '';
-    }
-    return;
-  }
-
-  const target = resolveFrameContentTarget(node);
-  target.textContent = '';
-  target.setAttribute('contenteditable', 'true');
-  target.setAttribute('role', 'textbox');
-  target.setAttribute('aria-label', label);
-  target.setAttribute('data-placeholder', label);
-  target.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
-  target.tabIndex = 0;
-};
-
-const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
-  const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '첨부파일';
-  const control = document.createElement('div');
-  control.className = 'v106-template-usage-file-control';
-  control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'attachment');
-
-  const fileLabel = document.createElement('label');
-  fileLabel.className = 'v106-template-usage-file-label';
-  fileLabel.textContent = '파일 선택';
-
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR, 'true');
-  input.setAttribute('aria-label', `${label} 파일 선택`);
-  fileLabel.appendChild(input);
-
-  const fileName = document.createElement('div');
-  fileName.className = 'v106-template-usage-file-name';
-  fileName.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_NAME_ATTR, 'true');
-  fileName.textContent = '선택된 파일 없음';
-
-  control.appendChild(fileLabel);
-  control.appendChild(fileName);
-  replaceFrameContentTarget(node, control);
-};
-
-const prepareTemplateUsageSignatureControl = (node: HTMLElement) => {
-  const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '서명';
-  const control = document.createElement('div');
-  control.className = 'v106-template-usage-signature-control';
-  control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'signature');
-
-  const canvas = document.createElement('canvas');
-  canvas.width = 420;
-  canvas.height = 140;
-  canvas.className = 'v106-template-usage-signature-canvas';
-  canvas.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR, 'true');
-  canvas.setAttribute('aria-label', `${label} 서명 입력`);
-  canvas.setAttribute('role', 'img');
-
-  const clearButton = document.createElement('button');
-  clearButton.type = 'button';
-  clearButton.className = 'v106-template-usage-signature-clear';
-  clearButton.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR, 'true');
-  clearButton.textContent = '지우기';
-
-  control.appendChild(canvas);
-  control.appendChild(clearButton);
-  replaceFrameContentTarget(node, control);
-};
-
-const prepareTemplateUsagePreviewValueBox = (node: HTMLElement) => {
-  const boxKind = readFrameBoxKind(node);
-  const runtimeMode = readFrameRuntimeMode(node);
-
-  node.setAttribute(TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR, 'true');
-
-  if (boxKind === 'attachment' || runtimeMode === 'file_slot') {
-    prepareTemplateUsageAttachmentControl(node);
-    return;
-  }
-
-  if (boxKind === 'signature' || runtimeMode.startsWith('signature_')) {
-    prepareTemplateUsageSignatureControl(node);
-    return;
-  }
-
-  prepareTemplateUsageTextValueControl(node);
-};
-
-const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | undefined) => {
-  const container = document.createElement('div');
-
-  if (!source) {
-    return '';
-  }
-
-  container.innerHTML = typeof source === 'string' ? source : source.innerHTML;
-  container.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
-    snapFrameBandShellEdgesInPage(pageInner);
-    normalizeFrameBorderAppearanceLayersInPage(pageInner);
-  });
-  syncFormControlMarkup(container);
-  stripTransientFrameEditorUi(container);
-  stripSelectionAttrs(container);
-  clearFrameValidationErrorUi(container);
-  clearFrameReviewWarningUi(container);
-  stripFrameMetadataMarkers(container);
-  TemplateFrameEditHtmlService.stripEditorUiState(container);
-
-  collectFrameSelectionAnchors(container).forEach((node) => {
-    const role = readFrameRole(node);
-    if (isTemplateUsageValueRole(role)) {
-      prepareTemplateUsagePreviewValueBox(node);
-    }
-  });
-
-  return container.innerHTML.trim();
-};
-
-const applyTemplateUsagePreviewAutoSize = (
-  root: HTMLElement,
-  frameNode: HTMLElement | null,
-  options?: {
-    restoreTextInputFocus?: boolean;
-    selectionStart?: number | null;
-    selectionEnd?: number | null;
-  }
-) => {
-  if (!frameNode) {
-    return;
-  }
-
-  const frameGroupId = getFrameGroupId(frameNode);
-
-  if (!frameGroupId || (!readFrameAutoHeightBox(frameNode) && !readFrameAutoWidthBox(frameNode))) {
-    return;
-  }
-
-  applyTemplateAutoSizeBoxes(root, [frameGroupId]);
-
-  if (options?.restoreTextInputFocus) {
-    restoreFrameTextInputFocus(root, frameGroupId, options.selectionStart ?? null, options.selectionEnd ?? null);
-  }
-};
-
-const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
-  type SignatureDrawState = {
-    canvas: HTMLCanvasElement;
-    pointerId: number;
-    lastX: number;
-    lastY: number;
-  };
-  const activeSignatureDrawStateByPointerId = new Map<number, SignatureDrawState>();
-  const readCanvasPoint = (canvas: HTMLCanvasElement, event: PointerEvent) => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / Math.max(1, rect.width);
-    const scaleY = canvas.height / Math.max(1, rect.height);
-
-    return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
-    };
-  };
-  const prepareSignatureContext = (canvas: HTMLCanvasElement) => {
-    const context = canvas.getContext('2d');
-
-    if (!context) {
-      return null;
-    }
-
-    context.strokeStyle = '#0f172a';
-    context.lineWidth = 3;
-    context.lineCap = 'round';
-    context.lineJoin = 'round';
-    return context;
-  };
-  const clearSignatureCanvas = (canvas: HTMLCanvasElement) => {
-    const context = canvas.getContext('2d');
-    context?.clearRect(0, 0, canvas.width, canvas.height);
-  };
-  const handleFileChange = (event: Event) => {
-    const input = event.target instanceof HTMLInputElement ? event.target : null;
-
-    if (!input || input.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR) !== 'true') {
-      return;
-    }
-
-    const frameNode = resolveFrameSelectionAnchor(input.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
-    const control = input.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
-    const fileName = control?.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_NAME_ATTR}="true"]`) || null;
-
-    if (fileName) {
-      fileName.textContent = input.files?.[0]?.name || '선택된 파일 없음';
-    }
-
-    applyTemplateUsagePreviewAutoSize(root, frameNode);
-  };
-  const handleSignaturePointerDown = (event: PointerEvent) => {
-    const canvas = event.target instanceof HTMLCanvasElement ? event.target : null;
-
-    if (!canvas || canvas.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR) !== 'true') {
-      return;
-    }
-
-    const context = prepareSignatureContext(canvas);
-    if (!context) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    canvas.setPointerCapture?.(event.pointerId);
-    const point = readCanvasPoint(canvas, event);
-    context.beginPath();
-    context.arc(point.x, point.y, 1.2, 0, Math.PI * 2);
-    context.fillStyle = '#0f172a';
-    context.fill();
-    activeSignatureDrawStateByPointerId.set(event.pointerId, {
-      canvas,
-      pointerId: event.pointerId,
-      lastX: point.x,
-      lastY: point.y,
-    });
-  };
-  const handleSignaturePointerMove = (event: PointerEvent) => {
-    const drawState = activeSignatureDrawStateByPointerId.get(event.pointerId);
-
-    if (!drawState) {
-      return;
-    }
-
-    const context = prepareSignatureContext(drawState.canvas);
-    if (!context) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const point = readCanvasPoint(drawState.canvas, event);
-    context.beginPath();
-    context.moveTo(drawState.lastX, drawState.lastY);
-    context.lineTo(point.x, point.y);
-    context.stroke();
-    drawState.lastX = point.x;
-    drawState.lastY = point.y;
-  };
-  const handleSignaturePointerEnd = (event: PointerEvent) => {
-    const drawState = activeSignatureDrawStateByPointerId.get(event.pointerId);
-
-    if (!drawState) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    if (drawState.canvas.hasPointerCapture?.(event.pointerId)) {
-      drawState.canvas.releasePointerCapture(event.pointerId);
-    }
-    activeSignatureDrawStateByPointerId.delete(event.pointerId);
-  };
-  const handleRuntimeClick = (event: MouseEvent) => {
-    const clearButton =
-      event.target instanceof HTMLElement
-        ? event.target.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR}="true"]`)
-        : null;
-
-    if (!clearButton) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const control = clearButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`);
-    const canvas = control?.querySelector<HTMLCanvasElement>(`[${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR}="true"]`) || null;
-
-    if (canvas) {
-      clearSignatureCanvas(canvas);
-    }
-  };
-
-  root.addEventListener('change', handleFileChange);
-  root.addEventListener('pointerdown', handleSignaturePointerDown, true);
-  root.addEventListener('pointermove', handleSignaturePointerMove, true);
-  root.addEventListener('pointerup', handleSignaturePointerEnd, true);
-  root.addEventListener('pointercancel', handleSignaturePointerEnd, true);
-  root.addEventListener('click', handleRuntimeClick, true);
-
-  return () => {
-    root.removeEventListener('change', handleFileChange);
-    root.removeEventListener('pointerdown', handleSignaturePointerDown, true);
-    root.removeEventListener('pointermove', handleSignaturePointerMove, true);
-    root.removeEventListener('pointerup', handleSignaturePointerEnd, true);
-    root.removeEventListener('pointercancel', handleSignaturePointerEnd, true);
-    root.removeEventListener('click', handleRuntimeClick, true);
-    activeSignatureDrawStateByPointerId.clear();
-  };
-};
-
 const readComputedVerticalBorderPx = (computedStyle: CSSStyleDeclaration) =>
   parseFramePx(computedStyle.borderTopWidth) + parseFramePx(computedStyle.borderBottomWidth);
 
@@ -11909,6 +11561,114 @@ type TemplateAutoSizeApplyOptions = {
   skipWidth?: boolean;
 };
 
+const cloneFrameRelativeAnchorConfig = (
+  config: TemplateFrameRelativeAnchorConfig
+): TemplateFrameRelativeAnchorConfig => ({
+  ...config,
+});
+
+const snapshotFrameRelativeAnchorConfigs = (root: ParentNode) => {
+  const snapshot = new Map<string, TemplateFrameRelativeAnchorConfig>();
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
+    const config = readFrameRelativeAnchorConfig(node, pageInner);
+
+    if (frameGroupId && config?.positionMode === 'relative' && config.anchorKind !== 'page-corner') {
+      snapshot.set(frameGroupId, cloneFrameRelativeAnchorConfig(config));
+    }
+  });
+
+  return snapshot;
+};
+
+const snapshotPositionGroupRects = (root: ParentNode) => {
+  const snapshot = new Map<string, PositionGroupRectSnapshotEntry>();
+
+  collectPositionGroupWrapperElements(root).forEach((wrapper) => {
+    const groupId = readPositionGroupWrapperId(wrapper);
+    const pageInner = wrapper.closest<HTMLElement>('.page-inner') || null;
+
+    if (!groupId || !pageInner) {
+      return;
+    }
+
+    snapshot.set(groupId, {
+      pageInner,
+      rect: readFrameElementRect(wrapper, pageInner),
+    });
+  });
+
+  return snapshot;
+};
+
+const restoreFrameRelativeAnchorConfigs = (
+  root: ParentNode,
+  snapshot: Map<string, TemplateFrameRelativeAnchorConfig>
+) => {
+  if (snapshot.size <= 0) {
+    return;
+  }
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    const config = frameGroupId ? snapshot.get(frameGroupId) : null;
+
+    if (config) {
+      writeFrameRelativeAnchorAttrs(node, config);
+    }
+  });
+};
+
+const preserveGroupRelativeAnchorGapsAfterAutoSize = (
+  root: ParentNode,
+  groupRectSnapshot: Map<string, PositionGroupRectSnapshotEntry>
+) => {
+  if (groupRectSnapshot.size <= 0) {
+    return;
+  }
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
+    const config = readFrameRelativeAnchorConfig(node, pageInner);
+
+    if (!pageInner || !config || config.positionMode !== 'relative' || config.anchorKind !== 'group') {
+      return;
+    }
+
+    const anchorGroupId = String(config.anchorId || '').trim();
+    const previousAnchorEntry = groupRectSnapshot.get(anchorGroupId) || null;
+    const nextAnchorRect = readPositionGroupWrapperRect(pageInner, anchorGroupId);
+
+    if (!previousAnchorEntry || !nextAnchorRect) {
+      return;
+    }
+
+    const nextConfig = { ...config };
+    const previousAnchorRect = previousAnchorEntry.rect;
+    const verticalGapFromBottom = config.offsetY - previousAnchorRect.height;
+    const horizontalGapFromRight = config.offsetX - previousAnchorRect.width;
+
+    if (verticalGapFromBottom >= -FRAME_RESIZE_TOLERANCE_PX) {
+      nextConfig.offsetY = nextAnchorRect.height + verticalGapFromBottom;
+    }
+
+    if (horizontalGapFromRight >= -FRAME_RESIZE_TOLERANCE_PX) {
+      nextConfig.offsetX = nextAnchorRect.width + horizontalGapFromRight;
+    }
+
+    if (
+      Math.abs(nextConfig.offsetX - config.offsetX) <= 0.01 &&
+      Math.abs(nextConfig.offsetY - config.offsetY) <= 0.01
+    ) {
+      return;
+    }
+
+    writeFrameRelativeAnchorAttrs(node, nextConfig);
+  });
+};
+
 const applyTemplateAutoHeightBoxes = (
   root: HTMLElement,
   frameGroupIds?: string[],
@@ -11923,7 +11683,6 @@ const applyTemplateAutoHeightBoxes = (
     : null;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
-  const processedFrameGroupIdSet = new Set<string>();
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -11934,36 +11693,13 @@ const applyTemplateAutoHeightBoxes = (
     .sort((left, right) => readFrameNodeRect(left).top - readFrameNodeRect(right).top)
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
+      const currentRect = readFrameNodeRect(node);
+      const requiredHeight = measureRequiredAutoHeightFrameHeight(node);
+      const requestedDelta = requiredHeight - currentRect.height;
       const anchorSide = normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom')] : [node];
-      const uniqueClusterNodes = Array.from(
-        new Map(
-          clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
-            Boolean(clusterFrameGroupId)
-          )
-        ).values()
-      );
 
-      if (uniqueClusterNodes.some((clusterNode) => processedFrameGroupIdSet.has(getFrameGroupId(clusterNode).trim()))) {
-        return;
-      }
-
-      uniqueClusterNodes.forEach((clusterNode) => {
-        processedFrameGroupIdSet.add(getFrameGroupId(clusterNode).trim());
-      });
-
-      const currentClusterHeight = uniqueClusterNodes.reduce(
-        (maxHeight, clusterNode) => Math.max(maxHeight, readFrameNodeRect(clusterNode).height),
-        Number.NEGATIVE_INFINITY
-      );
-      const requiredClusterHeight = uniqueClusterNodes.reduce((maxHeight, clusterNode) => {
-        const requiredHeight = measureRequiredAutoHeightFrameHeight(clusterNode);
-        return Number.isFinite(requiredHeight) ? Math.max(maxHeight, requiredHeight) : maxHeight;
-      }, Number.NEGATIVE_INFINITY);
-      const requestedDelta = requiredClusterHeight - currentClusterHeight;
-
-      if (!Number.isFinite(requiredClusterHeight) || !Number.isFinite(currentClusterHeight)) {
-        skippedCount += uniqueClusterNodes.length;
+      if (!Number.isFinite(requiredHeight)) {
+        skippedCount += 1;
         return;
       }
 
@@ -11974,9 +11710,9 @@ const applyTemplateAutoHeightBoxes = (
       const appliedDelta = applyFrameAutoHeightDelta(node, requestedDelta, anchorSide);
 
       if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(...uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)));
+        changedFrameGroupIds.push(frameGroupId);
       } else {
-        skippedCount += uniqueClusterNodes.length;
+        skippedCount += 1;
       }
     });
 
@@ -12006,7 +11742,6 @@ const applyTemplateAutoWidthBoxes = (
     : null;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
-  const processedFrameGroupIdSet = new Set<string>();
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -12017,36 +11752,13 @@ const applyTemplateAutoWidthBoxes = (
     .sort((left, right) => readFrameNodeRect(left).left - readFrameNodeRect(right).left)
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
+      const currentRect = readFrameNodeRect(node);
+      const requiredWidth = measureRequiredAutoWidthFrameWidth(node);
+      const requestedDelta = requiredWidth - currentRect.width;
       const anchorSide = normalizeTextAutoWidthAnchorSide(readFrameAutoSizeAnchorSide(node, 'right'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right')] : [node];
-      const uniqueClusterNodes = Array.from(
-        new Map(
-          clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
-            Boolean(clusterFrameGroupId)
-          )
-        ).values()
-      );
 
-      if (uniqueClusterNodes.some((clusterNode) => processedFrameGroupIdSet.has(getFrameGroupId(clusterNode).trim()))) {
-        return;
-      }
-
-      uniqueClusterNodes.forEach((clusterNode) => {
-        processedFrameGroupIdSet.add(getFrameGroupId(clusterNode).trim());
-      });
-
-      const currentClusterWidth = uniqueClusterNodes.reduce(
-        (maxWidth, clusterNode) => Math.max(maxWidth, readFrameNodeRect(clusterNode).width),
-        Number.NEGATIVE_INFINITY
-      );
-      const requiredClusterWidth = uniqueClusterNodes.reduce((maxWidth, clusterNode) => {
-        const requiredWidth = measureRequiredAutoWidthFrameWidth(clusterNode);
-        return Number.isFinite(requiredWidth) ? Math.max(maxWidth, requiredWidth) : maxWidth;
-      }, Number.NEGATIVE_INFINITY);
-      const requestedDelta = requiredClusterWidth - currentClusterWidth;
-
-      if (!Number.isFinite(requiredClusterWidth) || !Number.isFinite(currentClusterWidth)) {
-        skippedCount += uniqueClusterNodes.length;
+      if (!Number.isFinite(requiredWidth)) {
+        skippedCount += 1;
         return;
       }
 
@@ -12057,9 +11769,9 @@ const applyTemplateAutoWidthBoxes = (
       const appliedDelta = applyFrameAutoWidthDelta(node, requestedDelta, anchorSide);
 
       if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(...uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)));
+        changedFrameGroupIds.push(frameGroupId);
       } else {
-        skippedCount += uniqueClusterNodes.length;
+        skippedCount += 1;
       }
     });
 
@@ -12091,6 +11803,8 @@ const applyTemplateSecondaryContentFit = (
   let skippedCount = 0;
 
   materializePositionGroupWrappers(root);
+  const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
+  const positionGroupRectSnapshot = snapshotPositionGroupRects(root);
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -12132,8 +11846,10 @@ const applyTemplateSecondaryContentFit = (
     });
 
   if (changedFrameGroupIds.length > 0) {
-    materializePositionGroupWrappers(root);
+    restoreFrameRelativeAnchorConfigs(root, relativeAnchorSnapshot);
     ensureRelativeAnchorConfigs(root);
+    materializePositionGroupWrappers(root);
+    preserveGroupRelativeAnchorGapsAfterAutoSize(root, positionGroupRectSnapshot);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
 
@@ -12154,6 +11870,8 @@ const applyTemplateAutoSizeBoxes = (
   changedFrameGroupIds: string[];
 } => {
   materializePositionGroupWrappers(root);
+  const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
+  const positionGroupRectSnapshot = snapshotPositionGroupRects(root);
   const emptyResult = { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
   const heightResult = options.skipHeight
     ? emptyResult
@@ -12166,8 +11884,10 @@ const applyTemplateAutoSizeBoxes = (
   );
 
   if (changedFrameGroupIds.length > 0) {
-    materializePositionGroupWrappers(root);
+    restoreFrameRelativeAnchorConfigs(root, relativeAnchorSnapshot);
     ensureRelativeAnchorConfigs(root);
+    materializePositionGroupWrappers(root);
+    preserveGroupRelativeAnchorGapsAfterAutoSize(root, positionGroupRectSnapshot);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
 
@@ -14462,8 +14182,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [showMetadataIcons, setShowMetadataIcons] = React.useState(false);
   const [canvasIconScale, setCanvasIconScale] = React.useState<CanvasIconScale>('m');
   const [showCanvasLegend, setShowCanvasLegend] = React.useState(false);
-  const [templateUsagePreviewMode, setTemplateUsagePreviewMode] = React.useState(false);
-  const [templateUsagePreviewHtml, setTemplateUsagePreviewHtml] = React.useState('');
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
     kind: 'idle',
@@ -14544,7 +14262,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const surfaceRenderedPreviewHtml = templateUsagePreviewMode ? templateUsagePreviewHtml : renderedPreviewHtml;
   const selectedEdgeMemberCount = React.useMemo(
     () => new Set(edgeSelectionState.tokens.flatMap((token) => token.memberEdgeIds)).size,
     [edgeSelectionState]
@@ -15032,11 +14749,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
   }, [cancelScheduledAutoPersistDraft]);
 
-	  const syncDraftPreviewHtmlRef = React.useCallback((options?: {
-	    materializePositionGroups?: boolean;
-	    recordHistory?: boolean;
-	    updatePreviewDomVersion?: boolean;
-	    updateRenderedHtml?: boolean;
+  const syncDraftPreviewHtmlRef = React.useCallback((options?: {
+    materializePositionGroups?: boolean;
+    recordHistory?: boolean;
+    updatePreviewDomVersion?: boolean;
+    updateRenderedHtml?: boolean;
   }) => {
     const root = previewRef.current;
 
@@ -15066,46 +14783,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         showAllGroupProxySelections: positionGroupProxySelectionShowAllGroupsRef.current,
       });
     }
-	    return nextDraftHtml;
-	  }, [pushCanvasHistoryEntry]);
-
-  const toggleTemplateUsagePreviewMode = React.useCallback(() => {
-    if (templateUsagePreviewMode) {
-      setTemplateUsagePreviewMode(false);
-      setTemplateUsagePreviewHtml('');
-      setPreviewDomVersion((previous) => previous + 1);
-      setMessage('템플릿 편집 모드로 돌아왔습니다.');
-      return;
-    }
-
-    const root = previewRef.current;
-
-    if (!root || !renderedPreviewHtml.trim()) {
-      setMessage('실제 사용 미리보기를 만들 템플릿을 먼저 불러오세요.');
-      return;
-    }
-
-    syncDraftPreviewHtmlRef({ recordHistory: false });
-    const runtimeHtml = buildTemplateUsagePreviewHtml(root);
-
-    if (!runtimeHtml.trim()) {
-      setMessage('실제 사용 미리보기를 만들 수 없습니다.');
-      return;
-    }
-
-    setBoxCreationMode(false);
-    setTemplateUsagePreviewHtml(runtimeHtml);
-    setTemplateUsagePreviewMode(true);
-    setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
-  }, [renderedPreviewHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
-
-  React.useEffect(() => {
-    if (!templateUsagePreviewMode || !previewRef.current) {
-      return undefined;
-    }
-
-    return attachTemplateUsagePreviewRuntimeHandlers(previewRef.current);
-  }, [surfaceRenderedPreviewHtml, templateUsagePreviewMode]);
+    return nextDraftHtml;
+  }, [pushCanvasHistoryEntry]);
 
   const persistTemplateDraftHtml = React.useCallback(
     async (
@@ -20021,14 +19700,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [buildLiveEdgeTopologySnapshot]
   );
 
-	  const schedulePreviewEditorState = React.useCallback(() => {
-	    if (typeof window === 'undefined') {
-	      return;
-	    }
-
-	    if (templateUsagePreviewMode) {
-	      return;
-	    }
+  const schedulePreviewEditorState = React.useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
 
     if (hasActivePointerInteraction()) {
       deferredPreviewEditorStateRef.current = true;
@@ -20176,20 +19851,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
       visibleMetadataReviewIssues,
-	    syncPreviewSurfaceScale,
-	    templateUsagePreviewMode,
-	  ]);
+      syncPreviewSurfaceScale,
+    ]);
   const setPreviewNode = React.useCallback(
     (node: HTMLDivElement | null) => {
-	      previewRef.current = node;
+      previewRef.current = node;
 
-	      if (node && renderedPreviewHtml) {
-	        syncPreviewSurfaceCloneAttrs(node);
-	        if (templateUsagePreviewMode) {
-	          syncPreviewSurfaceScale(node);
-	          return;
-	        }
-	        syncPreviewSurfaceSelectionPanelTabAttr(node, selectionPanelTab);
+      if (node && renderedPreviewHtml) {
+        syncPreviewSurfaceCloneAttrs(node);
+        syncPreviewSurfaceSelectionPanelTabAttr(node, selectionPanelTab);
         syncPreviewSurfacePositionSpacingSelectionVisualAttr(
           node,
           selectionPanelTab === 'position' && positionOrderLockSelectionMode
@@ -20202,60 +19872,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
         schedulePreviewEditorState();
-        void (async () => {
-          await document.fonts?.ready?.catch(() => undefined);
-
-          if (previewRef.current !== node) {
-            return;
-          }
-
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
-
-          const liveNode = previewRef.current;
-
-          if (!liveNode || liveNode !== node) {
-            return;
-          }
-
-          ensurePreviewFrameBandNormalization(liveNode);
-          syncPreviewSurfaceCloneAttrs(liveNode);
-          syncPreviewSurfaceSelectionPanelTabAttr(liveNode, selectionPanelTab);
-          syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-            liveNode,
-            selectionPanelTab === 'position' && positionOrderLockSelectionMode
-          );
-          applyPreviewEditPermissions(liveNode, selectionPanelTab);
-
-          if (selectionPanelTab === 'position') {
-            materializePositionGroupWrappers(liveNode);
-            ensureRelativeAnchorConfigs(liveNode);
-            normalizePositionGroupRelativeAnchors(liveNode);
-            applyRelativeAnchoredFrameRectsInRoot(liveNode);
-          }
-
-          const autoSizeResult = applyTemplateAutoSizeBoxes(liveNode);
-
-          if (autoSizeResult.changedCount > 0) {
-            syncDraftPreviewHtmlRef({ recordHistory: false });
-          }
-        })();
       }
     },
     [
-	      positionOrderLockSelectionMode,
-	      renderedPreviewHtml,
-	      schedulePreviewEditorState,
-	      selectionPanelTab,
-	      syncDraftPreviewHtmlRef,
-	      syncPreviewSurfaceScale,
-	      templateUsagePreviewMode,
-	    ]
-	  );
+      positionOrderLockSelectionMode,
+      renderedPreviewHtml,
+      schedulePreviewEditorState,
+      selectionPanelTab,
+      syncDraftPreviewHtmlRef,
+      syncPreviewSurfaceScale,
+    ]
+  );
 
   const applyRuntimeSelectionUi = React.useCallback(
     (
@@ -21026,12 +20653,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     async (templateId: string) => {
       const normalizedTemplateId = templateId.trim();
 
-	      if (!normalizedTemplateId) {
-	        setTemplateDetail(null);
-	        setPreviewHtml('');
-	        setTemplateUsagePreviewMode(false);
-	        setTemplateUsagePreviewHtml('');
-	        selectedFrameGroupIdsRef.current = [];
+      if (!normalizedTemplateId) {
+        setTemplateDetail(null);
+        setPreviewHtml('');
+        selectedFrameGroupIdsRef.current = [];
         edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
@@ -21066,11 +20691,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setSelectedTemplateId(normalizedTemplateId);
         setTemplateName(detail.template.templateName);
         setSourceDocumentName(detail.template.sourceDocumentName || '');
-	        setLayoutResizeMode(detail.template.layoutResizeMode);
-	        setPreviewHtml(detail.template.draftHtml);
-	        setTemplateUsagePreviewMode(false);
-	        setTemplateUsagePreviewHtml('');
-	        selectedFrameGroupIdsRef.current = [];
+        setLayoutResizeMode(detail.template.layoutResizeMode);
+        setPreviewHtml(detail.template.draftHtml);
+        selectedFrameGroupIdsRef.current = [];
         edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
@@ -21132,11 +20755,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         if (selectedTemplateId.trim() === templateId || templateDetail?.template.id === templateId) {
           setSelectedTemplateId('');
-	          setTemplateDetail(null);
-	          setPreviewHtml('');
-	          setTemplateUsagePreviewMode(false);
-	          setTemplateUsagePreviewHtml('');
-	          setTemplateName('');
+          setTemplateDetail(null);
+          setPreviewHtml('');
+          setTemplateName('');
           setSourceDocumentName('');
           selectedFrameGroupIdsRef.current = [];
           edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
@@ -22863,13 +22484,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       writeFrameAutoSizeAnchorAttrs(node, side);
     });
 
+    const targetFrameGroupIds = nodes.map((node) => getFrameGroupId(node)).filter(Boolean);
+    const autoSizeResult = applyTemplateAutoSizeBoxes(root, targetFrameGroupIds);
     syncDraftPreviewHtmlRef({ materializePositionGroups: false });
     schedulePreviewEditorState();
     syncSelectionStyleDraft();
     requestPreviewTextFit();
     const directionLabel =
       side === 'top' ? '위로 확장' : side === 'bottom' ? '아래로 확장' : side === 'left' ? '왼쪽으로 확장' : '오른쪽으로 확장';
-    setMessage(`자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자`);
+    setMessage(
+      `자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자` +
+        (autoSizeResult.changedCount > 0 ? `, ${autoSizeResult.changedCount}개 크기 재계산` : '') +
+        (autoSizeResult.skippedCount > 0 ? `, ${autoSizeResult.skippedCount}개 제외` : '')
+    );
   }, [
     requestPreviewTextFit,
     schedulePreviewEditorState,
@@ -26477,14 +26104,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     ]
   );
 
-	  const saveTemplate = React.useCallback(async () => {
-	    const currentHtml =
-	      templateUsagePreviewMode || !previewRef.current
-	        ? draftPreviewHtmlRef.current.trim()
-	        : syncDraftPreviewHtmlRef();
+  const saveTemplate = React.useCallback(async () => {
+    const currentHtml = previewRef.current ? syncDraftPreviewHtmlRef() : draftPreviewHtmlRef.current.trim();
 
-	    await persistTemplateDraftHtml(currentHtml);
-	  }, [persistTemplateDraftHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+    await persistTemplateDraftHtml(currentHtml);
+  }, [persistTemplateDraftHtml, syncDraftPreviewHtmlRef]);
 
   const stopPointerInteraction = React.useCallback(
     (pointerId?: number) => {
@@ -26906,13 +26530,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const root = previewRef.current;
       const deleteTarget = event.target instanceof Element ? event.target : null;
 
-	      if (!root || !deleteTarget) {
-	        return;
-	      }
-
-	      if (templateUsagePreviewMode) {
-	        return;
-	      }
+      if (!root || !deleteTarget) {
+        return;
+      }
 
       const reviewWarningUi = deleteTarget.closest<HTMLElement>(
         `.${FRAME_REVIEW_WARNING_BUTTON_CLASS}, .${FRAME_REVIEW_WARNING_POPOVER_CLASS}`
@@ -27736,18 +27356,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      resolvePositionClickChainCurrentIndex,
 	      resolvePositionSelectionClickChain,
 	      previewPositionOrderLockCandidateSelection,
-	      previewZoom,
-	      selectionPanelTab,
-	      templateUsagePreviewMode,
-	    ]
-	  );
+      previewZoom,
+      selectionPanelTab,
+    ]
+  );
 
-	  const handlePreviewPointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-	    if (templateUsagePreviewMode) {
-	      return;
-	    }
-
-	    const marqueeSelectionState = marqueeSelectionStateRef.current;
+  const handlePreviewPointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const marqueeSelectionState = marqueeSelectionStateRef.current;
     const createBoxState = createBoxStateRef.current;
     const dragState = dragStateRef.current;
     let resizeState = resizeStateRef.current;
@@ -28422,21 +28037,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     normalizeLiveVerticalPhysicalPeersToDragDirection,
     realignLiveVerticalEdgeTargets,
     resolveLiveEdgeAutosnapCorrection,
-	    resolveLiveEdgeResizeTargets,
-	    selectionPanelTab,
-	    positionOrderLockSelectionMode,
-	    stabilizeLiveVerticalEdgeTargetsToAppliedDelta,
-	    syncLiveAppliedEdgeDeltas,
-	    templateUsagePreviewMode,
-	  ]);
+    resolveLiveEdgeResizeTargets,
+    selectionPanelTab,
+    positionOrderLockSelectionMode,
+    stabilizeLiveVerticalEdgeTargetsToAppliedDelta,
+    syncLiveAppliedEdgeDeltas,
+  ]);
 
-	  const handlePreviewPointerUp = React.useCallback(
-	    (event: React.PointerEvent<HTMLDivElement>) => {
-	      if (templateUsagePreviewMode) {
-	        return;
-	      }
-
-	      const createBoxState = createBoxStateRef.current;
+  const handlePreviewPointerUp = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const createBoxState = createBoxStateRef.current;
 
       if (createBoxState?.pointerId === event.pointerId) {
         event.preventDefault();
@@ -28688,20 +28298,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      commitCreatedFrameShell,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
-	      selectionPanelTab,
-	      positionOrderLockSelectionMode,
-	      stopPointerInteraction,
-	      templateUsagePreviewMode,
-	    ]
-	  );
+      selectionPanelTab,
+      positionOrderLockSelectionMode,
+      stopPointerInteraction,
+    ]
+  );
 
-	  const handlePreviewPointerCancel = React.useCallback(
-	    (event: React.PointerEvent<HTMLDivElement>) => {
-	      if (templateUsagePreviewMode) {
-	        return;
-	      }
-
-	      const marqueeSelectionState = marqueeSelectionStateRef.current;
+  const handlePreviewPointerCancel = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const marqueeSelectionState = marqueeSelectionStateRef.current;
 
       if (marqueeSelectionState?.pointerId === event.pointerId) {
         const owner = activePointerOwnerRef.current;
@@ -28747,21 +28352,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         stopPointerInteraction(event.pointerId);
       }
     },
-	    [
-	      applyRuntimeSelectionUi,
-	      clearTransientCanvasOverlays,
-	      schedulePreviewEditorState,
-	      stopPointerInteraction,
-	      templateUsagePreviewMode,
-	    ]
-	  );
+    [applyRuntimeSelectionUi, clearTransientCanvasOverlays, schedulePreviewEditorState, stopPointerInteraction]
+  );
 
-	  const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-	    if (templateUsagePreviewMode) {
-	      return;
-	    }
-
-	    const deleteTarget = event.target instanceof Element ? event.target : null;
+  const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const deleteTarget = event.target instanceof Element ? event.target : null;
     const reviewWarningUi = deleteTarget?.closest<HTMLElement>(
       `.${FRAME_REVIEW_WARNING_BUTTON_CLASS}, .${FRAME_REVIEW_WARNING_POPOVER_CLASS}`
     ) || null;
@@ -28818,46 +28413,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-	  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef]);
 
-	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
-	    const target = event.target instanceof HTMLElement ? event.target : null;
+  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
 
     if (!target) {
       return;
     }
 
     const frameTextInput = target.closest<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
-    const frameEditableScope = target.closest<HTMLElement>('[data-template-edit-scope]');
 
-	    if (templateUsagePreviewMode) {
+    if (selectionPanelTab === 'text' && frameTextInput) {
+      markTemplateValueElementEdited(frameTextInput);
       const root = previewRef.current;
-      const frameNode = resolveFrameSelectionAnchor(target.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
-      const shouldRestoreTextInputFocus = Boolean(frameTextInput && document.activeElement === frameTextInput);
-      const selectionStart =
-        frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
-          ? frameTextInput.selectionStart
-          : null;
-      const selectionEnd =
-        frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
-          ? frameTextInput.selectionEnd
-          : null;
-
-      if (root && frameNode) {
-        applyTemplateUsagePreviewAutoSize(root, frameNode, {
-          restoreTextInputFocus: shouldRestoreTextInputFocus,
-          selectionStart,
-          selectionEnd,
-        });
-      }
-	      return;
-	    }
-
-    if (selectionPanelTab === 'text') {
-      const root = previewRef.current;
-      const frameNode = resolveFrameSelectionAnchor(
-        (frameTextInput || frameEditableScope || target).closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)
-      );
+      const frameNode = resolveFrameSelectionAnchor(frameTextInput.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
       const frameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
       const shouldRestoreTextInputFocus = document.activeElement === frameTextInput;
       const selectionStart =
@@ -28870,7 +28440,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           : null;
 
       if (root && frameNode && frameGroupId && (readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))) {
-        markTemplateValueElementEdited(frameTextInput || frameEditableScope || target);
         applyTemplateAutoSizeBoxes(root, [frameGroupId]);
 
         if (shouldRestoreTextInputFocus) {
@@ -28886,7 +28455,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
-	  }, [requestPreviewTextFit, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+  }, [requestPreviewTextFit, selectionPanelTab, syncDraftPreviewHtmlRef]);
 
   const toggleBoxCreationModeFromCanvasToolbar = React.useCallback(() => {
     clearTransientCanvasOverlays();
@@ -30651,9 +30220,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview[data-frame-create-mode="true"] [data-template-edit-scope][data-template-edit-enabled="true"] {
           cursor: crosshair;
         }
-	        .template-edit-preview .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]),
-	        .template-edit-preview .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) {
-	          outline: 1px dashed rgba(15, 23, 42, .34) !important;
+        .template-edit-preview .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]),
+        .template-edit-preview .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) {
+          outline: 1px dashed rgba(15, 23, 42, .34) !important;
           outline-offset: -1px !important;
           background-color: transparent !important;
           background-image: repeating-linear-gradient(
@@ -30662,20 +30231,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             rgba(15, 23, 42, .08) 4px,
             transparent 4px,
             transparent 9px
-	          ) !important;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"],
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"] {
-	          outline: none !important;
-	          background-image: none !important;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [data-frame-editor-ui="true"],
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .${FRAME_KIND_MARKER_CLASS},
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .${FRAME_DELETE_BUTTON_CLASS},
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] ${FRAME_EDGE_BUTTON_SELECTOR},
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] ${FRAME_RESIZE_HANDLE_SELECTOR} {
-	          display: none !important;
-	        }
+          ) !important;
+        }
         .template-edit-preview [data-template-selected="true"] {
           --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(37, 99, 235, .96));
           position: relative;
@@ -30816,94 +30373,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview ${RAW_FRAME_NODE_SELECTOR} [data-template-value] {
           background-color: transparent;
         }
-	        .template-edit-preview [data-template-frame-role="value"] [data-template-frame-input="true"],
-	        .template-edit-preview [data-template-frame-input="true"][data-template-frame-role="value"] {
-	          color: rgb(148 163 184) !important;
-	          -webkit-text-fill-color: rgb(148 163 184) !important;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [data-template-frame-role="value"] [data-template-frame-input="true"],
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [data-template-frame-input="true"][data-template-frame-role="value"],
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"] [data-template-frame-input="true"] {
-	          color: inherit !important;
-	          -webkit-text-fill-color: currentColor !important;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}],
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"] [data-template-frame-input="true"] {
-	          pointer-events: auto !important;
-	          user-select: text !important;
-	          -webkit-user-select: text !important;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="text"][contenteditable="true"]:empty::before {
-	          content: attr(data-placeholder);
-	          color: rgb(148 163 184);
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control,
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control {
-	          width: 100%;
-	          height: 100%;
-	          min-height: 28px;
-	          box-sizing: border-box;
-	          display: grid;
-	          gap: 4px;
-	          align-content: center;
-	          color: rgb(15 23 42);
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-label {
-	          display: inline-flex;
-	          width: fit-content;
-	          max-width: 100%;
-	          align-items: center;
-	          justify-content: center;
-	          gap: 6px;
-	          border: 1px solid rgb(203 213 225);
-	          border-radius: 6px;
-	          background: rgb(248 250 252);
-	          padding: 4px 8px;
-	          font-size: 11px;
-	          font-weight: 700;
-	          color: rgb(51 65 85);
-	          cursor: pointer;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-label input {
-	          position: absolute;
-	          width: 1px;
-	          height: 1px;
-	          opacity: 0;
-	          pointer-events: none;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-name {
-	          min-width: 0;
-	          overflow: hidden;
-	          text-overflow: ellipsis;
-	          white-space: nowrap;
-	          font-size: 11px;
-	          color: rgb(100 116 139);
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control {
-	          grid-template-rows: minmax(0, 1fr) auto;
-	          align-content: stretch;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-canvas {
-	          width: 100%;
-	          height: 100%;
-	          min-height: 42px;
-	          border: 1px dashed rgb(148 163 184);
-	          border-radius: 6px;
-	          background: rgba(255, 255, 255, .72);
-	          touch-action: none;
-	          cursor: crosshair;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-clear {
-	          justify-self: end;
-	          border: 1px solid rgb(203 213 225);
-	          border-radius: 999px;
-	          background: rgb(255 255 255);
-	          padding: 2px 8px;
-	          font-size: 10px;
-	          font-weight: 700;
-	          color: rgb(71 85 105);
-	          cursor: pointer;
-	        }
+        .template-edit-preview [data-template-frame-role="value"] [data-template-frame-input="true"],
+        .template-edit-preview [data-template-frame-input="true"][data-template-frame-role="value"] {
+          color: rgb(148 163 184) !important;
+          -webkit-text-fill-color: rgb(148 163 184) !important;
+        }
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-frame-input="true"],
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-edit-scope],
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-value] {
@@ -31500,9 +30974,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           >
             템플릿 관리
           </Link>
-	          <Button onClick={() => void saveTemplate()} disabled={saving || loading || !templateDetail || templateUsagePreviewMode}>
-	            {saving ? '저장 중...' : '현재 템플릿 저장'}
-	          </Button>
+          <Button onClick={() => void saveTemplate()} disabled={saving || loading || !templateDetail}>
+            {saving ? '저장 중...' : '현재 템플릿 저장'}
+          </Button>
         </div>
       </div>
 
@@ -31576,32 +31050,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   <div className="min-w-0">
         <Card ref={stylePanelRef} className="border-slate-200 min-w-0 overflow-hidden">
           <CardHeader>
-		            <div className="flex items-center justify-between gap-3">
-		              <CardTitle>상자 편집 캔버스</CardTitle>
-		              <div className="flex items-center gap-2">
-		                <Button
-		                  size="sm"
-		                  variant="outline"
-		                  className={templateUsagePreviewMode ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800' : ''}
-		                  onClick={toggleTemplateUsagePreviewMode}
-		                  disabled={!renderedPreviewHtml.trim()}
-		                  aria-pressed={templateUsagePreviewMode}
-		                  aria-label={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
-		                  title={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
-		                >
-		                  {templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-		                </Button>
-		                <div className="inline-flex overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="캔버스 조작 모드">
-		                  <button
-		                    type="button"
+	            <div className="flex items-center justify-between gap-3">
+	              <CardTitle>상자 편집 캔버스</CardTitle>
+	              <div className="flex items-center gap-2">
+	                <div className="inline-flex overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="캔버스 조작 모드">
+	                  <button
+	                    type="button"
 	                    className={`inline-flex h-8 w-8 items-center justify-center transition ${
 	                      canvasInteractionMode === 'select'
 	                        ? 'bg-slate-900 text-white'
 	                        : 'bg-white text-slate-600 hover:bg-slate-100'
 	                    }`}
-		                    onClick={() => setCanvasInteractionMode('select')}
-		                    disabled={templateUsagePreviewMode}
-		                    aria-label="선택 모드"
+	                    onClick={() => setCanvasInteractionMode('select')}
+	                    aria-label="선택 모드"
 	                    title="선택 모드"
 	                  >
 	                    <MousePointer2 className="h-4 w-4" />
@@ -31613,8 +31074,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	                        ? 'bg-slate-900 text-white'
 	                        : 'bg-white text-slate-600 hover:bg-slate-100'
 	                    }`}
-		                    onClick={() => setCanvasInteractionMode('move')}
-		                    disabled={templateUsagePreviewMode}
+	                    onClick={() => setCanvasInteractionMode('move')}
 	                    aria-label="이동 모드"
 	                    title="이동 모드"
 	                  >
@@ -31624,8 +31084,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	                <Button
 	                  size="sm"
                   variant="outline"
-	                  onClick={handleUndoCanvasHistory}
-	                  disabled={!canUndoCanvasHistory || templateUsagePreviewMode}
+                  onClick={handleUndoCanvasHistory}
+                  disabled={!canUndoCanvasHistory}
                   aria-label="되돌리기"
                   title="되돌리기"
                 >
@@ -31634,8 +31094,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <Button
                   size="sm"
                   variant="outline"
-	                  onClick={handleRedoCanvasHistory}
-	                  disabled={!canRedoCanvasHistory || templateUsagePreviewMode}
+                  onClick={handleRedoCanvasHistory}
+                  disabled={!canRedoCanvasHistory}
                   aria-label="다시 실행하기"
                   title="다시 실행하기"
                 >
@@ -31951,33 +31411,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 		              </div>
 		            </CardContent>
 		          ) : null}
-	          <TemplateEditPreviewSurface
-	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
-	            boxCreationMode={templateUsagePreviewMode ? false : boxCreationMode}
-	            canvasIconScale={canvasIconScale}
-	            metadataVisualMode={templateUsagePreviewMode ? false : selectionPanelTab === 'metadata'}
-	            templateUsagePreviewMode={templateUsagePreviewMode}
-	            selectionPanelTab={selectionPanelTab}
-	            showMetadataIcons={templateUsagePreviewMode ? false : showMetadataIcons}
-	            actionOverlay={templateUsagePreviewMode ? null : resolveCanvasActionOverlay()}
-	            actionOverlayLabel={canvasActionOverlayLabel}
-	            actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
-	            metadataNameOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' && selectedFrameGroupIds.length <= 1
-	                ? renderMetadataNameOverlay
-	                : null
-	            }
-	            metadataRolePrimaryOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRolePrimaryOverlay : null
-	            }
-	            metadataRoleSecondaryOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleSecondaryOverlay : null
-	            }
-	            metadataRoleTertiaryOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleTertiaryOverlay : null
-	            }
-	            styleOverlay={templateUsagePreviewMode ? null : renderPositionStyleOverlay()}
-	            summaryOverlay={templateUsagePreviewMode ? null : renderSelectionSummaryBox()}
+          <TemplateEditPreviewSurface
+            renderedPreviewHtml={renderedPreviewHtml}
+            boxCreationMode={boxCreationMode}
+            canvasIconScale={canvasIconScale}
+            metadataVisualMode={selectionPanelTab === 'metadata'}
+            selectionPanelTab={selectionPanelTab}
+            showMetadataIcons={showMetadataIcons}
+            actionOverlay={resolveCanvasActionOverlay()}
+            actionOverlayLabel={canvasActionOverlayLabel}
+            actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
+            metadataNameOverlay={
+              selectionPanelTab === 'metadata' && selectedFrameGroupIds.length <= 1 ? renderMetadataNameOverlay : null
+            }
+            metadataRolePrimaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRolePrimaryOverlay : null}
+            metadataRoleSecondaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRoleSecondaryOverlay : null}
+            metadataRoleTertiaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRoleTertiaryOverlay : null}
+            styleOverlay={renderPositionStyleOverlay()}
+            summaryOverlay={renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}
             handlePreviewPointerDown={handlePreviewPointerDown}
             handlePreviewPointerMove={handlePreviewPointerMove}
