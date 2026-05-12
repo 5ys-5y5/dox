@@ -12708,11 +12708,11 @@ const appendPositionGroupProxySelectionMarker = (
   const marker = document.createElement('div');
   marker.setAttribute('data-frame-editor-ui', 'true');
   marker.setAttribute('data-v106-position-group-proxy-overlay', groupId);
+  marker.setAttribute('aria-hidden', 'true');
   marker.style.position = 'absolute';
   marker.style.pointerEvents = 'none';
 
   if (!rect) {
-    marker.setAttribute('aria-hidden', 'true');
     marker.style.display = 'none';
     pageInner.appendChild(marker);
     return;
@@ -12739,7 +12739,6 @@ const appendPositionGroupProxySelectionMarker = (
   fill.setAttribute('data-frame-editor-ui', 'true');
   fill.setAttribute('aria-hidden', 'true');
   marker.appendChild(fill);
-  marker.appendChild(buildFrameDeleteButton('group', groupId, `${groupId} 그룹 삭제`));
 
   pageInner.appendChild(marker);
 };
@@ -13271,13 +13270,6 @@ const hasFrameDeleteButtonForSelection = (shell: HTMLElement, frameGroupId: stri
       button.getAttribute(FRAME_DELETE_TARGET_ID_ATTR) === frameGroupId
   );
 
-const hasGroupDeleteButtonForProxyMarker = (marker: HTMLElement, groupId: string) =>
-  Array.from(marker.querySelectorAll<HTMLElement>(`[${FRAME_DELETE_BUTTON_ATTR}="true"]`)).some(
-    (button) =>
-      button.getAttribute(FRAME_DELETE_KIND_ATTR) === 'group' &&
-      button.getAttribute(FRAME_DELETE_TARGET_ID_ATTR) === groupId
-  );
-
 const stripEditorUiForStableFrameSelectionRefresh = (root: HTMLElement) => {
   root.querySelectorAll<HTMLElement>('[data-frame-editor-ui="true"]').forEach((element) => {
     if (
@@ -13400,6 +13392,10 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
     selectedEntryByFrameGroupId.set(selectedEntry.frameGroupId, selectedEntry);
   }
 
+  if (root.querySelectorAll<HTMLElement>(`.${FRAME_DELETE_BUTTON_CLASS}`).length !== expectedDirectSelectedIds.length) {
+    return false;
+  }
+
   const hasExpectedDirectSelectionUi = expectedDirectSelectedIds.every((frameGroupId, selectionIndex) => {
     const selectedEntry = selectedEntryByFrameGroupId.get(frameGroupId);
 
@@ -13429,14 +13425,6 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
   const expectedProxyGroupIds = Array.from(
     new Set(positionSelectionOrderState.normalizedProxySelections.map((proxySelection) => proxySelection.groupId.trim()).filter(Boolean))
   );
-
-  if (
-    root.querySelectorAll<HTMLElement>(`.${FRAME_DELETE_BUTTON_CLASS}`).length !==
-    expectedDirectSelectedIds.length + expectedProxyGroupIds.length
-  ) {
-    return false;
-  }
-
   const proxyMarkers = Array.from(root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]'));
   const proxyMarkerGroupIds = proxyMarkers
     .map((element) => element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '')
@@ -13471,10 +13459,7 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
   const hasExpectedProxySelectionOrder = proxyMarkers.every((element) => {
     const proxyGroupId = element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '';
     const expectedSelectionOrder = expectedProxySelectionOrderByGroupId.get(proxyGroupId);
-    return (
-      (!expectedSelectionOrder || element.getAttribute('data-template-selection-order') === expectedSelectionOrder) &&
-      hasGroupDeleteButtonForProxyMarker(element, proxyGroupId)
-    );
+    return !expectedSelectionOrder || element.getAttribute('data-template-selection-order') === expectedSelectionOrder;
   });
 
   if (!hasExpectedProxySelectionOrder) {
@@ -13793,7 +13778,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     Record<string, { gapY: string }>
   >({});
   const [showMetadataIcons, setShowMetadataIcons] = React.useState(false);
-  const [canvasIconScale, setCanvasIconScale] = React.useState<CanvasIconScale>('m');
+  const [canvasIconScale, setCanvasIconScale] = React.useState<CanvasIconScale>('s');
   const [showCanvasLegend, setShowCanvasLegend] = React.useState(false);
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
@@ -25834,7 +25819,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       let targetFrameGroupIds: string[] = [];
       let targetGroupIds: string[] = [];
       let targetLabel = normalizedTargetId;
-      let groupDirectFrameGroupIdsToDetach: string[] = [];
 
       if (normalizedKind === 'group') {
         const targetGroup = groupById.get(normalizedTargetId) || null;
@@ -25844,11 +25828,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-        targetGroupIds = [normalizedTargetId];
-        targetFrameGroupIds = [];
-        groupDirectFrameGroupIdsToDetach = Array.from(
+        targetGroupIds = collectPositionGroupTreeDescendantIds(root, [normalizedTargetId]);
+        if (!targetGroupIds.includes(normalizedTargetId)) {
+          targetGroupIds = [normalizedTargetId, ...targetGroupIds];
+        }
+        targetFrameGroupIds = Array.from(
           new Set(
-            (targetGroup.directFrameGroupIds ?? targetGroup.frameGroupIds)
+            targetGroupIds
+              .flatMap((groupId) => groupById.get(groupId)?.frameGroupIds || [])
+              .concat(targetGroup.frameGroupIds)
               .map((frameGroupId) => frameGroupId.trim())
               .filter(Boolean)
           )
@@ -25887,7 +25875,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setEdgeSelectionState(emptyEdgeSelection);
       setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
 
-      const removedFrameCount = normalizedKind === 'frame' ? removeFrameShellsByFrameGroupIds(root, targetFrameGroupIds) : 0;
+      const removedFrameCount = removeFrameShellsByFrameGroupIds(root, targetFrameGroupIds);
 
       if (normalizedKind === 'frame' && removedFrameCount <= 0) {
         setMessage('삭제할 상자를 찾지 못했습니다.');
@@ -25895,23 +25883,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      if (normalizedKind === 'group') {
-        unwrapPositionGroupTreeEntriesByIds(root, targetGroupIds);
-        groupDirectFrameGroupIdsToDetach.forEach((frameGroupId) => {
-          const targetNode = resolveFrameSelectionAnchor(
-            root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
-          );
-
-          if (targetNode && readFramePositionGroupConfig(targetNode)?.groupId === normalizedTargetId) {
-            writeFramePositionGroupAttrs(targetNode, null);
-          }
-        });
-        removePositionGroupWrappersByIds(root, targetGroupIds);
-        clearFrameRelativeAnchorsReferencingDeletedTargets(root, targetGroupIds, []);
-      } else {
-        prunePositionGroupTreeReferences(root, [], targetFrameGroupIds);
-        clearFrameRelativeAnchorsReferencingDeletedTargets(root, [], targetFrameGroupIds);
-      }
+      prunePositionGroupTreeReferences(root, targetGroupIds, targetFrameGroupIds);
+      removePositionGroupWrappersByIds(root, targetGroupIds);
+      clearFrameRelativeAnchorsReferencingDeletedTargets(root, targetGroupIds, targetFrameGroupIds);
       applyRelativeAnchoredFrameRectsInRoot(root);
       applyRuntimeSelectionUi([], emptyEdgeSelection, []);
       syncDraftPreviewHtmlRef();
@@ -25919,7 +25893,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       schedulePreviewEditorState();
       setMessage(
         normalizedKind === 'group'
-          ? `${targetLabel} 그룹 삭제 완료: 하위 상자와 하위 그룹 유지`
+          ? `${targetLabel} 삭제 완료: ${removedFrameCount}개 상자 삭제`
           : `${normalizedTargetId} 상자 삭제 완료`
       );
     },
@@ -26277,27 +26251,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           active: false,
         };
         return true;
-	      };
-	      const startSelectionMarqueeAfterClickSelection = (baseProxySelections: PositionGroupProxySelection[] = []) => {
-	        if (selectionPanelTab === 'position') {
-	          if (
-	            canvasInteractionMode !== 'select' ||
-	            positionOrderLockSelectionMode ||
-	            positionGroupEditModeRef.current.kind !== 'idle'
-	          ) {
-	            return false;
-	          }
+      };
+      const startSelectionMarqueeAfterClickSelection = (baseProxySelections: PositionGroupProxySelection[] = []) => {
+        if (selectionPanelTab === 'position') {
+          return false;
+        }
 
-	          return startMarqueeSelectionInteraction({
-	            anchorFrameGroupId: '',
-	            baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	            baseProxySelections,
-	          });
-	        }
-
-	        if (canvasInteractionMode !== 'select' && !(canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown)) {
-	          return false;
-	        }
+        if (canvasInteractionMode !== 'select' && !(canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown)) {
+          return false;
+        }
 
         return startMarqueeSelectionInteraction({
           anchorFrameGroupId: '',
@@ -26543,7 +26505,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-	      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
+      if (
+        selectionPanelTab === 'position' &&
+        canvasInteractionMode === 'select' &&
+        !positionOrderLockSelectionMode &&
+        positionGroupEditModeRef.current.kind === 'idle' &&
+        !edgeButton &&
+        !resizeHandle &&
+        pageInner
+      ) {
+        startMarqueeSelectionInteraction({ anchorFrameGroupId: frameGroupId });
+        return;
+      }
+
+      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
         if (positionOrderLockSelectionMode) {
           event.preventDefault();
           const pointerPoint = pageInner

@@ -196,7 +196,6 @@ type FrameRelationPreviewMode =
 
 type SelectionPanelTab = 'metadata' | 'position' | 'text';
 type CanvasInteractionMode = 'select' | 'move';
-type CanvasIconScale = 's' | 'm' | 'l';
 
 type TemplateFramePositionMode = 'relative' | 'absolute';
 
@@ -586,7 +585,6 @@ type TemplateFloatingOverlayContent = React.ReactNode | (() => React.ReactNode);
 type TemplateEditPreviewSurfaceProps = {
   renderedPreviewHtml: string;
   boxCreationMode: boolean;
-  canvasIconScale: CanvasIconScale;
   metadataVisualMode: boolean;
   selectionPanelTab: SelectionPanelTab;
   showMetadataIcons: boolean;
@@ -1091,7 +1089,6 @@ const buildStablePositionGroupProxySelection = (
 const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
   renderedPreviewHtml,
   boxCreationMode,
-  canvasIconScale,
   metadataVisualMode,
   selectionPanelTab,
   showMetadataIcons,
@@ -1809,7 +1806,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         ref={setPreviewNode}
         className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 p-4 template-clone template-clone--raster-first-v2-structured"
         data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
-        data-canvas-icon-scale={canvasIconScale}
         data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
         data-selection-panel-tab={selectionPanelTab}
         data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
@@ -1866,7 +1862,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   );
 });
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
-const CANVAS_ICON_SCALE_OPTIONS: CanvasIconScale[] = ['s', 'm', 'l'];
 const TEMPLATE_FRAME_BOX_KIND_OPTIONS: TemplateFrameBoxKind[] = ['text', 'attachment', 'signature'];
 const TEMPLATE_FRAME_ROLE_OPTIONS: TemplateFrameRole[] = ['key', 'value', 'key_value'];
 const TEXT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['static_label', 'editable_text'];
@@ -11411,54 +11406,9 @@ const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
   return Math.ceil(Math.max(baseWidth, currentRect.width + resolvedExtraWidth));
 };
 
-type TemplateAutoSizeApplyOptions = {
-  applyRelativeAnchors?: boolean;
-};
-
-const cloneFrameRelativeAnchorConfig = (
-  config: TemplateFrameRelativeAnchorConfig
-): TemplateFrameRelativeAnchorConfig => ({
-  ...config,
-});
-
-const snapshotFrameRelativeAnchorConfigs = (root: ParentNode) => {
-  const snapshot = new Map<string, TemplateFrameRelativeAnchorConfig>();
-
-  collectFrameSelectionAnchors(root).forEach((node) => {
-    const frameGroupId = getFrameGroupId(node).trim();
-    const pageInner = node.closest<HTMLElement>('.page-inner') || null;
-    const config = readFrameRelativeAnchorConfig(node, pageInner);
-
-    if (frameGroupId && config?.positionMode === 'relative' && config.anchorKind !== 'page-corner') {
-      snapshot.set(frameGroupId, cloneFrameRelativeAnchorConfig(config));
-    }
-  });
-
-  return snapshot;
-};
-
-const restoreFrameRelativeAnchorConfigs = (
-  root: ParentNode,
-  snapshot: Map<string, TemplateFrameRelativeAnchorConfig>
-) => {
-  if (snapshot.size <= 0) {
-    return;
-  }
-
-  collectFrameSelectionAnchors(root).forEach((node) => {
-    const frameGroupId = getFrameGroupId(node).trim();
-    const config = frameGroupId ? snapshot.get(frameGroupId) : null;
-
-    if (config) {
-      writeFrameRelativeAnchorAttrs(node, config);
-    }
-  });
-};
-
 const applyTemplateAutoHeightBoxes = (
   root: HTMLElement,
-  frameGroupIds?: string[],
-  options: TemplateAutoSizeApplyOptions = {}
+  frameGroupIds?: string[]
 ): {
   changedCount: number;
   skippedCount: number;
@@ -11502,9 +11452,9 @@ const applyTemplateAutoHeightBoxes = (
       }
     });
 
-  if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
+  if (changedFrameGroupIds.length > 0) {
     ensureRelativeAnchorConfigs(root);
-    applyRelativeAnchoredFrameRectsInRoot(root);
+    applyRelativeAnchoredFrameRectsInRoot(root, changedFrameGroupIds);
   }
 
   return {
@@ -11516,8 +11466,7 @@ const applyTemplateAutoHeightBoxes = (
 
 const applyTemplateAutoWidthBoxes = (
   root: HTMLElement,
-  frameGroupIds?: string[],
-  options: TemplateAutoSizeApplyOptions = {}
+  frameGroupIds?: string[]
 ): {
   changedCount: number;
   skippedCount: number;
@@ -11561,9 +11510,9 @@ const applyTemplateAutoWidthBoxes = (
       }
     });
 
-  if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
+  if (changedFrameGroupIds.length > 0) {
     ensureRelativeAnchorConfigs(root);
-    applyRelativeAnchoredFrameRectsInRoot(root);
+    applyRelativeAnchoredFrameRectsInRoot(root, changedFrameGroupIds);
   }
 
   return {
@@ -11581,23 +11530,13 @@ const applyTemplateAutoSizeBoxes = (
   skippedCount: number;
   changedFrameGroupIds: string[];
 } => {
-  const relativeAnchorSnapshot = snapshotFrameRelativeAnchorConfigs(root);
-  const heightResult = applyTemplateAutoHeightBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
-  const widthResult = applyTemplateAutoWidthBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
-  const changedFrameGroupIds = Array.from(
-    new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds])
-  );
-
-  if (changedFrameGroupIds.length > 0) {
-    restoreFrameRelativeAnchorConfigs(root, relativeAnchorSnapshot);
-    ensureRelativeAnchorConfigs(root);
-    applyRelativeAnchoredFrameRectsInRoot(root);
-  }
+  const heightResult = applyTemplateAutoHeightBoxes(root, frameGroupIds);
+  const widthResult = applyTemplateAutoWidthBoxes(root, frameGroupIds);
 
   return {
     changedCount: heightResult.changedCount + widthResult.changedCount,
     skippedCount: heightResult.skippedCount + widthResult.skippedCount,
-    changedFrameGroupIds,
+    changedFrameGroupIds: Array.from(new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds])),
   };
 };
 
@@ -12513,11 +12452,11 @@ const buildFrameDeleteButton = (kind: 'frame' | 'group', targetId: string, label
   button.setAttribute('aria-label', label);
   button.title = label;
   button.style.position = 'absolute';
-  button.style.top = 'var(--v106-canvas-icon-inset, 4px)';
-  button.style.right = 'var(--v106-canvas-icon-inset, 4px)';
+  button.style.top = '4px';
+  button.style.right = '4px';
   button.style.zIndex = '48';
-  button.style.width = 'var(--v106-canvas-icon-size, 24px)';
-  button.style.height = 'var(--v106-canvas-icon-size, 24px)';
+  button.style.width = '24px';
+  button.style.height = '24px';
   button.style.border = '1px solid rgba(248, 113, 113, .9)';
   button.style.borderRadius = '999px';
   button.style.background = 'rgba(254, 242, 242, .98)';
@@ -12708,11 +12647,11 @@ const appendPositionGroupProxySelectionMarker = (
   const marker = document.createElement('div');
   marker.setAttribute('data-frame-editor-ui', 'true');
   marker.setAttribute('data-v106-position-group-proxy-overlay', groupId);
+  marker.setAttribute('aria-hidden', 'true');
   marker.style.position = 'absolute';
   marker.style.pointerEvents = 'none';
 
   if (!rect) {
-    marker.setAttribute('aria-hidden', 'true');
     marker.style.display = 'none';
     pageInner.appendChild(marker);
     return;
@@ -12739,7 +12678,6 @@ const appendPositionGroupProxySelectionMarker = (
   fill.setAttribute('data-frame-editor-ui', 'true');
   fill.setAttribute('aria-hidden', 'true');
   marker.appendChild(fill);
-  marker.appendChild(buildFrameDeleteButton('group', groupId, `${groupId} 그룹 삭제`));
 
   pageInner.appendChild(marker);
 };
@@ -13271,13 +13209,6 @@ const hasFrameDeleteButtonForSelection = (shell: HTMLElement, frameGroupId: stri
       button.getAttribute(FRAME_DELETE_TARGET_ID_ATTR) === frameGroupId
   );
 
-const hasGroupDeleteButtonForProxyMarker = (marker: HTMLElement, groupId: string) =>
-  Array.from(marker.querySelectorAll<HTMLElement>(`[${FRAME_DELETE_BUTTON_ATTR}="true"]`)).some(
-    (button) =>
-      button.getAttribute(FRAME_DELETE_KIND_ATTR) === 'group' &&
-      button.getAttribute(FRAME_DELETE_TARGET_ID_ATTR) === groupId
-  );
-
 const stripEditorUiForStableFrameSelectionRefresh = (root: HTMLElement) => {
   root.querySelectorAll<HTMLElement>('[data-frame-editor-ui="true"]').forEach((element) => {
     if (
@@ -13400,6 +13331,10 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
     selectedEntryByFrameGroupId.set(selectedEntry.frameGroupId, selectedEntry);
   }
 
+  if (root.querySelectorAll<HTMLElement>(`.${FRAME_DELETE_BUTTON_CLASS}`).length !== expectedDirectSelectedIds.length) {
+    return false;
+  }
+
   const hasExpectedDirectSelectionUi = expectedDirectSelectedIds.every((frameGroupId, selectionIndex) => {
     const selectedEntry = selectedEntryByFrameGroupId.get(frameGroupId);
 
@@ -13429,14 +13364,6 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
   const expectedProxyGroupIds = Array.from(
     new Set(positionSelectionOrderState.normalizedProxySelections.map((proxySelection) => proxySelection.groupId.trim()).filter(Boolean))
   );
-
-  if (
-    root.querySelectorAll<HTMLElement>(`.${FRAME_DELETE_BUTTON_CLASS}`).length !==
-    expectedDirectSelectedIds.length + expectedProxyGroupIds.length
-  ) {
-    return false;
-  }
-
   const proxyMarkers = Array.from(root.querySelectorAll<HTMLElement>('[data-v106-position-group-proxy-overlay]'));
   const proxyMarkerGroupIds = proxyMarkers
     .map((element) => element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '')
@@ -13471,10 +13398,7 @@ const isStablePositionFrameSelectionUiAlreadyApplied = (
   const hasExpectedProxySelectionOrder = proxyMarkers.every((element) => {
     const proxyGroupId = element.getAttribute('data-v106-position-group-proxy-overlay')?.trim() || '';
     const expectedSelectionOrder = expectedProxySelectionOrderByGroupId.get(proxyGroupId);
-    return (
-      (!expectedSelectionOrder || element.getAttribute('data-template-selection-order') === expectedSelectionOrder) &&
-      hasGroupDeleteButtonForProxyMarker(element, proxyGroupId)
-    );
+    return !expectedSelectionOrder || element.getAttribute('data-template-selection-order') === expectedSelectionOrder;
   });
 
   if (!hasExpectedProxySelectionOrder) {
@@ -13793,7 +13717,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     Record<string, { gapY: string }>
   >({});
   const [showMetadataIcons, setShowMetadataIcons] = React.useState(false);
-  const [canvasIconScale, setCanvasIconScale] = React.useState<CanvasIconScale>('m');
   const [showCanvasLegend, setShowCanvasLegend] = React.useState(false);
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
@@ -25834,7 +25757,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       let targetFrameGroupIds: string[] = [];
       let targetGroupIds: string[] = [];
       let targetLabel = normalizedTargetId;
-      let groupDirectFrameGroupIdsToDetach: string[] = [];
 
       if (normalizedKind === 'group') {
         const targetGroup = groupById.get(normalizedTargetId) || null;
@@ -25844,11 +25766,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           return;
         }
 
-        targetGroupIds = [normalizedTargetId];
-        targetFrameGroupIds = [];
-        groupDirectFrameGroupIdsToDetach = Array.from(
+        targetGroupIds = collectPositionGroupTreeDescendantIds(root, [normalizedTargetId]);
+        if (!targetGroupIds.includes(normalizedTargetId)) {
+          targetGroupIds = [normalizedTargetId, ...targetGroupIds];
+        }
+        targetFrameGroupIds = Array.from(
           new Set(
-            (targetGroup.directFrameGroupIds ?? targetGroup.frameGroupIds)
+            targetGroupIds
+              .flatMap((groupId) => groupById.get(groupId)?.frameGroupIds || [])
+              .concat(targetGroup.frameGroupIds)
               .map((frameGroupId) => frameGroupId.trim())
               .filter(Boolean)
           )
@@ -25887,7 +25813,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setEdgeSelectionState(emptyEdgeSelection);
       setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
 
-      const removedFrameCount = normalizedKind === 'frame' ? removeFrameShellsByFrameGroupIds(root, targetFrameGroupIds) : 0;
+      const removedFrameCount = removeFrameShellsByFrameGroupIds(root, targetFrameGroupIds);
 
       if (normalizedKind === 'frame' && removedFrameCount <= 0) {
         setMessage('삭제할 상자를 찾지 못했습니다.');
@@ -25895,23 +25821,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      if (normalizedKind === 'group') {
-        unwrapPositionGroupTreeEntriesByIds(root, targetGroupIds);
-        groupDirectFrameGroupIdsToDetach.forEach((frameGroupId) => {
-          const targetNode = resolveFrameSelectionAnchor(
-            root.querySelector<HTMLElement>(`${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${frameGroupId}"]`)
-          );
-
-          if (targetNode && readFramePositionGroupConfig(targetNode)?.groupId === normalizedTargetId) {
-            writeFramePositionGroupAttrs(targetNode, null);
-          }
-        });
-        removePositionGroupWrappersByIds(root, targetGroupIds);
-        clearFrameRelativeAnchorsReferencingDeletedTargets(root, targetGroupIds, []);
-      } else {
-        prunePositionGroupTreeReferences(root, [], targetFrameGroupIds);
-        clearFrameRelativeAnchorsReferencingDeletedTargets(root, [], targetFrameGroupIds);
-      }
+      prunePositionGroupTreeReferences(root, targetGroupIds, targetFrameGroupIds);
+      removePositionGroupWrappersByIds(root, targetGroupIds);
+      clearFrameRelativeAnchorsReferencingDeletedTargets(root, targetGroupIds, targetFrameGroupIds);
       applyRelativeAnchoredFrameRectsInRoot(root);
       applyRuntimeSelectionUi([], emptyEdgeSelection, []);
       syncDraftPreviewHtmlRef();
@@ -25919,7 +25831,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       schedulePreviewEditorState();
       setMessage(
         normalizedKind === 'group'
-          ? `${targetLabel} 그룹 삭제 완료: 하위 상자와 하위 그룹 유지`
+          ? `${targetLabel} 삭제 완료: ${removedFrameCount}개 상자 삭제`
           : `${normalizedTargetId} 상자 삭제 완료`
       );
     },
@@ -26277,27 +26189,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           active: false,
         };
         return true;
-	      };
-	      const startSelectionMarqueeAfterClickSelection = (baseProxySelections: PositionGroupProxySelection[] = []) => {
-	        if (selectionPanelTab === 'position') {
-	          if (
-	            canvasInteractionMode !== 'select' ||
-	            positionOrderLockSelectionMode ||
-	            positionGroupEditModeRef.current.kind !== 'idle'
-	          ) {
-	            return false;
-	          }
+      };
+      const startSelectionMarqueeAfterClickSelection = (baseProxySelections: PositionGroupProxySelection[] = []) => {
+        if (selectionPanelTab === 'position') {
+          return false;
+        }
 
-	          return startMarqueeSelectionInteraction({
-	            anchorFrameGroupId: '',
-	            baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	            baseProxySelections,
-	          });
-	        }
-
-	        if (canvasInteractionMode !== 'select' && !(canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown)) {
-	          return false;
-	        }
+        if (canvasInteractionMode !== 'select' && !(canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown)) {
+          return false;
+        }
 
         return startMarqueeSelectionInteraction({
           anchorFrameGroupId: '',
@@ -26543,7 +26443,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-	      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
+      if (
+        selectionPanelTab === 'position' &&
+        canvasInteractionMode === 'select' &&
+        !positionOrderLockSelectionMode &&
+        positionGroupEditModeRef.current.kind === 'idle' &&
+        !edgeButton &&
+        !resizeHandle &&
+        pageInner
+      ) {
+        startMarqueeSelectionInteraction({ anchorFrameGroupId: frameGroupId });
+        return;
+      }
+
+      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
         if (positionOrderLockSelectionMode) {
           event.preventDefault();
           const pointerPoint = pageInner
@@ -29673,30 +29586,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           background: rgba(255, 255, 255, .9);
           pointer-events: none;
         }
-        .template-edit-preview {
-          --v106-canvas-icon-size: 11px;
-          --v106-canvas-icon-font-size: 6px;
-          --v106-canvas-icon-inset: 2px;
-          --v106-canvas-icon-padding-x: 3px;
-          --v106-canvas-icon-svg-size: 7px;
-          --v106-canvas-icon-marker-gap: 2px;
-        }
-        .template-edit-preview[data-canvas-icon-scale="m"] {
-          --v106-canvas-icon-size: 22px;
-          --v106-canvas-icon-font-size: 11px;
-          --v106-canvas-icon-inset: 4px;
-          --v106-canvas-icon-padding-x: 8px;
-          --v106-canvas-icon-svg-size: 14px;
-          --v106-canvas-icon-marker-gap: 3px;
-        }
-        .template-edit-preview[data-canvas-icon-scale="l"] {
-          --v106-canvas-icon-size: 32px;
-          --v106-canvas-icon-font-size: 14px;
-          --v106-canvas-icon-inset: 6px;
-          --v106-canvas-icon-padding-x: 10px;
-          --v106-canvas-icon-svg-size: 18px;
-          --v106-canvas-icon-marker-gap: 4px;
-        }
         .template-edit-preview[data-frame-create-mode="true"] {
           cursor: crosshair;
         }
@@ -29733,22 +29622,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"]::before {
           content: attr(data-template-selection-order);
           position: absolute;
-          top: var(--v106-canvas-icon-inset);
-          left: var(--v106-canvas-icon-inset);
+          top: 2px;
+          left: 2px;
           right: auto;
           z-index: 32;
-          min-width: var(--v106-canvas-icon-size);
-          height: var(--v106-canvas-icon-size);
-          box-sizing: border-box;
+          min-width: 11px;
+          height: 11px;
           border-radius: 999px;
-          padding: 0 var(--v106-canvas-icon-padding-x);
           display: inline-flex;
           align-items: center;
           justify-content: center;
           background: var(--template-selection-badge-color, rgba(37, 99, 235, .98));
           color: var(--template-selection-badge-text-color, white);
           box-shadow: none !important;
-          font-size: var(--v106-canvas-icon-font-size);
+          font-size: 6px;
           line-height: 1;
           font-weight: 700;
           pointer-events: none;
@@ -29771,12 +29658,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           min-width: 0;
           max-width: 120px;
           width: auto;
-          height: max(22px, var(--v106-canvas-icon-size));
-          padding: 0 max(8px, var(--v106-canvas-icon-padding-x));
+          height: 22px;
+          padding: 0 8px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-size: max(11px, var(--v106-canvas-icon-font-size));
+          font-size: 11px;
         }
         .template-edit-preview [${TEMPLATE_FRAME_POSITION_RELATION_ACTIVE_ATTR}="true"] {
           position: relative;
@@ -30080,8 +29967,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} {
           position: absolute;
-          top: var(--v106-canvas-icon-inset);
-          left: var(--v106-canvas-icon-inset);
+          top: 4px;
+          left: 6px;
           z-index: 26;
           display: flex;
           align-items: center;
@@ -30091,66 +29978,64 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           transition: opacity .12s ease, transform .12s ease;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] {
-          top: var(--v106-canvas-icon-inset);
-          left: var(--v106-canvas-icon-inset);
+          top: 1px;
+          left: 1px;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__stack {
           display: inline-flex;
           align-items: center;
-          gap: var(--v106-canvas-icon-marker-gap);
+          gap: 3px;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] .v106-frame-kind-marker__stack {
-          gap: var(--v106-canvas-icon-marker-gap);
+          gap: 2px;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__pill {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-height: var(--v106-canvas-icon-size);
-          min-width: var(--v106-canvas-icon-size);
-          box-sizing: border-box;
+          min-height: 16px;
+          min-width: 16px;
           border-radius: 999px;
-          padding: 0 var(--v106-canvas-icon-padding-x);
+          padding: 2px;
           border: 1px solid rgba(148, 163, 184, .32);
           background: rgba(255, 255, 255, .96);
           color: rgba(15, 23, 42, .92);
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] .v106-frame-kind-marker__pill {
-          min-height: var(--v106-canvas-icon-size);
-          min-width: var(--v106-canvas-icon-size);
-          box-sizing: border-box;
-          padding: 0 var(--v106-canvas-icon-padding-x);
+          min-height: 11px;
+          min-width: 11px;
+          padding: 1px;
           border-radius: 999px;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__icon {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: var(--v106-canvas-icon-svg-size);
-          height: var(--v106-canvas-icon-svg-size);
+          width: 12px;
+          height: 12px;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] .v106-frame-kind-marker__icon {
-          width: var(--v106-canvas-icon-svg-size);
-          height: var(--v106-canvas-icon-svg-size);
+          width: 8px;
+          height: 8px;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} .v106-frame-kind-marker__text {
           display: none;
           margin-left: 3px;
-          font-size: var(--v106-canvas-icon-font-size);
+          font-size: 10px;
           line-height: 1;
           font-weight: 700;
-          letter-spacing: 0;
+          letter-spacing: -0.01em;
           white-space: nowrap;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} svg {
-          width: var(--v106-canvas-icon-svg-size);
-          height: var(--v106-canvas-icon-svg-size);
+          width: 11px;
+          height: 11px;
           display: block;
           stroke: currentColor;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS}[data-compact="true"] svg {
-          width: var(--v106-canvas-icon-svg-size);
-          height: var(--v106-canvas-icon-svg-size);
+          width: 8px;
+          height: 8px;
         }
         .template-edit-preview [data-template-selected="true"] .${FRAME_KIND_MARKER_CLASS}:not([data-compact="true"]) .v106-frame-kind-marker__text,
         .template-edit-preview [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"] .${FRAME_KIND_MARKER_CLASS}:not([data-compact="true"]) .v106-frame-kind-marker__text,
@@ -30231,18 +30116,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           pointer-events: none;
         }
         .template-edit-preview .${FRAME_DELETE_BUTTON_CLASS} {
-          top: var(--v106-canvas-icon-inset) !important;
-          right: var(--v106-canvas-icon-inset) !important;
-          width: var(--v106-canvas-icon-size) !important;
-          height: var(--v106-canvas-icon-size) !important;
-          box-sizing: border-box !important;
           box-shadow: none !important;
           filter: none !important;
           text-shadow: none !important;
-        }
-        .template-edit-preview .${FRAME_DELETE_BUTTON_CLASS} svg {
-          width: var(--v106-canvas-icon-svg-size) !important;
-          height: var(--v106-canvas-icon-svg-size) !important;
         }
         .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS} {
           position: absolute;
@@ -30590,25 +30466,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 <Button size="sm" variant="outline" onClick={() => setShowMetadataIcons((previous) => !previous)}>
                   {showMetadataIcons ? '아이콘 끄기' : '아이콘 켜기'}
                 </Button>
-                <div className="inline-flex overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="캔버스 아이콘 크기">
-                  {CANVAS_ICON_SCALE_OPTIONS.map((scale) => (
-                    <button
-                      key={`canvas-icon-scale:${scale}`}
-                      type="button"
-                      className={`inline-flex h-8 min-w-8 items-center justify-center border-l border-slate-300 px-2 text-xs font-semibold uppercase transition first:border-l-0 ${
-                        canvasIconScale === scale
-                          ? 'bg-slate-900 text-white'
-                          : 'bg-white text-slate-600 hover:bg-slate-100'
-                      }`}
-                      onClick={() => setCanvasIconScale(scale)}
-                      aria-pressed={canvasIconScale === scale}
-                      aria-label={`캔버스 아이콘 크기 ${scale.toUpperCase()}`}
-                      title={`캔버스 아이콘 크기 ${scale.toUpperCase()}`}
-                    >
-                      {scale.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           </CardHeader>
@@ -30897,7 +30754,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           <TemplateEditPreviewSurface
             renderedPreviewHtml={renderedPreviewHtml}
             boxCreationMode={boxCreationMode}
-            canvasIconScale={canvasIconScale}
             metadataVisualMode={selectionPanelTab === 'metadata'}
             selectionPanelTab={selectionPanelTab}
             showMetadataIcons={showMetadataIcons}

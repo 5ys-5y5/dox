@@ -26277,27 +26277,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           active: false,
         };
         return true;
-	      };
-	      const startSelectionMarqueeAfterClickSelection = (baseProxySelections: PositionGroupProxySelection[] = []) => {
-	        if (selectionPanelTab === 'position') {
-	          if (
-	            canvasInteractionMode !== 'select' ||
-	            positionOrderLockSelectionMode ||
-	            positionGroupEditModeRef.current.kind !== 'idle'
-	          ) {
-	            return false;
-	          }
+      };
+      const startSelectionMarqueeAfterClickSelection = (baseProxySelections: PositionGroupProxySelection[] = []) => {
+        if (selectionPanelTab === 'position') {
+          return false;
+        }
 
-	          return startMarqueeSelectionInteraction({
-	            anchorFrameGroupId: '',
-	            baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	            baseProxySelections,
-	          });
-	        }
-
-	        if (canvasInteractionMode !== 'select' && !(canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown)) {
-	          return false;
-	        }
+        if (canvasInteractionMode !== 'select' && !(canvasInteractionMode === 'move' && !hadSelectionBeforePointerDown)) {
+          return false;
+        }
 
         return startMarqueeSelectionInteraction({
           anchorFrameGroupId: '',
@@ -26543,7 +26531,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-	      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
+      if (
+        selectionPanelTab === 'position' &&
+        canvasInteractionMode === 'select' &&
+        !positionOrderLockSelectionMode &&
+        positionGroupEditModeRef.current.kind === 'idle' &&
+        !edgeButton &&
+        !resizeHandle &&
+        pageInner
+      ) {
+        startMarqueeSelectionInteraction({ anchorFrameGroupId: frameGroupId });
+        return;
+      }
+
+      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
         if (positionOrderLockSelectionMode) {
           event.preventDefault();
           const pointerPoint = pageInner
