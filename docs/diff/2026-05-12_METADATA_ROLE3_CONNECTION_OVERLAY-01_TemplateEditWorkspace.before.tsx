@@ -592,7 +592,6 @@ type TemplateEditPreviewSurfaceProps = {
   metadataNameOverlay?: TemplateFloatingOverlayContent;
   metadataRolePrimaryOverlay?: TemplateFloatingOverlayContent;
   metadataRoleSecondaryOverlay?: TemplateFloatingOverlayContent;
-  metadataRoleTertiaryOverlay?: TemplateFloatingOverlayContent;
   styleOverlay?: TemplateFloatingOverlayContent;
   summaryOverlay?: TemplateFloatingOverlayContent;
   setPreviewNode: (node: HTMLDivElement | null) => void;
@@ -611,8 +610,7 @@ type TemplateFloatingOverlayId =
   | 'action'
   | 'metadataName'
   | 'metadataRolePrimary'
-  | 'metadataRoleSecondary'
-  | 'metadataRoleTertiary';
+  | 'metadataRoleSecondary';
 
 type SummaryOverlayDragState = {
   overlayId: TemplateFloatingOverlayId;
@@ -721,15 +719,12 @@ const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
 const SUMMARY_OVERLAY_INSET_PX = 12;
 const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
 const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
-const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'style', 'action'];
+const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['style', 'action'];
 const METADATA_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = [
-  'summary',
   'metadataName',
   'metadataRolePrimary',
   'metadataRoleSecondary',
-  'metadataRoleTertiary',
 ];
-const TEXT_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'action'];
 
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
   if (element.getAttribute(attrName) === nextValue) {
@@ -1093,7 +1088,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   metadataNameOverlay,
   metadataRolePrimaryOverlay,
   metadataRoleSecondaryOverlay,
-  metadataRoleTertiaryOverlay,
   styleOverlay,
   summaryOverlay,
   setPreviewNode,
@@ -1112,7 +1106,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     metadataName: null,
     metadataRolePrimary: null,
     metadataRoleSecondary: null,
-    metadataRoleTertiary: null,
   });
   const floatingOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
   const pendingFloatingOverlayDragStyleResetRef = React.useRef<TemplateFloatingOverlayId | null>(null);
@@ -1123,7 +1116,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     metadataName: 'top-right',
     metadataRolePrimary: 'top-right',
     metadataRoleSecondary: 'top-right',
-    metadataRoleTertiary: 'top-right',
   });
   const [styleOverlayCollapsed, setStyleOverlayCollapsed] = React.useState(true);
   const [summaryOverlayCollapsed, setSummaryOverlayCollapsed] = React.useState(true);
@@ -1131,7 +1123,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const [metadataNameOverlayCollapsed, setMetadataNameOverlayCollapsed] = React.useState(true);
   const [metadataRolePrimaryOverlayCollapsed, setMetadataRolePrimaryOverlayCollapsed] = React.useState(true);
   const [metadataRoleSecondaryOverlayCollapsed, setMetadataRoleSecondaryOverlayCollapsed] = React.useState(true);
-  const [metadataRoleTertiaryOverlayCollapsed, setMetadataRoleTertiaryOverlayCollapsed] = React.useState(true);
   const [floatingOverlayViewportRevision, setFloatingOverlayViewportRevision] = React.useState(0);
   const hasSummaryOverlay = Boolean(summaryOverlay);
   const hasStyleOverlay = Boolean(styleOverlay);
@@ -1139,7 +1130,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const hasMetadataNameOverlay = Boolean(metadataNameOverlay);
   const hasMetadataRolePrimaryOverlay = Boolean(metadataRolePrimaryOverlay);
   const hasMetadataRoleSecondaryOverlay = Boolean(metadataRoleSecondaryOverlay);
-  const hasMetadataRoleTertiaryOverlay = Boolean(metadataRoleTertiaryOverlay);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1196,14 +1186,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     metadataNameOverlayCollapsed,
     metadataRolePrimaryOverlayCollapsed,
     metadataRoleSecondaryOverlayCollapsed,
-    metadataRoleTertiaryOverlayCollapsed,
     hasSummaryOverlay,
     hasStyleOverlay,
     hasActionOverlay,
     hasMetadataNameOverlay,
     hasMetadataRolePrimaryOverlay,
     hasMetadataRoleSecondaryOverlay,
-    hasMetadataRoleTertiaryOverlay,
   ]);
 
   const readFloatingOverlayVisibleBounds = React.useCallback(() => {
@@ -1251,8 +1239,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return metadataRolePrimaryOverlayCollapsed;
       case 'metadataRoleSecondary':
         return metadataRoleSecondaryOverlayCollapsed;
-      case 'metadataRoleTertiary':
-        return metadataRoleTertiaryOverlayCollapsed;
       default:
         return true;
     }
@@ -1272,24 +1258,13 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return hasMetadataRolePrimaryOverlay;
       case 'metadataRoleSecondary':
         return hasMetadataRoleSecondaryOverlay;
-      case 'metadataRoleTertiary':
-        return hasMetadataRoleTertiaryOverlay;
       default:
         return false;
     }
   };
 
-  const readFloatingOverlayStackOrder = () => {
-    if (selectionPanelTab === 'metadata') {
-      return METADATA_FLOATING_OVERLAY_STACK_ORDER;
-    }
-
-    if (selectionPanelTab === 'text') {
-      return TEXT_FLOATING_OVERLAY_STACK_ORDER;
-    }
-
-    return POSITION_FLOATING_OVERLAY_STACK_ORDER;
-  };
+  const readFloatingOverlayStackOrder = () =>
+    selectionPanelTab === 'metadata' ? METADATA_FLOATING_OVERLAY_STACK_ORDER : POSITION_FLOATING_OVERLAY_STACK_ORDER;
 
   const readFloatingOverlayFallbackHeight = React.useCallback((overlayId: TemplateFloatingOverlayId, isCollapsed: boolean) => {
     if (isCollapsed) {
@@ -1304,7 +1279,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       return 150;
     }
 
-    if (overlayId === 'metadataRolePrimary' || overlayId === 'metadataRoleSecondary' || overlayId === 'metadataRoleTertiary') {
+    if (overlayId === 'metadataRolePrimary' || overlayId === 'metadataRoleSecondary') {
       return 220;
     }
 
@@ -1333,48 +1308,32 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         visibleBounds.width - SUMMARY_OVERLAY_INSET_PX * 2
       );
       const stackOrder = readFloatingOverlayStackOrder();
-      const sameCornerStackIds = stackOrder.filter(
-        (stackOverlayId) => hasFloatingOverlayContent(stackOverlayId) && floatingOverlayCorners[stackOverlayId] === corner
-      );
-      const readStackOverlayHeight = (stackOverlayId: TemplateFloatingOverlayId) => {
-        const stackOverlayNode = floatingOverlayNodeRefs.current[stackOverlayId];
-        return (
-          stackOverlayNode?.offsetHeight ||
-          readFloatingOverlayFallbackHeight(stackOverlayId, readFloatingOverlayCollapsed(stackOverlayId))
-        );
-      };
-      const sameCornerStackIndex = sameCornerStackIds.indexOf(overlayId);
-      const sameCornerStackHeights = new Map(
-        sameCornerStackIds.map((stackOverlayId) => [stackOverlayId, readStackOverlayHeight(stackOverlayId)] as const)
-      );
-      const sameCornerStackTotalHeight = sameCornerStackIds.reduce(
-        (height, stackOverlayId) => height + (sameCornerStackHeights.get(stackOverlayId) || 0),
-        0
-      );
-      const stackGap =
-        sameCornerStackIds.length <= 1
-          ? 0
-          : Math.min(
-              SUMMARY_OVERLAY_INSET_PX,
-              Math.max(0, (visibleBounds.height - sameCornerStackTotalHeight) / (sameCornerStackIds.length - 1))
-            );
+      const stackIndex = stackOrder.indexOf(overlayId);
       const stackPeerIds =
-        sameCornerStackIndex < 0
+        stackIndex < 0
           ? []
           : corner.startsWith('top')
-            ? sameCornerStackIds.slice(0, sameCornerStackIndex)
-            : sameCornerStackIds.slice(sameCornerStackIndex + 1);
-      const verticalStackOffset = stackPeerIds.reduce(
-        (offset, stackOverlayId) => offset + (sameCornerStackHeights.get(stackOverlayId) || 0) + stackGap,
-        0
-      );
+            ? stackOrder.slice(0, stackIndex)
+            : stackOrder.slice(stackIndex + 1);
+      const verticalStackOffset = stackPeerIds.reduce((offset, stackOverlayId) => {
+        if (!hasFloatingOverlayContent(stackOverlayId) || floatingOverlayCorners[stackOverlayId] !== corner) {
+          return offset;
+        }
+
+        const stackOverlayNode = floatingOverlayNodeRefs.current[stackOverlayId];
+        const stackOverlayHeight =
+          stackOverlayNode?.offsetHeight ||
+          readFloatingOverlayFallbackHeight(stackOverlayId, readFloatingOverlayCollapsed(stackOverlayId));
+
+        return offset + stackOverlayHeight + SUMMARY_OVERLAY_INSET_PX;
+      }, 0);
       const minLeft = visibleBounds.left + SUMMARY_OVERLAY_INSET_PX;
       const maxLeft = Math.max(minLeft, visibleBounds.right - overlayWidth - SUMMARY_OVERLAY_INSET_PX);
       const baseMinTop = visibleBounds.top + SUMMARY_OVERLAY_INSET_PX;
       const minTop = baseMinTop + verticalStackOffset;
       const maxTop = Math.max(baseMinTop, visibleBounds.bottom - overlayHeight - SUMMARY_OVERLAY_INSET_PX);
       const pinnedLeft = corner.endsWith('left') ? minLeft : maxLeft;
-      const pinnedTop = corner.startsWith('top') ? minTop : maxTop - verticalStackOffset;
+      const pinnedTop = corner.startsWith('top') ? Math.min(minTop, maxTop) : Math.max(baseMinTop, maxTop - verticalStackOffset);
 
       return {
         left: `${pinnedLeft}px`,
@@ -1388,16 +1347,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       hasMetadataNameOverlay,
       hasMetadataRolePrimaryOverlay,
       hasMetadataRoleSecondaryOverlay,
-      hasMetadataRoleTertiaryOverlay,
       hasStyleOverlay,
-      hasSummaryOverlay,
       metadataNameOverlayCollapsed,
       metadataRolePrimaryOverlayCollapsed,
       metadataRoleSecondaryOverlayCollapsed,
-      metadataRoleTertiaryOverlayCollapsed,
       actionOverlayCollapsed,
       styleOverlayCollapsed,
-      summaryOverlayCollapsed,
       selectionPanelTab,
       readFloatingOverlayFallbackHeight,
       readFloatingOverlayVisibleBounds,
@@ -1526,11 +1481,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         visibleHeight: visibleBounds.height,
         hasMoved: false,
       };
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Synthetic pointer events used by browser verification do not always create an active pointer.
-      }
+      event.currentTarget.setPointerCapture(event.pointerId);
     },
     [readFloatingOverlayVisibleBounds]
   );
@@ -1641,12 +1592,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     },
     [finishFloatingOverlayDrag]
   );
-  const finishMetadataRoleTertiaryOverlayDrag = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => setMetadataRoleTertiaryOverlayCollapsed((current) => !current));
-    },
-    [finishFloatingOverlayDrag]
-  );
 
   const cancelFloatingOverlayDrag = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     const dragState = floatingOverlayDragStateRef.current;
@@ -1692,10 +1637,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     const expandedWidthClassName = options.expandedWidthClassName || 'w-[30rem] max-w-[calc(100%_-_1.5rem)]';
     const overlayWidthClassName = isCollapsed ? 'w-max max-w-[calc(100%_-_1.5rem)]' : expandedWidthClassName;
     const overlayZIndexClassName =
-      overlayId === 'metadataRoleTertiary'
-        ? 'z-[75]'
-        : overlayId === 'metadataRoleSecondary'
-          ? 'z-[74]'
+      overlayId === 'metadataRoleSecondary'
+        ? 'z-[74]'
         : overlayId === 'metadataRolePrimary'
           ? 'z-[73]'
           : overlayId === 'action' || overlayId === 'metadataName'
@@ -1839,15 +1782,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         setMetadataRoleSecondaryOverlayCollapsed,
         finishMetadataRoleSecondaryOverlayDrag,
         metadataRoleSecondaryOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection(
-        'metadataRoleTertiary',
-        '상자 연결',
-        metadataRoleTertiaryOverlayCollapsed,
-        setMetadataRoleTertiaryOverlayCollapsed,
-        finishMetadataRoleTertiaryOverlayDrag,
-        metadataRoleTertiaryOverlay,
         { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
       )}
       {renderFloatingOverlaySection('action', actionOverlayLabel, actionOverlayCollapsed, setActionOverlayCollapsed, finishActionOverlayDrag, actionOverlay, {
@@ -17913,166 +17847,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       disabled: true,
     };
   }, [getFrameNodes, previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]);
-  const metadataConnectionReasonLines = React.useMemo(() => {
-    const selectedIds = selectedFrameGroupIds
-      .map((frameGroupId) => frameGroupId.trim())
-      .filter((frameGroupId) => Boolean(frameGroupId));
-    const formatIdList = (ids: string[]) => {
-      const normalizedIds = ids.map((id) => id.trim()).filter(Boolean);
-
-      if (normalizedIds.length <= 2) {
-        return normalizedIds.join(', ');
-      }
-
-      return `${normalizedIds.slice(0, 2).join(', ')} 외 ${normalizedIds.length - 2}개`;
-    };
-
-    if (metadataRelationSelectionMode.kind === 'parent') {
-      return [
-        `${formatIdList(metadataRelationSelectionMode.sourceFrameGroupIds)}는 하위 값입니다.`,
-        '이 값들을 묶을 상위 키 1개를 선택해야 저장할 수 있습니다.',
-      ];
-    }
-
-    if (metadataRelationSelectionMode.kind === 'value') {
-      return [
-        `${metadataRelationSelectionMode.sourceKeyFrameGroupId}는 상위 키입니다.`,
-        '이 키에 넣을 하위 값을 선택하면 연결할 수 있습니다.',
-      ];
-    }
-
-    if (metadataVirtualConnectionDraft.mode === 'key') {
-      return [
-        selectedIds.length > 0 ? `${formatIdList(selectedIds)}에 연결할 상위 키를 찾는 중입니다.` : '상위 키를 찾는 중입니다.',
-        '화면에 있으면 선택하고, 없으면 이름으로 새로 저장합니다.',
-      ];
-    }
-
-    if (metadataVirtualConnectionDraft.mode === 'value') {
-      const sourceKeyId =
-        metadataRelationSelectionMode.kind === 'value'
-          ? metadataRelationSelectionMode.sourceKeyFrameGroupId
-          : primarySelectedFrameGroupId || selectedIds[0] || '';
-
-      return [
-        sourceKeyId ? `${sourceKeyId}에 연결할 하위 값을 찾는 중입니다.` : '하위 값을 찾는 중입니다.',
-        '화면에 있으면 선택하고, 없으면 이름으로 새로 저장합니다.',
-      ];
-    }
-
-    if (selectedIds.length <= 0) {
-      return ['상자를 선택하면 연결 가능한 작업을 보여줍니다.'];
-    }
-
-    const root = previewRef.current;
-
-    if (!root) {
-      return [`${formatIdList(selectedIds)}의 연결 정보를 확인 중입니다.`];
-    }
-
-    const frameNodes = getFrameNodes(root);
-    const frameNodeById = new Map(frameNodes.map((node) => [getFrameGroupId(node), node] as const));
-    const virtualDefinitionById = new Map(virtualFrameDefinitions.map((definition) => [definition.id, definition] as const));
-    const valueIdsByKeyId = new Map<string, string[]>();
-
-    frameNodes.forEach((node) => {
-      const frameGroupId = getFrameGroupId(node);
-      const parentGroupId = readFrameParentGroupId(node);
-
-      if (readFrameRole(node) === 'value' && parentGroupId) {
-        valueIdsByKeyId.set(parentGroupId, [...(valueIdsByKeyId.get(parentGroupId) || []), frameGroupId]);
-      }
-    });
-
-    const entries = selectedIds.map((frameGroupId) => {
-      const node = frameNodeById.get(frameGroupId) || null;
-
-      return {
-        frameGroupId,
-        role: node ? readFrameRole(node) : '',
-        parentGroupId: node ? readFrameParentGroupId(node) : '',
-      };
-    });
-    const keyEntries = entries.filter((entry) => entry.role === 'key');
-    const valueEntries = entries.filter((entry) => entry.role === 'value');
-    const independentEntries = entries.filter((entry) => entry.role === 'key_value');
-
-    if (independentEntries.length > 0) {
-      return [
-        `${formatIdList(independentEntries.map((entry) => entry.frameGroupId))}는 독립 값입니다.`,
-        '다른 상자와 묶지 않는 항목이라 연결 작업을 할 수 없습니다.',
-      ];
-    }
-
-    if (entries.some((entry) => entry.role !== 'key' && entry.role !== 'value')) {
-      return [
-        `${formatIdList(selectedIds)}는 아직 상위 키나 하위 값으로 정리되지 않았습니다.`,
-        '먼저 상자 역할 - 2에서 상위 키 또는 하위 값을 고르세요.',
-      ];
-    }
-
-    if (keyEntries.length > 1) {
-      return ['상위 키가 여러 개 선택되었습니다.', '연결 기준은 1개만 필요하므로 키 상자 1개만 남기세요.'];
-    }
-
-    if (keyEntries.length === 1 && valueEntries.length === 0) {
-      const keyId = keyEntries[0].frameGroupId;
-      const linkedValueIds = valueIdsByKeyId.get(keyId) || [];
-
-      return [
-        `${keyId}는 상위 키입니다.`,
-        linkedValueIds.length > 0
-          ? `${formatIdList(linkedValueIds)}가 연결되어 있어 하위 값을 추가하거나 뺄 수 있습니다.`
-          : '아직 연결된 하위 값이 없어 입력 박스를 선택할 수 있습니다.',
-      ];
-    }
-
-    if (keyEntries.length === 0 && valueEntries.length > 0) {
-      const connectedParentIds = Array.from(new Set(valueEntries.map((entry) => entry.parentGroupId).filter(Boolean)));
-
-      if (connectedParentIds.length > 0) {
-        const parentId = connectedParentIds[0];
-        const parentExistsOnScreen = frameNodeById.has(parentId);
-        const parentLabel = parentExistsOnScreen
-          ? `${parentId} 상위 키`
-          : `화면에 없는 상위 키 ${virtualDefinitionById.get(parentId)?.id || parentId}`;
-
-        return [
-          `${formatIdList(valueEntries.map((entry) => entry.frameGroupId))}는 하위 값입니다.`,
-          `${parentLabel}와 연결되어 있어 키를 다시 선택할 수 있습니다.`,
-        ];
-      }
-
-      return [
-        `${formatIdList(valueEntries.map((entry) => entry.frameGroupId))}는 하위 값입니다.`,
-        '아직 상위 키가 없어 키 박스를 선택할 수 있습니다.',
-      ];
-    }
-
-    if (keyEntries.length === 1 && valueEntries.length > 0) {
-      const connectedValueIds = valueEntries.filter((entry) => Boolean(entry.parentGroupId)).map((entry) => entry.frameGroupId);
-
-      return [
-        `${keyEntries[0].frameGroupId}는 상위 키, ${formatIdList(
-          valueEntries.map((entry) => entry.frameGroupId)
-        )}는 하위 값입니다.`,
-        connectedValueIds.length > 0
-          ? `${formatIdList(connectedValueIds)}는 기존 연결이 있어 바꿔 연결할 수 있습니다.`
-          : '선택한 하위 값을 이 상위 키에 연결할 수 있습니다.',
-      ];
-    }
-
-    return [`${formatIdList(selectedIds)}의 연결 정보를 확인 중입니다.`];
-  }, [
-    getFrameNodes,
-    metadataRelationSelectionMode,
-    metadataVirtualConnectionDraft.mode,
-    previewDomVersion,
-    primarySelectedFrameGroupId,
-    renderedPreviewHtml,
-    selectedFrameGroupIds,
-    virtualFrameDefinitions,
-  ]);
   const frameRelationPreviewMode = React.useMemo<FrameRelationPreviewMode>(() => {
     if (selectionPanelTab !== 'metadata') {
       return { kind: 'idle' };
@@ -28727,18 +28501,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               );
             })}
           </div>
-        </div>
-    </div>
-  );
-
-  const renderMetadataRoleTertiaryOverlay = () => (
-    <div className="space-y-3">
-      <div className="space-y-1 text-[11px] font-medium leading-4 text-slate-700">
-        {metadataConnectionReasonLines.map((line, index) => (
-          <div key={`metadata-connection-reason:${index}`}>{line}</div>
-        ))}
-      </div>
-      <div className="space-y-2">
         <div>
           {metadataVirtualConnectionDraft.mode === 'idle' ? (
             metadataRelationSelectionMode.kind !== 'idle' ? (
@@ -30242,7 +30004,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             }
             metadataRolePrimaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRolePrimaryOverlay : null}
             metadataRoleSecondaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRoleSecondaryOverlay : null}
-            metadataRoleTertiaryOverlay={selectionPanelTab === 'metadata' ? renderMetadataRoleTertiaryOverlay : null}
             styleOverlay={renderPositionStyleOverlay()}
             summaryOverlay={renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}

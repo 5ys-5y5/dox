@@ -721,15 +721,13 @@ const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
 const SUMMARY_OVERLAY_INSET_PX = 12;
 const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
 const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
-const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'style', 'action'];
+const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['style', 'action'];
 const METADATA_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = [
-  'summary',
   'metadataName',
   'metadataRolePrimary',
   'metadataRoleSecondary',
   'metadataRoleTertiary',
 ];
-const TEXT_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'action'];
 
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
   if (element.getAttribute(attrName) === nextValue) {
@@ -1279,17 +1277,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     }
   };
 
-  const readFloatingOverlayStackOrder = () => {
-    if (selectionPanelTab === 'metadata') {
-      return METADATA_FLOATING_OVERLAY_STACK_ORDER;
-    }
-
-    if (selectionPanelTab === 'text') {
-      return TEXT_FLOATING_OVERLAY_STACK_ORDER;
-    }
-
-    return POSITION_FLOATING_OVERLAY_STACK_ORDER;
-  };
+  const readFloatingOverlayStackOrder = () =>
+    selectionPanelTab === 'metadata' ? METADATA_FLOATING_OVERLAY_STACK_ORDER : POSITION_FLOATING_OVERLAY_STACK_ORDER;
 
   const readFloatingOverlayFallbackHeight = React.useCallback((overlayId: TemplateFloatingOverlayId, isCollapsed: boolean) => {
     if (isCollapsed) {
@@ -1333,48 +1322,32 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         visibleBounds.width - SUMMARY_OVERLAY_INSET_PX * 2
       );
       const stackOrder = readFloatingOverlayStackOrder();
-      const sameCornerStackIds = stackOrder.filter(
-        (stackOverlayId) => hasFloatingOverlayContent(stackOverlayId) && floatingOverlayCorners[stackOverlayId] === corner
-      );
-      const readStackOverlayHeight = (stackOverlayId: TemplateFloatingOverlayId) => {
-        const stackOverlayNode = floatingOverlayNodeRefs.current[stackOverlayId];
-        return (
-          stackOverlayNode?.offsetHeight ||
-          readFloatingOverlayFallbackHeight(stackOverlayId, readFloatingOverlayCollapsed(stackOverlayId))
-        );
-      };
-      const sameCornerStackIndex = sameCornerStackIds.indexOf(overlayId);
-      const sameCornerStackHeights = new Map(
-        sameCornerStackIds.map((stackOverlayId) => [stackOverlayId, readStackOverlayHeight(stackOverlayId)] as const)
-      );
-      const sameCornerStackTotalHeight = sameCornerStackIds.reduce(
-        (height, stackOverlayId) => height + (sameCornerStackHeights.get(stackOverlayId) || 0),
-        0
-      );
-      const stackGap =
-        sameCornerStackIds.length <= 1
-          ? 0
-          : Math.min(
-              SUMMARY_OVERLAY_INSET_PX,
-              Math.max(0, (visibleBounds.height - sameCornerStackTotalHeight) / (sameCornerStackIds.length - 1))
-            );
+      const stackIndex = stackOrder.indexOf(overlayId);
       const stackPeerIds =
-        sameCornerStackIndex < 0
+        stackIndex < 0
           ? []
           : corner.startsWith('top')
-            ? sameCornerStackIds.slice(0, sameCornerStackIndex)
-            : sameCornerStackIds.slice(sameCornerStackIndex + 1);
-      const verticalStackOffset = stackPeerIds.reduce(
-        (offset, stackOverlayId) => offset + (sameCornerStackHeights.get(stackOverlayId) || 0) + stackGap,
-        0
-      );
+            ? stackOrder.slice(0, stackIndex)
+            : stackOrder.slice(stackIndex + 1);
+      const verticalStackOffset = stackPeerIds.reduce((offset, stackOverlayId) => {
+        if (!hasFloatingOverlayContent(stackOverlayId) || floatingOverlayCorners[stackOverlayId] !== corner) {
+          return offset;
+        }
+
+        const stackOverlayNode = floatingOverlayNodeRefs.current[stackOverlayId];
+        const stackOverlayHeight =
+          stackOverlayNode?.offsetHeight ||
+          readFloatingOverlayFallbackHeight(stackOverlayId, readFloatingOverlayCollapsed(stackOverlayId));
+
+        return offset + stackOverlayHeight + SUMMARY_OVERLAY_INSET_PX;
+      }, 0);
       const minLeft = visibleBounds.left + SUMMARY_OVERLAY_INSET_PX;
       const maxLeft = Math.max(minLeft, visibleBounds.right - overlayWidth - SUMMARY_OVERLAY_INSET_PX);
       const baseMinTop = visibleBounds.top + SUMMARY_OVERLAY_INSET_PX;
       const minTop = baseMinTop + verticalStackOffset;
       const maxTop = Math.max(baseMinTop, visibleBounds.bottom - overlayHeight - SUMMARY_OVERLAY_INSET_PX);
       const pinnedLeft = corner.endsWith('left') ? minLeft : maxLeft;
-      const pinnedTop = corner.startsWith('top') ? minTop : maxTop - verticalStackOffset;
+      const pinnedTop = corner.startsWith('top') ? Math.min(minTop, maxTop) : Math.max(baseMinTop, maxTop - verticalStackOffset);
 
       return {
         left: `${pinnedLeft}px`,
@@ -1390,14 +1363,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       hasMetadataRoleSecondaryOverlay,
       hasMetadataRoleTertiaryOverlay,
       hasStyleOverlay,
-      hasSummaryOverlay,
       metadataNameOverlayCollapsed,
       metadataRolePrimaryOverlayCollapsed,
       metadataRoleSecondaryOverlayCollapsed,
       metadataRoleTertiaryOverlayCollapsed,
       actionOverlayCollapsed,
       styleOverlayCollapsed,
-      summaryOverlayCollapsed,
       selectionPanelTab,
       readFloatingOverlayFallbackHeight,
       readFloatingOverlayVisibleBounds,
@@ -1526,11 +1497,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         visibleHeight: visibleBounds.height,
         hasMoved: false,
       };
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Synthetic pointer events used by browser verification do not always create an active pointer.
-      }
+      event.currentTarget.setPointerCapture(event.pointerId);
     },
     [readFloatingOverlayVisibleBounds]
   );

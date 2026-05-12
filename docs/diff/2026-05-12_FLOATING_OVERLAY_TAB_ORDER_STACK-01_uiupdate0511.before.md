@@ -529,7 +529,6 @@ type PositionGroupEditMode =
 | `SELECTION-BADGE-SIZE-50-01` | 상자와 그룹 선택 시 출력되는 선택 순서 번호 뱃지는 기존 대비 약 50% 크기로 줄인다. 간격 설정 모드의 항목명 라벨 뱃지는 번호 뱃지가 아니므로 기존 가독성 크기를 유지한다. | `docs/diff/2026-05-12_SELECTION_BADGE_SIZE_50-01_*` | 완료 |
 | `METADATA-ROLE3-CONNECTION-OVERLAY-01` | `속성` 탭의 `상자 역할 - 2`는 상위 키/하위 값/독립 값 선택만 담당한다. 기존 연결 CTA와 연결 편집 UI는 독립 오버레이 `상자 연결`으로 분리하고, CTA 위에는 선택 상자의 현재 연결 상태와 해당 CTA가 필요한 이유를 쉬운 말로 줄 구분 출력한다. | `docs/diff/2026-05-12_METADATA_ROLE3_CONNECTION_OVERLAY-01_*` | 완료 |
 | `METADATA-CONNECTION-LABEL-01` | `상자 역할 - 3` 오버레이의 사용자 표시명만 `상자 연결`로 변경한다. 내부 슬롯명과 기존 연결 동작은 유지한다. | `docs/diff/2026-05-12_METADATA_CONNECTION_LABEL-01_*` | 완료 |
-| `FLOATING-OVERLAY-TAB-ORDER-STACK-01` | 모든 탭의 플로팅 오버레이 스택에 `요약`을 포함한다. 같은 사분면에 있을 때 `속성`: `요약 -> 상자명 -> 상자 역할 - 1 -> 상자 역할 - 2 -> 상자 연결`, `크기 및 위치`: `요약 -> 스타일 -> 기능 버튼`, `텍스트`: `요약 -> 텍스트 설정` 순서로 서로를 밀어내며 겹치지 않게 한다. | `docs/diff/2026-05-12_FLOATING_OVERLAY_TAB_ORDER_STACK-01_*` | 완료 |
 
 ## 9. 테스트 계획
 
@@ -752,12 +751,5 @@ type PositionGroupEditMode =
 - 2026-05-12: `METADATA-CONNECTION-LABEL-01` 구현 전 백업을 `docs/diff/2026-05-12_METADATA_CONNECTION_LABEL-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-12_METADATA_CONNECTION_LABEL-01_uiupdate0511.before.md`에 생성했다.
 - 2026-05-12: `METADATA-CONNECTION-LABEL-01` 구현. `metadataRoleTertiary` 슬롯의 화면 표시명만 `상자 역할 - 3`에서 `상자 연결`로 변경했다. 연결 CTA, 설명 문구, 위치 계산, 저장 동작은 변경하지 않았다.
 - 2026-05-12: chrome-devtools MCP 검증. 대표 URL을 새로고침한 뒤 `속성` 탭으로 전환해 플로팅 버튼 표시명을 확인했다. `상자 연결` 버튼이 표시되고 `상자 역할 - 3` 텍스트는 화면 버튼에 남아 있지 않았다. 콘솔에는 기존 접근성 issue와 리소스 404 1건이 표시됐으며 이번 라벨 변경과 직접 관련된 런타임 오류는 없었다.
-- 2026-05-12: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다.
-- 2026-05-12: Supabase MCP 검증. `get_advisors(type=performance)`를 실행했다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다. 반환된 성능 advisory는 기존 DB 인덱스/RLS 관련 항목이며 이번 UI 변경 범위와 직접 관련 없다.
-- 2026-05-12: `FLOATING-OVERLAY-TAB-ORDER-STACK-01` 구현 전 백업을 `docs/diff/2026-05-12_FLOATING_OVERLAY_TAB_ORDER_STACK-01_TemplateEditWorkspace.before.tsx`, `docs/diff/2026-05-12_FLOATING_OVERLAY_TAB_ORDER_STACK-01_uiupdate0511.before.md`에 생성했다.
-- 2026-05-12: `FLOATING-OVERLAY-TAB-ORDER-STACK-01` 구현. 플로팅 오버레이 스택 순서를 탭별로 분리하고 모든 순서의 첫 항목에 `요약`을 포함했다. `속성` 탭은 `요약, 상자명, 상자 역할 - 1, 상자 역할 - 2, 상자 연결`, `크기 및 위치` 탭은 `요약, 스타일, 기능 버튼`, `텍스트` 탭은 `요약, 텍스트 설정` 순서로 같은 사분면의 이전/다음 오버레이 높이만큼 위치를 보정한다.
-- 2026-05-12: `FLOATING-OVERLAY-TAB-ORDER-STACK-01` 보정. 같은 사분면에 들어온 오버레이 전체 높이가 현재 보이는 preview 높이에 가까울 때 기존 고정 간격 때문에 아래 항목이 겹칠 수 있어, 같은 사분면의 총 높이를 기준으로 간격을 자동 축소한다. 부족한 높이에서는 순서와 비겹침을 우선하고, 보이는 영역 내부 고정은 가능한 범위에서만 유지한다.
-- 2026-05-12: chrome-devtools MCP 검증. 대표 URL에서 `속성` 탭 오버레이를 모두 같은 좌측 상단 사분면으로 이동했다. 결과는 `요약 -> 상자명 -> 상자 역할 - 1 -> 상자 역할 - 2 -> 상자 연결` 순서이며 각 rect가 `673-705`, `715-747`, `757-789`, `799-831`, `841-873`으로 겹침 0개였다.
-- 2026-05-12: chrome-devtools MCP 검증. 같은 방식으로 `텍스트` 탭은 `요약 -> 텍스트 설정` 순서와 겹침 없음, `크기 및 위치` 탭은 `요약 -> 스타일 -> 기능 버튼` 순서와 겹침 없음이 확인됐다. 콘솔에는 기존 접근성 issue인 `No label associated with a form field`, `A form field element should have an id or name attribute`만 표시됐고 이번 변경과 직접 관련된 `error`/`warn`은 없었다.
 - 2026-05-12: 정적 검증. `git diff --check -- src/components/template/TemplateEditWorkspace.tsx docs/uiupdate0511.md`, `npm run check:no-shadow-app`, `npx esbuild src/app/templates/edit/page.tsx --bundle --platform=browser --format=esm --jsx=automatic --log-level=warning --outfile=/tmp/template-edit-page-check.js`가 통과했다.
 - 2026-05-12: Supabase MCP 검증. `get_advisors(type=performance)`를 실행했다. 이번 변경은 DB schema/data write 또는 SQL 실행을 포함하지 않는다. 반환된 성능 advisory는 기존 DB 인덱스/RLS 관련 항목이며 이번 UI 변경 범위와 직접 관련 없다.
