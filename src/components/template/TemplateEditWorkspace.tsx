@@ -468,6 +468,7 @@ type MarqueeSelectionState = {
   scale: number;
   pageInner: HTMLElement;
   anchorFrameGroupId: string | null;
+  focusFrameGroupIdOnClick?: string | null;
   positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
   baseSelectionIds: string[];
   baseProxySelections?: PositionGroupProxySelection[];
@@ -2536,7 +2537,13 @@ const APPEARANCE_BORDER_SIDE_LABELS: Record<TemplateEdgeSide, string> = {
   bottom: '하',
   left: '좌',
 };
-const APPEARANCE_PADDING_FIELD_BY_SIDE: Record<AppearancePaddingSide, keyof SelectionStyleDraft> = {
+const APPEARANCE_PADDING_LABEL_BY_SIDE: Record<AppearancePaddingSide, string> = {
+  top: '상',
+  bottom: '하',
+  left: '좌',
+  right: '우',
+};
+const APPEARANCE_PADDING_FIELD_BY_SIDE: Record<AppearancePaddingSide, StyleFieldKey> = {
   top: 'paddingTop',
   bottom: 'paddingBottom',
   left: 'paddingLeft',
@@ -11998,6 +12005,7 @@ const getSharedValue = (values: string[]) => {
   return '';
 };
 const MIXED_STYLE_VALUE_LABEL = '혼합';
+const MIXED_PADDING_DISPLAY_LABEL = '혼용';
 
 const resolveFrameContentTarget = (node: HTMLElement) => {
   return (
@@ -15293,7 +15301,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [sizeMatchTargetKind, setSizeMatchTargetKind] = React.useState<SizeMatchTargetKind>('height');
   const [sizeMatchSourceFrameGroupId, setSizeMatchSourceFrameGroupId] = React.useState('');
   const [sizeMatchSourcePickMode, setSizeMatchSourcePickMode] = React.useState(false);
-  const [textPaddingEditSide, setTextPaddingEditSide] = React.useState<AppearancePaddingSide>('top');
   const [selectionAppearanceToolbarWidth, setSelectionAppearanceToolbarWidth] = React.useState<number | null>(null);
   const [selectionSaveProgress, setSelectionSaveProgress] =
     React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
@@ -28316,11 +28323,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
       const startMarqueeSelectionInteraction = ({
         anchorFrameGroupId = '',
+        focusFrameGroupIdOnClick = null,
         positionShiftClickFallbackEntry = null,
         baseSelectionIds,
         baseProxySelections,
       }: {
         anchorFrameGroupId?: string;
+        focusFrameGroupIdOnClick?: string | null;
         positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
         baseSelectionIds?: string[];
         baseProxySelections?: PositionGroupProxySelection[];
@@ -28425,6 +28434,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           scale: previewZoom / 100,
           pageInner,
           anchorFrameGroupId: anchorFrameGroupId || null,
+          focusFrameGroupIdOnClick: focusFrameGroupIdOnClick?.trim() || null,
           positionShiftClickFallbackEntry,
           baseSelectionIds: resolvedBaseSelectionIds.slice(),
           baseProxySelections: selectionPanelTab === 'position' ? baseProxySelections : undefined,
@@ -28473,27 +28483,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
 
       if (isTextCanvasEditModeActive && frameNode && !edgeButton && !resizeHandle && !event.shiftKey) {
-        // 텍스트 탭의 일반 클릭은 직접 입력 편집을 우선하고, Shift/드래그 선택은 아래 공통 선택 흐름에 맡겨 일괄 서식을 유지한다.
-        const textFrameGroupId = getFrameGroupId(frameNode);
-        const textInput = frameNode.querySelector<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
         const clickedTextInput = resolveFrameTextInputElement(target);
+        const isActiveTextInput =
+          Boolean(clickedTextInput) &&
+          !clickedTextInput.readOnly &&
+          document.activeElement === clickedTextInput;
+        const frameGroupIdForTextMode = getFrameGroupId(frameNode);
 
-        if (clickedTextInput) {
-          event.preventDefault();
-          focusFrameTextInputForEditing(clickedTextInput);
+        // 텍스트 입력이 이미 활성화된 상태에서의 드래그는 상자 선택이 아니라 브라우저 기본 텍스트 선택으로 처리한다.
+        if (clickedTextInput && isActiveTextInput) {
+          enableFrameTextInputForEditing(clickedTextInput);
           return;
         }
 
-        if (textInput) {
-          event.preventDefault();
-          focusFrameTextInputForEditing(textInput);
+        // 비활성 텍스트 입력에서 드래그를 시작하면 상자 드래그 선택으로 전환하고,
+        // 클릭으로 끝나면 pointerup에서 텍스트 입력을 활성화한다.
+        if (clickedTextInput && frameGroupIdForTextMode) {
+          const started = startMarqueeSelectionInteraction({
+            anchorFrameGroupId: frameGroupIdForTextMode,
+            focusFrameGroupIdOnClick: frameGroupIdForTextMode,
+          });
+          if (started) {
+            return;
+          }
         }
-
-        if (textFrameGroupId) {
-          focusFrameTextInputForEditingByFrameGroupId(root, textFrameGroupId);
-        }
-
-        return;
       }
 
       if (sizeMatchSourcePickModeRef.current && frameNode && !edgeButton && !resizeHandle) {
@@ -29815,9 +29828,66 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         );
         const finalRect = buildPointerDragRect(marqueeSelectionState.origin, finalPoint);
         const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+        const shouldTreatAsTextInputActivationClick =
+          Boolean(marqueeSelectionState.focusFrameGroupIdOnClick) &&
+          !marqueeSelectionState.active &&
+          finalRect.width < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
+          finalRect.height < FRAME_MARQUEE_DRAG_THRESHOLD_PX;
 
         clearTransientCanvasOverlays();
         activePointerOwnerRef.current = null;
+
+        if (shouldTreatAsTextInputActivationClick) {
+          selectedFrameGroupIdsRef.current = marqueeSelectionState.baseSelectionIds;
+          edgeSelectionStateRef.current = emptyEdgeSelection;
+          if (selectionPanelTab === 'position') {
+            const retainedProxySelections = mergePositionProxySelections(
+              retainPositionProxySelectionsForSelectedIds(
+                marqueeSelectionState.baseProxySelections,
+                marqueeSelectionState.baseSelectionIds
+              ),
+              marqueeSelectionState.lastProxySelections || []
+            );
+            const previousActiveEntity = positionActiveSelectionEntityRef.current;
+            positionGroupProxySelectionsOverrideRef.current = retainedProxySelections;
+            positionGroupProxySelectionGroupIdRef.current =
+              retainedProxySelections[0]?.groupId ||
+              (previousActiveEntity?.kind === 'group' ? previousActiveEntity.groupId : '');
+            positionActiveSelectionEntityRef.current = retainedProxySelections[0]
+              ? {
+                  kind: 'group',
+                  groupId: retainedProxySelections[0].groupId,
+                  frameGroupIds: retainedProxySelections[0].frameGroupIds.slice(),
+                }
+              : marqueeSelectionState.baseSelectionIds.length === 1
+                ? {
+                    kind: 'frame',
+                    frameGroupId: marqueeSelectionState.baseSelectionIds[0] || '',
+                  }
+                : previousActiveEntity?.kind === 'group'
+                  ? previousActiveEntity
+                  : null;
+            applyFastFrameBoxSelectionVisuals(
+              marqueeSelectionState.baseSelectionIds,
+              emptyEdgeSelection,
+              retainedProxySelections
+            );
+          } else {
+            applyRuntimeSelectionUi(marqueeSelectionState.baseSelectionIds, emptyEdgeSelection);
+          }
+
+          const focusFrameGroupId = marqueeSelectionState.focusFrameGroupIdOnClick?.trim() || '';
+          if (focusFrameGroupId && previewRef.current) {
+            focusFrameTextInputForEditingByFrameGroupId(previewRef.current, focusFrameGroupId);
+          }
+
+          if (deferredPreviewEditorStateRef.current) {
+            deferredPreviewEditorStateRef.current = false;
+            schedulePreviewEditorState();
+          }
+
+          return;
+        }
 
         if (
           marqueeSelectionState.active ||
@@ -30109,6 +30179,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const clickedTextInput = resolveFrameTextInputElement(target);
 
       if (clickedTextInput && previewRef.current.contains(clickedTextInput)) {
+        const isActiveTextInput = !clickedTextInput.readOnly && document.activeElement === clickedTextInput;
+
+        if (!isActiveTextInput) {
+          event.preventDefault();
+          focusFrameTextInputForEditing(clickedTextInput);
+        }
+
         return;
       }
 
@@ -32045,13 +32122,44 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ? 'bg-slate-950 text-white'
           : 'bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
       }`;
-    const selectedPaddingField = APPEARANCE_PADDING_FIELD_BY_SIDE[textPaddingEditSide];
-    const selectedPaddingValue = selectionStyleDraft[selectedPaddingField];
-    const selectedPaddingPlaceholder = hasSelection ? '?' : '0';
-    const paddingSideButtonClass = (active: boolean) =>
-      `inline-flex h-7 items-center justify-center rounded-md border px-2 text-[11px] font-semibold transition ${
-        active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
-      }`;
+    const paddingFieldsBySide = APPEARANCE_PADDING_SIDES.map((side) => {
+      const field = APPEARANCE_PADDING_FIELD_BY_SIDE[side];
+      const rawValue = hasSelection ? String(selectionStyleDraft[field] || '') : '';
+      const isMixed = hasSelection && rawValue.trim() === MIXED_STYLE_VALUE_LABEL;
+      const displayValue = isMixed ? MIXED_PADDING_DISPLAY_LABEL : rawValue;
+      const hasValue = displayValue.trim().length > 0;
+      const state: 'disabled' | 'mixed' | 'active' = !hasSelection ? 'disabled' : isMixed ? 'mixed' : hasValue ? 'active' : 'disabled';
+
+      return {
+        side,
+        field,
+        label: APPEARANCE_PADDING_LABEL_BY_SIDE[side],
+        isMixed,
+        displayValue,
+        state,
+      };
+    });
+    const paddingStatusField =
+      (paddingFieldsBySide.find((entry) => styleFieldApplyStatus[entry.field] === 'saving')?.field as StyleFieldKey | undefined) ||
+      'paddingTop';
+    const paddingSideButtonClassByState = (state: 'disabled' | 'mixed' | 'active') => {
+      if (state === 'active') {
+        return 'border-slate-950 bg-slate-950 text-white';
+      }
+      if (state === 'mixed') {
+        return 'border-slate-300 bg-slate-300 text-slate-700';
+      }
+      return 'border-slate-300 bg-white text-slate-400';
+    };
+    const paddingInputClassByState = (state: 'disabled' | 'mixed' | 'active') => {
+      if (state === 'mixed') {
+        return 'border-slate-300 bg-slate-200 text-slate-700';
+      }
+      if (state === 'active') {
+        return 'border-slate-300 bg-white text-slate-900';
+      }
+      return 'border-slate-300 bg-white text-slate-400';
+    };
 
     return (
       <div className="space-y-2.5">
@@ -32087,45 +32195,62 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         <div className="space-y-1">
           <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
             여백
-            {renderStyleApplyStatusIcon(selectedPaddingField)}
+            {renderStyleApplyStatusIcon(paddingStatusField)}
           </label>
-          <div className="grid grid-cols-[repeat(4,minmax(0,1fr))_72px] gap-1">
-            {[
-              { side: 'top' as const, label: '상' },
-              { side: 'bottom' as const, label: '하' },
-              { side: 'left' as const, label: '좌' },
-              { side: 'right' as const, label: '우' },
-            ].map(({ side, label }) => (
-              <button
-                key={`text-padding-side:${side}`}
-                type="button"
-                className={paddingSideButtonClass(textPaddingEditSide === side)}
-                disabled={!hasSelection}
-                onClick={() => setTextPaddingEditSide(side)}
-              >
-                {label}
-              </button>
+          <div className="grid grid-cols-2 gap-1.5">
+            {paddingFieldsBySide.map(({ side, field, label, isMixed, displayValue, state }) => (
+              <div key={`text-padding-field:${side}`} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1">
+                <button
+                  type="button"
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-[11px] font-semibold transition ${paddingSideButtonClassByState(state)}`}
+                  disabled={!hasSelection}
+                  onClick={() => {
+                    if (!hasSelection) {
+                      return;
+                    }
+                    const input = stylePanelRef.current?.querySelector<HTMLInputElement>(`[data-style-field="${field}"]`);
+                    input?.focus();
+                  }}
+                >
+                  {label}
+                </button>
+                <div className="relative">
+                  <Input
+                    key={`text-padding:${field}:${hasSelection ? 'selected' : 'empty'}:${selectionStyleDraft[field]}`}
+                    data-style-field={field}
+                    data-style-field-mixed={isMixed ? 'true' : 'false'}
+                    defaultValue={hasSelection ? displayValue : ''}
+                    inputMode="decimal"
+                    placeholder={hasSelection ? (isMixed ? MIXED_PADDING_DISPLAY_LABEL : '0') : ''}
+                    disabled={!hasSelection}
+                    className={`h-7 pr-7 text-xs disabled:opacity-100 ${paddingInputClassByState(state)}`}
+                    onFocus={(event) => {
+                      if (isMixed && event.currentTarget.value.trim() === MIXED_PADDING_DISPLAY_LABEL) {
+                        event.currentTarget.value = '';
+                      }
+                    }}
+                    onBlur={(event) => {
+                      const normalizedValue = event.currentTarget.value.trim();
+                      if (isMixed && (!normalizedValue || normalizedValue === MIXED_PADDING_DISPLAY_LABEL)) {
+                        applyStyleFieldOnBlur(field, '', { mixedBlank: true });
+                        return;
+                      }
+                      applyStyleFieldOnBlur(field, event.currentTarget.value, {
+                        mixedBlank: isMixed && !normalizedValue,
+                      });
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-500">
+                    px
+                  </span>
+                </div>
+              </div>
             ))}
-            <div className="relative">
-              <Input
-                key={`text-padding:${selectedPaddingField}:${hasSelection ? 'selected' : 'empty'}:${selectedPaddingValue}`}
-                data-style-field={selectedPaddingField}
-                defaultValue={selectedPaddingValue}
-                inputMode="decimal"
-                placeholder={selectedPaddingPlaceholder}
-                disabled={!hasSelection}
-                className="h-7 pr-7 text-xs"
-                onBlur={(event) => applyStyleFieldOnBlur(selectedPaddingField, event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.currentTarget.blur();
-                  }
-                }}
-              />
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-500">
-                px
-              </span>
-            </div>
           </div>
         </div>
 
