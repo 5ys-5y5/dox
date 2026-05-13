@@ -662,14 +662,6 @@ type SummaryOverlayDragState = {
   hasMoved: boolean;
 };
 
-type FloatingOverlayQuadrantGuideState = {
-  activeCorner: SummaryOverlayCorner;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
-
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = RAW_FRAME_NODE_SELECTOR;
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
@@ -1173,8 +1165,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   });
   const floatingOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
   const pendingFloatingOverlayDragStyleResetRef = React.useRef<TemplateFloatingOverlayId | null>(null);
-  const [floatingOverlayQuadrantGuide, setFloatingOverlayQuadrantGuide] =
-    React.useState<FloatingOverlayQuadrantGuideState | null>(null);
   const [floatingOverlayCorners, setFloatingOverlayCorners] = React.useState<Record<TemplateFloatingOverlayId, SummaryOverlayCorner>>({
     summary: 'top-left',
     style: 'top-right',
@@ -1468,51 +1458,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     [readFloatingOverlayFallbackHeight, readFloatingOverlayFallbackWidth]
   );
 
-  const updateFloatingOverlayQuadrantGuide = React.useCallback(
-    (metrics: {
-      left: number;
-      top: number;
-      width: number;
-      height: number;
-      visibleLeft: number;
-      visibleTop: number;
-      visibleWidth: number;
-      visibleHeight: number;
-    } | null) => {
-      if (!metrics) {
-        setFloatingOverlayQuadrantGuide((currentGuide) => (currentGuide ? null : currentGuide));
-        return;
-      }
-
-      const nextVertical =
-        metrics.top + metrics.height / 2 < metrics.visibleTop + metrics.visibleHeight / 2 ? 'top' : 'bottom';
-      const nextHorizontal =
-        metrics.left + metrics.width / 2 < metrics.visibleLeft + metrics.visibleWidth / 2 ? 'left' : 'right';
-      const activeCorner = `${nextVertical}-${nextHorizontal}` as SummaryOverlayCorner;
-      setFloatingOverlayQuadrantGuide((currentGuide) => {
-        if (
-          currentGuide &&
-          currentGuide.activeCorner === activeCorner &&
-          currentGuide.left === metrics.visibleLeft &&
-          currentGuide.top === metrics.visibleTop &&
-          currentGuide.width === metrics.visibleWidth &&
-          currentGuide.height === metrics.visibleHeight
-        ) {
-          return currentGuide;
-        }
-
-        return {
-          activeCorner,
-          left: metrics.visibleLeft,
-          top: metrics.visibleTop,
-          width: metrics.visibleWidth,
-          height: metrics.visibleHeight,
-        };
-      });
-    },
-    []
-  );
-
   const resolveFloatingOverlayPinnedStyle = React.useCallback(
     (
       overlayId: TemplateFloatingOverlayId,
@@ -1754,9 +1699,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       }
 
       applyFloatingOverlayDirectDragStyle(dragState.overlayId, metrics);
-      updateFloatingOverlayQuadrantGuide(metrics);
     },
-    [applyFloatingOverlayDirectDragStyle, readFloatingOverlayDragMetrics, updateFloatingOverlayQuadrantGuide]
+    [applyFloatingOverlayDirectDragStyle, readFloatingOverlayDragMetrics]
   );
 
   const finishFloatingOverlayDrag = React.useCallback(
@@ -1791,7 +1735,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         toggleCollapsed();
       }
 
-      setFloatingOverlayQuadrantGuide(null);
       floatingOverlayDragStateRef.current = null;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1858,7 +1801,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     event.stopPropagation();
     const overlayId = dragState.overlayId;
     floatingOverlayDragStateRef.current = null;
-    setFloatingOverlayQuadrantGuide(null);
     resetFloatingOverlayDirectDragStyle(overlayId);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1962,7 +1904,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
               if (dragState?.pointerId === event.pointerId) {
                 const activeOverlayId = dragState.overlayId;
                 floatingOverlayDragStateRef.current = null;
-                setFloatingOverlayQuadrantGuide(null);
                 resetFloatingOverlayDirectDragStyle(activeOverlayId);
               }
             }}
@@ -2022,41 +1963,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         onInput={handlePreviewInput}
         dangerouslySetInnerHTML={renderedPreviewMarkup}
       />
-      {selectionPanelTab === 'position' && floatingOverlayQuadrantGuide ? (
-        <div
-          className="pointer-events-none absolute z-[60]"
-          style={{
-            left: `${floatingOverlayQuadrantGuide.left}px`,
-            top: `${floatingOverlayQuadrantGuide.top}px`,
-            width: `${floatingOverlayQuadrantGuide.width}px`,
-            height: `${floatingOverlayQuadrantGuide.height}px`,
-          }}
-        >
-          <div
-            className="grid h-full w-full grid-cols-2 grid-rows-2"
-            style={{
-              padding: `${SUMMARY_OVERLAY_INSET_PX}px`,
-              gap: `${FLOATING_OVERLAY_STACK_GAP_PX}px`,
-            }}
-          >
-            {(
-              [
-                ['top-left', 'row-start-1 col-start-1'],
-                ['top-right', 'row-start-1 col-start-2'],
-                ['bottom-left', 'row-start-2 col-start-1'],
-                ['bottom-right', 'row-start-2 col-start-2'],
-              ] as const
-            ).map(([corner, positionClassName]) => (
-              <div
-                key={corner}
-                className={`rounded-lg transition-colors ${
-                  floatingOverlayQuadrantGuide.activeCorner === corner ? 'bg-sky-500/10' : 'bg-sky-500/[0.03]'
-                } ${positionClassName}`}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
       {renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay)}
       {renderFloatingOverlaySection(
         'style',

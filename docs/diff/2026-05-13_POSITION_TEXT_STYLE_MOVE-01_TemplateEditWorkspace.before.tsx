@@ -612,11 +612,6 @@ type TemplateEditPreviewSurfaceProps = {
   metadataRoleSecondaryOverlay?: TemplateFloatingOverlayContent;
   metadataRoleTertiaryOverlay?: TemplateFloatingOverlayContent;
   styleOverlay?: TemplateFloatingOverlayContent;
-  styleOverlayLabel?: string;
-  textStyleOverlay?: TemplateFloatingOverlayContent;
-  textStyleOverlayCollapsed: boolean;
-  setTextStyleOverlayCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  textStyleOverlayExpandedWidthClassName?: string;
   summaryOverlay?: TemplateFloatingOverlayContent;
   setPreviewNode: (node: HTMLDivElement | null) => void;
   handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -631,7 +626,6 @@ type SummaryOverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-r
 type TemplateFloatingOverlayId =
   | 'summary'
   | 'style'
-  | 'textStyle'
   | 'action'
   | 'metadataName'
   | 'metadataRolePrimary'
@@ -660,14 +654,6 @@ type SummaryOverlayDragState = {
   visibleWidth: number;
   visibleHeight: number;
   hasMoved: boolean;
-};
-
-type FloatingOverlayQuadrantGuideState = {
-  activeCorner: SummaryOverlayCorner;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
 };
 
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
@@ -767,10 +753,9 @@ const FRAME_RELATIVE_ANCHOR_BADGE_CLASS = 'v106-frame-relative-anchor-badge';
 const CREATED_FRAME_GROUP_PREFIX = 'user-box';
 const POSITION_SUMMARY_LIST_COLLAPSE_THRESHOLD = 5;
 const SUMMARY_OVERLAY_INSET_PX = 12;
-const FLOATING_OVERLAY_STACK_GAP_PX = 12;
 const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
 const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
-const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'style', 'textStyle', 'action'];
+const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'style', 'action'];
 const METADATA_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = [
   'summary',
   'metadataName',
@@ -1146,11 +1131,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   metadataRoleSecondaryOverlay,
   metadataRoleTertiaryOverlay,
   styleOverlay,
-  styleOverlayLabel = '스타일',
-  textStyleOverlay,
-  textStyleOverlayCollapsed,
-  setTextStyleOverlayCollapsed,
-  textStyleOverlayExpandedWidthClassName,
   summaryOverlay,
   setPreviewNode,
   handlePreviewPointerDown,
@@ -1164,7 +1144,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const floatingOverlayNodeRefs = React.useRef<Record<TemplateFloatingOverlayId, HTMLDivElement | null>>({
     summary: null,
     style: null,
-    textStyle: null,
     action: null,
     metadataName: null,
     metadataRolePrimary: null,
@@ -1173,12 +1152,9 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   });
   const floatingOverlayDragStateRef = React.useRef<SummaryOverlayDragState | null>(null);
   const pendingFloatingOverlayDragStyleResetRef = React.useRef<TemplateFloatingOverlayId | null>(null);
-  const [floatingOverlayQuadrantGuide, setFloatingOverlayQuadrantGuide] =
-    React.useState<FloatingOverlayQuadrantGuideState | null>(null);
   const [floatingOverlayCorners, setFloatingOverlayCorners] = React.useState<Record<TemplateFloatingOverlayId, SummaryOverlayCorner>>({
     summary: 'top-left',
     style: 'top-right',
-    textStyle: 'top-right',
     action: 'top-right',
     metadataName: 'top-right',
     metadataRolePrimary: 'top-right',
@@ -1195,7 +1171,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const [floatingOverlayViewportRevision, setFloatingOverlayViewportRevision] = React.useState(0);
   const hasSummaryOverlay = Boolean(summaryOverlay);
   const hasStyleOverlay = Boolean(styleOverlay);
-  const hasTextStyleOverlay = Boolean(textStyleOverlay);
   const hasActionOverlay = Boolean(actionOverlay);
   const hasMetadataNameOverlay = Boolean(metadataNameOverlay);
   const hasMetadataRolePrimaryOverlay = Boolean(metadataRolePrimaryOverlay);
@@ -1253,7 +1228,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     renderedPreviewHtml,
     summaryOverlayCollapsed,
     styleOverlayCollapsed,
-    textStyleOverlayCollapsed,
     actionOverlayCollapsed,
     metadataNameOverlayCollapsed,
     metadataRolePrimaryOverlayCollapsed,
@@ -1261,7 +1235,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     metadataRoleTertiaryOverlayCollapsed,
     hasSummaryOverlay,
     hasStyleOverlay,
-    hasTextStyleOverlay,
     hasActionOverlay,
     hasMetadataNameOverlay,
     hasMetadataRolePrimaryOverlay,
@@ -1286,22 +1259,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     const visibleBottom = clampToShellHeight(Math.min(shellRect.height, window.innerHeight - shellRect.top));
     const normalizedRight = Math.max(visibleLeft, visibleRight);
     const normalizedBottom = Math.max(visibleTop, visibleBottom);
-    const visibleWidth = normalizedRight - visibleLeft;
-    const visibleHeight = normalizedBottom - visibleTop;
-
-    if (visibleWidth <= 0 || visibleHeight <= 0) {
-      return {
-        shellRect,
-        left: 0,
-        top: 0,
-        right: shellRect.width,
-        bottom: shellRect.height,
-        width: shellRect.width,
-        height: shellRect.height,
-        shellWidth: shellRect.width,
-        shellHeight: shellRect.height,
-      };
-    }
 
     return {
       shellRect,
@@ -1309,8 +1266,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       top: visibleTop,
       right: normalizedRight,
       bottom: normalizedBottom,
-      width: visibleWidth,
-      height: visibleHeight,
+      width: normalizedRight - visibleLeft,
+      height: normalizedBottom - visibleTop,
       shellWidth: shellRect.width,
       shellHeight: shellRect.height,
     };
@@ -1322,8 +1279,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return summaryOverlayCollapsed;
       case 'style':
         return styleOverlayCollapsed;
-      case 'textStyle':
-        return textStyleOverlayCollapsed;
       case 'action':
         return actionOverlayCollapsed;
       case 'metadataName':
@@ -1345,8 +1300,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return hasSummaryOverlay;
       case 'style':
         return hasStyleOverlay;
-      case 'textStyle':
-        return hasTextStyleOverlay;
       case 'action':
         return hasActionOverlay;
       case 'metadataName':
@@ -1383,10 +1336,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       return 220;
     }
 
-    if (overlayId === 'textStyle') {
-      return 300;
-    }
-
     if (overlayId === 'metadataName') {
       return 150;
     }
@@ -1397,121 +1346,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 
     return 260;
   }, []);
-
-  const readFloatingOverlayFallbackWidth = React.useCallback((overlayId: TemplateFloatingOverlayId, isCollapsed: boolean) => {
-    if (isCollapsed) {
-      switch (overlayId) {
-        case 'summary':
-          return 73;
-        case 'style':
-          return 104;
-        case 'textStyle':
-          return 113;
-        case 'action':
-          return 94;
-        case 'metadataName':
-          return 78;
-        case 'metadataRolePrimary':
-        case 'metadataRoleSecondary':
-          return 124;
-        case 'metadataRoleTertiary':
-          return 90;
-        default:
-          return 96;
-      }
-    }
-
-    if (overlayId === 'action') {
-      return 176;
-    }
-
-    if (overlayId === 'textStyle') {
-      return 672;
-    }
-
-    if (overlayId === 'metadataName' || overlayId === 'metadataRolePrimary' || overlayId === 'metadataRoleSecondary' || overlayId === 'metadataRoleTertiary') {
-      return 400;
-    }
-
-    return 480;
-  }, []);
-
-  const readFloatingOverlayResolvedSize = React.useCallback(
-    (overlayId: TemplateFloatingOverlayId, isCollapsed: boolean) => {
-      const overlayNode = floatingOverlayNodeRefs.current[overlayId];
-      const collapsedFallbackWidth = readFloatingOverlayFallbackWidth(overlayId, true);
-      const collapsedFallbackHeight = readFloatingOverlayFallbackHeight(overlayId, true);
-      const targetFallbackWidth = readFloatingOverlayFallbackWidth(overlayId, isCollapsed);
-      const targetFallbackHeight = readFloatingOverlayFallbackHeight(overlayId, isCollapsed);
-      const measuredWidth = overlayNode?.offsetWidth || 0;
-      const measuredHeight = overlayNode?.offsetHeight || 0;
-      const width = isCollapsed
-        ? measuredWidth > 0
-          ? Math.min(measuredWidth, collapsedFallbackWidth)
-          : collapsedFallbackWidth
-        : measuredWidth > collapsedFallbackWidth + 1
-          ? measuredWidth
-          : targetFallbackWidth;
-      const height = isCollapsed
-        ? measuredHeight > 0
-          ? Math.min(measuredHeight, collapsedFallbackHeight)
-          : collapsedFallbackHeight
-        : measuredHeight > collapsedFallbackHeight + 1
-          ? measuredHeight
-          : targetFallbackHeight;
-
-      return {
-        width,
-        height,
-      };
-    },
-    [readFloatingOverlayFallbackHeight, readFloatingOverlayFallbackWidth]
-  );
-
-  const updateFloatingOverlayQuadrantGuide = React.useCallback(
-    (metrics: {
-      left: number;
-      top: number;
-      width: number;
-      height: number;
-      visibleLeft: number;
-      visibleTop: number;
-      visibleWidth: number;
-      visibleHeight: number;
-    } | null) => {
-      if (!metrics) {
-        setFloatingOverlayQuadrantGuide((currentGuide) => (currentGuide ? null : currentGuide));
-        return;
-      }
-
-      const nextVertical =
-        metrics.top + metrics.height / 2 < metrics.visibleTop + metrics.visibleHeight / 2 ? 'top' : 'bottom';
-      const nextHorizontal =
-        metrics.left + metrics.width / 2 < metrics.visibleLeft + metrics.visibleWidth / 2 ? 'left' : 'right';
-      const activeCorner = `${nextVertical}-${nextHorizontal}` as SummaryOverlayCorner;
-      setFloatingOverlayQuadrantGuide((currentGuide) => {
-        if (
-          currentGuide &&
-          currentGuide.activeCorner === activeCorner &&
-          currentGuide.left === metrics.visibleLeft &&
-          currentGuide.top === metrics.visibleTop &&
-          currentGuide.width === metrics.visibleWidth &&
-          currentGuide.height === metrics.visibleHeight
-        ) {
-          return currentGuide;
-        }
-
-        return {
-          activeCorner,
-          left: metrics.visibleLeft,
-          top: metrics.visibleTop,
-          width: metrics.visibleWidth,
-          height: metrics.visibleHeight,
-        };
-      });
-    },
-    []
-  );
 
   const resolveFloatingOverlayPinnedStyle = React.useCallback(
     (
@@ -1525,7 +1359,11 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return undefined;
       }
 
-      const { width: overlayWidth, height: overlayHeight } = readFloatingOverlayResolvedSize(overlayId, isCollapsed);
+      const overlayNode = floatingOverlayNodeRefs.current[overlayId];
+      const fallbackWidth = isCollapsed ? 96 : overlayId === 'action' ? 176 : 480;
+      const fallbackHeight = readFloatingOverlayFallbackHeight(overlayId, isCollapsed);
+      const overlayWidth = overlayNode?.offsetWidth || fallbackWidth;
+      const overlayHeight = overlayNode?.offsetHeight || fallbackHeight;
       const availableWidth = Math.max(
         SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX,
         visibleBounds.width - SUMMARY_OVERLAY_INSET_PX * 2
@@ -1534,8 +1372,13 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       const sameCornerStackIds = stackOrder.filter(
         (stackOverlayId) => hasFloatingOverlayContent(stackOverlayId) && floatingOverlayCorners[stackOverlayId] === corner
       );
-      const readStackOverlayHeight = (stackOverlayId: TemplateFloatingOverlayId) =>
-        readFloatingOverlayResolvedSize(stackOverlayId, readFloatingOverlayCollapsed(stackOverlayId)).height;
+      const readStackOverlayHeight = (stackOverlayId: TemplateFloatingOverlayId) => {
+        const stackOverlayNode = floatingOverlayNodeRefs.current[stackOverlayId];
+        return (
+          stackOverlayNode?.offsetHeight ||
+          readFloatingOverlayFallbackHeight(stackOverlayId, readFloatingOverlayCollapsed(stackOverlayId))
+        );
+      };
       const sameCornerStackIndex = sameCornerStackIds.indexOf(overlayId);
       const sameCornerStackHeights = new Map(
         sameCornerStackIds.map((stackOverlayId) => [stackOverlayId, readStackOverlayHeight(stackOverlayId)] as const)
@@ -1544,25 +1387,30 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         (height, stackOverlayId) => height + (sameCornerStackHeights.get(stackOverlayId) || 0),
         0
       );
-      const stackGap = sameCornerStackIds.length <= 1 ? 0 : FLOATING_OVERLAY_STACK_GAP_PX;
-      const totalStackHeight = sameCornerStackTotalHeight + stackGap * Math.max(0, sameCornerStackIds.length - 1);
-      const stackStartTop = corner.startsWith('bottom')
-        ? Math.max(
-            visibleBounds.top + SUMMARY_OVERLAY_INSET_PX,
-            visibleBounds.bottom - SUMMARY_OVERLAY_INSET_PX - totalStackHeight
-          )
-        : visibleBounds.top + SUMMARY_OVERLAY_INSET_PX;
-      const verticalStackOffset =
-        sameCornerStackIndex <= 0
+      const stackGap =
+        sameCornerStackIds.length <= 1
           ? 0
-          : sameCornerStackIds.slice(0, sameCornerStackIndex).reduce(
-              (offset, stackOverlayId) => offset + (sameCornerStackHeights.get(stackOverlayId) || 0) + stackGap,
-              0
+          : Math.min(
+              SUMMARY_OVERLAY_INSET_PX,
+              Math.max(0, (visibleBounds.height - sameCornerStackTotalHeight) / (sameCornerStackIds.length - 1))
             );
+      const stackPeerIds =
+        sameCornerStackIndex < 0
+          ? []
+          : corner.startsWith('top')
+            ? sameCornerStackIds.slice(0, sameCornerStackIndex)
+            : sameCornerStackIds.slice(sameCornerStackIndex + 1);
+      const verticalStackOffset = stackPeerIds.reduce(
+        (offset, stackOverlayId) => offset + (sameCornerStackHeights.get(stackOverlayId) || 0) + stackGap,
+        0
+      );
       const minLeft = visibleBounds.left + SUMMARY_OVERLAY_INSET_PX;
       const maxLeft = Math.max(minLeft, visibleBounds.right - overlayWidth - SUMMARY_OVERLAY_INSET_PX);
+      const baseMinTop = visibleBounds.top + SUMMARY_OVERLAY_INSET_PX;
+      const minTop = baseMinTop + verticalStackOffset;
+      const maxTop = Math.max(baseMinTop, visibleBounds.bottom - overlayHeight - SUMMARY_OVERLAY_INSET_PX);
       const pinnedLeft = corner.endsWith('left') ? minLeft : maxLeft;
-      const pinnedTop = stackStartTop + verticalStackOffset;
+      const pinnedTop = corner.startsWith('top') ? minTop : maxTop - verticalStackOffset;
 
       return {
         left: `${pinnedLeft}px`,
@@ -1577,9 +1425,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       hasMetadataRolePrimaryOverlay,
       hasMetadataRoleSecondaryOverlay,
       hasMetadataRoleTertiaryOverlay,
-      readFloatingOverlayFallbackWidth,
       hasStyleOverlay,
-      hasTextStyleOverlay,
       hasSummaryOverlay,
       metadataNameOverlayCollapsed,
       metadataRolePrimaryOverlayCollapsed,
@@ -1587,10 +1433,9 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       metadataRoleTertiaryOverlayCollapsed,
       actionOverlayCollapsed,
       styleOverlayCollapsed,
-      textStyleOverlayCollapsed,
       summaryOverlayCollapsed,
       selectionPanelTab,
-      readFloatingOverlayResolvedSize,
+      readFloatingOverlayFallbackHeight,
       readFloatingOverlayVisibleBounds,
     ]
   );
@@ -1754,9 +1599,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       }
 
       applyFloatingOverlayDirectDragStyle(dragState.overlayId, metrics);
-      updateFloatingOverlayQuadrantGuide(metrics);
     },
-    [applyFloatingOverlayDirectDragStyle, readFloatingOverlayDragMetrics, updateFloatingOverlayQuadrantGuide]
+    [applyFloatingOverlayDirectDragStyle, readFloatingOverlayDragMetrics]
   );
 
   const finishFloatingOverlayDrag = React.useCallback(
@@ -1787,11 +1631,9 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       }
 
       if (!dragState.hasMoved && toggleCollapsed) {
-        resetFloatingOverlayDirectDragStyle(overlayId);
         toggleCollapsed();
       }
 
-      setFloatingOverlayQuadrantGuide(null);
       floatingOverlayDragStateRef.current = null;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1810,12 +1652,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       finishFloatingOverlayDrag(event, () => setStyleOverlayCollapsed((current) => !current));
     },
     [finishFloatingOverlayDrag]
-  );
-  const finishTextStyleOverlayDrag = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => setTextStyleOverlayCollapsed((current) => !current));
-    },
-    [finishFloatingOverlayDrag, setTextStyleOverlayCollapsed]
   );
   const finishSummaryOverlayDrag = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -1858,7 +1694,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     event.stopPropagation();
     const overlayId = dragState.overlayId;
     floatingOverlayDragStateRef.current = null;
-    setFloatingOverlayQuadrantGuide(null);
     resetFloatingOverlayDirectDragStyle(overlayId);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1962,7 +1797,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
               if (dragState?.pointerId === event.pointerId) {
                 const activeOverlayId = dragState.overlayId;
                 floatingOverlayDragStateRef.current = null;
-                setFloatingOverlayQuadrantGuide(null);
                 resetFloatingOverlayDirectDragStyle(activeOverlayId);
               }
             }}
@@ -2022,59 +1856,15 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         onInput={handlePreviewInput}
         dangerouslySetInnerHTML={renderedPreviewMarkup}
       />
-      {selectionPanelTab === 'position' && floatingOverlayQuadrantGuide ? (
-        <div
-          className="pointer-events-none absolute z-[60]"
-          style={{
-            left: `${floatingOverlayQuadrantGuide.left}px`,
-            top: `${floatingOverlayQuadrantGuide.top}px`,
-            width: `${floatingOverlayQuadrantGuide.width}px`,
-            height: `${floatingOverlayQuadrantGuide.height}px`,
-          }}
-        >
-          <div
-            className="grid h-full w-full grid-cols-2 grid-rows-2"
-            style={{
-              padding: `${SUMMARY_OVERLAY_INSET_PX}px`,
-              gap: `${FLOATING_OVERLAY_STACK_GAP_PX}px`,
-            }}
-          >
-            {(
-              [
-                ['top-left', 'row-start-1 col-start-1'],
-                ['top-right', 'row-start-1 col-start-2'],
-                ['bottom-left', 'row-start-2 col-start-1'],
-                ['bottom-right', 'row-start-2 col-start-2'],
-              ] as const
-            ).map(([corner, positionClassName]) => (
-              <div
-                key={corner}
-                className={`rounded-lg transition-colors ${
-                  floatingOverlayQuadrantGuide.activeCorner === corner ? 'bg-sky-500/10' : 'bg-sky-500/[0.03]'
-                } ${positionClassName}`}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
       {renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay)}
       {renderFloatingOverlaySection(
         'style',
-        styleOverlayLabel,
+        '스타일',
         styleOverlayCollapsed,
         setStyleOverlayCollapsed,
         finishStyleOverlayDrag,
         styleOverlay,
         { expandedWidthClassName: 'w-fit max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection(
-        'textStyle',
-        '텍스트 스타일',
-        textStyleOverlayCollapsed,
-        setTextStyleOverlayCollapsed,
-        finishTextStyleOverlayDrag,
-        textStyleOverlay,
-        { expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-[42rem] max-w-[calc(100%_-_1.5rem)]' }
       )}
       {renderFloatingOverlaySection(
         'metadataName',
@@ -2123,7 +1913,6 @@ const CANVAS_ICON_SCALE_OPTIONS: CanvasIconScale[] = ['s', 'm', 'l'];
 const TEMPLATE_FRAME_BOX_KIND_OPTIONS: TemplateFrameBoxKind[] = ['text', 'attachment', 'signature'];
 const TEMPLATE_FRAME_ROLE_OPTIONS: TemplateFrameRole[] = ['key', 'value', 'key_value'];
 const TEXT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['static_label', 'editable_text'];
-const TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR = 'data-v106-text-canvas-edit-mode';
 const ATTACHMENT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['file_slot'];
 const APPEARANCE_TARGET_BY_STYLE_FIELD: Partial<Record<StyleFieldKey, AppearanceBoxModelTarget>> = {
   width: 'content',
@@ -10485,30 +10274,26 @@ const restoreFrameTextInputFocus = (
 
 const applyFrameTextEditingMode = (root: HTMLElement, enabled: boolean) => {
   root.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]').forEach((input) => {
-    if (!enabled) {
-      disableFrameTextInputEditing(input);
+    if (enabled) {
+      enableFrameTextInputForEditing(input);
+      return;
     }
+
+    disableFrameTextInputEditing(input);
   });
 };
 
-const applyPreviewEditPermissions = (
-  root: HTMLElement,
-  selectionPanelTab: SelectionPanelTab = 'position',
-  textCanvasEditMode = false
-) => {
-  const permissionSignature = `${selectionPanelTab}:${textCanvasEditMode ? 'text' : 'default'}`;
-
-  if (root.getAttribute(TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR) === permissionSignature) {
+const applyPreviewEditPermissions = (root: HTMLElement, selectionPanelTab: SelectionPanelTab = 'position') => {
+  if (root.getAttribute(TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR) === selectionPanelTab) {
     return;
   }
 
-  setElementAttributeIfChanged(root, TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR, permissionSignature);
-  setElementAttributeIfChanged(root, TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR, textCanvasEditMode ? 'true' : 'false');
+  setElementAttributeIfChanged(root, TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR, selectionPanelTab);
   root.querySelectorAll<HTMLElement>('[data-template-edit-scope]').forEach((element) => {
     element.setAttribute('contenteditable', 'true');
     element.setAttribute('data-template-edit-enabled', 'true');
   });
-  applyFrameTextEditingMode(root, textCanvasEditMode);
+  applyFrameTextEditingMode(root, selectionPanelTab === 'text');
   if (root.getAttribute(TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR) !== 'true') {
     primeFrameContentScaleMetrics(root);
     collectFrameSelectionAnchors(root).forEach((node) => {
@@ -15157,7 +14942,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     React.useState<AppearanceCorner[]>(() => [...APPEARANCE_CORNERS]);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
-  const [positionTextStyleOverlayCollapsed, setPositionTextStyleOverlayCollapsed] = React.useState(true);
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
   const [positionRelationTargetFrameGroupId, setPositionRelationTargetFrameGroupId] = React.useState('');
   const [positionOrderLockSelectionMode, setPositionOrderLockSelectionMode] = React.useState(false);
@@ -15175,9 +14959,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   >('');
   const [moveGroupAssignmentTargetGroupId, setMoveGroupAssignmentTargetGroupId] = React.useState('');
   const [positionGroupEditMode, setPositionGroupEditMode] = React.useState<PositionGroupEditMode>({ kind: 'idle' });
-  const isTextCanvasEditModeActive =
-    selectionPanelTab === 'text' || (selectionPanelTab === 'position' && !positionTextStyleOverlayCollapsed);
-  const textCanvasEditModeActiveRef = React.useRef(isTextCanvasEditModeActive);
   const [expandedPositionBoxGroupIds, setExpandedPositionBoxGroupIds] = React.useState<Record<string, boolean>>({});
   const [expandedPositionSummarySections, setExpandedPositionSummarySections] = React.useState<Record<string, boolean>>({});
   const [expandedSelectionSummaryTabs, setExpandedSelectionSummaryTabs] = React.useState<
@@ -15201,9 +14982,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [templateUsagePreviewMode, setTemplateUsagePreviewMode] = React.useState(false);
   const [templateUsagePreviewHtml, setTemplateUsagePreviewHtml] = React.useState('');
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
-  React.useEffect(() => {
-    textCanvasEditModeActiveRef.current = isTextCanvasEditModeActive;
-  }, [isTextCanvasEditModeActive]);
   const [metadataRelationSelectionMode, setMetadataRelationSelectionMode] = React.useState<MetadataRelationSelectionMode>({
     kind: 'idle',
   });
@@ -20884,7 +20662,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         root,
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
-      applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       applyFrameCanvasVisualHints(root);
       if (selectionPanelTab !== 'position') {
         syncPreviewSurfaceScale(root);
@@ -21043,7 +20821,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             liveNode,
             selectionPanelTab === 'position' && positionOrderLockSelectionMode
           );
-          applyPreviewEditPermissions(liveNode, selectionPanelTab, textCanvasEditModeActiveRef.current);
+          applyPreviewEditPermissions(liveNode, selectionPanelTab);
 
           if (selectionPanelTab === 'position') {
             materializePositionGroupWrappers(liveNode);
@@ -21060,7 +20838,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         })();
       }
     },
-	    [
+    [
 	      positionOrderLockSelectionMode,
 	      renderedPreviewHtml,
 	      schedulePreviewEditorState,
@@ -21089,7 +20867,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         root,
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
-      applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       if (selectionPanelTab !== 'position') {
         clearPositionOnlyEditorUi(root);
         applyFrameCanvasVisualHints(root);
@@ -21175,7 +20953,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         root,
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
-      applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       if (selectionPanelTab !== 'position') {
         clearPositionOnlyEditorUi(root);
         applyFrameCanvasVisualHints(root);
@@ -22171,7 +21949,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const normalized = ensurePreviewFrameBandNormalization(root);
       syncPreviewSurfaceCloneAttrs(root);
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
-      applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
+      applyPreviewEditPermissions(root, selectionPanelTab);
       applyFrameCanvasVisualHints(root);
       if (selectionPanelTab !== 'position') {
         syncPreviewSurfaceScale(root);
@@ -22283,16 +22061,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    applyPreviewEditPermissions(root, selectionPanelTab, isTextCanvasEditModeActive);
-  }, [renderedPreviewHtml, selectionPanelTab, isTextCanvasEditModeActive]);
-
-  React.useLayoutEffect(() => {
-    const root = previewRef.current;
-
-    if (!root) {
-      return;
-    }
-
     const suppressedSelectionReapply = suppressNextSelectionLayoutReapplyRef.current;
     if (suppressedSelectionReapply) {
       const shouldSkipSelectionReapply =
@@ -22311,6 +22079,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     if (selectionPanelTab !== 'position') {
+      applyPreviewEditPermissions(root, selectionPanelTab);
       clearPositionOnlyEditorUi(root);
       applyFrameCanvasVisualHints(root);
       applyFastFrameSelectionUi(
@@ -22351,6 +22120,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
+    applyPreviewEditPermissions(root, selectionPanelTab);
     applyFrameCanvasVisualHints(root);
     normalizeLiveVerticalCohorts(root);
     normalizeLiveVerticalPhysicalPeers(root);
@@ -28063,15 +27833,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         });
       };
 
-      if (isTextCanvasEditModeActive && frameNode && !edgeButton && !resizeHandle && !event.shiftKey) {
+      if (
+        selectionPanelTab === 'text' &&
+        frameNode &&
+        !edgeButton &&
+        !resizeHandle &&
+        !event.shiftKey
+      ) {
         // 텍스트 탭의 일반 클릭은 직접 입력 편집을 우선하고, Shift/드래그 선택은 아래 공통 선택 흐름에 맡겨 일괄 서식을 유지한다.
         const textFrameGroupId = getFrameGroupId(frameNode);
         const textInput = frameNode.querySelector<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
         const clickedTextInput = resolveFrameTextInputElement(target);
 
         if (clickedTextInput) {
-          event.preventDefault();
-          focusFrameTextInputForEditing(clickedTextInput);
+          enableFrameTextInputForEditing(clickedTextInput);
           return;
         }
 
@@ -29585,7 +29360,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      applyShiftMergedPositionEntitySelection,
 	      clearTransientCanvasOverlays,
 	      commitCreatedFrameShell,
-      isTextCanvasEditModeActive,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
 	      selectionPanelTab,
@@ -29684,7 +29458,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const target = event.target instanceof HTMLElement ? event.target : null;
 
-    if (isTextCanvasEditModeActive && target && previewRef.current) {
+    if (selectionPanelTab === 'text' && target && previewRef.current) {
       const clickedTextInput = resolveFrameTextInputElement(target);
 
       if (clickedTextInput && previewRef.current.contains(clickedTextInput)) {
@@ -29718,7 +29492,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-	  }, [deleteCanvasSelectionEntity, isTextCanvasEditModeActive, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+	  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
 
 	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
 	    const target = event.target instanceof HTMLElement ? event.target : null;
@@ -29753,7 +29527,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      return;
 	    }
 
-    if (isTextCanvasEditModeActive) {
+    if (selectionPanelTab === 'text') {
       const root = previewRef.current;
       const frameNode = resolveFrameSelectionAnchor(
         (frameTextInput || frameEditableScope || target).closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)
@@ -29786,7 +29560,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
-	  }, [isTextCanvasEditModeActive, requestPreviewTextFit, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+	  }, [requestPreviewTextFit, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
 
   const toggleBoxCreationModeFromCanvasToolbar = React.useCallback(() => {
     clearTransientCanvasOverlays();
@@ -31204,20 +30978,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
-  const renderPositionBoxStyleOverlay = () => {
+  const renderPositionStyleOverlay = () => {
     if (selectionPanelTab !== 'position') {
       return null;
     }
 
     return renderSelectionAppearanceControls();
-  };
-
-  const renderPositionTextStyleOverlay = () => {
-    if (selectionPanelTab !== 'position') {
-      return null;
-    }
-
-    return renderTextCanvasActionControls();
   };
 
   const renderPositionActionOverlay = () => {
@@ -32003,12 +31769,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return renderPositionActionOverlay;
     }
 
+    if (selectionPanelTab === 'text') {
+      return renderTextCanvasActionControls;
+    }
+
     return null;
   };
 
-  const canvasActionOverlayLabel = '기능 버튼';
+  const canvasActionOverlayLabel = selectionPanelTab === 'text' ? '텍스트 설정' : '기능 버튼';
   const canvasActionOverlayWidthClassName =
-    selectionPanelTab === 'metadata' ? 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' : 'w-44 max-w-[calc(100%_-_1.5rem)]';
+    selectionPanelTab === 'text'
+      ? 'w-[42rem] max-w-[calc(100%_-_1.5rem)]'
+      : selectionPanelTab === 'metadata'
+        ? 'w-[25rem] max-w-[calc(100%_-_1.5rem)]'
+        : 'w-44 max-w-[calc(100%_-_1.5rem)]';
 
   return (
     <div className="space-y-6">
@@ -32265,22 +32039,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
           z-index: 22;
         }
-        .template-edit-preview[data-selection-panel-tab="text"] [data-template-frame-input="true"],
-        .template-edit-preview[${TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR}="true"] [data-template-frame-input="true"] {
+        .template-edit-preview[data-selection-panel-tab="text"] [data-template-frame-input="true"] {
           pointer-events: auto !important;
           user-select: text !important;
           -webkit-user-select: text !important;
           cursor: text !important;
         }
-        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"] [data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"],
-        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[${TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR}="true"] [data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
+        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"] [data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
           pointer-events: auto !important;
           user-select: text !important;
           -webkit-user-select: text !important;
           cursor: text !important;
         }
-        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"][data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"],
-        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[${TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR}="true"][data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
+        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"][data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
           pointer-events: auto !important;
           user-select: text !important;
           -webkit-user-select: text !important;
@@ -33487,12 +33258,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            metadataRoleTertiaryOverlay={
 	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleTertiaryOverlay : null
 	            }
-	            styleOverlay={templateUsagePreviewMode ? null : renderPositionBoxStyleOverlay()}
-	            styleOverlayLabel="상자 스타일"
-	            textStyleOverlay={templateUsagePreviewMode ? null : renderPositionTextStyleOverlay()}
-	            textStyleOverlayCollapsed={positionTextStyleOverlayCollapsed}
-	            setTextStyleOverlayCollapsed={setPositionTextStyleOverlayCollapsed}
-	            textStyleOverlayExpandedWidthClassName="w-[42rem] max-w-[calc(100%_-_1.5rem)]"
+	            styleOverlay={templateUsagePreviewMode ? null : renderPositionStyleOverlay()}
 	            summaryOverlay={templateUsagePreviewMode ? null : renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}
             handlePreviewPointerDown={handlePreviewPointerDown}
