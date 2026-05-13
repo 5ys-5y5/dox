@@ -13364,6 +13364,33 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
 const readComputedVerticalBorderPx = (computedStyle: CSSStyleDeclaration) =>
   parseFramePx(computedStyle.borderTopWidth) + parseFramePx(computedStyle.borderBottomWidth);
 
+const copyComputedTextMeasurementStyles = (
+  computedStyle: CSSStyleDeclaration,
+  targetStyle: CSSStyleDeclaration
+) => {
+  [
+    'font-family',
+    'font-size',
+    'font-weight',
+    'font-style',
+    'font-variant',
+    'font-stretch',
+    'font-size-adjust',
+    'font-kerning',
+    'font-feature-settings',
+    'font-variation-settings',
+    'line-height',
+    'letter-spacing',
+    'text-transform',
+    'text-rendering',
+  ].forEach((propertyName) => {
+    const value = computedStyle.getPropertyValue(propertyName).trim();
+    if (value) {
+      targetStyle.setProperty(propertyName, value);
+    }
+  });
+};
+
 const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const targetRect = target.getBoundingClientRect();
   const computedStyle = getComputedStyle(target);
@@ -13391,9 +13418,7 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   clone.style.overflow = 'hidden';
   clone.style.pointerEvents = 'none';
   clone.style.boxSizing = computedStyle.boxSizing;
-  clone.style.font = computedStyle.font;
-  clone.style.lineHeight = computedStyle.lineHeight;
-  clone.style.letterSpacing = computedStyle.letterSpacing;
+  copyComputedTextMeasurementStyles(computedStyle, clone.style);
   clone.style.padding = computedStyle.padding;
   clone.style.border = computedStyle.border;
   clone.style.whiteSpace = computedStyle.whiteSpace;
@@ -13423,9 +13448,7 @@ const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputE
   clone.style.overflow = 'visible';
   clone.style.pointerEvents = 'none';
   clone.style.boxSizing = computedStyle.boxSizing;
-  clone.style.font = computedStyle.font;
-  clone.style.lineHeight = computedStyle.lineHeight;
-  clone.style.letterSpacing = computedStyle.letterSpacing;
+  copyComputedTextMeasurementStyles(computedStyle, clone.style);
   clone.style.padding = computedStyle.padding;
   clone.style.border = computedStyle.border;
   clone.style.whiteSpace = 'pre';
