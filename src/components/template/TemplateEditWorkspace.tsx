@@ -11997,6 +11997,7 @@ const getSharedValue = (values: string[]) => {
 
   return '';
 };
+const MIXED_STYLE_VALUE_LABEL = '혼합';
 
 const resolveFrameContentTarget = (node: HTMLElement) => {
   return (
@@ -22869,8 +22870,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const syncSelectionStyleDraft = React.useCallback(() => {
     const root = previewRef.current;
+    const activeSelectionIds =
+      selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
+        ? selectedPositionResolvedFrameGroupIds
+        : selectedFrameGroupIds;
 
-    if (!root || selectedFrameGroupIds.length === 0) {
+    if (!root || activeSelectionIds.length === 0) {
       setSelectionStyleDraft(defaultSelectionStyleDraft);
       return;
     }
@@ -22888,8 +22893,22 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const resolveStyleTargetShell = (node: HTMLElement) =>
       styleTargets.kind === 'frame' ? resolveFrameLayoutShell(node) : node;
 
-    const widths = nodes.map((node) => String(Math.round(node.getBoundingClientRect().width)));
-    const heights = nodes.map((node) => String(Math.round(node.getBoundingClientRect().height)));
+    const frameRects = nodes.map((node) => {
+      if (styleTargets.kind === 'frame') {
+        return readFrameMoveRect(node);
+      }
+      return readFrameElementRect(resolveStyleTargetShell(node));
+    });
+    const widths = frameRects.map((rect) => String(Math.round(rect.width)));
+    const heights = frameRects.map((rect) => String(Math.round(rect.height)));
+    const getSharedStyleFieldValue = (values: string[]) => {
+      const normalizedValues = values.map((value) => String(value || ''));
+      const [first] = normalizedValues;
+      if (normalizedValues.every((value) => value === first)) {
+        return first;
+      }
+      return MIXED_STYLE_VALUE_LABEL;
+    };
     const fontSizes = nodes.map((node) => normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).fontSize));
     const lineHeights = nodes.map((node) =>
       normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).lineHeight)
@@ -22926,34 +22945,42 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const borderStyles = borderAppearances.map((appearance) => appearance.style);
     const borderAligns = borderAppearances.map((appearance) => appearance.align);
 
-    const sharedTextAlign = getSharedValue(textAligns);
+    const sharedTextAlign = getSharedStyleFieldValue(textAligns);
 
     setSelectionStyleDraft({
-      width: getSharedValue(widths),
-      height: getSharedValue(heights),
-      fontSize: getSharedValue(fontSizes),
-      lineHeight: getSharedValue(lineHeights),
-      paddingTop: getSharedValue(paddingTops),
-      paddingBottom: getSharedValue(paddingBottoms),
-      paddingLeft: getSharedValue(paddingLefts),
-      paddingRight: getSharedValue(paddingRights),
-      borderRadius: getSharedValue(borderRadii),
-      fontFamily: getSharedValue(fontFamilies),
-      fontWeight: getSharedValue(fontWeights),
-      fontStyle: getSharedValue(fontStyles),
-      textDecorationLine: getSharedValue(textDecorationLines),
+      width: getSharedStyleFieldValue(widths),
+      height: getSharedStyleFieldValue(heights),
+      fontSize: getSharedStyleFieldValue(fontSizes),
+      lineHeight: getSharedStyleFieldValue(lineHeights),
+      paddingTop: getSharedStyleFieldValue(paddingTops),
+      paddingBottom: getSharedStyleFieldValue(paddingBottoms),
+      paddingLeft: getSharedStyleFieldValue(paddingLefts),
+      paddingRight: getSharedStyleFieldValue(paddingRights),
+      borderRadius: getSharedStyleFieldValue(borderRadii),
+      fontFamily: getSharedStyleFieldValue(fontFamilies),
+      fontWeight: getSharedStyleFieldValue(fontWeights),
+      fontStyle: getSharedStyleFieldValue(fontStyles),
+      textDecorationLine: getSharedStyleFieldValue(textDecorationLines),
       textAlign:
+        sharedTextAlign === MIXED_STYLE_VALUE_LABEL
+          ? MIXED_STYLE_VALUE_LABEL
+          :
         sharedTextAlign === 'center' || sharedTextAlign === 'right' || sharedTextAlign === 'justify'
           ? sharedTextAlign
           : 'left',
-      color: getSharedValue(colors) || '#0f172a',
-      backgroundColor: getSharedValue(backgroundColors) || 'transparent',
-      borderColor: getSharedValue(borderColors),
-      borderWidth: getSharedValue(borderWidths),
-      borderStyle: getSharedValue(borderStyles),
-      borderAlign: getSharedValue(borderAligns),
+      color: getSharedStyleFieldValue(colors) || '#0f172a',
+      backgroundColor: getSharedStyleFieldValue(backgroundColors) || 'transparent',
+      borderColor: getSharedStyleFieldValue(borderColors),
+      borderWidth: getSharedStyleFieldValue(borderWidths),
+      borderStyle: getSharedStyleFieldValue(borderStyles),
+      borderAlign: getSharedStyleFieldValue(borderAligns),
     });
-  }, [resolveSelectionAppearanceStyleTargets, selectedFrameGroupIds]);
+  }, [
+    resolveSelectionAppearanceStyleTargets,
+    selectedFrameGroupIds,
+    selectedPositionResolvedFrameGroupIds,
+    selectionPanelTab,
+  ]);
 
   const scheduleDeferredTextAutoSizeSync = React.useCallback((applyChanges?: () => void) => {
     if (typeof window === 'undefined') {
@@ -22986,7 +23013,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncSelectionStyleDraft();
   }, [
     selectedFrameGroupIds,
-    selectedPositionResolvedBoxGroup?.id,
+    selectedPositionResolvedFrameGroupIds,
     syncSelectionStyleDraft,
     templateDetail?.template.id,
   ]);
@@ -23929,13 +23956,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     (patch: FrameStylePatch) => {
       const root = previewRef.current;
 
-      if (!root || selectedFrameGroupIdsRef.current.length === 0) {
+      if (!root) {
         setMessage('편집할 상자를 먼저 선택하세요.');
         return;
       }
 
       const styleTargets = resolveSelectionAppearanceStyleTargets(root);
       const nodes = styleTargets.elements;
+
+      if (nodes.length === 0) {
+        setMessage('편집할 상자를 먼저 선택하세요.');
+        return;
+      }
       const styleTargetFrameGroupIds = Array.from(
         new Set(nodes.map((node) => getFrameGroupId(node).trim()).filter(Boolean))
       );
@@ -25910,7 +25942,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const readFieldValue = (field: keyof SelectionStyleDraft) => {
       const element = root.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-style-field="${field}"]`);
-      return element?.value ?? selectionStyleDraft[field];
+      const rawValue = element?.value ?? selectionStyleDraft[field];
+      return String(rawValue || '').trim() === MIXED_STYLE_VALUE_LABEL ? '' : rawValue;
     };
 
     return {
@@ -25938,7 +25971,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   }, [selectionStyleDraft]);
 
   const applySelectionStyleDraft = React.useCallback(() => {
-    if (selectedFrameGroupIdsRef.current.length === 0) {
+    const root = previewRef.current;
+    if (!root || resolveSelectionAppearanceStyleTargets(root).elements.length === 0) {
       setMessage('스타일을 적용할 상자를 먼저 선택하세요.');
       return false;
     }
@@ -25986,6 +26020,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     appearanceTargetCorners,
     applySelectionStylePatch,
     readSelectionStyleDraftFromControls,
+    resolveSelectionAppearanceStyleTargets,
   ]);
 
   const setStyleFieldDraftValue = React.useCallback((field: StyleFieldKey, value: string) => {
@@ -26001,7 +26036,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         mixedBlank?: boolean;
       }
     ) => {
-      if (selectedFrameGroupIdsRef.current.length === 0) {
+      const root = previewRef.current;
+      if (!root || resolveSelectionAppearanceStyleTargets(root).elements.length === 0) {
         return;
       }
 
@@ -26079,13 +26115,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       appearanceTargetBorderSides,
       appearanceTargetCorners,
       applySelectionStylePatch,
+      resolveSelectionAppearanceStyleTargets,
       selectionStyleDraft,
     ]
   );
 
   const applyStyleFieldImmediateValue = React.useCallback(
     (field: StyleFieldKey, value: string) => {
-      if (selectedFrameGroupIdsRef.current.length === 0) {
+      const root = previewRef.current;
+      if (!root || resolveSelectionAppearanceStyleTargets(root).elements.length === 0) {
         return;
       }
 
@@ -26136,6 +26174,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       appearanceTargetBorderSides,
       appearanceTargetCorners,
       applySelectionStylePatch,
+      resolveSelectionAppearanceStyleTargets,
       setStyleFieldDraftValue,
     ]
   );
@@ -26640,7 +26679,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const renderStyleColorPicker = (field: 'color' | 'backgroundColor' | 'borderColor', label: string) => {
-    const hasSelection = selectedFrameGroupIds.length > 0;
+    const activeStyleSelectionIds =
+      selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
+        ? selectedPositionResolvedFrameGroupIds
+        : selectedFrameGroupIds;
+    const hasSelection = activeStyleSelectionIds.length > 0;
     const fallbackValue = field === 'backgroundColor' ? 'transparent' : '#0f172a';
     const draftValue = selectionStyleDraft[field].trim();
     const selectedValue = hasSelection ? draftValue || fallbackValue : '';
@@ -30602,7 +30645,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   };
 
   const renderTextAutoSizeControls = () => {
-    const hasSelection = selectedFrameGroupIds.length > 0;
+    const activeStyleSelectionIds =
+      selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
+        ? selectedPositionResolvedFrameGroupIds
+        : selectedFrameGroupIds;
+    const hasSelection = activeStyleSelectionIds.length > 0;
     const autoSizeRowToneClass = (active: boolean) =>
       `inline-flex items-center justify-center text-[11px] font-semibold transition ${
         active ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
@@ -30920,7 +30967,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   };
 
   const renderSelectionAppearanceControls = () => {
-    const hasAppearanceSelection = selectedFrameGroupIds.length > 0;
+    const activeStyleSelectionIds =
+      selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
+        ? selectedPositionResolvedFrameGroupIds
+        : selectedFrameGroupIds;
+    const hasAppearanceSelection = activeStyleSelectionIds.length > 0;
     const parseDraftNumber = (value: string) => {
       const parsedValue = Number.parseFloat(value);
       return Number.isFinite(parsedValue) ? parsedValue : null;
@@ -31393,20 +31444,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       maxIntegerDigits?: number,
       showInlineLabel = true
     ) => {
+      const draftValue = hasAppearanceSelection ? selectionStyleDraft[field] : '';
+      const isDraftMixedValue = draftValue.trim() === MIXED_STYLE_VALUE_LABEL;
       const displayState = borderFieldDisplayState[field] || {
-        value: hasAppearanceSelection ? selectionStyleDraft[field] : '',
-        mixed: false,
+        value: isDraftMixedValue ? '' : draftValue,
+        mixed: isDraftMixedValue,
       };
       const disabled = isStyleFieldDisabled(field);
       const inputStateClass = resolveInlineStyleFieldStateClass(field, disabled);
-      const inputDefaultValue = hasAppearanceSelection ? (displayState.mixed ? '' : displayState.value) : '';
-      const mixedPlaceholder = hasAppearanceSelection && displayState.mixed ? '혼합' : '';
+      const inputDefaultValue = hasAppearanceSelection
+        ? displayState.mixed
+          ? MIXED_STYLE_VALUE_LABEL
+          : displayState.value
+        : '';
+      const mixedPlaceholder = '';
       const inputKey = `inline-style:${field}:${hasAppearanceSelection ? 'selected' : 'empty'}:${
         displayState.mixed ? 'mixed' : displayState.value
       }:${selectionStyleDraft[field]}`;
 
       const inputPaddingClass = showInlineLabel
-        ? 'pl-[20px] pr-[16px] sm:pl-[50px] sm:pr-5'
+        ? 'pl-[18px] pr-[16px] sm:pl-[34px] sm:pr-4'
         : 'pl-2 pr-[16px] sm:pl-2 sm:pr-5';
       const normalizeNumericInputByIntegerDigits = (value: string) => {
         if (!maxIntegerDigits) {
@@ -31699,14 +31756,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 선 두께
                 {renderStyleApplyStatusIcon('borderWidth')}
               </label>
-              {renderInlineNumericInput('borderWidth', '선 두께', 'w-full min-w-0', 'LW', 2, false)}
+              {renderInlineNumericInput('borderWidth', '선 두께', 'w-full min-w-0', 'LW', 3, false)}
             </div>
             <div className="space-y-1">
               <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
                 코너 라운딩
                 {renderStyleApplyStatusIcon('borderRadius')}
               </label>
-              {renderInlineNumericInput('borderRadius', '코너 라운딩', 'w-full min-w-0', 'CR', 2, false)}
+              {renderInlineNumericInput('borderRadius', '코너 라운딩', 'w-full min-w-0', 'CR', 3, false)}
             </div>
           </div>
           <div className="grid w-full min-w-0 max-w-full grid-cols-3 items-center gap-2 self-stretch">
@@ -31935,7 +31992,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const renderRichTextNumericInput = (
     field: 'fontSize' | 'lineHeight' | 'paddingTop' | 'paddingBottom' | 'paddingLeft' | 'paddingRight',
     label: string,
-    placeholder: string
+    placeholder: string,
+    hasSelection: boolean
   ) => (
     <div className="space-y-1.5">
       <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
@@ -31944,12 +32002,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       </label>
       <div className="relative">
         <Input
-          key={`rich-text:${field}:${selectedFrameGroupIds.length > 0 ? 'selected' : 'empty'}:${selectionStyleDraft[field]}`}
+          key={`rich-text:${field}:${hasSelection ? 'selected' : 'empty'}:${selectionStyleDraft[field]}`}
           data-style-field={field}
-          defaultValue={selectionStyleDraft[field]}
+          defaultValue={hasSelection ? selectionStyleDraft[field] : ''}
           inputMode="decimal"
           placeholder={placeholder}
-          disabled={selectedFrameGroupIds.length === 0}
+          disabled={!hasSelection}
           className="h-8 pr-8 text-xs"
           onBlur={(event) => applyStyleFieldOnBlur(field, event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -31966,7 +32024,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const renderTextCanvasActionControls = () => {
-    const hasSelection = selectedFrameGroupIds.length > 0;
+    const activeStyleSelectionIds =
+      selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
+        ? selectedPositionResolvedFrameGroupIds
+        : selectedFrameGroupIds;
+    const hasSelection = activeStyleSelectionIds.length > 0;
     const currentFontFamily = selectionStyleDraft.fontFamily || '';
     const hasCustomFontFamily =
       Boolean(currentFontFamily) &&
@@ -32015,8 +32077,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         </div>
 
         <div className="grid grid-cols-3 gap-1.5">
-          {renderRichTextNumericInput('fontSize', '글자 크기', '14')}
-          {renderRichTextNumericInput('lineHeight', '줄 높이', '20')}
+          {renderRichTextNumericInput('fontSize', '글자 크기', '14', hasSelection)}
+          {renderRichTextNumericInput('lineHeight', '줄 높이', '20', hasSelection)}
           <div className="[&>div>label]:text-xs [&>div>label]:font-semibold [&_select]:h-8 [&_select]:text-xs">
             {renderStyleColorPicker('color', '글자 색')}
           </div>
