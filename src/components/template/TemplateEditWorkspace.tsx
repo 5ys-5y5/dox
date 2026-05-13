@@ -737,8 +737,17 @@ const TEMPLATE_USAGE_PREVIEW_FILE_NAMES_ATTR = 'data-template-usage-preview-file
 const TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR = 'data-template-usage-preview-file-add';
 const TEMPLATE_USAGE_PREVIEW_FILE_REMOVE_ATTR = 'data-template-usage-preview-file-remove';
 const TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR = 'data-template-usage-preview-file-index';
+const TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR = 'data-template-usage-preview-context-key';
+const TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR = 'data-template-usage-preview-runtime-mode';
+const TEMPLATE_USAGE_PREVIEW_LABEL_ATTR = 'data-template-usage-preview-label';
 const TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR = 'data-template-usage-preview-signature-canvas';
 const TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR = 'data-template-usage-preview-signature-clear';
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR = 'data-template-usage-preview-signature-image-data';
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR = 'data-template-usage-preview-signature-status';
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR = 'data-template-usage-preview-signature-signer-name';
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR = 'data-template-usage-preview-signature-signed-at';
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR = 'data-template-usage-preview-signature-provider';
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_HISTORY_ATTR = 'data-template-usage-preview-signature-history';
 const TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR = 'data-v106-edit-permissions-tab';
 const TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR = 'data-v106-content-stabilized';
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
@@ -7057,14 +7066,43 @@ const ensurePageInnerBaseMinHeight = (pageInner: HTMLElement) => {
   return Math.max(MIN_FRAME_SIZE_PX, Number.parseFloat(pageInner.dataset.templateBaseMinHeight || '0') || 0);
 };
 
+const syncTemplatePreviewScaledSourceBounds = (pageInner: HTMLElement, bounds: { width: number; height: number }) => {
+  const previewRoot = pageInner.closest<HTMLElement>('.template-edit-preview[data-template-preview-scaled="true"]');
+
+  if (!previewRoot || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height)) {
+    return;
+  }
+
+  const sourceWidth = Math.max(MIN_FRAME_SIZE_PX, Math.ceil(bounds.width));
+  const sourceHeight = Math.max(MIN_FRAME_SIZE_PX, Math.ceil(bounds.height));
+  const availableWidth = previewRoot.clientWidth || sourceWidth;
+  const scale = Math.min(availableWidth / sourceWidth, 1);
+
+  previewRoot.style.setProperty('--template-preview-scale', String(scale));
+  previewRoot.style.setProperty('--template-preview-source-width', `${sourceWidth}px`);
+  previewRoot.style.setProperty('--template-preview-source-height', `${sourceHeight}px`);
+  previewRoot.style.setProperty('--template-preview-scaled-height', `${sourceHeight * scale}px`);
+};
+
 const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
   const baseMinHeight = ensurePageInnerBaseMinHeight(pageInner);
+  const computedStyle = getComputedStyle(pageInner);
+  const baseWidth =
+    readFirstFiniteFramePx(pageInner.style.width, computedStyle.width) ||
+    Math.max(MIN_FRAME_SIZE_PX, pageInner.scrollWidth || pageInner.getBoundingClientRect().width);
   const shells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'));
-  const maxBottom = shells.reduce((maxBottomValue, shell) => {
+  const { maxBottom, maxRight } = shells.reduce((acc, shell) => {
     const rect = readFrameElementRect(shell, pageInner);
-    return Math.max(maxBottomValue, rect.top + rect.height);
-  }, baseMinHeight);
-  pageInner.style.minHeight = `${Math.max(baseMinHeight, Math.ceil(maxBottom))}px`;
+    return {
+      maxBottom: Math.max(acc.maxBottom, rect.top + rect.height),
+      maxRight: Math.max(acc.maxRight, rect.left + rect.width),
+    };
+  }, { maxBottom: baseMinHeight, maxRight: baseWidth });
+  const nextHeight = Math.max(baseMinHeight, Math.ceil(maxBottom));
+  const nextWidth = Math.max(baseWidth, Math.ceil(maxRight));
+
+  pageInner.style.minHeight = `${nextHeight}px`;
+  syncTemplatePreviewScaledSourceBounds(pageInner, { width: nextWidth, height: nextHeight });
 };
 
 const buildTableCellLayoutPositions = (table: HTMLTableElement): TableCellLayoutPosition[] => {
@@ -8169,6 +8207,218 @@ const shiftShellsBelowBoundary = (
       syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(shell), pageInner);
     }
   });
+};
+
+const settleTemplateUsagePreviewVerticalOverlaps = (root: ParentNode) => {
+  Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
+    const placedRects: FrameNodeRect[] = [];
+    const shells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
+      .filter((shell) => !isAbsolutePositionedShell(shell))
+      .sort((left, right) => {
+        const leftRect = readFrameElementRect(left, pageInner);
+        const rightRect = readFrameElementRect(right, pageInner);
+        return leftRect.top - rightRect.top || leftRect.left - rightRect.left;
+      });
+
+    shells.forEach((shell) => {
+      let rect = readFrameElementRect(shell, pageInner);
+      let nextTop = rect.top;
+
+      placedRects.forEach((placedRect) => {
+        const overlapX =
+          Math.min(rect.left + rect.width, placedRect.left + placedRect.width) -
+          Math.max(rect.left, placedRect.left);
+
+        if (overlapX <= 1) {
+          return;
+        }
+
+        const placedBottom = placedRect.top + placedRect.height;
+        if (nextTop < placedBottom - 0.5) {
+          nextTop = placedBottom;
+        }
+      });
+
+      if (Math.abs(nextTop - rect.top) > 0.5) {
+        rect = {
+          ...rect,
+          top: nextTop,
+        };
+        writeFrameMoveRect(shell, rect);
+        syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(shell), pageInner);
+      }
+
+      placedRects.push(rect);
+    });
+
+    updatePageInnerMinHeight(pageInner);
+  });
+};
+
+const pickNormalizedPeerBoundaryCoordinate = (
+  values: number[],
+  fallback: number,
+  mode: 'start' | 'inner' | 'end'
+) => {
+  const coordinates = values.filter((value) => Number.isFinite(value)).sort((left, right) => left - right);
+
+  if (coordinates.length === 0) {
+    return fallback;
+  }
+
+  if (mode === 'start') {
+    return coordinates[0];
+  }
+
+  if (mode === 'end') {
+    return coordinates[coordinates.length - 1];
+  }
+
+  return coordinates[Math.floor(coordinates.length / 2)];
+};
+
+const resolveTemplateUsagePreviewNormalizedPeerAxis = (
+  geometry: NormalizedBandGeometry,
+  peerGeometries: NormalizedBandGeometry[],
+  pageInner: HTMLElement,
+  axis: 'row' | 'col'
+) => {
+  const shellRect = readFrameElementRect(geometry.shell, pageInner);
+  const rangeStart = axis === 'row' ? geometry.rowStart : geometry.colStart;
+  const rangeEnd = axis === 'row' ? geometry.rowEnd : geometry.colEnd;
+  const origin = axis === 'row' ? shellRect.top : shellRect.left;
+  const size = axis === 'row' ? shellRect.height : shellRect.width;
+  const span = Math.max(1, rangeEnd - rangeStart);
+  const boundaryCoordinates = Array.from({ length: span + 1 }, (_, index) => {
+    const boundaryIndex = rangeStart + index;
+    const fallback = origin + (size * index) / span;
+    const candidates: number[] = [];
+
+    peerGeometries.forEach((peerGeometry) => {
+      const peerRect = readFrameElementRect(peerGeometry.shell, pageInner);
+      const peerStartIndex = axis === 'row' ? peerGeometry.rowStart : peerGeometry.colStart;
+      const peerEndIndex = axis === 'row' ? peerGeometry.rowEnd : peerGeometry.colEnd;
+      const peerStart = axis === 'row' ? peerRect.top : peerRect.left;
+      const peerEnd = axis === 'row' ? peerRect.top + peerRect.height : peerRect.left + peerRect.width;
+
+      if (peerStartIndex === boundaryIndex) {
+        candidates.push(peerStart);
+      }
+
+      if (peerEndIndex === boundaryIndex) {
+        candidates.push(peerEnd);
+      }
+    });
+
+    return pickNormalizedPeerBoundaryCoordinate(
+      candidates,
+      fallback,
+      index === 0 ? 'start' : index === span ? 'end' : 'inner'
+    );
+  });
+  const sizes = boundaryCoordinates.slice(1).map((coordinate, index) =>
+    Math.max(axis === 'row' ? MIN_TABLE_ROW_HEIGHT_PX : MIN_WRITABLE_TABLE_SIZE_PX, coordinate - boundaryCoordinates[index])
+  );
+  const total = sizes.reduce((sum, axisSize) => sum + axisSize, 0);
+
+  return {
+    start: boundaryCoordinates[0],
+    end: boundaryCoordinates[boundaryCoordinates.length - 1],
+    sizes,
+    total,
+  };
+};
+
+const syncTemplateUsagePreviewNormalizedBandPeerBounds = (root: ParentNode) => {
+  let changed = false;
+
+  Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
+    const geometriesBySourceKey = new Map<string, NormalizedBandGeometry[]>();
+
+    Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
+      .map((shell) => readNormalizedBandGeometry(shell))
+      .filter((geometry): geometry is NormalizedBandGeometry => Boolean(geometry))
+      .forEach((geometry) => {
+        const entries = geometriesBySourceKey.get(geometry.sourceKey) || [];
+        entries.push(geometry);
+        geometriesBySourceKey.set(geometry.sourceKey, entries);
+      });
+
+    geometriesBySourceKey.forEach((sourceGeometries) => {
+      sourceGeometries.forEach((geometry) => {
+        const peerGeometries = sourceGeometries.filter((candidate) => candidate.shell !== geometry.shell);
+
+        if (peerGeometries.length === 0) {
+          return;
+        }
+
+        const shellRect = readFrameElementRect(geometry.shell, pageInner);
+        const rowAxis = resolveTemplateUsagePreviewNormalizedPeerAxis(geometry, peerGeometries, pageInner, 'row');
+        const colAxis = resolveTemplateUsagePreviewNormalizedPeerAxis(geometry, peerGeometries, pageInner, 'col');
+        const nextTop = rowAxis.start;
+        const nextLeft = colAxis.start;
+        const nextBottom = Math.max(shellRect.top + shellRect.height, rowAxis.end);
+        const nextRight = Math.max(shellRect.left + shellRect.width, colAxis.end);
+        const nextHeight = Math.max(MIN_FRAME_SIZE_PX, nextBottom - nextTop);
+        const nextWidth = Math.max(MIN_FRAME_SIZE_PX, nextRight - nextLeft);
+
+        if (
+          Math.abs(shellRect.top - nextTop) <= 0.5 &&
+          Math.abs(shellRect.left - nextLeft) <= 0.5 &&
+          Math.abs(shellRect.height - nextHeight) <= 0.5 &&
+          Math.abs(shellRect.width - nextWidth) <= 0.5
+        ) {
+          return;
+        }
+
+        const rowSizes = [...rowAxis.sizes];
+        const colSizes = [...colAxis.sizes];
+        const extraHeight = nextHeight - rowAxis.total;
+        const extraWidth = nextWidth - colAxis.total;
+
+        if (rowSizes.length > 0 && extraHeight > 0.5) {
+          rowSizes[rowSizes.length - 1] += extraHeight;
+        }
+
+        if (colSizes.length > 0 && extraWidth > 0.5) {
+          colSizes[colSizes.length - 1] += extraWidth;
+        }
+
+        const table =
+          geometry.shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') ||
+          geometry.shell.querySelector<HTMLTableElement>('table');
+
+        writePositionedElementPageRect(
+          geometry.shell,
+          {
+            left: nextLeft,
+            top: nextTop,
+            width: nextWidth,
+            height: nextHeight,
+          },
+          pageInner,
+          { minSize: MIN_WRITABLE_TABLE_SIZE_PX }
+        );
+
+        if (table) {
+          setTableColWidths(table, colSizes);
+          setTableRowHeights(table, rowSizes);
+          syncShellSizeFromTable(geometry.shell, table, colSizes, rowSizes);
+        } else {
+          syncFrameBandShellTableSize(geometry.shell);
+        }
+
+        syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(geometry.shell), pageInner);
+        changed = true;
+      });
+    });
+
+    if (changed) {
+      updatePageInnerMinHeight(pageInner);
+    }
+  });
+
+  return changed;
 };
 
 const applyOuterBottomHeightDelta = (shell: HTMLElement, delta: number, shrinkRange?: BoundaryShrinkRange) => {
@@ -12024,31 +12274,130 @@ const clearElementChildren = (element: HTMLElement) => {
   }
 };
 
+const readComputedOrInlineStyleValue = (
+  target: HTMLElement,
+  computedStyle: CSSStyleDeclaration,
+  cssPropertyName: string
+) => {
+  const inlineStyleValue = target.style.getPropertyValue(cssPropertyName).trim();
+  if (inlineStyleValue) {
+    return inlineStyleValue;
+  }
+
+  return computedStyle.getPropertyValue(cssPropertyName).trim();
+};
+
+const TEMPLATE_USAGE_PREVIEW_VALUE_TEXT_COLOR_VAR = '--v106-template-usage-value-text-color';
+const EDITOR_VALUE_PLACEHOLDER_TEXT_COLOR = 'rgb(148, 163, 184)';
+
+const parseTemplateUsagePreviewColorChannel = (value: string) => {
+  const normalizedValue = String(value || '').trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parsedNumber = Number.parseFloat(normalizedValue);
+
+  if (!Number.isFinite(parsedNumber)) {
+    return null;
+  }
+
+  if (normalizedValue.endsWith('%')) {
+    return Math.round(Math.max(0, Math.min(100, parsedNumber)) * 2.55);
+  }
+
+  return Math.round(Math.max(0, Math.min(255, parsedNumber)));
+};
+
+const resolveTemplateUsagePreviewAlphaColor = (colorValue: string, opacity = 0.2) => {
+  const channels = String(colorValue || '').match(/\d*\.?\d+%?/g) || [];
+
+  if (channels.length < 3) {
+    return '';
+  }
+
+  const red = parseTemplateUsagePreviewColorChannel(channels[0] || '');
+  const green = parseTemplateUsagePreviewColorChannel(channels[1] || '');
+  const blue = parseTemplateUsagePreviewColorChannel(channels[2] || '');
+
+  if (red === null || green === null || blue === null) {
+    return '';
+  }
+
+  const normalizedOpacity = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 0.2;
+  return `rgba(${red}, ${green}, ${blue}, ${normalizedOpacity})`;
+};
+
+const resolveTemplateUsagePreviewValueSourceColor = (target: HTMLElement) => {
+  const inlineColor = target.style.color.trim();
+
+  if (inlineColor) {
+    return inlineColor;
+  }
+
+  const computedColor = getComputedStyle(target).color.trim();
+
+  if (!computedColor || computedColor === EDITOR_VALUE_PLACEHOLDER_TEXT_COLOR) {
+    return 'rgb(15, 23, 42)';
+  }
+
+  return computedColor;
+};
+
+const applyTemplateUsagePreviewValueTextTone = (target: HTMLElement) => {
+  const sourceColor = resolveTemplateUsagePreviewValueSourceColor(target);
+  const tonedColor = resolveTemplateUsagePreviewAlphaColor(sourceColor, 0.2) || 'rgba(15, 23, 42, 0.2)';
+
+  target.style.setProperty(TEMPLATE_USAGE_PREVIEW_VALUE_TEXT_COLOR_VAR, tonedColor);
+  target.style.setProperty('color', tonedColor);
+  target.style.setProperty('-webkit-text-fill-color', tonedColor);
+};
+
 const replaceFrameContentTarget = (node: HTMLElement, replacement: HTMLElement) => {
   const target = resolveFrameContentTarget(node);
   const computedStyle = getComputedStyle(target);
+  const copyPresentationStyle = (cssPropertyName: string) => {
+    const value = readComputedOrInlineStyleValue(target, computedStyle, cssPropertyName);
+
+    if (value) {
+      replacement.style.setProperty(cssPropertyName, value);
+    }
+  };
 
   replacement.style.boxSizing = 'border-box';
   replacement.style.width = '100%';
   replacement.style.height = '100%';
   replacement.style.minWidth = '0px';
   replacement.style.minHeight = '0px';
-  replacement.style.font = computedStyle.font;
-  replacement.style.lineHeight = computedStyle.lineHeight;
-  replacement.style.letterSpacing = computedStyle.letterSpacing;
-  replacement.style.color = computedStyle.color;
-  replacement.style.textAlign = computedStyle.textAlign;
-  replacement.style.whiteSpace = computedStyle.whiteSpace;
+  copyPresentationStyle('position');
+  if (replacement.style.position && replacement.style.position !== 'static') {
+    copyPresentationStyle('top');
+    copyPresentationStyle('right');
+    copyPresentationStyle('bottom');
+    copyPresentationStyle('left');
+  }
+  copyPresentationStyle('z-index');
+  copyPresentationStyle('overflow');
+  copyPresentationStyle('font-size');
+  copyPresentationStyle('font-family');
+  copyPresentationStyle('font-style');
+  copyPresentationStyle('font-weight');
+  copyPresentationStyle('line-height');
+  copyPresentationStyle('letter-spacing');
+  copyPresentationStyle('color');
+  copyPresentationStyle('text-align');
+  copyPresentationStyle('white-space');
 
   if (
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLInputElement ||
     (target !== node && target.hasAttribute('data-template-frame-input'))
   ) {
-    replacement.style.paddingTop = computedStyle.paddingTop;
-    replacement.style.paddingBottom = computedStyle.paddingBottom;
-    replacement.style.paddingLeft = computedStyle.paddingLeft;
-    replacement.style.paddingRight = computedStyle.paddingRight;
+    copyPresentationStyle('padding-top');
+    copyPresentationStyle('padding-right');
+    copyPresentationStyle('padding-bottom');
+    copyPresentationStyle('padding-left');
     target.replaceWith(replacement);
     return replacement;
   }
@@ -12079,6 +12428,7 @@ const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
     if (input instanceof HTMLTextAreaElement) {
       input.textContent = '';
     }
+    applyTemplateUsagePreviewValueTextTone(input);
     return;
   }
 
@@ -12090,6 +12440,252 @@ const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
   target.removeAttribute('data-placeholder');
   target.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
   target.tabIndex = 0;
+  applyTemplateUsagePreviewValueTextTone(target);
+};
+
+type TemplateUsagePreviewSignatureHistoryEntry = {
+  at: string;
+  message: string;
+};
+
+const DEFAULT_TEMPLATE_USAGE_SIGNATURE_PROVIDER = 'preview-signature';
+const DEFAULT_TEMPLATE_USAGE_SIGNATURE_SIGNER = 'preview-user';
+
+const resolveTemplateUsagePreviewRuntimeMode = (node: HTMLElement): TemplateFrameRuntimeMode | '' => {
+  const explicitRuntimeMode = readFrameRuntimeMode(node);
+
+  if (explicitRuntimeMode) {
+    return explicitRuntimeMode;
+  }
+
+  const boxKind = readFrameBoxKind(node);
+  const role = readFrameRole(node);
+
+  if (!boxKind) {
+    return '';
+  }
+
+  const fallbackRole: TemplateFrameRole | 'group' = role === '' ? 'value' : role;
+  return getDefaultRuntimeMode(boxKind, fallbackRole);
+};
+
+const resolveTemplateUsagePreviewContextKey = (node: HTMLElement) => {
+  const parentGroupId = readFrameParentGroupId(node);
+
+  if (parentGroupId) {
+    return `parent:${parentGroupId}`;
+  }
+
+  const valueKey = readFrameValueKey(node);
+
+  if (valueKey) {
+    return `value:${valueKey}`;
+  }
+
+  const colorGroup = readFrameMetadataAttr(node, TEMPLATE_FRAME_COLOR_GROUP_ATTR);
+
+  if (colorGroup) {
+    return `color:${colorGroup}`;
+  }
+
+  const frameGroupId = getFrameGroupId(node);
+  return frameGroupId ? `frame:${frameGroupId}` : 'frame:unknown';
+};
+
+const readTemplateUsagePreviewSignatureHistory = (
+  control: HTMLElement
+): TemplateUsagePreviewSignatureHistoryEntry[] => {
+  const rawValue = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_HISTORY_ATTR);
+
+  if (!rawValue) {
+    return [];
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue);
+
+    if (!Array.isArray(parsedValue)) {
+      return [];
+    }
+
+    return parsedValue
+      .map((item) => ({
+        at: String(item?.at || '').trim(),
+        message: String(item?.message || '').trim(),
+      }))
+      .filter((item) => Boolean(item.message))
+      .slice(0, 24);
+  } catch {
+    return [];
+  }
+};
+
+const writeTemplateUsagePreviewSignatureHistory = (
+  control: HTMLElement,
+  history: TemplateUsagePreviewSignatureHistoryEntry[]
+) => {
+  const normalizedHistory = history
+    .map((item) => ({
+      at: String(item.at || '').trim(),
+      message: String(item.message || '').trim(),
+    }))
+    .filter((item) => Boolean(item.message))
+    .slice(-24);
+
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_HISTORY_ATTR, JSON.stringify(normalizedHistory));
+};
+
+const formatTemplateUsagePreviewSignedAt = (value: string) => {
+  const iso = String(value || '').trim();
+
+  if (!iso) {
+    return '-';
+  }
+
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return date.toLocaleString('ko-KR', {
+    hour12: false,
+  });
+};
+
+const ensureTemplateUsagePreviewSignatureState = (control: HTMLElement) => {
+  if (!control.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR)) {
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR, 'pending');
+  }
+
+  if (!control.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR)) {
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR, DEFAULT_TEMPLATE_USAGE_SIGNATURE_SIGNER);
+  }
+
+  if (!control.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR)) {
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR, DEFAULT_TEMPLATE_USAGE_SIGNATURE_PROVIDER);
+  }
+
+  if (!control.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR)) {
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR, '');
+  }
+
+  if (!control.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR)) {
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR, '');
+  }
+
+  if (!control.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_HISTORY_ATTR)) {
+    writeTemplateUsagePreviewSignatureHistory(control, []);
+  }
+};
+
+const readTemplateUsagePreviewSignatureModeValue = (control: HTMLElement, runtimeMode: TemplateFrameRuntimeMode) => {
+  const status = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR) === 'signed' ? 'signed' : 'pending';
+  const signerName = String(control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR) || '').trim();
+  const signedAt = String(control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR) || '').trim();
+  const provider = String(control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR) || '').trim();
+
+  if (runtimeMode === 'signature_status') {
+    return status === 'signed' ? 'signed' : 'pending';
+  }
+
+  if (runtimeMode === 'signature_signer_name') {
+    return status === 'signed' && signerName ? signerName : '-';
+  }
+
+  if (runtimeMode === 'signature_signed_at') {
+    return status === 'signed' ? formatTemplateUsagePreviewSignedAt(signedAt) : '-';
+  }
+
+  if (runtimeMode === 'signature_provider') {
+    return status === 'signed' && provider ? provider : '-';
+  }
+
+  return '-';
+};
+
+const renderTemplateUsagePreviewSignatureControl = (control: HTMLElement) => {
+  ensureTemplateUsagePreviewSignatureState(control);
+
+  const runtimeModeAttr = control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || 'signature_image';
+  const runtimeMode = isTemplateFrameRuntimeMode(runtimeModeAttr) ? runtimeModeAttr : 'signature_image';
+  const label = control.getAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR)?.trim() || '서명';
+  const imageData = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR) || '';
+
+  clearElementChildren(control);
+
+  if (runtimeMode === 'signature_history') {
+    const history = readTemplateUsagePreviewSignatureHistory(control);
+    const historyContainer = document.createElement('div');
+    historyContainer.className = 'v106-template-usage-signature-history';
+
+    if (history.length === 0) {
+      const line = document.createElement('div');
+      line.className = 'v106-template-usage-signature-history-line';
+      line.textContent = '서명 이력 없음';
+      historyContainer.appendChild(line);
+    } else {
+      history
+        .slice()
+        .reverse()
+        .forEach((entry) => {
+          const line = document.createElement('div');
+          line.className = 'v106-template-usage-signature-history-line';
+          line.textContent = `${formatTemplateUsagePreviewSignedAt(entry.at)} · ${entry.message}`;
+          historyContainer.appendChild(line);
+        });
+    }
+
+    control.appendChild(historyContainer);
+    return;
+  }
+
+  if (
+    runtimeMode === 'signature_signer_name' ||
+    runtimeMode === 'signature_signed_at' ||
+    runtimeMode === 'signature_provider' ||
+    runtimeMode === 'signature_status'
+  ) {
+    const info = document.createElement('div');
+    info.className = 'v106-template-usage-signature-info';
+    info.textContent = readTemplateUsagePreviewSignatureModeValue(control, runtimeMode);
+    control.appendChild(info);
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 420;
+  canvas.height = 140;
+  canvas.className = 'v106-template-usage-signature-canvas';
+  canvas.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR, 'true');
+  canvas.setAttribute('aria-label', `${label} 서명 입력`);
+  canvas.setAttribute('role', 'img');
+
+  const clearButton = document.createElement('button');
+  clearButton.type = 'button';
+  clearButton.className = 'v106-template-usage-signature-clear';
+  clearButton.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR, 'true');
+  clearButton.textContent = '지우기';
+
+  control.appendChild(canvas);
+  control.appendChild(clearButton);
+
+  if (!imageData) {
+    return;
+  }
+
+  const image = new Image();
+  image.onload = () => {
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      return;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  };
+  image.src = imageData;
 };
 
 const readTemplateUsagePreviewFileNames = (control: HTMLElement) => {
@@ -12169,9 +12765,14 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
 
 const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
   const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '첨부파일';
+  const contextKey = resolveTemplateUsagePreviewContextKey(node);
+  const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node) || 'file_slot';
   const control = document.createElement('div');
   control.className = 'v106-template-usage-file-control';
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'attachment');
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR, contextKey);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR, runtimeMode);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR, label);
   control.setAttribute('role', 'group');
   control.setAttribute('aria-label', `${label} 첨부파일`);
   control.tabIndex = 0;
@@ -12205,8 +12806,8 @@ const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
   fileToolbar.appendChild(addButton);
   fileToolbar.appendChild(input);
   control.appendChild(fileDisplay);
-  control.appendChild(fileToolbar);
   control.appendChild(fileList);
+  control.appendChild(fileToolbar);
   writeTemplateUsagePreviewFileNames(control, []);
   renderTemplateUsagePreviewAttachmentControl(control);
   replaceFrameContentTarget(node, control);
@@ -12214,32 +12815,22 @@ const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
 
 const prepareTemplateUsageSignatureControl = (node: HTMLElement) => {
   const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '서명';
+  const contextKey = resolveTemplateUsagePreviewContextKey(node);
+  const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node) || 'signature_image';
   const control = document.createElement('div');
   control.className = 'v106-template-usage-signature-control';
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'signature');
-
-  const canvas = document.createElement('canvas');
-  canvas.width = 420;
-  canvas.height = 140;
-  canvas.className = 'v106-template-usage-signature-canvas';
-  canvas.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR, 'true');
-  canvas.setAttribute('aria-label', `${label} 서명 입력`);
-  canvas.setAttribute('role', 'img');
-
-  const clearButton = document.createElement('button');
-  clearButton.type = 'button';
-  clearButton.className = 'v106-template-usage-signature-clear';
-  clearButton.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR, 'true');
-  clearButton.textContent = '지우기';
-
-  control.appendChild(canvas);
-  control.appendChild(clearButton);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR, contextKey);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR, runtimeMode);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR, label);
+  ensureTemplateUsagePreviewSignatureState(control);
+  renderTemplateUsagePreviewSignatureControl(control);
   replaceFrameContentTarget(node, control);
 };
 
 const prepareTemplateUsagePreviewValueBox = (node: HTMLElement) => {
   const boxKind = readFrameBoxKind(node);
-  const runtimeMode = readFrameRuntimeMode(node);
+  const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node);
 
   node.setAttribute(TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR, 'true');
 
@@ -12286,6 +12877,62 @@ const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | und
   return container.innerHTML.trim();
 };
 
+const isTemplateUsagePreviewValueFrameEmpty = (frameNode: HTMLElement) => {
+  const valueBox =
+    frameNode.getAttribute(TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR) === 'true'
+      ? frameNode
+      : frameNode.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"]`);
+
+  if (!valueBox) {
+    return false;
+  }
+
+  const frameInput =
+    valueBox.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
+    valueBox.querySelector<HTMLInputElement>('[data-template-frame-input="true"]') ||
+    frameNode.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
+    frameNode.querySelector<HTMLInputElement>('[data-template-frame-input="true"]');
+
+  if (frameInput) {
+    return String(frameInput.value || '').trim().length === 0;
+  }
+
+  const control =
+    (valueBox.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) ? valueBox : null) ||
+    valueBox.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}]`) ||
+    frameNode.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}]`);
+
+  if (control) {
+    const controlType = control.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR);
+
+    if (controlType === 'attachment') {
+      return readTemplateUsagePreviewFileNames(control).length === 0;
+    }
+
+    if (controlType === 'signature') {
+      const runtimeMode = control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || '';
+      const hasImage = String(control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR) || '').trim().length > 0;
+      const hasHistory = readTemplateUsagePreviewSignatureHistory(control).length > 0;
+      const status = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR) === 'signed';
+
+      if (runtimeMode === 'signature_history') {
+        return !hasHistory;
+      }
+
+      if (runtimeMode === 'signature_image') {
+        return !hasImage;
+      }
+
+      return !status;
+    }
+
+    return String(control.textContent || '').trim().length === 0;
+  }
+
+  const contentTarget = resolveFrameContentTarget(valueBox);
+  return String(contentTarget.textContent || '').trim().length === 0;
+};
+
 const applyTemplateUsagePreviewAutoSize = (
   root: HTMLElement,
   frameNode: HTMLElement | null,
@@ -12293,9 +12940,16 @@ const applyTemplateUsagePreviewAutoSize = (
     restoreTextInputFocus?: boolean;
     selectionStart?: number | null;
     selectionEnd?: number | null;
+    onLayoutChange?: (root: HTMLElement) => void;
   }
 ) => {
   if (!frameNode) {
+    return;
+  }
+
+  const frameBoxKind = readFrameBoxKind(frameNode);
+  const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(frameNode);
+  if (frameBoxKind === 'signature' && runtimeMode === 'signature_image') {
     return;
   }
 
@@ -12305,21 +12959,133 @@ const applyTemplateUsagePreviewAutoSize = (
     return;
   }
 
-  applyTemplateAutoSizeBoxes(root, [frameGroupId]);
+  applyTemplateAutoSizeBoxes(root, [frameGroupId], {
+    applyRelativeAnchors: false,
+  });
+  settleTemplateUsagePreviewVerticalOverlaps(root);
+  syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
+  options?.onLayoutChange?.(root);
 
   if (options?.restoreTextInputFocus) {
     restoreFrameTextInputFocus(root, frameGroupId, options.selectionStart ?? null, options.selectionEnd ?? null);
   }
 };
 
-const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
+const attachTemplateUsagePreviewRuntimeHandlers = (
+  root: HTMLElement,
+  options?: {
+    onAutoSizeLayoutChange?: (root: HTMLElement) => void;
+  }
+) => {
   type SignatureDrawState = {
     canvas: HTMLCanvasElement;
     pointerId: number;
     lastX: number;
     lastY: number;
+    contextKey: string;
+    frameNode: HTMLElement | null;
+  };
+  type SignatureStatePatch = {
+    status?: 'pending' | 'signed';
+    signerName?: string;
+    signedAt?: string;
+    provider?: string;
+    imageData?: string;
+    appendHistoryMessage?: string;
+    resetHistory?: boolean;
   };
   const activeSignatureDrawStateByPointerId = new Map<number, SignatureDrawState>();
+  const readRuntimeContextKey = (control: HTMLElement | null) =>
+    control?.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR)?.trim() || '';
+  const getAttachmentControls = () =>
+    Array.from(root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`));
+  const getSignatureControls = () =>
+    Array.from(root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`));
+  const getControlsByContext = (controlType: 'attachment' | 'signature', contextKey: string) =>
+    Array.from(
+      root.querySelectorAll<HTMLElement>(
+        `[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="${controlType}"][${TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR}="${contextKey}"]`
+      )
+    );
+  const collectContextFrameNodes = (controlType: 'attachment' | 'signature', contextKey: string) =>
+    Array.from(
+      new Set(
+        getControlsByContext(controlType, contextKey)
+          .map((control) => resolveFrameSelectionAnchor(control.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)))
+          .filter((node): node is HTMLElement => Boolean(node))
+      )
+    );
+  const syncSignatureStateByContext = (contextKey: string, patch: SignatureStatePatch = {}) => {
+    if (!contextKey) {
+      return;
+    }
+
+    const controls = getControlsByContext('signature', contextKey);
+
+    if (controls.length === 0) {
+      return;
+    }
+
+    const primaryControl = controls[0];
+    ensureTemplateUsagePreviewSignatureState(primaryControl);
+    const baseHistory = patch.resetHistory ? [] : readTemplateUsagePreviewSignatureHistory(primaryControl);
+    const nextStatus =
+      patch.status ??
+      (primaryControl.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR) === 'signed' ? 'signed' : 'pending');
+    const nextSignerName =
+      patch.signerName ??
+      String(primaryControl.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR) || '').trim();
+    const nextSignedAt =
+      patch.signedAt ??
+      String(primaryControl.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR) || '').trim();
+    const nextProvider =
+      patch.provider ??
+      String(primaryControl.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR) || '').trim();
+    const nextImageData =
+      patch.imageData ??
+      String(primaryControl.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR) || '').trim();
+    const nextHistory =
+      patch.appendHistoryMessage
+        ? [...baseHistory, { at: nextSignedAt || new Date().toISOString(), message: patch.appendHistoryMessage }]
+        : baseHistory;
+
+    controls.forEach((control) => {
+      ensureTemplateUsagePreviewSignatureState(control);
+      control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR, nextStatus);
+      control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR, nextSignerName);
+      control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR, nextSignedAt);
+      control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR, nextProvider);
+      control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR, nextImageData);
+
+      writeTemplateUsagePreviewSignatureHistory(control, nextHistory);
+      renderTemplateUsagePreviewSignatureControl(control);
+    });
+
+    collectContextFrameNodes('signature', contextKey).forEach((frameNode) => {
+      applyTemplateUsagePreviewAutoSize(root, frameNode, {
+        onLayoutChange: options?.onAutoSizeLayoutChange,
+      });
+    });
+  };
+  const syncAttachmentFileNamesByContext = (contextKey: string, fileNames: string[]) => {
+    if (!contextKey) {
+      return;
+    }
+
+    const normalizedFileNames = fileNames.map((name) => String(name || '').trim()).filter((name) => Boolean(name));
+    const controls = getControlsByContext('attachment', contextKey);
+
+    controls.forEach((control) => {
+      writeTemplateUsagePreviewFileNames(control, normalizedFileNames);
+      renderTemplateUsagePreviewAttachmentControl(control);
+    });
+
+    collectContextFrameNodes('attachment', contextKey).forEach((frameNode) => {
+      applyTemplateUsagePreviewAutoSize(root, frameNode, {
+        onLayoutChange: options?.onAutoSizeLayoutChange,
+      });
+    });
+  };
   const readCanvasPoint = (canvas: HTMLCanvasElement, event: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / Math.max(1, rect.width);
@@ -12343,10 +13109,6 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
     context.lineJoin = 'round';
     return context;
   };
-  const clearSignatureCanvas = (canvas: HTMLCanvasElement) => {
-    const context = canvas.getContext('2d');
-    context?.clearRect(0, 0, canvas.width, canvas.height);
-  };
   const handleFileChange = (event: Event) => {
     const input = event.target instanceof HTMLInputElement ? event.target : null;
 
@@ -12354,24 +13116,21 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
       return;
     }
 
-    const frameNode = resolveFrameSelectionAnchor(input.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
     const control = input.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+    const contextKey = readRuntimeContextKey(control);
 
-    if (control) {
+    if (control && contextKey) {
       const nextFileNames = [
-        ...readTemplateUsagePreviewFileNames(control),
+        ...readTemplateUsagePreviewFileNames(getControlsByContext('attachment', contextKey)[0] || control),
         ...Array.from(input.files || [])
           .map((file) => String(file.name || '').trim())
           .filter((fileName) => Boolean(fileName)),
       ];
-      writeTemplateUsagePreviewFileNames(control, nextFileNames);
-      renderTemplateUsagePreviewAttachmentControl(control);
+      syncAttachmentFileNamesByContext(contextKey, nextFileNames);
       setTemplateUsagePreviewAttachmentEditMode(control, true);
     }
 
     input.value = '';
-
-    applyTemplateUsagePreviewAutoSize(root, frameNode);
   };
   const handleSignaturePointerDown = (event: PointerEvent) => {
     const canvas = event.target instanceof HTMLCanvasElement ? event.target : null;
@@ -12389,6 +13148,8 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
     event.stopPropagation();
     canvas.setPointerCapture?.(event.pointerId);
     const point = readCanvasPoint(canvas, event);
+    const control = canvas.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`);
+    const contextKey = readRuntimeContextKey(control);
     context.beginPath();
     context.arc(point.x, point.y, 1.2, 0, Math.PI * 2);
     context.fillStyle = '#0f172a';
@@ -12398,6 +13159,8 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
       pointerId: event.pointerId,
       lastX: point.x,
       lastY: point.y,
+      contextKey,
+      frameNode: resolveFrameSelectionAnchor(canvas.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)),
     });
   };
   const handleSignaturePointerMove = (event: PointerEvent) => {
@@ -12434,13 +13197,34 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
     if (drawState.canvas.hasPointerCapture?.(event.pointerId)) {
       drawState.canvas.releasePointerCapture(event.pointerId);
     }
+
+    if (event.type === 'pointercancel') {
+      activeSignatureDrawStateByPointerId.delete(event.pointerId);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const imageData = drawState.canvas.toDataURL('image/png');
+    syncSignatureStateByContext(drawState.contextKey, {
+      status: 'signed',
+      signerName: DEFAULT_TEMPLATE_USAGE_SIGNATURE_SIGNER,
+      signedAt: now,
+      provider: DEFAULT_TEMPLATE_USAGE_SIGNATURE_PROVIDER,
+      imageData,
+      appendHistoryMessage: '서명 완료',
+    });
+
+    if (drawState.frameNode) {
+      applyTemplateUsagePreviewAutoSize(root, drawState.frameNode, {
+        onLayoutChange: options?.onAutoSizeLayoutChange,
+      });
+    }
+
     activeSignatureDrawStateByPointerId.delete(event.pointerId);
   };
   const handleRuntimeClick = (event: MouseEvent) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
-    const attachmentControls = Array.from(
-      root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`)
-    );
+    const attachmentControls = getAttachmentControls();
     const addButton = target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR}="true"]`) || null;
 
     if (addButton) {
@@ -12465,17 +13249,15 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
       event.preventDefault();
       event.stopPropagation();
       const control = removeButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
-      const frameNode = resolveFrameSelectionAnchor(removeButton.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
+      const contextKey = readRuntimeContextKey(control);
       const removeIndex = Number(removeButton.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR));
 
-      if (control) {
-        const nextFileNames = readTemplateUsagePreviewFileNames(control).filter((_, index) => index !== removeIndex);
-        writeTemplateUsagePreviewFileNames(control, nextFileNames);
-        renderTemplateUsagePreviewAttachmentControl(control);
+      if (control && contextKey) {
+        const baseControl = getControlsByContext('attachment', contextKey)[0] || control;
+        const nextFileNames = readTemplateUsagePreviewFileNames(baseControl).filter((_, index) => index !== removeIndex);
+        syncAttachmentFileNamesByContext(contextKey, nextFileNames);
         setTemplateUsagePreviewAttachmentEditMode(control, true);
       }
-
-      applyTemplateUsagePreviewAutoSize(root, frameNode);
       return;
     }
 
@@ -12496,12 +13278,70 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
     event.preventDefault();
     event.stopPropagation();
     const control = clearButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`);
-    const canvas = control?.querySelector<HTMLCanvasElement>(`[${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR}="true"]`) || null;
+    const contextKey = readRuntimeContextKey(control);
 
-    if (canvas) {
-      clearSignatureCanvas(canvas);
+    if (contextKey) {
+      syncSignatureStateByContext(contextKey, {
+        status: 'pending',
+        signedAt: '',
+        imageData: '',
+        appendHistoryMessage: '서명 지움',
+      });
     }
   };
+
+  const initialAttachmentFilesByContext = new Map<string, string[]>();
+  getAttachmentControls().forEach((control) => {
+    const contextKey = readRuntimeContextKey(control);
+    if (!contextKey || initialAttachmentFilesByContext.has(contextKey)) {
+      return;
+    }
+    initialAttachmentFilesByContext.set(contextKey, readTemplateUsagePreviewFileNames(control));
+  });
+  initialAttachmentFilesByContext.forEach((fileNames, contextKey) => {
+    syncAttachmentFileNamesByContext(contextKey, fileNames);
+  });
+
+  const initialSignatureControlsByContext = new Map<string, HTMLElement>();
+  getSignatureControls().forEach((control) => {
+    const contextKey = readRuntimeContextKey(control);
+    if (!contextKey || initialSignatureControlsByContext.has(contextKey)) {
+      return;
+    }
+    initialSignatureControlsByContext.set(contextKey, control);
+  });
+  initialSignatureControlsByContext.forEach((control, contextKey) => {
+    ensureTemplateUsagePreviewSignatureState(control);
+    syncSignatureStateByContext(contextKey, {});
+  });
+
+  const initialAutoSizedFrameGroupIds = Array.from(
+    new Set(
+      collectFrameSelectionAnchors(root)
+        .filter((frameNode) => {
+          const frameGroupId = getFrameGroupId(frameNode);
+
+          if (!frameGroupId || (!readFrameAutoHeightBox(frameNode) && !readFrameAutoWidthBox(frameNode))) {
+            return false;
+          }
+
+          const frameBoxKind = readFrameBoxKind(frameNode);
+          const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(frameNode);
+          return !(frameBoxKind === 'signature' && runtimeMode === 'signature_image');
+        })
+        .map((frameNode) => getFrameGroupId(frameNode).trim())
+        .filter((frameGroupId) => Boolean(frameGroupId))
+    )
+  );
+
+  if (initialAutoSizedFrameGroupIds.length > 0) {
+    applyTemplateAutoSizeBoxes(root, initialAutoSizedFrameGroupIds, {
+      applyRelativeAnchors: false,
+    });
+    settleTemplateUsagePreviewVerticalOverlaps(root);
+    syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
+    options?.onAutoSizeLayoutChange?.(root);
+  }
 
   root.addEventListener('change', handleFileChange);
   root.addEventListener('pointerdown', handleSignaturePointerDown, true);
@@ -12598,11 +13438,63 @@ const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputE
   return measuredWidth;
 };
 
+const isTemplateUsagePreviewModeNode = (node: HTMLElement) =>
+  Boolean(node.closest(`.template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"]`));
+
+const measureTemplateUsagePreviewNaturalFrameHeight = (node: HTMLElement) => {
+  const currentRect = readFrameNodeRect(node);
+  const contentTarget = resolveFrameContentTarget(node);
+  const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
+  const contentHeightDelta = measureTargets.reduce((maxDelta, target) => {
+    const targetRect = target.getBoundingClientRect();
+    const requiredTargetHeight =
+      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
+        ? measureNaturalTextControlHeight(target)
+        : Math.max(target.scrollHeight || 0, target.offsetHeight || 0, target.clientHeight || 0, targetRect.height || 0);
+    const visibleTargetHeight = Math.max(targetRect.height || 0, target.offsetHeight || 0, target.clientHeight || 0);
+
+    return Math.max(maxDelta, requiredTargetHeight - visibleTargetHeight);
+  }, Number.NEGATIVE_INFINITY);
+  const resolvedContentHeightDelta = Number.isFinite(contentHeightDelta) ? contentHeightDelta : 0;
+
+  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.height + resolvedContentHeightDelta));
+};
+
+const measureTemplateUsagePreviewNaturalFrameWidth = (node: HTMLElement) => {
+  const currentRect = readFrameNodeRect(node);
+  const contentTarget = resolveFrameContentTarget(node);
+  const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
+  const contentWidthDelta = measureTargets.reduce((maxDelta, target) => {
+    const targetRect = target.getBoundingClientRect();
+    const requiredTargetWidth =
+      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
+        ? measureNaturalTextControlWidth(target)
+        : Math.max(target.scrollWidth || 0, target.offsetWidth || 0, target.clientWidth || 0, targetRect.width || 0);
+    const visibleTargetWidth = targetRect.width || target.offsetWidth || target.clientWidth || 0;
+
+    return Math.max(maxDelta, requiredTargetWidth - visibleTargetWidth);
+  }, Number.NEGATIVE_INFINITY);
+  const resolvedContentWidthDelta = Number.isFinite(contentWidthDelta) ? contentWidthDelta : 0;
+
+  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.width + resolvedContentWidthDelta));
+};
+
 const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
   const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
   const baseHeight = readFrameAutoHeightBaseHeight(node, currentRect.height);
+
+  if (isTemplateUsagePreviewValueFrameEmpty(node)) {
+    return Math.ceil(baseHeight);
+  }
+
+  if (isTemplateUsagePreviewModeNode(node)) {
+    return Math.ceil(Math.max(baseHeight, measureTemplateUsagePreviewNaturalFrameHeight(node)));
+  }
+
   const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
   const extraHeight = measureTargets.reduce((maxExtraHeight, target) => {
     const targetRect = target.getBoundingClientRect();
@@ -12624,6 +13516,15 @@ const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
   const baseWidth = readFrameAutoWidthBaseWidth(node, currentRect.width);
+
+  if (isTemplateUsagePreviewValueFrameEmpty(node)) {
+    return Math.ceil(baseWidth);
+  }
+
+  if (isTemplateUsagePreviewModeNode(node)) {
+    return Math.ceil(Math.max(baseWidth, measureTemplateUsagePreviewNaturalFrameWidth(node)));
+  }
+
   const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
   const extraWidth = measureTargets.reduce((maxExtraWidth, target) => {
     const targetRect = target.getBoundingClientRect();
@@ -12864,7 +13765,8 @@ const applyTemplateAutoWidthBoxes = (
 const applyTemplateSecondaryContentFit = (
   root: HTMLElement,
   frameGroupIds: string[] | undefined,
-  axis: TextAutoSizeSecondaryFitAxis
+  axis: TextAutoSizeSecondaryFitAxis,
+  options: TemplateAutoSizeApplyOptions = {}
 ): {
   changedCount: number;
   skippedCount: number;
@@ -12917,7 +13819,7 @@ const applyTemplateSecondaryContentFit = (
       }
     });
 
-  if (changedFrameGroupIds.length > 0) {
+  if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
     materializePositionGroupWrappers(root);
     ensureRelativeAnchorConfigs(root);
     applyRelativeAnchoredFrameRectsInRoot(root);
@@ -12951,7 +13853,7 @@ const applyTemplateAutoSizeBoxes = (
     new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds])
   );
 
-  if (changedFrameGroupIds.length > 0) {
+  if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
     materializePositionGroupWrappers(root);
     ensureRelativeAnchorConfigs(root);
     applyRelativeAnchoredFrameRectsInRoot(root);
@@ -15277,6 +16179,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [positionSpacingBulkGapY, setPositionSpacingBulkGapY] = React.useState('');
   const [positionSpacingBulkGapError, setPositionSpacingBulkGapError] = React.useState(false);
   const [selectedPositionSpacingSettingRelationKey, setSelectedPositionSpacingSettingRelationKey] = React.useState('');
+  const templateUsagePreviewAutoSizeLayoutChangeRef = React.useRef<((root: HTMLElement) => void) | null>(null);
   const [positionSelectionStateRevision, setPositionSelectionStateRevision] = React.useState(0);
   const [definedPositionRelationGapDraftByKey, setDefinedPositionRelationGapDraftByKey] = React.useState<
     Record<string, { gapY: string }>
@@ -16199,7 +17102,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return undefined;
     }
 
-    return attachTemplateUsagePreviewRuntimeHandlers(previewRef.current);
+    return attachTemplateUsagePreviewRuntimeHandlers(previewRef.current, {
+      onAutoSizeLayoutChange: (root) => {
+        templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root);
+      },
+    });
   }, [surfaceRenderedPreviewHtml, templateUsagePreviewMode]);
 
   const persistTemplateDraftHtml = React.useCallback(
@@ -18460,7 +19367,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return hasSameValues ? previous : next;
     });
   }, [focusedDefinedPositionRelativeRelations, positionOrderLockSelectionMode, positionSpacingSettingRelations]);
-  const applyPositionSpacingRelationsToRoot = React.useCallback(
+	  const applyPositionSpacingRelationsToRoot = React.useCallback(
     (
       root: HTMLElement,
       relations: Array<{
@@ -18666,9 +19573,50 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyRelativeAnchoredFrameRectsInRoot(root);
       return true;
     },
-    []
+	    []
+	  );
+  const applyPreservedPositionSpacingRelations = React.useCallback(
+    (root: HTMLElement) => {
+      const preservedSpacingRelations = positionSpacingSettingRelations
+        .filter((relation) => relation.anchorKind !== 'page-corner')
+        .map((relation) => ({
+          relation,
+          gapY: Math.max(0, Number(relation.gapYPx) || 0),
+        }));
+
+      if (preservedSpacingRelations.length <= 0) {
+        return false;
+      }
+
+      return applyPositionSpacingRelationsToRoot(root, preservedSpacingRelations);
+    },
+    [applyPositionSpacingRelationsToRoot, positionSpacingSettingRelations]
   );
-  const applyDefinedPositionRelationGapDraft = React.useCallback(
+  const applyTemplateUsagePreviewPreservedSpacingRelations = React.useCallback(
+    (root: HTMLElement) => {
+      const changed = applyPreservedPositionSpacingRelations(root);
+      if (!changed) {
+        return;
+      }
+
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
+      settleTemplateUsagePreviewVerticalOverlaps(root);
+      root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+        updatePageInnerMinHeight(pageInner);
+      });
+    },
+    [applyPreservedPositionSpacingRelations]
+  );
+  React.useLayoutEffect(() => {
+    templateUsagePreviewAutoSizeLayoutChangeRef.current = applyTemplateUsagePreviewPreservedSpacingRelations;
+
+    return () => {
+      if (templateUsagePreviewAutoSizeLayoutChangeRef.current === applyTemplateUsagePreviewPreservedSpacingRelations) {
+        templateUsagePreviewAutoSizeLayoutChangeRef.current = null;
+      }
+    };
+  }, [applyTemplateUsagePreviewPreservedSpacingRelations]);
+	  const applyDefinedPositionRelationGapDraft = React.useCallback(
     (relation: DefinedPositionRelativeRelation, nextGapYRaw: string) => {
       setDefinedPositionRelationGapDraftByKey((previous) => ({
         ...previous,
@@ -23999,14 +24947,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         hasExplicitWidthPatch ||
         hasExplicitHeightPatch ||
         autoSizeResult.changedCount > 0;
+      const spacingChanged = shouldUpdateGeometry ? applyPreservedPositionSpacingRelations(root) : false;
 
-      if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0) {
+      if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0 && !spacingChanged) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
       syncDraftPreviewHtmlRef({
-        materializePositionGroups: shouldUpdateGeometry,
-        updatePreviewDomVersion: shouldUpdateGeometry,
-        updateRenderedHtml: shouldUpdateGeometry,
+        materializePositionGroups: shouldUpdateGeometry || spacingChanged,
+        updatePreviewDomVersion: shouldUpdateGeometry || spacingChanged,
+        updateRenderedHtml: shouldUpdateGeometry || spacingChanged,
       });
       if (!shouldUpdateGeometry && shouldRecalculateAutoSize) {
         schedulePreviewEditorState();
@@ -24015,6 +24964,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       requestPreviewTextFit();
     },
     [
+      applyPreservedPositionSpacingRelations,
       requestPreviewTextFit,
       resolveSelectionAppearanceStyleTargets,
       schedulePreviewEditorState,
@@ -24047,18 +24997,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     });
 
     syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
-    const preservedSpacingRelations = positionSpacingSettingRelations
-      .filter((relation) => relation.anchorKind !== 'page-corner')
-      .map((relation) => ({
-        relation,
-        gapY: Math.max(0, Number(relation.gapYPx) || 0),
-      }));
 
     scheduleDeferredTextAutoSizeSync(() => {
       if (mode !== 'fixed') {
         const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds);
         if (autoSizeResult.changedCount > 0) {
-          applyPositionSpacingRelationsToRoot(root, preservedSpacingRelations);
+          applyPreservedPositionSpacingRelations(root);
         }
       }
     });
@@ -24066,8 +25010,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       mode === 'height' ? '자동 높이 상자' : mode === 'width' ? '자동 너비 상자' : '고정 상자';
     setMessage(`${modeLabel} 설정: ${nodes.length}개 상자`);
   }, [
-    applyPositionSpacingRelationsToRoot,
-    positionSpacingSettingRelations,
+    applyPreservedPositionSpacingRelations,
     scheduleDeferredTextAutoSizeSync,
     syncTextAutoSizeUiOverrideFromSelection,
   ]);
@@ -24134,25 +25077,83 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const targetFrameGroupIds = nodes.map((node) => getFrameGroupId(node)).filter(Boolean);
-    const preservedSpacingRelations = positionSpacingSettingRelations
-      .filter((relation) => relation.anchorKind !== 'page-corner')
-      .map((relation) => ({
-        relation,
-        gapY: Math.max(0, Number(relation.gapYPx) || 0),
-      }));
     const fitResult = applyTemplateSecondaryContentFit(root, targetFrameGroupIds, axis);
     if (fitResult.changedCount > 0) {
-      applyPositionSpacingRelationsToRoot(root, preservedSpacingRelations);
+      applyPreservedPositionSpacingRelations(root);
     }
     syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
     scheduleDeferredTextAutoSizeSync();
     setMessage(`${axis === 'width' ? '너비' : '높이'} 내용 맞춤: ${nodes.length}개 상자`);
   }, [
-    applyPositionSpacingRelationsToRoot,
-    positionSpacingSettingRelations,
+    applyPreservedPositionSpacingRelations,
     scheduleDeferredTextAutoSizeSync,
     syncTextAutoSizeUiOverrideFromSelection,
   ]);
+
+  const setTextAutoSizeMinimumForSelection = React.useCallback(
+    (axis: Extract<TextAutoSizeSecondaryFitAxis, 'height' | 'width'>, minimumSize: number) => {
+      const root = previewRef.current;
+
+      if (!root) {
+        return;
+      }
+
+      const normalizedMinimumSize = Number.isFinite(minimumSize)
+        ? Math.max(MIN_FRAME_SIZE_PX, Math.round(minimumSize * 1000) / 1000)
+        : Number.NaN;
+
+      if (!Number.isFinite(normalizedMinimumSize)) {
+        setMessage(axis === 'height' ? '최소 높이 값을 확인하세요.' : '최소 너비 값을 확인하세요.');
+        return;
+      }
+
+      const styleTargets = resolveSelectionAppearanceStyleTargets(root);
+      const allSelectedNodes = styleTargets.elements;
+      const targetNodes = allSelectedNodes.filter((node) =>
+        axis === 'height' ? readFrameAutoHeightBox(node) : readFrameAutoWidthBox(node)
+      );
+
+      if (targetNodes.length <= 0) {
+        setMessage(axis === 'height' ? '최소 높이를 적용할 자동 높이 상자가 없습니다.' : '최소 너비를 적용할 자동 너비 상자가 없습니다.');
+        return;
+      }
+
+      targetNodes.forEach((node) => {
+        if (axis === 'height') {
+          writeFrameAutoHeightBaseAttrs(node, normalizedMinimumSize);
+          return;
+        }
+        writeFrameAutoWidthBaseAttrs(node, normalizedMinimumSize);
+      });
+
+      const selectionFrameGroupIds = Array.from(
+        new Set(allSelectedNodes.map((node) => getFrameGroupId(node).trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+      );
+      if (selectionFrameGroupIds.length > 0) {
+        syncTextAutoSizeUiOverrideFromSelection(root, selectionFrameGroupIds);
+      }
+
+      const targetFrameGroupIds = Array.from(
+        new Set(targetNodes.map((node) => getFrameGroupId(node).trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+      );
+
+      scheduleDeferredTextAutoSizeSync(() => {
+        const autoSizeResult = applyTemplateAutoSizeBoxes(root, targetFrameGroupIds);
+        if (autoSizeResult.changedCount > 0) {
+          applyPreservedPositionSpacingRelations(root);
+        }
+      });
+      setMessage(
+        `${axis === 'height' ? '최소 높이' : '최소 너비'} ${normalizedMinimumSize}px 설정: ${targetNodes.length}개 상자`
+      );
+    },
+    [
+      applyPreservedPositionSpacingRelations,
+      resolveSelectionAppearanceStyleTargets,
+      scheduleDeferredTextAutoSizeSync,
+      syncTextAutoSizeUiOverrideFromSelection,
+    ]
+  );
 
   const matchSelectionDimensionFromSource = React.useCallback(
     (sourceFrameGroupId: string, target: SizeMatchTargetKind) => {
@@ -30246,6 +31247,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           restoreTextInputFocus: shouldRestoreTextInputFocus,
           selectionStart,
           selectionEnd,
+          onLayoutChange: (layoutRoot) => {
+            templateUsagePreviewAutoSizeLayoutChangeRef.current?.(layoutRoot);
+          },
         });
       }
 	      return;
@@ -30269,7 +31273,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       if (root && frameNode && frameGroupId && (readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))) {
         markTemplateValueElementEdited(frameTextInput || frameEditableScope || target);
-        applyTemplateAutoSizeBoxes(root, [frameGroupId]);
+        const autoSizeResult = applyTemplateAutoSizeBoxes(root, [frameGroupId]);
+        if (autoSizeResult.changedCount > 0) {
+          applyPreservedPositionSpacingRelations(root);
+        }
 
         if (shouldRestoreTextInputFocus) {
           restoreFrameTextInputFocus(root, frameGroupId, selectionStart, selectionEnd);
@@ -30284,7 +31291,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
-	  }, [isTextCanvasEditModeActive, requestPreviewTextFit, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+	  }, [
+    applyPreservedPositionSpacingRelations,
+    isTextCanvasEditModeActive,
+    requestPreviewTextFit,
+    selectionPanelTab,
+    syncDraftPreviewHtmlRef,
+    templateUsagePreviewMode,
+  ]);
 
   const toggleBoxCreationModeFromCanvasToolbar = React.useCallback(() => {
     clearTransientCanvasOverlays();
@@ -31115,6 +32129,47 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         )
       ),
     } satisfies Partial<Record<StyleFieldKey, { value: string; mixed: boolean }>>;
+    const autoSizeMinimumAxis: Extract<TextAutoSizeSecondaryFitAxis, 'height' | 'width'> | null = selectedTextAutoSizeState.allHeight
+      ? 'height'
+      : selectedTextAutoSizeState.allWidth
+        ? 'width'
+        : null;
+    const autoSizeMinimumDisplayState: {
+      axis: Extract<TextAutoSizeSecondaryFitAxis, 'height' | 'width'>;
+      label: string;
+      value: string;
+      mixed: boolean;
+    } | null = (() => {
+      if (!previewStyleTargets || !autoSizeMinimumAxis || selectedTextAutoSizeState.mixed) {
+        return null;
+      }
+
+      const targetNodes = previewStyleTargets.elements.filter((node) =>
+        autoSizeMinimumAxis === 'height' ? readFrameAutoHeightBox(node) : readFrameAutoWidthBox(node)
+      );
+
+      if (targetNodes.length <= 0) {
+        return null;
+      }
+
+      const normalizedValues = targetNodes.map((node) => {
+        const currentRect = readFrameNodeRect(node);
+        const minimumSize =
+          autoSizeMinimumAxis === 'height'
+            ? readFrameAutoHeightBaseHeight(node, currentRect.height)
+            : readFrameAutoWidthBaseWidth(node, currentRect.width);
+
+        return String(Number(Math.max(MIN_FRAME_SIZE_PX, minimumSize).toFixed(3)));
+      });
+      const uniqueValues = Array.from(new Set(normalizedValues));
+
+      return {
+        axis: autoSizeMinimumAxis,
+        label: autoSizeMinimumAxis === 'height' ? '최소 높이' : '최소 너비',
+        value: uniqueValues[0] || '',
+        mixed: uniqueValues.length > 1,
+      };
+    })();
     const isStyleFieldDisabled = (field: StyleFieldKey) => {
       if (!hasAppearanceSelection) {
         return true;
@@ -31638,6 +32693,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         </span>
       );
     };
+    const normalizeAutoSizeMinimumInput = (value: string) => {
+      const numericOnly = value.replace(/[^\d.]/g, '');
+
+      if (!numericOnly) {
+        return '';
+      }
+
+      const hasDecimalPoint = numericOnly.includes('.');
+      const [rawIntegerPart = '', ...fractionParts] = numericOnly.split('.');
+      const integerPart = rawIntegerPart.slice(0, 4);
+      const fractionPart = fractionParts.join('');
+
+      if (!hasDecimalPoint) {
+        return integerPart;
+      }
+
+      const normalizedIntegerPart = integerPart || '0';
+
+      if (numericOnly.endsWith('.') && !fractionPart) {
+        return `${normalizedIntegerPart}.`;
+      }
+
+      return `${normalizedIntegerPart}.${fractionPart}`;
+    };
     const renderInlineColorPicker = (
       field: AppearanceColorPickerField,
       _label: string,
@@ -31896,7 +32975,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                     : { backgroundColor: backgroundColorValue }),
                   width: '100%',
                   maxWidth: '100%',
-                  height: `${visualContentHeight}px`,
+                  minHeight: `${visualContentHeight}px`,
                   ...previewCornerRadiusStyle,
                   overflow: 'hidden',
                 }}
@@ -31927,6 +33006,72 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       3
                     )}
                   </div>
+                  {autoSizeMinimumDisplayState ? (
+                    <span
+                      className="relative inline-flex w-full items-center"
+                      onMouseDown={stopInlineControlEvent}
+                      onClick={stopInlineControlEvent}
+                    >
+                      <span className="pointer-events-none absolute left-1 top-1/2 z-10 -translate-y-1/2 text-[10px] font-medium text-slate-500 sm:left-2">
+                        <span className="hidden sm:inline">{autoSizeMinimumDisplayState.label}</span>
+                        <span className="sm:hidden">{autoSizeMinimumDisplayState.axis === 'height' ? 'MH' : 'MW'}</span>
+                      </span>
+                      <Input
+                        key={`inline-style:auto-size-minimum:${autoSizeMinimumDisplayState.axis}:${autoSizeMinimumDisplayState.mixed ? 'mixed' : autoSizeMinimumDisplayState.value}`}
+                        defaultValue={autoSizeMinimumDisplayState.mixed ? MIXED_STYLE_VALUE_LABEL : autoSizeMinimumDisplayState.value}
+                        inputMode="decimal"
+                        aria-label={autoSizeMinimumDisplayState.label}
+                        title={autoSizeMinimumDisplayState.label}
+                        className={`h-8 w-full rounded-md border pl-[18px] pr-[16px] text-center text-[11px] font-semibold disabled:opacity-100 sm:pl-[34px] sm:pr-4 ${
+                          resolveInlineStyleFieldStateClass(autoSizeMinimumDisplayState.axis === 'height' ? 'height' : 'width')
+                        }`}
+                        onInput={(event) => {
+                          const inputElement = event.currentTarget;
+                          const normalizedValue = normalizeAutoSizeMinimumInput(inputElement.value);
+                          if (normalizedValue !== inputElement.value) {
+                            inputElement.value = normalizedValue;
+                          }
+                        }}
+                        onBlur={(event) => {
+                          const normalizedValue = normalizeAutoSizeMinimumInput(event.currentTarget.value);
+                          if (normalizedValue !== event.currentTarget.value) {
+                            event.currentTarget.value = normalizedValue;
+                          }
+
+                          if (!normalizedValue.trim()) {
+                            return;
+                          }
+
+                          const parsedValue = Number.parseFloat(normalizedValue);
+                          if (!Number.isFinite(parsedValue)) {
+                            setMessage(
+                              autoSizeMinimumDisplayState.axis === 'height'
+                                ? '최소 높이 값을 확인하세요.'
+                                : '최소 너비 값을 확인하세요.'
+                            );
+                            return;
+                          }
+
+                          if (!autoSizeMinimumDisplayState.mixed) {
+                            const currentValue = Number.parseFloat(autoSizeMinimumDisplayState.value);
+                            if (Number.isFinite(currentValue) && Math.abs(currentValue - parsedValue) <= 0.001) {
+                              return;
+                            }
+                          }
+
+                          setTextAutoSizeMinimumForSelection(autoSizeMinimumDisplayState.axis, parsedValue);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.currentTarget.blur();
+                          }
+                        }}
+                      />
+                      <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[10px] font-medium text-slate-500 sm:right-1.5">
+                        px
+                      </span>
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -32199,10 +33344,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </label>
           <div className="grid grid-cols-2 gap-1.5">
             {paddingFieldsBySide.map(({ side, field, label, isMixed, displayValue, state }) => (
-              <div key={`text-padding-field:${side}`} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1">
+              <div key={`text-padding-field:${side}`} className="grid grid-cols-[56px_minmax(0,1fr)] items-center gap-1">
                 <button
                   type="button"
-                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-[11px] font-semibold transition ${paddingSideButtonClassByState(state)}`}
+                  className={`inline-flex h-7 w-14 items-center justify-center rounded-md border text-[11px] font-semibold transition ${paddingSideButtonClassByState(state)}`}
                   disabled={!hasSelection}
                   onClick={() => {
                     if (!hasSelection) {
@@ -33014,8 +34159,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [data-template-frame-role="value"] [data-template-frame-input="true"],
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [data-template-frame-input="true"][data-template-frame-role="value"],
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"] [data-template-frame-input="true"] {
-	          color: inherit !important;
-	          -webkit-text-fill-color: currentColor !important;
+	          color: var(${TEMPLATE_USAGE_PREVIEW_VALUE_TEXT_COLOR_VAR}, inherit) !important;
+	          -webkit-text-fill-color: var(${TEMPLATE_USAGE_PREVIEW_VALUE_TEXT_COLOR_VAR}, currentColor) !important;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}],
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"] [data-template-frame-input="true"] {
@@ -33029,13 +34174,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          height: 100%;
 	          min-height: 28px;
 	          box-sizing: border-box;
-	          display: grid;
+	          display: flex;
+	          flex-direction: column;
 	          gap: 4px;
-	          align-content: start;
 	          color: rgb(15 23 42);
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control {
 	          cursor: text;
+	          justify-content: flex-start;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-display,
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-list {
@@ -33043,6 +34189,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          display: grid;
 	          gap: 4px;
 	          align-content: start;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="edit"] .v106-template-usage-file-list {
+	          flex: 0 0 auto;
+	          min-height: 0;
+	          overflow: visible;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-display-line,
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-item-name {
@@ -33069,6 +34220,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="edit"] .v106-template-usage-file-toolbar {
 	          display: inline-grid;
+	          margin-top: 4px;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-item {
 	          display: grid;
@@ -33106,15 +34258,55 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          grid-template-rows: minmax(0, 1fr) auto;
 	          align-content: stretch;
 	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control[${TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR}="signature_image"] {
+	          position: relative;
+	          display: block;
+	          min-height: 0;
+	          overflow: hidden;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-info {
+	          min-height: 100%;
+	          display: flex;
+	          align-items: center;
+	          justify-content: flex-start;
+	          font-size: 11px;
+	          line-height: 1.4;
+	          color: rgb(51 65 85);
+	          white-space: nowrap;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-history {
+	          min-height: 100%;
+	          min-width: 0;
+	          display: grid;
+	          gap: 4px;
+	          align-content: start;
+	          overflow: hidden;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-history-line {
+	          min-width: 0;
+	          font-size: 10px;
+	          line-height: 1.35;
+	          color: rgb(71 85 105);
+	          white-space: nowrap;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
+	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-canvas {
+	          display: block;
 	          width: 100%;
 	          height: 100%;
-	          min-height: 42px;
+	          min-height: 0;
 	          border: none;
 	          border-radius: 0;
 	          background: transparent;
 	          touch-action: none;
 	          cursor: crosshair;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control[${TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR}="signature_image"] .v106-template-usage-signature-canvas {
+	          position: absolute;
+	          inset: 0;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-clear {
 	          justify-self: end;
@@ -33126,6 +34318,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          font-weight: 700;
 	          color: rgb(71 85 105);
 	          cursor: pointer;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control[${TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR}="signature_image"] .v106-template-usage-signature-clear {
+	          position: absolute;
+	          right: 6px;
+	          top: 6px;
+	          z-index: 2;
+	          justify-self: auto;
 	        }
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-frame-input="true"],
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-edit-scope],
