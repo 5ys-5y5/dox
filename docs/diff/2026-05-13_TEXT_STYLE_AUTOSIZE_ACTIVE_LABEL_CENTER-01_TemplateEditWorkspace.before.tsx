@@ -31403,7 +31403,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         centerLabel
           ? 'justify-center p-1.5 text-center'
           : reserveInlineActionSpace
-            ? 'justify-center pl-1.5 pr-[5.75rem] text-center'
+            ? 'justify-start pl-1.5 pr-[5.75rem] text-left'
             : 'justify-start p-1.5 text-left'
       }`;
     const autoSizeInlineActionButtonClass = (active: boolean, hidden = false, first = false) =>

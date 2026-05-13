@@ -31395,16 +31395,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           : 'bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
       }`;
     const autoSizeSegmentToneClass = (active: boolean, hidden = false) =>
-      `inline-flex items-center justify-center text-[11px] font-semibold transition ${
+      `inline-flex items-center justify-center px-2 text-[11px] font-semibold transition ${
         active ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
       } ${hidden ? 'pointer-events-none opacity-0' : ''}`;
     const autoSizeModeButtonClass = (active: boolean, reserveInlineActionSpace: boolean, centerLabel: boolean) =>
       `${autoSizeSegmentToneClass(active)} h-10 w-full min-w-0 rounded-md border border-slate-300 ${
         centerLabel
-          ? 'justify-center p-1.5 text-center'
+          ? 'justify-center px-2 text-center'
           : reserveInlineActionSpace
-            ? 'justify-center pl-1.5 pr-[5.75rem] text-center'
-            : 'justify-start p-1.5 text-left'
+            ? 'justify-start pl-2.5 pr-[5.75rem] text-left'
+            : 'justify-start px-2.5 text-left'
       }`;
     const autoSizeInlineActionButtonClass = (active: boolean, hidden = false, first = false) =>
       `${autoSizeSegmentToneClass(active, hidden)} h-7 w-7 shrink-0 ${first ? '' : 'border-l border-slate-300'} p-0`;
@@ -31425,19 +31425,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const trailingActionCount = 3;
       const hasInlineActions = actionItems.length > 0;
       const showInlineActionTray = active && hasInlineActions;
-      const centerModeLabel = !showInlineActionTray;
+      const centerModeLabel = active && !hasInlineActions;
 
       return (
         <div className="relative min-w-0 w-full">
           <button
             type="button"
-            className={autoSizeModeButtonClass(active, showInlineActionTray, centerModeLabel)}
+            className={autoSizeModeButtonClass(active, hasInlineActions, centerModeLabel)}
             onClick={() => setTextAutoSizeModeForSelection(mode)}
           >
             {label}
           </button>
           <div
-            className={`absolute right-1.5 top-1.5 inline-flex box-border h-7 overflow-hidden rounded-md border border-slate-300 bg-white ${
+            className={`absolute right-0.5 top-1/2 inline-flex box-border h-7 -translate-y-1/2 overflow-hidden rounded-md border border-slate-300 bg-white ${
               showInlineActionTray ? '' : 'pointer-events-none opacity-0'
             }`}
             aria-hidden={!showInlineActionTray}

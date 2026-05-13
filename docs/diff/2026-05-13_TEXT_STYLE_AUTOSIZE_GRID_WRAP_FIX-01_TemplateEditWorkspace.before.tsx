@@ -31394,20 +31394,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ? 'bg-slate-950 text-white'
           : 'bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
       }`;
-    const autoSizeSegmentToneClass = (active: boolean, hidden = false) =>
-      `inline-flex items-center justify-center text-[11px] font-semibold transition ${
+    const autoSizeSegmentButtonClass = (active: boolean, hidden = false) =>
+      `inline-flex h-7 items-center justify-center px-2 text-[11px] font-semibold transition ${
         active ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
       } ${hidden ? 'pointer-events-none opacity-0' : ''}`;
-    const autoSizeModeButtonClass = (active: boolean, reserveInlineActionSpace: boolean, centerLabel: boolean) =>
-      `${autoSizeSegmentToneClass(active)} h-10 w-full min-w-0 rounded-md border border-slate-300 ${
-        centerLabel
-          ? 'justify-center p-1.5 text-center'
-          : reserveInlineActionSpace
-            ? 'justify-center pl-1.5 pr-[5.75rem] text-center'
-            : 'justify-start p-1.5 text-left'
-      }`;
-    const autoSizeInlineActionButtonClass = (active: boolean, hidden = false, first = false) =>
-      `${autoSizeSegmentToneClass(active, hidden)} h-7 w-7 shrink-0 ${first ? '' : 'border-l border-slate-300'} p-0`;
+    const autoSizeModeButtonClass = (active: boolean) =>
+      `${autoSizeSegmentButtonClass(active)} min-w-0 justify-start px-2.5 text-left`;
+    const autoSizeInlineActionButtonClass = (active: boolean, hidden = false) =>
+      `${autoSizeSegmentButtonClass(active, hidden)} w-7 shrink-0 border-l border-slate-300 p-0`;
     const selectedPaddingField = APPEARANCE_PADDING_FIELD_BY_SIDE[textPaddingEditSide];
     const selectedPaddingValue = selectionStyleDraft[selectedPaddingField];
     const selectedPaddingPlaceholder = hasSelection ? '?' : '0';
@@ -31419,37 +31413,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       mode: TextAutoSizeMode,
       label: string,
       active: boolean,
-      inlineActions: React.ReactNode[] = []
+      inlineActions: React.ReactNode = null
     ) => {
-      const actionItems = inlineActions;
+      const actionItems = React.Children.toArray(inlineActions);
       const trailingActionCount = 3;
-      const hasInlineActions = actionItems.length > 0;
-      const showInlineActionTray = active && hasInlineActions;
-      const centerModeLabel = !showInlineActionTray;
 
       return (
-        <div className="relative min-w-0 w-full">
+        <div className="grid min-w-0 w-full grid-cols-[minmax(0,1fr)_28px_28px_28px] overflow-hidden rounded-md border border-slate-300 bg-white">
           <button
             type="button"
-            className={autoSizeModeButtonClass(active, showInlineActionTray, centerModeLabel)}
+            className={autoSizeModeButtonClass(active)}
             onClick={() => setTextAutoSizeModeForSelection(mode)}
           >
             {label}
           </button>
-          <div
-            className={`absolute right-1.5 top-1.5 inline-flex box-border h-7 overflow-hidden rounded-md border border-slate-300 bg-white ${
-              showInlineActionTray ? '' : 'pointer-events-none opacity-0'
-            }`}
-            aria-hidden={!showInlineActionTray}
-          >
-            {Array.from({ length: trailingActionCount }).map((_, actionIndex) => (
-              <React.Fragment key={`text-autosize-option:${mode}:action:${actionIndex}`}>
-                {actionItems[actionIndex] || (
-                  <div className={autoSizeInlineActionButtonClass(false, true, actionIndex === 0)} aria-hidden="true" />
-                )}
-              </React.Fragment>
-            ))}
-          </div>
+          {Array.from({ length: trailingActionCount }).map((_, actionIndex) => (
+            <React.Fragment key={`text-autosize-option:${mode}:action:${actionIndex}`}>
+              {actionItems[actionIndex] || (
+                <div className={autoSizeInlineActionButtonClass(false, true)} aria-hidden="true" />
+              )}
+            </React.Fragment>
+          ))}
         </div>
       );
     };
@@ -31612,24 +31596,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   '자동 높이 상자',
                   selectedTextAutoSizeState.allHeight,
                   selectedTextAutoSizeState.allHeight ? (
-                    [
+                    <>
                       <button
-                        key="height-anchor-top"
                         type="button"
                         className={autoSizeInlineActionButtonClass(
                           selectedTextAutoSizeState.heightAnchorSide === 'top' &&
-                            !selectedTextAutoSizeState.heightAnchorSideMixed,
-                          false,
-                          true
+                            !selectedTextAutoSizeState.heightAnchorSideMixed
                         )}
                         onClick={() => setTextAutoSizeAnchorForSelection('top')}
                         aria-label="위로 확장"
                         title="위로 확장"
                       >
                         <ArrowUp className="h-3.5 w-3.5" />
-                      </button>,
+                      </button>
                       <button
-                        key="height-anchor-bottom"
                         type="button"
                         className={autoSizeInlineActionButtonClass(
                           selectedTextAutoSizeState.heightAnchorSide === 'bottom' &&
@@ -31640,9 +31620,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         title="아래로 확장"
                       >
                         <ArrowDown className="h-3.5 w-3.5" />
-                      </button>,
+                      </button>
                       <button
-                        key="height-fit-width"
                         type="button"
                         className={autoSizeInlineActionButtonClass(false)}
                         onClick={() => fitTextAutoSizeSecondaryAxisForSelection('width')}
@@ -31650,33 +31629,29 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         title="너비에 내용 맞추기"
                       >
                         <ArrowLeftRight className="h-3.5 w-3.5" />
-                      </button>,
-                    ]
-                  ) : []
+                      </button>
+                    </>
+                  ) : null
                 )}
                 {renderTextAutoSizeModeOption(
                   'width',
                   '자동 너비 상자',
                   selectedTextAutoSizeState.allWidth,
                   selectedTextAutoSizeState.allWidth ? (
-                    [
+                    <>
                       <button
-                        key="width-anchor-left"
                         type="button"
                         className={autoSizeInlineActionButtonClass(
                           selectedTextAutoSizeState.widthAnchorSide === 'left' &&
-                            !selectedTextAutoSizeState.widthAnchorSideMixed,
-                          false,
-                          true
+                            !selectedTextAutoSizeState.widthAnchorSideMixed
                         )}
                         onClick={() => setTextAutoSizeAnchorForSelection('left')}
                         aria-label="왼쪽으로 확장"
                         title="왼쪽으로 확장"
                       >
                         <ArrowLeft className="h-3.5 w-3.5" />
-                      </button>,
+                      </button>
                       <button
-                        key="width-anchor-right"
                         type="button"
                         className={autoSizeInlineActionButtonClass(
                           selectedTextAutoSizeState.widthAnchorSide === 'right' &&
@@ -31687,9 +31662,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         title="오른쪽으로 확장"
                       >
                         <ArrowRight className="h-3.5 w-3.5" />
-                      </button>,
+                      </button>
                       <button
-                        key="width-fit-height"
                         type="button"
                         className={autoSizeInlineActionButtonClass(false)}
                         onClick={() => fitTextAutoSizeSecondaryAxisForSelection('height')}
@@ -31697,9 +31671,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         title="높이에 내용 맞추기"
                       >
                         <ArrowUpDown className="h-3.5 w-3.5" />
-                      </button>,
-                    ]
-                  ) : []
+                      </button>
+                    </>
+                  ) : null
                 )}
                 {renderTextAutoSizeModeOption('fixed', '고정 상자', selectedTextAutoSizeState.allFixed)}
               </div>
