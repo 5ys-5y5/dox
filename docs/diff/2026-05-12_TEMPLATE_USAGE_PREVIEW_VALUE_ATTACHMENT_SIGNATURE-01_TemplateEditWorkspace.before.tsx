@@ -80,10 +80,8 @@ type SelectionStyleDraft = {
   height: string;
   fontSize: string;
   lineHeight: string;
-  paddingTop: string;
-  paddingBottom: string;
-  paddingLeft: string;
-  paddingRight: string;
+  paddingX: string;
+  paddingY: string;
   borderRadius: string;
   fontFamily: string;
   fontWeight: string;
@@ -131,8 +129,6 @@ type StyleFieldKey = keyof SelectionStyleDraft;
 type StyleFieldApplyState = 'idle' | 'saving' | 'saved' | 'failed';
 type AppearanceBoxModelTarget = 'content' | 'border' | 'corner';
 type AppearanceColorPickerField = 'backgroundColor' | 'borderColor';
-type AppearancePaddingSide = Extract<TemplateEdgeSide, 'top' | 'bottom' | 'left' | 'right'>;
-type AppearanceCorner = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
 type TextAutoSizeMode = 'fixed' | 'height' | 'width';
 type TextAutoSizeAnchorSide = Extract<TemplateEdgeSide, 'top' | 'bottom' | 'left' | 'right'>;
 type TextAutoHeightAnchorSide = Extract<TextAutoSizeAnchorSide, 'top' | 'bottom'>;
@@ -162,8 +158,6 @@ type MetadataConnectionSuggestionOption = {
 type FrameStylePatch = Omit<Partial<SelectionStyleDraft>, 'width' | 'height'> & {
   width?: number;
   height?: number;
-  targetBorderSides?: TemplateEdgeSide[];
-  targetCorners?: AppearanceCorner[];
 };
 
 type FrameMetadataPatch = {
@@ -709,13 +703,7 @@ const TEMPLATE_USAGE_PREVIEW_MODE_ATTR = 'data-template-usage-preview-mode';
 const TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR = 'data-template-usage-preview-value-box';
 const TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR = 'data-template-usage-preview-control';
 const TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR = 'data-template-usage-preview-file-input';
-const TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR = 'data-template-usage-preview-file-mode';
-const TEMPLATE_USAGE_PREVIEW_FILE_DISPLAY_ATTR = 'data-template-usage-preview-file-display';
-const TEMPLATE_USAGE_PREVIEW_FILE_LIST_ATTR = 'data-template-usage-preview-file-list';
-const TEMPLATE_USAGE_PREVIEW_FILE_NAMES_ATTR = 'data-template-usage-preview-file-names';
-const TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR = 'data-template-usage-preview-file-add';
-const TEMPLATE_USAGE_PREVIEW_FILE_REMOVE_ATTR = 'data-template-usage-preview-file-remove';
-const TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR = 'data-template-usage-preview-file-index';
+const TEMPLATE_USAGE_PREVIEW_FILE_NAME_ATTR = 'data-template-usage-preview-file-name';
 const TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR = 'data-template-usage-preview-signature-canvas';
 const TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR = 'data-template-usage-preview-signature-clear';
 const TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR = 'data-v106-edit-permissions-tab';
@@ -1812,13 +1800,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
             )}
           </button>
           {isCollapsed ? null : (
-            <div
-              className={
-                overlayId === 'style'
-                  ? 'inline-flex max-h-[min(26rem,calc(100vh-14rem))] w-fit max-w-full flex-col gap-2.5 overflow-auto p-4'
-                  : 'max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2'
-              }
-            >
+            <div className="max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2">
               {contentRenderer ? contentRenderer() : content}
             </div>
           )}
@@ -1857,15 +1839,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         dangerouslySetInnerHTML={renderedPreviewMarkup}
       />
       {renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay)}
-      {renderFloatingOverlaySection(
-        'style',
-        '스타일',
-        styleOverlayCollapsed,
-        setStyleOverlayCollapsed,
-        finishStyleOverlayDrag,
-        styleOverlay,
-        { expandedWidthClassName: 'w-fit max-w-[calc(100%_-_1.5rem)]' }
-      )}
+      {renderFloatingOverlaySection('style', '스타일', styleOverlayCollapsed, setStyleOverlayCollapsed, finishStyleOverlayDrag, styleOverlay)}
       {renderFloatingOverlaySection(
         'metadataName',
         '상자명',
@@ -1914,16 +1888,6 @@ const TEMPLATE_FRAME_BOX_KIND_OPTIONS: TemplateFrameBoxKind[] = ['text', 'attach
 const TEMPLATE_FRAME_ROLE_OPTIONS: TemplateFrameRole[] = ['key', 'value', 'key_value'];
 const TEXT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['static_label', 'editable_text'];
 const ATTACHMENT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['file_slot'];
-const APPEARANCE_TARGET_BY_STYLE_FIELD: Partial<Record<StyleFieldKey, AppearanceBoxModelTarget>> = {
-  width: 'content',
-  height: 'content',
-  backgroundColor: 'content',
-  borderWidth: 'border',
-  borderColor: 'border',
-  borderStyle: 'border',
-  borderAlign: 'border',
-  borderRadius: 'corner',
-};
 const SIGNATURE_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = [
   'signature_image',
   'signature_history',
@@ -2197,10 +2161,8 @@ const defaultSelectionStyleDraft: SelectionStyleDraft = {
   height: '',
   fontSize: '',
   lineHeight: '',
-  paddingTop: '',
-  paddingBottom: '',
-  paddingLeft: '',
-  paddingRight: '',
+  paddingX: '',
+  paddingY: '',
   borderRadius: '',
   fontFamily: '',
   fontWeight: '',
@@ -2209,10 +2171,10 @@ const defaultSelectionStyleDraft: SelectionStyleDraft = {
   textAlign: 'left',
   color: '#0f172a',
   backgroundColor: 'transparent',
-  borderColor: '',
+  borderColor: '#0f172a',
   borderWidth: '',
-  borderStyle: '',
-  borderAlign: '',
+  borderStyle: 'solid',
+  borderAlign: 'inside',
 };
 
 const defaultStyleFieldApplyStatus: Record<StyleFieldKey, StyleFieldApplyState> = {
@@ -2220,10 +2182,8 @@ const defaultStyleFieldApplyStatus: Record<StyleFieldKey, StyleFieldApplyState> 
   height: 'idle',
   fontSize: 'idle',
   lineHeight: 'idle',
-  paddingTop: 'idle',
-  paddingBottom: 'idle',
-  paddingLeft: 'idle',
-  paddingRight: 'idle',
+  paddingX: 'idle',
+  paddingY: 'idle',
   borderRadius: 'idle',
   fontFamily: 'idle',
   fontWeight: 'idle',
@@ -2300,73 +2260,10 @@ const FRAME_BORDER_STYLE_LABEL_BY_VALUE = new Map(
 const FRAME_BORDER_ALIGN_LABEL_BY_VALUE = new Map(
   FRAME_BORDER_ALIGN_OPTIONS.map((option) => [option.value, option.label] as const)
 );
-const APPEARANCE_PADDING_SIDES: AppearancePaddingSide[] = ['top', 'bottom', 'left', 'right'];
-const APPEARANCE_BORDER_SIDES: TemplateEdgeSide[] = ['top', 'right', 'bottom', 'left'];
-const APPEARANCE_CORNERS: AppearanceCorner[] = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
-const APPEARANCE_CORNER_LABELS: Record<AppearanceCorner, string> = {
-  'top-left': '좌상',
-  'top-right': '우상',
-  'bottom-right': '우하',
-  'bottom-left': '좌하',
-};
-const APPEARANCE_BORDER_SIDE_LABELS: Record<TemplateEdgeSide, string> = {
-  top: '상',
-  right: '우',
-  bottom: '하',
-  left: '좌',
-};
-const APPEARANCE_PADDING_FIELD_BY_SIDE: Record<AppearancePaddingSide, keyof SelectionStyleDraft> = {
-  top: 'paddingTop',
-  bottom: 'paddingBottom',
-  left: 'paddingLeft',
-  right: 'paddingRight',
-};
-const APPEARANCE_CORNER_RADIUS_STYLE_PROP: Record<AppearanceCorner, 'borderTopLeftRadius' | 'borderTopRightRadius' | 'borderBottomRightRadius' | 'borderBottomLeftRadius'> = {
-  'top-left': 'borderTopLeftRadius',
-  'top-right': 'borderTopRightRadius',
-  'bottom-right': 'borderBottomRightRadius',
-  'bottom-left': 'borderBottomLeftRadius',
-};
-const APPEARANCE_BORDER_SIDE_WIDTH_STYLE_PROP: Record<TemplateEdgeSide, 'borderTopWidth' | 'borderRightWidth' | 'borderBottomWidth' | 'borderLeftWidth'> = {
-  top: 'borderTopWidth',
-  right: 'borderRightWidth',
-  bottom: 'borderBottomWidth',
-  left: 'borderLeftWidth',
-};
-const APPEARANCE_BORDER_SIDE_STYLE_STYLE_PROP: Record<TemplateEdgeSide, 'borderTopStyle' | 'borderRightStyle' | 'borderBottomStyle' | 'borderLeftStyle'> = {
-  top: 'borderTopStyle',
-  right: 'borderRightStyle',
-  bottom: 'borderBottomStyle',
-  left: 'borderLeftStyle',
-};
-const APPEARANCE_BORDER_SIDE_COLOR_STYLE_PROP: Record<TemplateEdgeSide, 'borderTopColor' | 'borderRightColor' | 'borderBottomColor' | 'borderLeftColor'> = {
-  top: 'borderTopColor',
-  right: 'borderRightColor',
-  bottom: 'borderBottomColor',
-  left: 'borderLeftColor',
-};
 const TEMPLATE_FRAME_BORDER_ALIGN_ATTR = 'data-template-frame-border-align';
 const TEMPLATE_FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
 const TEMPLATE_FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
 const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
-const TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR: Record<TemplateEdgeSide, string> = {
-  top: 'data-template-frame-border-top-width',
-  right: 'data-template-frame-border-right-width',
-  bottom: 'data-template-frame-border-bottom-width',
-  left: 'data-template-frame-border-left-width',
-};
-const TEMPLATE_FRAME_BORDER_SIDE_STYLE_ATTR: Record<TemplateEdgeSide, string> = {
-  top: 'data-template-frame-border-top-style',
-  right: 'data-template-frame-border-right-style',
-  bottom: 'data-template-frame-border-bottom-style',
-  left: 'data-template-frame-border-left-style',
-};
-const TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR: Record<TemplateEdgeSide, string> = {
-  top: 'data-template-frame-border-top-color',
-  right: 'data-template-frame-border-right-color',
-  bottom: 'data-template-frame-border-bottom-color',
-  left: 'data-template-frame-border-left-color',
-};
 const normalizeFrameBorderStyleValue = (value: string | null | undefined, borderWidth = 1) => {
   const normalizedValue = String(value || '').trim().toLowerCase();
 
@@ -11246,88 +11143,6 @@ const hasLegacyTransparentFrameGuide = (element: HTMLElement) => {
   });
 };
 
-const readElementBorderSideAppearance = (element: HTMLElement, side: TemplateEdgeSide) => {
-  const computedStyle = getComputedStyle(element);
-  const styleProp = APPEARANCE_BORDER_SIDE_STYLE_STYLE_PROP[side];
-  const widthProp = APPEARANCE_BORDER_SIDE_WIDTH_STYLE_PROP[side];
-  const colorProp = APPEARANCE_BORDER_SIDE_COLOR_STYLE_PROP[side];
-  const storedWidth = normalizeFrameBorderWidthValue(element.getAttribute(TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR[side]));
-  const storedStyle = element.getAttribute(TEMPLATE_FRAME_BORDER_SIDE_STYLE_ATTR[side])?.trim() || '';
-  const storedColor = colorToHex(element.getAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side]) || '');
-  const width = storedWidth ?? parseFramePx(computedStyle[widthProp]);
-  const style = normalizeFrameBorderStyleValue(storedStyle || computedStyle[styleProp], width);
-  const color = storedColor || colorToHex(computedStyle[colorProp] || '') || '#0f172a';
-
-  return {
-    width,
-    style,
-    color,
-  };
-};
-
-const persistElementBorderSideAppearance = (
-  element: HTMLElement,
-  side: TemplateEdgeSide,
-  appearance: {
-    width: number;
-    style: string;
-    color: string;
-  }
-) => {
-  const widthProp = APPEARANCE_BORDER_SIDE_WIDTH_STYLE_PROP[side];
-  const styleProp = APPEARANCE_BORDER_SIDE_STYLE_STYLE_PROP[side];
-  const colorProp = APPEARANCE_BORDER_SIDE_COLOR_STYLE_PROP[side];
-  const hasVisibleBorder = appearance.width > 0 && appearance.style !== 'none';
-
-  element.style[widthProp] = `${hasVisibleBorder ? appearance.width : 0}px`;
-  element.style[styleProp] = hasVisibleBorder ? appearance.style : 'none';
-  element.style[colorProp] = hasVisibleBorder ? appearance.color || '#0f172a' : 'transparent';
-  element.setAttribute(TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR[side], formatFrameBorderWidthValue(hasVisibleBorder ? appearance.width : 0));
-  element.setAttribute(TEMPLATE_FRAME_BORDER_SIDE_STYLE_ATTR[side], hasVisibleBorder ? appearance.style : 'none');
-  if (hasVisibleBorder && appearance.color) {
-    element.setAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side], appearance.color);
-  } else {
-    element.removeAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side]);
-  }
-};
-
-const materializeElementBorderAppearanceToInside = (element: HTMLElement) => {
-  const current = readElementBorderAppearance(element);
-  const normalizedStyle = normalizeFrameBorderStyleValue(current.style, current.width);
-  const hasVisibleBorder = current.width > 0 && normalizedStyle !== 'none';
-
-  (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).forEach((side) => {
-    persistElementBorderSideAppearance(element, side, {
-      width: hasVisibleBorder ? current.width : 0,
-      style: hasVisibleBorder ? normalizedStyle : 'none',
-      color: current.color || '#0f172a',
-    });
-  });
-
-  element.style.boxSizing = 'border-box';
-  element.style.outline = 'none';
-  element.style.outlineOffset = '0px';
-  element.style.borderTopWidth = `${hasVisibleBorder ? current.width : 0}px`;
-  element.style.borderRightWidth = `${hasVisibleBorder ? current.width : 0}px`;
-  element.style.borderBottomWidth = `${hasVisibleBorder ? current.width : 0}px`;
-  element.style.borderLeftWidth = `${hasVisibleBorder ? current.width : 0}px`;
-  element.style.borderTopStyle = hasVisibleBorder ? normalizedStyle : 'none';
-  element.style.borderRightStyle = hasVisibleBorder ? normalizedStyle : 'none';
-  element.style.borderBottomStyle = hasVisibleBorder ? normalizedStyle : 'none';
-  element.style.borderLeftStyle = hasVisibleBorder ? normalizedStyle : 'none';
-  element.style.borderTopColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
-  element.style.borderRightColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
-  element.style.borderBottomColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
-  element.style.borderLeftColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
-  element.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
-};
-
-const readElementCornerRadiusValue = (element: HTMLElement, corner: AppearanceCorner) => {
-  const computedStyle = getComputedStyle(element);
-  const styleProp = APPEARANCE_CORNER_RADIUS_STYLE_PROP[corner];
-  return normalizeNumericStyleValue(computedStyle[styleProp] || '');
-};
-
 const readElementBorderAppearance = (element: HTMLElement) => {
   const computedStyle = getComputedStyle(element);
   const hasStoredBorderAppearance =
@@ -11434,8 +11249,7 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
   let nextWidth = current.width;
   let nextStyle = current.style;
   const nextAlign = patch.borderAlign !== undefined ? normalizeFrameBorderAlignValue(patch.borderAlign) : current.align;
-  const hasExplicitBorderColor = patch.borderColor !== undefined;
-  const nextColorCandidate =
+  const nextColor =
     patch.borderColor !== undefined
       ? colorToHex(patch.borderColor) || patch.borderColor || current.color || '#0f172a'
       : current.color || '#0f172a';
@@ -11457,13 +11271,6 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
   }
 
   const hasVisibleBorder = nextWidth > 0 && nextStyle !== 'none';
-  const nextColor = hasVisibleBorder
-    ? hasExplicitBorderColor
-      ? nextColorCandidate || '#0f172a'
-      : nextColorCandidate && nextColorCandidate !== 'transparent'
-        ? nextColorCandidate
-        : '#0f172a'
-    : nextColorCandidate || 'transparent';
   const insideWidth = hasVisibleBorder
     ? nextAlign === 'outside'
       ? 0
@@ -11502,124 +11309,6 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
   } else {
     element.removeAttribute('data-template-frame-outline-style');
   }
-
-  (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).forEach((side) => {
-    persistElementBorderSideAppearance(element, side, {
-      width: hasVisibleBorder ? nextWidth : 0,
-      style: hasVisibleBorder ? nextStyle : 'none',
-      color: nextColor || '#0f172a',
-    });
-  });
-};
-
-const applyElementBorderSideAppearanceStylePatch = (
-  element: HTMLElement,
-  patch: FrameStylePatch,
-  sides: TemplateEdgeSide[]
-) => {
-  const nextSides = Array.from(new Set(sides.map((side) => side.trim() as TemplateEdgeSide))).filter((side) =>
-    APPEARANCE_BORDER_SIDE_WIDTH_STYLE_PROP[side]
-  );
-
-  if (nextSides.length <= 0) {
-    return;
-  }
-
-  materializeElementBorderAppearanceToInside(element);
-
-  nextSides.forEach((side) => {
-    const current = readElementBorderSideAppearance(element, side);
-    let nextWidth = current.width;
-    let nextStyle = current.style;
-    const hasExplicitBorderColor = patch.borderColor !== undefined;
-    const nextColorCandidate =
-      patch.borderColor !== undefined
-        ? colorToHex(patch.borderColor) || patch.borderColor || current.color || '#0f172a'
-        : current.color || '#0f172a';
-
-    if (patch.borderWidth !== undefined) {
-      nextWidth = normalizeFrameBorderWidthValue(patch.borderWidth) ?? 0;
-    }
-
-    if (patch.borderStyle !== undefined) {
-      nextStyle = normalizeFrameBorderStyleValue(patch.borderStyle, Math.max(nextWidth, 1));
-    }
-
-    if (patch.borderWidth !== undefined && patch.borderStyle === undefined && nextWidth > 0 && nextStyle === 'none') {
-      nextStyle = 'solid';
-    }
-
-    if (patch.borderStyle !== undefined && nextStyle !== 'none' && nextWidth <= 0) {
-      nextWidth = 1;
-    }
-
-    const hasVisibleBorder = nextWidth > 0 && nextStyle !== 'none';
-    const nextColor = hasVisibleBorder
-      ? hasExplicitBorderColor
-        ? nextColorCandidate || '#0f172a'
-        : nextColorCandidate && nextColorCandidate !== 'transparent'
-          ? nextColorCandidate
-          : '#0f172a'
-      : nextColorCandidate || 'transparent';
-
-    persistElementBorderSideAppearance(element, side, {
-      width: nextWidth,
-      style: nextStyle,
-      color: nextColor,
-    });
-  });
-
-  element.style.outline = 'none';
-  element.style.outlineOffset = '0px';
-  element.style.outlineWidth = '0px';
-  element.style.outlineStyle = 'none';
-  element.style.outlineColor = 'transparent';
-  element.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
-  element.setAttribute(
-    'data-template-frame-outline-style',
-    (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).some((side) => {
-      const appearance = readElementBorderSideAppearance(element, side);
-      return appearance.width > 0 && appearance.style !== 'none';
-    })
-      ? 'solid'
-      : 'none'
-  );
-};
-
-const applyElementCornerRadiusStylePatch = (
-  element: HTMLElement,
-  radiusValue: string | null | undefined,
-  corners: AppearanceCorner[]
-) => {
-  const parsedRadius = Number.parseFloat(radiusValue || '');
-  const safeRadius = Number.isFinite(parsedRadius) ? Math.max(0, parsedRadius) : 0;
-  const targetCorners = corners.length > 0 ? corners : APPEARANCE_CORNERS;
-
-  targetCorners.forEach((corner) => {
-    const styleProp = APPEARANCE_CORNER_RADIUS_STYLE_PROP[corner];
-    element.style[styleProp] = radiusValue ? `${safeRadius}px` : '';
-  });
-};
-
-const applyElementPaddingStylePatch = (element: HTMLElement, patch: FrameStylePatch) => {
-  const computedStyle = getComputedStyle(element);
-  const nextPaddingTop =
-    patch.paddingTop !== undefined ? Number.parseFloat(patch.paddingTop || '0') : parseFramePx(computedStyle.paddingTop || '0');
-  const nextPaddingBottom =
-    patch.paddingBottom !== undefined
-      ? Number.parseFloat(patch.paddingBottom || '0')
-      : parseFramePx(computedStyle.paddingBottom || '0');
-  const nextPaddingLeft =
-    patch.paddingLeft !== undefined ? Number.parseFloat(patch.paddingLeft || '0') : parseFramePx(computedStyle.paddingLeft || '0');
-  const nextPaddingRight =
-    patch.paddingRight !== undefined
-      ? Number.parseFloat(patch.paddingRight || '0')
-      : parseFramePx(computedStyle.paddingRight || '0');
-
-  element.style.paddingTop = `${Number.isFinite(nextPaddingTop) ? nextPaddingTop : 0}px`;
-  element.style.paddingBottom = `${Number.isFinite(nextPaddingBottom) ? nextPaddingBottom : 0}px`;
-  element.style.paddingLeft = `${Number.isFinite(nextPaddingLeft) ? nextPaddingLeft : 0}px`;
-  element.style.paddingRight = `${Number.isFinite(nextPaddingRight) ? nextPaddingRight : 0}px`;
 };
 
 const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
@@ -11636,11 +11325,6 @@ const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
       element.removeAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR);
       element.removeAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR);
       element.removeAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
-      (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).forEach((side) => {
-        element.removeAttribute(TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR[side]);
-        element.removeAttribute(TEMPLATE_FRAME_BORDER_SIDE_STYLE_ATTR[side]);
-        element.removeAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side]);
-      });
       element.removeAttribute('data-template-frame-outline-style');
     });
 };
@@ -11705,7 +11389,7 @@ const resolveFrameContentTarget = (node: HTMLElement) => {
   );
 };
 
-const isTemplateUsageValueRole = (role: TemplateFrameRole | 'group' | '') => role === 'value';
+const isTemplateUsageValueRole = (role: TemplateFrameRole | 'group' | '') => role === 'value' || role === 'key_value';
 
 const clearElementChildren = (element: HTMLElement) => {
   while (element.firstChild) {
@@ -11715,34 +11399,16 @@ const clearElementChildren = (element: HTMLElement) => {
 
 const replaceFrameContentTarget = (node: HTMLElement, replacement: HTMLElement) => {
   const target = resolveFrameContentTarget(node);
-  const computedStyle = getComputedStyle(target);
-
-  replacement.style.boxSizing = 'border-box';
-  replacement.style.width = '100%';
-  replacement.style.height = '100%';
-  replacement.style.minWidth = '0px';
-  replacement.style.minHeight = '0px';
-  replacement.style.font = computedStyle.font;
-  replacement.style.lineHeight = computedStyle.lineHeight;
-  replacement.style.letterSpacing = computedStyle.letterSpacing;
-  replacement.style.color = computedStyle.color;
-  replacement.style.textAlign = computedStyle.textAlign;
-  replacement.style.whiteSpace = computedStyle.whiteSpace;
 
   if (
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLInputElement ||
     (target !== node && target.hasAttribute('data-template-frame-input'))
   ) {
-    replacement.style.paddingTop = computedStyle.paddingTop;
-    replacement.style.paddingBottom = computedStyle.paddingBottom;
-    replacement.style.paddingLeft = computedStyle.paddingLeft;
-    replacement.style.paddingRight = computedStyle.paddingRight;
     target.replaceWith(replacement);
     return replacement;
   }
 
-  replacement.style.padding = '0px';
   clearElementChildren(target);
   target.appendChild(replacement);
   return replacement;
@@ -11758,7 +11424,7 @@ const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
     input.value = '';
     input.defaultValue = '';
     input.setAttribute('value', '');
-    input.removeAttribute('placeholder');
+    input.setAttribute('placeholder', label);
     input.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
     input.removeAttribute('readonly');
     input.removeAttribute('disabled');
@@ -11776,84 +11442,9 @@ const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
   target.setAttribute('contenteditable', 'true');
   target.setAttribute('role', 'textbox');
   target.setAttribute('aria-label', label);
-  target.removeAttribute('data-placeholder');
+  target.setAttribute('data-placeholder', label);
   target.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
   target.tabIndex = 0;
-};
-
-const readTemplateUsagePreviewFileNames = (control: HTMLElement) => {
-  const rawValue = control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_NAMES_ATTR);
-
-  if (!rawValue) {
-    return [] as string[];
-  }
-
-  try {
-    const parsedValue = JSON.parse(rawValue);
-
-    if (!Array.isArray(parsedValue)) {
-      return [] as string[];
-    }
-
-    return parsedValue
-      .map((value) => String(value || '').trim())
-      .filter((value) => Boolean(value));
-  } catch {
-    return [] as string[];
-  }
-};
-
-const writeTemplateUsagePreviewFileNames = (control: HTMLElement, fileNames: string[]) => {
-  control.setAttribute(
-    TEMPLATE_USAGE_PREVIEW_FILE_NAMES_ATTR,
-    JSON.stringify(
-      fileNames.map((value) => String(value || '').trim()).filter((value) => Boolean(value))
-    )
-  );
-};
-
-const setTemplateUsagePreviewAttachmentEditMode = (control: HTMLElement, editMode: boolean) => {
-  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR, editMode ? 'edit' : 'view');
-};
-
-const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
-  const fileNames = readTemplateUsagePreviewFileNames(control);
-  const display = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_DISPLAY_ATTR}="true"]`);
-  const fileList = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_LIST_ATTR}="true"]`);
-
-  if (display) {
-    clearElementChildren(display);
-    fileNames.forEach((fileName) => {
-      const line = document.createElement('div');
-      line.className = 'v106-template-usage-file-display-line';
-      line.textContent = fileName;
-      display.appendChild(line);
-    });
-  }
-
-  if (fileList) {
-    clearElementChildren(fileList);
-    fileNames.forEach((fileName, index) => {
-      const row = document.createElement('div');
-      row.className = 'v106-template-usage-file-item';
-      row.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR, String(index));
-
-      const fileNameLabel = document.createElement('div');
-      fileNameLabel.className = 'v106-template-usage-file-item-name';
-      fileNameLabel.textContent = fileName;
-
-      const removeButton = document.createElement('button');
-      removeButton.type = 'button';
-      removeButton.className = 'v106-template-usage-file-remove';
-      removeButton.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_REMOVE_ATTR, 'true');
-      removeButton.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR, String(index));
-      removeButton.textContent = '삭제';
-
-      row.appendChild(fileNameLabel);
-      row.appendChild(removeButton);
-      fileList.appendChild(row);
-    });
-  }
 };
 
 const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
@@ -11861,43 +11452,24 @@ const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
   const control = document.createElement('div');
   control.className = 'v106-template-usage-file-control';
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'attachment');
-  control.setAttribute('role', 'group');
-  control.setAttribute('aria-label', `${label} 첨부파일`);
-  control.tabIndex = 0;
-  setTemplateUsagePreviewAttachmentEditMode(control, false);
 
-  const fileDisplay = document.createElement('div');
-  fileDisplay.className = 'v106-template-usage-file-display';
-  fileDisplay.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_DISPLAY_ATTR, 'true');
-
-  const fileToolbar = document.createElement('div');
-  fileToolbar.className = 'v106-template-usage-file-toolbar';
-
-  const addButton = document.createElement('button');
-  addButton.type = 'button';
-  addButton.className = 'v106-template-usage-file-add';
-  addButton.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR, 'true');
-  addButton.setAttribute('aria-label', `${label} 파일 추가`);
-  addButton.textContent = '+';
+  const fileLabel = document.createElement('label');
+  fileLabel.className = 'v106-template-usage-file-label';
+  fileLabel.textContent = '파일 선택';
 
   const input = document.createElement('input');
   input.type = 'file';
-  input.multiple = true;
   input.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR, 'true');
   input.setAttribute('aria-label', `${label} 파일 선택`);
-  input.setAttribute('multiple', 'true');
+  fileLabel.appendChild(input);
 
-  const fileList = document.createElement('div');
-  fileList.className = 'v106-template-usage-file-list';
-  fileList.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_LIST_ATTR, 'true');
+  const fileName = document.createElement('div');
+  fileName.className = 'v106-template-usage-file-name';
+  fileName.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_NAME_ATTR, 'true');
+  fileName.textContent = '선택된 파일 없음';
 
-  fileToolbar.appendChild(addButton);
-  fileToolbar.appendChild(input);
-  control.appendChild(fileDisplay);
-  control.appendChild(fileToolbar);
-  control.appendChild(fileList);
-  writeTemplateUsagePreviewFileNames(control, []);
-  renderTemplateUsagePreviewAttachmentControl(control);
+  control.appendChild(fileLabel);
+  control.appendChild(fileName);
   replaceFrameContentTarget(node, control);
 };
 
@@ -12045,20 +11617,11 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
 
     const frameNode = resolveFrameSelectionAnchor(input.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
     const control = input.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+    const fileName = control?.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_NAME_ATTR}="true"]`) || null;
 
-    if (control) {
-      const nextFileNames = [
-        ...readTemplateUsagePreviewFileNames(control),
-        ...Array.from(input.files || [])
-          .map((file) => String(file.name || '').trim())
-          .filter((fileName) => Boolean(fileName)),
-      ];
-      writeTemplateUsagePreviewFileNames(control, nextFileNames);
-      renderTemplateUsagePreviewAttachmentControl(control);
-      setTemplateUsagePreviewAttachmentEditMode(control, true);
+    if (fileName) {
+      fileName.textContent = input.files?.[0]?.name || '선택된 파일 없음';
     }
-
-    input.value = '';
 
     applyTemplateUsagePreviewAutoSize(root, frameNode);
   };
@@ -12126,59 +11689,12 @@ const attachTemplateUsagePreviewRuntimeHandlers = (root: HTMLElement) => {
     activeSignatureDrawStateByPointerId.delete(event.pointerId);
   };
   const handleRuntimeClick = (event: MouseEvent) => {
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    const attachmentControls = Array.from(
-      root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`)
-    );
-    const addButton = target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR}="true"]`) || null;
-
-    if (addButton) {
-      event.preventDefault();
-      event.stopPropagation();
-      const control = addButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
-      const input = control?.querySelector<HTMLInputElement>(`input[${TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR}="true"]`) || null;
-
-      if (control) {
-        attachmentControls.forEach((candidate) =>
-          setTemplateUsagePreviewAttachmentEditMode(candidate, candidate === control)
-        );
-      }
-
-      input?.click();
-      return;
-    }
-
-    const removeButton = target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_REMOVE_ATTR}="true"]`) || null;
-
-    if (removeButton) {
-      event.preventDefault();
-      event.stopPropagation();
-      const control = removeButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
-      const frameNode = resolveFrameSelectionAnchor(removeButton.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
-      const removeIndex = Number(removeButton.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR));
-
-      if (control) {
-        const nextFileNames = readTemplateUsagePreviewFileNames(control).filter((_, index) => index !== removeIndex);
-        writeTemplateUsagePreviewFileNames(control, nextFileNames);
-        renderTemplateUsagePreviewAttachmentControl(control);
-        setTemplateUsagePreviewAttachmentEditMode(control, true);
-      }
-
-      applyTemplateUsagePreviewAutoSize(root, frameNode);
-      return;
-    }
-
     const clearButton =
-      target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR}="true"]`) || null;
+      event.target instanceof HTMLElement
+        ? event.target.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR}="true"]`)
+        : null;
 
     if (!clearButton) {
-      const activeAttachmentControl =
-        target?.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`) || null;
-
-      attachmentControls.forEach((control) => {
-        setTemplateUsagePreviewAttachmentEditMode(control, control === activeAttachmentControl);
-      });
-
       return;
     }
 
@@ -14792,11 +14308,6 @@ const applyFrameStylePatch = (
 ) => {
   const contentTarget = resolveFrameContentTarget(node);
   const persistedFrameNode = resolvePersistedFrameNode(node);
-  const shellTarget = resolveFrameLayoutShell(node);
-  const persistedShellTarget = persistedFrameNode ? resolveFrameLayoutShell(persistedFrameNode) : null;
-  const styleShellTargets = Array.from(
-    new Set([shellTarget, persistedShellTarget].filter((target): target is HTMLElement => Boolean(target)))
-  );
 
   if (typeof patch.width === 'number' && Number.isFinite(patch.width)) {
     applyPositionStyleWidth(node, patch.width);
@@ -14845,15 +14356,7 @@ const applyFrameStylePatch = (
   }
 
   if (patch.backgroundColor !== undefined) {
-    if (node !== shellTarget) {
-      node.style.backgroundColor = '';
-    }
-    if (persistedFrameNode && persistedFrameNode !== shellTarget) {
-      persistedFrameNode.style.backgroundColor = '';
-    }
-    styleShellTargets.forEach((target) => {
-      target.style.backgroundColor = patch.backgroundColor || '';
-    });
+    node.style.backgroundColor = patch.backgroundColor || '';
   }
 
   if (
@@ -14862,36 +14365,23 @@ const applyFrameStylePatch = (
     patch.borderStyle !== undefined ||
     patch.borderAlign !== undefined
   ) {
-    if (Array.isArray(patch.targetBorderSides) && patch.targetBorderSides.length === 0) {
-      // Intentionally no-op when the UI has no active edge targets.
-    } else if ((patch.targetBorderSides || []).length > 0 && (patch.targetBorderSides || []).length < 4) {
-      styleShellTargets.forEach((target) => {
-        applyElementBorderSideAppearanceStylePatch(target, patch, patch.targetBorderSides || []);
-        clearNestedFrameBorderAppearanceStyles(target);
-      });
-    } else {
-      styleShellTargets.forEach((target) => {
-        applyElementBorderAppearanceStylePatch(target, patch);
-        clearNestedFrameBorderAppearanceStyles(target);
-      });
-    }
+    applyElementBorderAppearanceStylePatch(node, patch);
+    clearNestedFrameBorderAppearanceStyles(resolveFrameLayoutShell(node));
   }
 
   if (patch.borderRadius !== undefined) {
-    if (!Array.isArray(patch.targetCorners) || patch.targetCorners.length > 0) {
-      styleShellTargets.forEach((target) => {
-        applyElementCornerRadiusStylePatch(target, patch.borderRadius, patch.targetCorners || APPEARANCE_CORNERS);
-      });
+    node.style.borderRadius = patch.borderRadius ? `${Number.parseFloat(patch.borderRadius)}px` : '';
+    if (persistedFrameNode && persistedFrameNode !== node) {
+      persistedFrameNode.style.borderRadius = patch.borderRadius ? `${Number.parseFloat(patch.borderRadius)}px` : '';
     }
   }
 
-  if (
-    patch.paddingTop !== undefined ||
-    patch.paddingBottom !== undefined ||
-    patch.paddingLeft !== undefined ||
-    patch.paddingRight !== undefined
-  ) {
-    applyElementPaddingStylePatch(contentTarget, patch);
+  if (patch.paddingX !== undefined || patch.paddingY !== undefined) {
+    const paddingX = patch.paddingX !== undefined ? Number.parseFloat(patch.paddingX || '0') : NaN;
+    const paddingY = patch.paddingY !== undefined ? Number.parseFloat(patch.paddingY || '0') : NaN;
+    const safePaddingX = Number.isFinite(paddingX) ? paddingX : parseFramePx(contentTarget.style.paddingLeft || '0');
+    const safePaddingY = Number.isFinite(paddingY) ? paddingY : parseFramePx(contentTarget.style.paddingTop || '0');
+    contentTarget.style.padding = `${safePaddingY}px ${safePaddingX}px`;
   }
 };
 
@@ -14903,10 +14393,8 @@ const frameStylePatchCanChangeContentMeasurement = (patch: FrameStylePatch) =>
   patch.fontFamily !== undefined ||
   patch.fontWeight !== undefined ||
   patch.fontStyle !== undefined ||
-  patch.paddingTop !== undefined ||
-  patch.paddingBottom !== undefined ||
-  patch.paddingLeft !== undefined ||
-  patch.paddingRight !== undefined ||
+  patch.paddingX !== undefined ||
+  patch.paddingY !== undefined ||
   patch.borderWidth !== undefined ||
   patch.borderStyle !== undefined ||
   patch.borderAlign !== undefined;
@@ -14933,13 +14421,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [styleFieldApplyStatus, setStyleFieldApplyStatus] =
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
-  const [activeInlineStyleField, setActiveInlineStyleField] = React.useState<StyleFieldKey | null>(null);
   const [appearanceBoxModelTarget, setAppearanceBoxModelTarget] =
     React.useState<AppearanceBoxModelTarget>('content');
-  const [appearanceTargetBorderSides, setAppearanceTargetBorderSides] =
-    React.useState<TemplateEdgeSide[]>(() => [...APPEARANCE_BORDER_SIDES]);
-  const [appearanceTargetCorners, setAppearanceTargetCorners] =
-    React.useState<AppearanceCorner[]>(() => [...APPEARANCE_CORNERS]);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
@@ -14991,8 +14474,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [metadataConnectionPickerOpen, setMetadataConnectionPickerOpen] = React.useState(false);
   const [styleColorPickerOpen, setStyleColorPickerOpen] = React.useState<null | 'color' | 'backgroundColor' | 'borderColor'>(null);
   const [borderStylePickerOpen, setBorderStylePickerOpen] = React.useState(false);
-  const [textPaddingEditSide, setTextPaddingEditSide] = React.useState<AppearancePaddingSide>('top');
-  const [selectionAppearanceToolbarWidth, setSelectionAppearanceToolbarWidth] = React.useState<number | null>(null);
   const [selectionSaveProgress, setSelectionSaveProgress] =
     React.useState<SelectionSaveProgressState>(defaultSelectionSaveProgressState);
   const [hasSelectionProgressHistory, setHasSelectionProgressHistory] = React.useState(false);
@@ -15009,7 +14490,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
-  const selectionAppearanceToolbarRef = React.useRef<HTMLDivElement | null>(null);
   const previousSelectionPanelTabRef = React.useRef<SelectionPanelTab>('position');
   const draftPreviewHtmlRef = React.useRef('');
   const selectedFrameGroupIdsRef = React.useRef<string[]>([]);
@@ -15047,32 +14527,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const canvasHistoryNavigationInProgressRef = React.useRef(false);
   const queuedAutoPersistDraftHtmlRef = React.useRef('');
   const lastPersistedDraftHtmlRef = React.useRef('');
-  const templateUsagePreviewEditorDraftSnapshotRef = React.useRef('');
-  const templateUsagePreviewRenderSnapshotRef = React.useRef('');
-
-  const syncSelectionAppearanceToolbarWidth = React.useCallback((toolbarNode: HTMLDivElement | null) => {
-    if (!toolbarNode) {
-      setSelectionAppearanceToolbarWidth(null);
-      return;
-    }
-
-    const nextWidth = toolbarNode.getBoundingClientRect().width;
-    setSelectionAppearanceToolbarWidth((previousWidth) => {
-      if (!Number.isFinite(nextWidth) || nextWidth <= 0) {
-        return previousWidth;
-      }
-
-      return previousWidth !== null && Math.abs(previousWidth - nextWidth) < 0.5 ? previousWidth : nextWidth;
-    });
-  }, []);
-
-  const handleSelectionAppearanceToolbarRef = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      selectionAppearanceToolbarRef.current = node;
-      syncSelectionAppearanceToolbarWidth(node);
-    },
-    [syncSelectionAppearanceToolbarWidth]
-  );
 
   const templateOptions = React.useMemo<TemplateOption[]>(
     () =>
@@ -15398,45 +14852,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setMetadataConnectionPickerOpen(false);
     setStyleColorPickerOpen(null);
     setBorderStylePickerOpen(false);
-    setAppearanceBoxModelTarget('content');
-    setAppearanceTargetBorderSides([]);
-    setAppearanceTargetCorners([]);
   }, [selectedFrameGroupIds, selectionPanelTab]);
-
-  React.useLayoutEffect(() => {
-    if (selectionPanelTab !== 'position') {
-      setSelectionAppearanceToolbarWidth(null);
-      return;
-    }
-
-    const toolbarNode = selectionAppearanceToolbarRef.current;
-
-    if (!toolbarNode) {
-      setSelectionAppearanceToolbarWidth(null);
-      return;
-    }
-
-    const syncToolbarWidth = () => {
-      syncSelectionAppearanceToolbarWidth(toolbarNode);
-    };
-
-    syncToolbarWidth();
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', syncToolbarWidth);
-      return () => {
-        window.removeEventListener('resize', syncToolbarWidth);
-      };
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      syncToolbarWidth();
-    });
-    resizeObserver.observe(toolbarNode);
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [selectionPanelTab, selectedFrameGroupIds, selectionStyleDraft, syncSelectionAppearanceToolbarWidth]);
 
   React.useEffect(() => {
     if (selectionPanelTab !== 'metadata' && metadataRelationSelectionModeRef.current.kind !== 'idle') {
@@ -15655,12 +15071,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const toggleTemplateUsagePreviewMode = React.useCallback(() => {
     if (templateUsagePreviewMode) {
-      if (templateUsagePreviewRenderSnapshotRef.current.trim()) {
-        setPreviewHtml(templateUsagePreviewRenderSnapshotRef.current);
-      }
-      if (templateUsagePreviewEditorDraftSnapshotRef.current.trim()) {
-        draftPreviewHtmlRef.current = templateUsagePreviewEditorDraftSnapshotRef.current;
-      }
       setTemplateUsagePreviewMode(false);
       setTemplateUsagePreviewHtml('');
       setPreviewDomVersion((previous) => previous + 1);
@@ -15675,9 +15085,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    const editorDraftHtml = syncDraftPreviewHtmlRef({ recordHistory: false });
-    templateUsagePreviewEditorDraftSnapshotRef.current = editorDraftHtml;
-    templateUsagePreviewRenderSnapshotRef.current = extractPreviewRenderHtml(root);
+    syncDraftPreviewHtmlRef({ recordHistory: false });
     const runtimeHtml = buildTemplateUsagePreviewHtml(root);
 
     if (!runtimeHtml.trim()) {
@@ -22284,12 +21692,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
   const resolveSelectionAppearanceStyleTargets = React.useCallback(
     (root: HTMLElement) => {
-      const activeSelectionIds =
-        selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
-          ? selectedPositionResolvedFrameGroupIds
-          : selectedFrameGroupIdsRef.current.length > 0
-            ? selectedFrameGroupIdsRef.current
-            : selectedFrameGroupIds;
+      const activeSelectionIds = selectedFrameGroupIdsRef.current.length > 0
+        ? selectedFrameGroupIdsRef.current
+        : selectedFrameGroupIds;
       const selectedIdSet = new Set(activeSelectionIds);
 
       return {
@@ -22299,9 +21704,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [
       getFrameNodes,
-      selectedPositionResolvedFrameGroupIds,
       selectedFrameGroupIds,
-      selectionPanelTab,
     ]
   );
 
@@ -22332,17 +21735,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const lineHeights = nodes.map((node) =>
       normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).lineHeight)
     );
-    const paddingTops = nodes.map((node) =>
-      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingTop)
-    );
-    const paddingBottoms = nodes.map((node) =>
-      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingBottom)
-    );
-    const paddingLefts = nodes.map((node) =>
+    const paddingXs = nodes.map((node) =>
       normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingLeft)
     );
-    const paddingRights = nodes.map((node) =>
-      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingRight)
+    const paddingYs = nodes.map((node) =>
+      normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingTop)
     );
     const borderRadii = nodes.map((node) =>
       normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetShell(node)).borderRadius)
@@ -22371,10 +21768,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       height: getSharedValue(heights),
       fontSize: getSharedValue(fontSizes),
       lineHeight: getSharedValue(lineHeights),
-      paddingTop: getSharedValue(paddingTops),
-      paddingBottom: getSharedValue(paddingBottoms),
-      paddingLeft: getSharedValue(paddingLefts),
-      paddingRight: getSharedValue(paddingRights),
+      paddingX: getSharedValue(paddingXs),
+      paddingY: getSharedValue(paddingYs),
       borderRadius: getSharedValue(borderRadii),
       fontFamily: getSharedValue(fontFamilies),
       fontWeight: getSharedValue(fontWeights),
@@ -22389,7 +21784,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       borderColor: getSharedValue(borderColors),
       borderWidth: getSharedValue(borderWidths),
       borderStyle: getSharedValue(borderStyles),
-      borderAlign: getSharedValue(borderAligns),
+      borderAlign: getSharedValue(borderAligns) || 'inside',
     });
   }, [resolveSelectionAppearanceStyleTargets, selectedFrameGroupIds]);
 
@@ -22401,10 +21796,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncSelectionStyleDraft,
     templateDetail?.template.id,
   ]);
-
-  React.useEffect(() => {
-    setActiveInlineStyleField(null);
-  }, [selectedFrameGroupIds, selectedPositionResolvedBoxGroup?.id, selectionPanelTab, templateDetail?.template.id]);
 
   const syncFrameMetadataDraft = React.useCallback(() => {
     const root = previewRef.current;
@@ -23343,19 +22734,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const applySelectionStylePatch = React.useCallback(
     (patch: FrameStylePatch) => {
       const root = previewRef.current;
+      const activeSelectionIds = selectedFrameGroupIdsRef.current;
 
-      if (!root || selectedFrameGroupIdsRef.current.length === 0) {
+      if (!root || activeSelectionIds.length === 0) {
         setMessage('편집할 상자를 먼저 선택하세요.');
         return;
       }
 
       const styleTargets = resolveSelectionAppearanceStyleTargets(root);
       const nodes = styleTargets.elements;
-      const styleTargetFrameGroupIds = Array.from(
-        new Set(nodes.map((node) => getFrameGroupId(node).trim()).filter(Boolean))
-      );
 
-      if (styleTargetFrameGroupIds.length <= 0) {
+      if (!nodes.length) {
         return;
       }
 
@@ -23366,7 +22755,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       const hasExplicitHeightPatch = typeof patch.height === 'number' && Number.isFinite(patch.height);
       const shouldRecalculateAutoSize = frameStylePatchCanChangeContentMeasurement(patch);
       const autoSizeResult = shouldRecalculateAutoSize
-        ? applyTemplateAutoSizeBoxes(root, styleTargetFrameGroupIds, {
+        ? applyTemplateAutoSizeBoxes(root, activeSelectionIds, {
             skipWidth: hasExplicitWidthPatch,
             skipHeight: hasExplicitHeightPatch,
           })
@@ -25269,10 +24658,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       height: readFieldValue('height'),
       fontSize: readFieldValue('fontSize'),
       lineHeight: readFieldValue('lineHeight'),
-      paddingTop: readFieldValue('paddingTop'),
-      paddingBottom: readFieldValue('paddingBottom'),
-      paddingLeft: readFieldValue('paddingLeft'),
-      paddingRight: readFieldValue('paddingRight'),
+      paddingX: readFieldValue('paddingX'),
+      paddingY: readFieldValue('paddingY'),
       borderRadius: readFieldValue('borderRadius'),
       fontFamily: readFieldValue('fontFamily'),
       fontWeight: readFieldValue('fontWeight'),
@@ -25311,33 +24698,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       textDecorationLine: nextDraft.textDecorationLine,
       textAlign: nextDraft.textAlign,
       color: nextDraft.color,
-      paddingTop: nextDraft.paddingTop,
-      paddingBottom: nextDraft.paddingBottom,
-      paddingLeft: nextDraft.paddingLeft,
-      paddingRight: nextDraft.paddingRight,
+      paddingX: nextDraft.paddingX,
+      paddingY: nextDraft.paddingY,
       borderRadius: nextDraft.borderRadius,
       backgroundColor: nextDraft.backgroundColor,
       borderColor: nextDraft.borderColor || undefined,
       borderWidth: nextDraft.borderWidth || undefined,
       borderStyle: nextDraft.borderStyle || undefined,
       borderAlign: nextDraft.borderAlign || undefined,
-      targetBorderSides:
-        appearanceBoxModelTarget === 'border' && appearanceTargetBorderSides.length > 0
-          ? [...appearanceTargetBorderSides]
-          : undefined,
-      targetCorners:
-        appearanceBoxModelTarget === 'corner' && appearanceTargetCorners.length > 0
-          ? [...appearanceTargetCorners]
-          : undefined,
     });
     return true;
-  }, [
-    appearanceBoxModelTarget,
-    appearanceTargetBorderSides,
-    appearanceTargetCorners,
-    applySelectionStylePatch,
-    readSelectionStyleDraftFromControls,
-  ]);
+  }, [applySelectionStylePatch, readSelectionStyleDraftFromControls]);
 
   const setStyleFieldDraftValue = React.useCallback((field: StyleFieldKey, value: string) => {
     setSelectionStyleDraft((previous) => ({ ...previous, [field]: value }));
@@ -25350,18 +24721,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const controlElement =
-        stylePanelRef.current?.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-style-field="${field}"]`) || null;
-      const controlValue = controlElement?.value ?? selectionStyleDraft[field];
-      const controlValueMixedBlank =
-        controlElement instanceof HTMLInputElement &&
-        controlElement.getAttribute('data-style-field-mixed') === 'true' &&
-        !controlValue.trim();
-
-      if (controlValueMixedBlank) {
-        setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'idle' }));
-        return;
-      }
+      const controlValue =
+        stylePanelRef.current?.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-style-field="${field}"]`)?.value ??
+        selectionStyleDraft[field];
 
       setSelectionSaveProgress({
         phase: 'running',
@@ -25385,18 +24747,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         (patch as Partial<Record<Exclude<StyleFieldKey, 'width' | 'height'>, string>>)[stringField] = controlValue;
       }
 
-      if (
-        appearanceBoxModelTarget === 'border' &&
-        appearanceTargetBorderSides.length > 0 &&
-        (field === 'borderWidth' || field === 'borderColor' || field === 'borderStyle')
-      ) {
-        patch.targetBorderSides = [...appearanceTargetBorderSides];
-      }
-
-      if (appearanceBoxModelTarget === 'corner' && appearanceTargetCorners.length > 0 && field === 'borderRadius') {
-        patch.targetCorners = [...appearanceTargetCorners];
-      }
-
       setSelectionStyleDraft((previous) => ({ ...previous, [field]: controlValue }));
       applySelectionStylePatch(patch);
       setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saved' }));
@@ -25411,13 +24761,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         detail: `${field} 스타일을 반영했습니다.`,
       });
     },
-    [
-      appearanceBoxModelTarget,
-      appearanceTargetBorderSides,
-      appearanceTargetCorners,
-      applySelectionStylePatch,
-      selectionStyleDraft,
-    ]
+    [applySelectionStylePatch, selectionStyleDraft]
   );
 
   const applyStyleFieldImmediateValue = React.useCallback(
@@ -25443,18 +24787,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         (patch as Partial<Record<Exclude<StyleFieldKey, 'width' | 'height'>, string>>)[stringField] = value;
       }
 
-      if (
-        appearanceBoxModelTarget === 'border' &&
-        appearanceTargetBorderSides.length > 0 &&
-        (field === 'borderWidth' || field === 'borderColor' || field === 'borderStyle')
-      ) {
-        patch.targetBorderSides = [...appearanceTargetBorderSides];
-      }
-
-      if (appearanceBoxModelTarget === 'corner' && appearanceTargetCorners.length > 0 && field === 'borderRadius') {
-        patch.targetCorners = [...appearanceTargetCorners];
-      }
-
       applySelectionStylePatch(patch);
       setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saved' }));
       window.setTimeout(() => {
@@ -25468,13 +24800,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         detail: `${field} 스타일을 반영했습니다.`,
       });
     },
-    [
-      appearanceBoxModelTarget,
-      appearanceTargetBorderSides,
-      appearanceTargetCorners,
-      applySelectionStylePatch,
-      setStyleFieldDraftValue,
-    ]
+    [applySelectionStylePatch, setStyleFieldDraftValue]
   );
 
   const readFrameMetadataDraftFromControls = React.useCallback((): FrameMetadataDraft => {
@@ -30019,183 +29345,23 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   );
 
   const renderSelectionAppearanceControls = () => {
-    const hasAppearanceSelection = selectedFrameGroupIds.length > 0;
     const parseDraftNumber = (value: string) => {
       const parsedValue = Number.parseFloat(value);
       return Number.isFinite(parsedValue) ? parsedValue : null;
     };
     const clampVisualNumber = (value: number, minimum: number, maximum: number) =>
       Math.min(Math.max(value, minimum), maximum);
+    const formatDraftValue = (value: string) => (value.trim() ? value.trim() : '혼합');
+    const widthValue = parseDraftNumber(selectionStyleDraft.width);
     const heightValue = parseDraftNumber(selectionStyleDraft.height);
     const borderWidthValue = parseDraftNumber(selectionStyleDraft.borderWidth) || 0;
     const borderRadiusValue = parseDraftNumber(selectionStyleDraft.borderRadius) || 0;
     const borderStyleValue = normalizeFrameBorderStyleValue(selectionStyleDraft.borderStyle, borderWidthValue);
     const borderColorValue = selectionStyleDraft.borderColor.trim() || '#0f172a';
     const backgroundColorValue = selectionStyleDraft.backgroundColor.trim() || 'transparent';
-    const previewRoot = previewRef.current;
-    const previewStyleTargets =
-      hasAppearanceSelection && previewRoot ? resolveSelectionAppearanceStyleTargets(previewRoot) : null;
-    const previewStyleTargetShells = previewStyleTargets
-      ? previewStyleTargets.elements.map((node) =>
-          previewStyleTargets.kind === 'frame' ? resolveFrameLayoutShell(node) : node
-        )
-      : [];
-    const scopedBorderSidesForDisplay =
-      appearanceBoxModelTarget === 'border' && appearanceTargetBorderSides.length > 0
-        ? appearanceTargetBorderSides
-        : APPEARANCE_BORDER_SIDES;
-    const scopedCornersForDisplay =
-      appearanceBoxModelTarget === 'corner' && appearanceTargetCorners.length > 0
-        ? appearanceTargetCorners
-        : APPEARANCE_CORNERS;
-    const computeSharedDisplayState = (values: string[]) => {
-      const normalizedValues = values.map((value) => value.trim());
-      const uniqueValues = Array.from(new Set(normalizedValues));
-      return {
-        value: uniqueValues[0] || '',
-        mixed: uniqueValues.length > 1,
-      };
-    };
-    const borderFieldDisplayState = {
-      borderWidth: computeSharedDisplayState(
-        scopedBorderSidesForDisplay.flatMap((side) =>
-          previewStyleTargetShells.map((shell) =>
-            formatFrameBorderWidthValue(readElementBorderSideAppearance(shell, side).width)
-          )
-        )
-      ),
-      borderStyle: computeSharedDisplayState(
-        scopedBorderSidesForDisplay.flatMap((side) =>
-          previewStyleTargetShells.map((shell) => readElementBorderSideAppearance(shell, side).style || 'none')
-        )
-      ),
-      borderColor: computeSharedDisplayState(
-        scopedBorderSidesForDisplay.flatMap((side) =>
-          previewStyleTargetShells.map((shell) => {
-            const appearance = readElementBorderSideAppearance(shell, side);
-            return colorToHex(appearance.color || '') || appearance.color || '';
-          })
-        )
-      ),
-      borderAlign: computeSharedDisplayState(
-        previewStyleTargetShells.map((shell) => readElementBorderAppearance(shell).align || '')
-      ),
-      borderRadius: computeSharedDisplayState(
-        scopedCornersForDisplay.flatMap((corner) =>
-          previewStyleTargetShells.map((shell) => readElementCornerRadiusValue(shell, corner))
-        )
-      ),
-    } satisfies Partial<Record<StyleFieldKey, { value: string; mixed: boolean }>>;
-    const isStyleFieldDisabled = (field: StyleFieldKey) => {
-      if (appearanceBoxModelTarget === 'corner') {
-        return field === 'borderWidth' || field === 'borderColor' || field === 'borderStyle' || field === 'borderAlign';
-      }
-
-      if (appearanceBoxModelTarget === 'border') {
-        return field === 'borderRadius';
-      }
-
-      return false;
-    };
-    const selectionAppearancePreviewWidthPx =
-      selectionAppearanceToolbarWidth && Number.isFinite(selectionAppearanceToolbarWidth)
-        ? Math.max(1, Math.round(selectionAppearanceToolbarWidth))
-        : null;
+    const visualContentWidth = widthValue ? clampVisualNumber(widthValue * 0.45, 110, 280) : 180;
     const visualContentHeight = heightValue ? clampVisualNumber(heightValue * 0.32, 48, 128) : 70;
     const visualBorderWidth = borderStyleValue === 'none' ? 2 : clampVisualNumber(borderWidthValue || 1, 1, 8);
-    const previewStrokeColor = borderStyleValue === 'none' ? 'rgba(15, 23, 42, .35)' : borderColorValue;
-    const previewBorderSides = APPEARANCE_BORDER_SIDES.reduce<Record<TemplateEdgeSide, { width: number; style: string; color: string }>>(
-      (accumulator, side) => {
-        const sideAppearances = previewStyleTargetShells.map((shell) => readElementBorderSideAppearance(shell, side));
-        const widthToken =
-          sideAppearances.length === 1
-            ? formatFrameBorderWidthValue(sideAppearances[0]?.width || 0)
-            : getSharedValue(sideAppearances.map((appearance) => formatFrameBorderWidthValue(appearance.width)));
-        const widthValue = normalizeFrameBorderWidthValue(widthToken) ?? 0;
-        const styleToken =
-          sideAppearances.length === 1
-            ? sideAppearances[0]?.style || ''
-            : getSharedValue(sideAppearances.map((appearance) => appearance.style));
-        const colorToken =
-          sideAppearances.length === 1
-            ? sideAppearances[0]?.color || ''
-            : getSharedValue(sideAppearances.map((appearance) => appearance.color));
-        const normalizedStyle = normalizeFrameBorderStyleValue(styleToken || 'none', Math.max(widthValue, 1));
-        const hasVisibleBorder = widthValue > 0 && normalizedStyle !== 'none';
-
-        accumulator[side] = {
-          width: hasVisibleBorder ? clampVisualNumber(widthValue, 1, 8) : 0,
-          style: hasVisibleBorder ? normalizedStyle : 'none',
-          color: hasVisibleBorder ? colorToHex(colorToken || '') || colorToken || '#0f172a' : 'transparent',
-        };
-        return accumulator;
-      },
-      {
-        top: { width: 0, style: 'none', color: 'transparent' },
-        right: { width: 0, style: 'none', color: 'transparent' },
-        bottom: { width: 0, style: 'none', color: 'transparent' },
-        left: { width: 0, style: 'none', color: 'transparent' },
-      }
-    );
-    const previewCornerRadii = APPEARANCE_CORNERS.reduce<Record<AppearanceCorner, number>>(
-      (accumulator, corner) => {
-        const cornerValues = previewStyleTargetShells.map((shell) => readElementCornerRadiusValue(shell, corner));
-        const radiusToken =
-          cornerValues.length === 1 ? cornerValues[0] || '' : getSharedValue(cornerValues);
-        const parsedRadius = Number.parseFloat(radiusToken || '');
-        accumulator[corner] = Number.isFinite(parsedRadius) ? clampVisualNumber(parsedRadius, 0, 28) : 0;
-        return accumulator;
-      },
-      {
-        'top-left': clampVisualNumber(borderRadiusValue, 0, 28),
-        'top-right': clampVisualNumber(borderRadiusValue, 0, 28),
-        'bottom-right': clampVisualNumber(borderRadiusValue, 0, 28),
-        'bottom-left': clampVisualNumber(borderRadiusValue, 0, 28),
-      }
-    );
-    const previewHasAnyVisibleBorder = APPEARANCE_BORDER_SIDES.some((side) => {
-      const appearance = previewBorderSides[side];
-      return appearance.width > 0 && appearance.style !== 'none';
-    });
-    const previewCornerRadiusStyle: React.CSSProperties = {
-      borderTopLeftRadius: `${previewCornerRadii['top-left']}px`,
-      borderTopRightRadius: `${previewCornerRadii['top-right']}px`,
-      borderBottomRightRadius: `${previewCornerRadii['bottom-right']}px`,
-      borderBottomLeftRadius: `${previewCornerRadii['bottom-left']}px`,
-    };
-    const previewBorderPresentationStyle: React.CSSProperties = previewHasAnyVisibleBorder
-      ? {
-          borderTopWidth: `${previewBorderSides.top.width}px`,
-          borderTopStyle: previewBorderSides.top.style,
-          borderTopColor: previewBorderSides.top.color,
-          borderRightWidth: `${previewBorderSides.right.width}px`,
-          borderRightStyle: previewBorderSides.right.style,
-          borderRightColor: previewBorderSides.right.color,
-          borderBottomWidth: `${previewBorderSides.bottom.width}px`,
-          borderBottomStyle: previewBorderSides.bottom.style,
-          borderBottomColor: previewBorderSides.bottom.color,
-          borderLeftWidth: `${previewBorderSides.left.width}px`,
-          borderLeftStyle: previewBorderSides.left.style,
-          borderLeftColor: previewBorderSides.left.color,
-        }
-      : {
-          border: 'none',
-        };
-    const previewDashedGuideStyle: React.CSSProperties | null =
-      !previewHasAnyVisibleBorder
-        ? {
-            position: 'absolute',
-            inset: `${visualBorderWidth / -2}px`,
-            pointerEvents: 'none',
-            borderWidth: `${visualBorderWidth}px`,
-            borderStyle: 'dashed',
-            borderColor: previewStrokeColor,
-            borderTopLeftRadius: `${previewCornerRadii['top-left'] + visualBorderWidth / 2}px`,
-            borderTopRightRadius: `${previewCornerRadii['top-right'] + visualBorderWidth / 2}px`,
-            borderBottomRightRadius: `${previewCornerRadii['bottom-right'] + visualBorderWidth / 2}px`,
-            borderBottomLeftRadius: `${previewCornerRadii['bottom-left'] + visualBorderWidth / 2}px`,
-          }
-        : null;
     const transparentFillStyle: React.CSSProperties = {
       backgroundColor: '#ffffff',
       backgroundImage:
@@ -30204,98 +29370,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       backgroundSize: '12px 12px',
     };
     const boxModelZoneClass = () => 'relative cursor-pointer focus-visible:outline-none';
-    const activateAppearanceTargetMode = (target: AppearanceBoxModelTarget, resetSelection = false) => {
-      if (target === 'content') {
-        setAppearanceTargetBorderSides([]);
-        setAppearanceTargetCorners([]);
-        setAppearanceBoxModelTarget('content');
-        return;
-      }
-
-      const shouldResetSelection = resetSelection || appearanceBoxModelTarget !== target;
-
-      if (target === 'border' && shouldResetSelection) {
-        setAppearanceTargetBorderSides([]);
-      }
-      if (target === 'border') {
-        setAppearanceTargetCorners([]);
-      }
-      if (target === 'corner' && shouldResetSelection) {
-        setAppearanceTargetCorners([]);
-      }
-      if (target === 'corner') {
-        setAppearanceTargetBorderSides([]);
-      }
-      setAppearanceBoxModelTarget(target);
-    };
-    const clearAppearanceTargetModeIfNoSelection = (target: Extract<AppearanceBoxModelTarget, 'border' | 'corner'>) => {
-      if (target === 'border') {
-        if (appearanceBoxModelTarget === 'border' && appearanceTargetBorderSides.length <= 0) {
-          activateAppearanceTargetMode('content', true);
-        }
-        return;
-      }
-
-      if (appearanceBoxModelTarget === 'corner' && appearanceTargetCorners.length <= 0) {
-        activateAppearanceTargetMode('content', true);
-      }
-    };
-    const toggleBorderSideTargetSelectionFromClick = (side: TemplateEdgeSide) => {
-      setAppearanceTargetBorderSides((previous) => {
-        const normalizedPrevious = previous.filter((entry): entry is TemplateEdgeSide => APPEARANCE_BORDER_SIDES.includes(entry));
-
-        if (appearanceBoxModelTarget !== 'border') {
-          setAppearanceTargetCorners([]);
-          setAppearanceBoxModelTarget('border');
-          return [side];
-        }
-
-        const nextSelection = normalizedPrevious.includes(side)
-          ? normalizedPrevious.filter((entry) => entry !== side)
-          : [...normalizedPrevious, side];
-
-        if (nextSelection.length <= 0) {
-          setAppearanceTargetCorners([]);
-          setAppearanceBoxModelTarget('content');
-          return [];
-        }
-
-        setAppearanceTargetCorners([]);
-        setAppearanceBoxModelTarget('border');
-        return nextSelection;
-      });
-    };
-    const toggleCornerTargetSelectionFromClick = (corner: AppearanceCorner) => {
-      setAppearanceTargetCorners((previous) => {
-        const normalizedPrevious = previous.filter((entry): entry is AppearanceCorner => APPEARANCE_CORNERS.includes(entry));
-
-        if (appearanceBoxModelTarget !== 'corner') {
-          setAppearanceTargetBorderSides([]);
-          setAppearanceBoxModelTarget('corner');
-          return [corner];
-        }
-
-        const nextSelection = normalizedPrevious.includes(corner)
-          ? normalizedPrevious.filter((entry) => entry !== corner)
-          : [...normalizedPrevious, corner];
-
-        if (nextSelection.length <= 0) {
-          setAppearanceTargetBorderSides([]);
-          setAppearanceBoxModelTarget('content');
-          return [];
-        }
-
-        setAppearanceTargetBorderSides([]);
-        setAppearanceBoxModelTarget('corner');
-        return nextSelection;
-      });
-    };
     const selectBoxModelTarget = (
       event: React.MouseEvent<HTMLDivElement | HTMLButtonElement>,
       target: AppearanceBoxModelTarget
     ) => {
       event.stopPropagation();
-      activateAppearanceTargetMode(target, true);
+      setAppearanceBoxModelTarget(target);
     };
     const handleBoxModelTargetKeyDown = (
       event: React.KeyboardEvent<HTMLDivElement | HTMLButtonElement>,
@@ -30307,7 +29387,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       event.preventDefault();
       event.stopPropagation();
-      activateAppearanceTargetMode(target, true);
+      setAppearanceBoxModelTarget(target);
     };
     const renderBoxModelLabel = (label: string, detail?: string) => (
       <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-950">
@@ -30315,147 +29395,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         {detail ? <span className="font-normal text-slate-600">{detail}</span> : null}
       </div>
     );
-    const hintAppearanceModeForStyleField = (field: StyleFieldKey, nextValue?: string) => {
-      const nextTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
-
-      if (!nextTarget) {
-        return;
-      }
-
-      if (!hasAppearanceSelection) {
-        activateAppearanceTargetMode('content', true);
-        return;
-      }
-
-      if (nextTarget === 'content') {
-        activateAppearanceTargetMode('content', true);
-        return;
-      }
-
-      const resolvedValue = typeof nextValue === 'string' ? nextValue : selectionStyleDraft[field];
-      if ((nextTarget === 'border' || nextTarget === 'corner') && !String(resolvedValue || '').trim()) {
-        const hasExplicitTargetSelection =
-          nextTarget === 'border' ? appearanceTargetBorderSides.length > 0 : appearanceTargetCorners.length > 0;
-
-        if (!hasExplicitTargetSelection) {
-          activateAppearanceTargetMode('content', true);
-        }
-        return;
-      }
-
-      if (nextTarget === 'border' || nextTarget === 'corner') {
-        activateAppearanceTargetMode(nextTarget);
-        return;
-      }
-
-      setAppearanceBoxModelTarget(nextTarget);
+    const appearanceTargetByStyleField: Partial<Record<StyleFieldKey, AppearanceBoxModelTarget>> = {
+      width: 'content',
+      height: 'content',
+      backgroundColor: 'content',
+      borderWidth: 'border',
+      borderColor: 'border',
+      borderStyle: 'border',
+      borderAlign: 'border',
+      borderRadius: 'corner',
     };
     const stopInlineControlEvent = (event: React.MouseEvent<HTMLElement>) => {
       event.stopPropagation();
     };
-    const renderBorderSideTargetButton = (side: TemplateEdgeSide) => {
-      const isSelected = appearanceTargetBorderSides.includes(side);
-      const isActive = appearanceBoxModelTarget === 'border' && isSelected;
-      const isVisible = appearanceBoxModelTarget === 'border';
-      const sideClassName =
-        side === 'top'
-          ? 'left-3 right-3 top-[-8px] h-4 cursor-pointer'
-          : side === 'bottom'
-            ? 'left-3 right-3 bottom-[-8px] h-4 cursor-pointer'
-            : side === 'left'
-              ? 'bottom-3 left-[-8px] top-3 w-4 cursor-pointer'
-              : 'bottom-3 right-[-8px] top-3 w-4 cursor-pointer';
-
-      return (
-        <button
-          key={`appearance-border-side:${side}`}
-          type="button"
-          aria-label={`${APPEARANCE_BORDER_SIDE_LABELS[side]} 엣지 선택`}
-          aria-pressed={isSelected}
-          className={`absolute z-20 rounded-full border-0 p-0 transition-colors ${
-            isVisible ? 'bg-sky-500/20 hover:bg-sky-500/25' : 'bg-transparent hover:bg-transparent'
-          } ${sideClassName}`}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            toggleBorderSideTargetSelectionFromClick(side);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              event.stopPropagation();
-              toggleBorderSideTargetSelectionFromClick(side);
-            }
-          }}
-        >
-          {isActive ? (
-            <span
-              aria-hidden="true"
-              className={`pointer-events-none absolute ${
-                side === 'top' || side === 'bottom'
-                  ? 'left-0 right-0 top-1/2 -translate-y-1/2 border-t-[3px] border-sky-500'
-                  : 'bottom-0 left-1/2 top-0 -translate-x-1/2 border-l-[3px] border-sky-500'
-              }`}
-              style={{
-                boxShadow: '0 0 0 1px rgba(255,255,255,0.9)',
-              }}
-            />
-          ) : null}
-        </button>
-      );
-    };
-    const renderCornerTargetButton = (corner: AppearanceCorner) => {
-      const isSelected = appearanceTargetCorners.includes(corner);
-      const isActive = appearanceBoxModelTarget === 'corner' && isSelected;
-      const isVisible = appearanceBoxModelTarget === 'corner';
-      const cornerClassName =
-        corner === 'top-left'
-          ? 'left-[-8px] top-[-8px]'
-          : corner === 'top-right'
-            ? 'right-[-8px] top-[-8px]'
-            : corner === 'bottom-right'
-              ? 'bottom-[-8px] right-[-8px]'
-              : 'bottom-[-8px] left-[-8px]';
-
-      return (
-        <button
-          key={`appearance-corner:${corner}`}
-          type="button"
-          aria-label={`${APPEARANCE_CORNER_LABELS[corner]} 코너 선택`}
-          aria-pressed={isSelected}
-          className={`absolute z-20 h-4 w-4 rounded-full border-0 p-0 transition-colors ${
-            isVisible ? 'bg-sky-500/20 hover:bg-sky-500/25' : 'bg-transparent hover:bg-transparent'
-          } ${cornerClassName}`}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            toggleCornerTargetSelectionFromClick(corner);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              event.stopPropagation();
-              toggleCornerTargetSelectionFromClick(corner);
-            }
-          }}
-        >
-          {isActive ? (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 rounded-full bg-sky-500"
-              style={{
-                boxShadow: '0 0 0 2px rgba(255,255,255,0.92)',
-              }}
-            />
-          ) : null}
-        </button>
-      );
-    };
-    const resolveInlineStyleFieldStateClass = (field: StyleFieldKey, disabled = false) => {
-      if (disabled) {
-        return 'border-slate-200 bg-slate-100 text-slate-400 hover:bg-slate-100';
-      }
-
+    const resolveInlineStyleFieldStateClass = (field: StyleFieldKey) => {
       const applyStatus = styleFieldApplyStatus[field];
 
       if (applyStatus === 'saved') {
@@ -30478,21 +29431,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       widthClassName = 'w-32',
       shortLabel = ariaLabel
     ) => {
-      const displayState = borderFieldDisplayState[field] || {
-        value: hasAppearanceSelection ? selectionStyleDraft[field] : '',
-        mixed: false,
-      };
-      const isEditingField = activeInlineStyleField === field;
-      const disabled = isStyleFieldDisabled(field);
-      const inputStateClass = resolveInlineStyleFieldStateClass(field, disabled);
-      const displayValue = hasAppearanceSelection
-        ? isEditingField
-          ? selectionStyleDraft[field]
-          : displayState.mixed
-            ? ''
-            : displayState.value
-        : '';
-      const mixedPlaceholder = hasAppearanceSelection && displayState.mixed ? '혼합' : '';
+      const inputStateClass = resolveInlineStyleFieldStateClass(field);
 
       return (
         <span
@@ -30506,43 +29445,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </span>
           <Input
             data-style-field={field}
-            data-style-field-mixed={displayState.mixed ? 'true' : 'false'}
-            value={displayValue}
+            value={selectionStyleDraft[field]}
             inputMode="decimal"
             aria-label={ariaLabel}
             title={ariaLabel}
-            placeholder={mixedPlaceholder}
+            placeholder=""
             className={`h-8 w-full rounded-md border pl-[20px] pr-[16px] text-center text-[11px] font-semibold sm:pl-[50px] sm:pr-5 ${inputStateClass}`}
-            disabled={disabled}
             onFocus={() => {
-              if (disabled) {
-                return;
-              }
-              setActiveInlineStyleField(field);
-              setSelectionStyleDraft((previous) => {
-                const nextValue = displayState.mixed ? '' : displayState.value;
-                return previous[field] === nextValue ? previous : { ...previous, [field]: nextValue };
-              });
-              hintAppearanceModeForStyleField(field);
-            }}
-            onChange={(event) => {
-              if (disabled) {
-                return;
-              }
-              hintAppearanceModeForStyleField(field, event.target.value);
-              setStyleFieldDraftValue(field, event.target.value);
-            }}
-            onBlur={() => {
-              if (disabled) {
-                return;
-              }
-              applyStyleFieldOnBlur(field);
-              setActiveInlineStyleField((previous) => (previous === field ? null : previous));
-              const nextTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
-              if (nextTarget === 'border' || nextTarget === 'corner') {
-                clearAppearanceTargetModeIfNoSelection(nextTarget);
+              const nextTarget = appearanceTargetByStyleField[field];
+              if (nextTarget) {
+                setAppearanceBoxModelTarget(nextTarget);
               }
             }}
+            onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
+            onBlur={() => applyStyleFieldOnBlur(field)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.currentTarget.blur();
@@ -30561,12 +29477,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       style?: React.CSSProperties,
       variant: 'popover' | 'horizontal' = 'popover'
     ) => {
-      const displayState = borderFieldDisplayState[field] || {
-        value: selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : hasAppearanceSelection ? '#0f172a' : ''),
-        mixed: false,
-      };
-      const currentValue = displayState.mixed ? '' : displayState.value;
-      const disabled = isStyleFieldDisabled(field);
+      const currentValue = selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : '#0f172a');
 
       return (
         <div
@@ -30593,7 +29504,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     setStyleColorPickerOpen(null);
-                    hintAppearanceModeForStyleField(field, option.value);
                     applyStyleFieldImmediateValue(field, option.value);
                   }}
                 >
@@ -30617,34 +29527,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </div>
           {variant === 'popover' ? (
             <Input
-              data-style-field-mixed={displayState.mixed ? 'true' : 'false'}
-              value={hasAppearanceSelection ? selectionStyleDraft[field] : ''}
-              placeholder={
-                displayState.mixed
-                  ? '혼합'
-                  : field === 'backgroundColor'
-                    ? 'transparent 또는 #ffffff'
-                    : '#0f172a'
-              }
+              value={selectionStyleDraft[field]}
+              placeholder={field === 'backgroundColor' ? 'transparent 또는 #ffffff' : '#0f172a'}
               className="mt-2 h-8 text-xs"
-              disabled={disabled}
-              onChange={(event) => {
-                if (disabled) {
-                  return;
-                }
-                hintAppearanceModeForStyleField(field, event.target.value);
-                setStyleFieldDraftValue(field, event.target.value);
-              }}
-              onBlur={() => {
-                if (disabled) {
-                  return;
-                }
-                applyStyleFieldOnBlur(field);
-                const nextTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
-                if (nextTarget === 'border' || nextTarget === 'corner') {
-                  clearAppearanceTargetModeIfNoSelection(nextTarget);
-                }
-              }}
+              onChange={(event) => setStyleFieldDraftValue(field, event.target.value)}
+              onBlur={() => applyStyleFieldOnBlur(field)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.currentTarget.blur();
@@ -30662,13 +29549,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       showInlinePanel = true,
       shortLabel?: string
     ) => {
-      const displayState = borderFieldDisplayState[field] || {
-        value: selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : hasAppearanceSelection ? '#0f172a' : ''),
-        mixed: false,
-      };
-      const currentValue = displayState.mixed ? '' : displayState.value;
+      const currentValue = selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : '#0f172a');
       const isOpen = styleColorPickerOpen === field;
-      const disabled = isStyleFieldDisabled(field);
 
       return (
         <div
@@ -30676,16 +29558,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           onMouseDown={stopInlineControlEvent}
           onClick={(event) => {
             event.stopPropagation();
-            if (disabled) {
-              return;
-            }
-            if (field === 'backgroundColor') {
-              activateAppearanceTargetMode('content', true);
-            } else if (hasAppearanceSelection) {
-              activateAppearanceTargetMode('border');
-            } else {
-              activateAppearanceTargetMode('content', true);
-            }
+            setAppearanceBoxModelTarget(appearanceTargetByStyleField[field] || 'content');
             setStyleColorPickerOpen((previous) => (previous === field ? null : field));
           }}
           onBlur={(event) => {
@@ -30695,42 +29568,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             }
 
             setStyleColorPickerOpen(null);
-            const nextAppearanceTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
-            if (nextAppearanceTarget === 'border' || nextAppearanceTarget === 'corner') {
-              clearAppearanceTargetModeIfNoSelection(nextAppearanceTarget);
-            }
           }}
         >
           <input data-style-field={field} type="hidden" value={selectionStyleDraft[field]} readOnly />
           <button
             type="button"
-            disabled={disabled}
-            className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass(field, disabled)}`}
+            className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass(field)}`}
             aria-label={label}
           >
             <span
               className="h-3.5 w-3.5 rounded border border-slate-200"
               style={{
-                backgroundColor: displayState.mixed ? '#ffffff' : currentValue === 'transparent' ? '#ffffff' : currentValue,
+                backgroundColor: currentValue === 'transparent' ? '#ffffff' : currentValue,
                 backgroundImage:
-                  displayState.mixed
-                    ? 'repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.4) 0px, rgba(148, 163, 184, 0.4) 3px, transparent 3px, transparent 6px)'
-                    : currentValue === 'transparent'
+                  currentValue === 'transparent'
                     ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)'
                     : 'none',
-                backgroundPosition:
-                  displayState.mixed
-                    ? '0 0'
-                    : currentValue === 'transparent'
-                      ? '0 0, 0 5px, 5px -5px, -5px 0px'
-                      : undefined,
-                backgroundSize: displayState.mixed ? '8px 8px' : currentValue === 'transparent' ? '10px 10px' : undefined,
+                backgroundPosition: currentValue === 'transparent' ? '0 0, 0 5px, 5px -5px, -5px 0px' : undefined,
+                backgroundSize: currentValue === 'transparent' ? '10px 10px' : undefined,
               }}
               aria-hidden="true"
             />
             <span>
               <span className={shortLabel ? 'hidden sm:inline' : undefined}>
-                {displayState.mixed ? '혼합' : field === 'backgroundColor' ? '배경' : '선색'}
+                {field === 'backgroundColor' ? '배경' : '선색'}
               </span>
               {shortLabel ? <span className="sm:hidden">{shortLabel}</span> : null}
             </span>
@@ -30742,53 +29603,34 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const cycleBorderAlignValue = () => {
       const currentIndex = FRAME_BORDER_ALIGN_OPTIONS.findIndex((option) => option.value === selectionStyleDraft.borderAlign);
       const nextOption = FRAME_BORDER_ALIGN_OPTIONS[(currentIndex + 1 + FRAME_BORDER_ALIGN_OPTIONS.length) % FRAME_BORDER_ALIGN_OPTIONS.length];
-      hintAppearanceModeForStyleField('borderAlign', nextOption.value);
       applyStyleFieldImmediateValue('borderAlign', nextOption.value);
     };
     const renderInlineBorderAlignPicker = () => {
-      const displayState = borderFieldDisplayState.borderAlign || {
-        value: hasAppearanceSelection ? selectionStyleDraft.borderAlign : '',
-        mixed: false,
-      };
-      const currentBorderAlignValue = hasAppearanceSelection ? displayState.value : '';
-      const disabled = isStyleFieldDisabled('borderAlign');
-      const currentLabel = displayState.mixed
-        ? '혼합'
-        : currentBorderAlignValue
-        ? FRAME_BORDER_ALIGN_LABEL_BY_VALUE.get(currentBorderAlignValue) || currentBorderAlignValue
+      const currentLabel = selectionStyleDraft.borderAlign
+        ? FRAME_BORDER_ALIGN_LABEL_BY_VALUE.get(selectionStyleDraft.borderAlign) || selectionStyleDraft.borderAlign
         : '외곽선 정렬';
       const currentShortLabel =
-        displayState.mixed
-          ? 'MIX'
-          : currentBorderAlignValue === 'inside'
+        selectionStyleDraft.borderAlign === 'inside'
           ? 'I'
-          : currentBorderAlignValue === 'center'
+          : selectionStyleDraft.borderAlign === 'center'
             ? 'C'
-            : currentBorderAlignValue === 'outside'
+            : selectionStyleDraft.borderAlign === 'outside'
               ? 'O'
               : 'BA';
+
       return (
       <div
         className="relative inline-flex min-w-0 w-full sm:w-auto"
         onMouseDown={stopInlineControlEvent}
         onClick={stopInlineControlEvent}
       >
-        <input data-style-field="borderAlign" type="hidden" value={displayState.mixed ? '' : currentBorderAlignValue} readOnly />
+        <input data-style-field="borderAlign" type="hidden" value={selectionStyleDraft.borderAlign} readOnly />
         <button
           type="button"
-          disabled={disabled}
-          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderAlign', disabled)}`}
+          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderAlign')}`}
           onClick={() => {
-            if (disabled) {
-              return;
-            }
+            setAppearanceBoxModelTarget('border');
             cycleBorderAlignValue();
-          }}
-          onBlur={() => {
-            if (disabled) {
-              return;
-            }
-            clearAppearanceTargetModeIfNoSelection('border');
           }}
           title="클릭할 때마다 내부 → 중앙 → 외곽 순서로 바뀝니다."
         >
@@ -30806,66 +29648,30 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         onMouseDown={stopInlineControlEvent}
         onClick={stopInlineControlEvent}
       >
-        {(() => {
-          const currentBorderStyleValue =
-            borderFieldDisplayState.borderStyle?.mixed || !hasAppearanceSelection
-              ? ''
-              : borderFieldDisplayState.borderStyle?.value || selectionStyleDraft.borderStyle;
-          const borderStyleDisabled = isStyleFieldDisabled('borderStyle');
-          return (
-            <>
-        <input
-          data-style-field="borderStyle"
-          type="hidden"
-          value={
-            hasAppearanceSelection && !(borderFieldDisplayState.borderStyle?.mixed || false)
-              ? currentBorderStyleValue
-              : ''
-          }
-          readOnly
-        />
+        <input data-style-field="borderStyle" type="hidden" value={selectionStyleDraft.borderStyle} readOnly />
         <button
           type="button"
-          disabled={borderStyleDisabled}
-          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderStyle', borderStyleDisabled)}`}
+          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderStyle')}`}
           onClick={() => {
-            if (borderStyleDisabled) {
-              return;
-            }
-            if (hasAppearanceSelection) {
-              activateAppearanceTargetMode('border');
-            } else {
-              activateAppearanceTargetMode('content', true);
-            }
+            setAppearanceBoxModelTarget('border');
             setBorderStylePickerOpen((previous) => !previous);
           }}
-          onBlur={() =>
-            window.setTimeout(() => {
-              setBorderStylePickerOpen(false);
-              if (!borderStyleDisabled) {
-                clearAppearanceTargetModeIfNoSelection('border');
-              }
-            }, 120)
-          }
+          onBlur={() => window.setTimeout(() => setBorderStylePickerOpen(false), 120)}
         >
           <span>
             <span className="hidden sm:inline">
-              {borderFieldDisplayState.borderStyle?.mixed
-                ? '혼합'
-                : hasAppearanceSelection && currentBorderStyleValue
-                  ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(currentBorderStyleValue) || currentBorderStyleValue
+              {selectionStyleDraft.borderStyle
+                ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(selectionStyleDraft.borderStyle) || selectionStyleDraft.borderStyle
                 : '외곽선 타입'}
             </span>
             <span className="sm:hidden">LT</span>
           </span>
-          {hasAppearanceSelection && !(borderFieldDisplayState.borderStyle?.mixed || false) && currentBorderStyleValue
-            ? renderBorderStylePreview(currentBorderStyleValue, 'hidden sm:block w-10')
-            : null}
+          {selectionStyleDraft.borderStyle ? renderBorderStylePreview(selectionStyleDraft.borderStyle, 'hidden sm:block w-10') : null}
         </button>
         {borderStylePickerOpen ? (
           <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
             {FRAME_BORDER_STYLE_OPTIONS.map((option) => {
-              const isSelected = currentBorderStyleValue === option.value;
+              const isSelected = selectionStyleDraft.borderStyle === option.value;
 
               return (
                 <button
@@ -30877,7 +29683,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     setBorderStylePickerOpen(false);
-                    hintAppearanceModeForStyleField('borderStyle', option.value);
                     applyStyleFieldImmediateValue('borderStyle', option.value);
                   }}
                 >
@@ -30893,88 +29698,83 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             })}
           </div>
         ) : null}
-            </>
-          );
-        })()}
       </div>
     );
+
     return (
-      <>
-        <div
-          ref={handleSelectionAppearanceToolbarRef}
-          className="grid w-fit min-w-0 max-w-full grid-cols-[62px_42px_42px_38px_62px] items-center gap-0.5 sm:grid-cols-[110px_max-content_max-content_max-content_132px] sm:gap-1"
-        >
-          {renderInlineNumericInput(
-            'borderWidth',
-            '선 두께',
-            'w-[62px] sm:w-[110px]',
-            'LW'
-          )}
-          {renderInlineColorPicker('borderColor', '선 색 선택', 'left-0 top-full mt-1', true, 'LC')}
-          {renderInlineBorderStylePicker()}
-          {renderInlineBorderAlignPicker()}
-          {renderInlineNumericInput(
-            'borderRadius',
-            '코너 라운딩',
-            'w-[62px] sm:w-[132px]',
-            'CR'
-          )}
-        </div>
-        <div
-          role="button"
-          tabIndex={0}
-          className={`${boxModelZoneClass('border')} min-w-0 max-w-full overflow-visible rounded-xl bg-slate-50`}
-          aria-label="외곽선 및 상자 출력 형식 편집"
-          style={{
-            boxSizing: 'border-box',
-            width: selectionAppearancePreviewWidthPx ? `${selectionAppearancePreviewWidthPx}px` : 'fit-content',
-            maxWidth: '100%',
-            ...previewCornerRadiusStyle,
-            ...previewBorderPresentationStyle,
-          }}
-          onClick={(event) => selectBoxModelTarget(event, 'border')}
-          onKeyDown={(event) => handleBoxModelTargetKeyDown(event, 'border')}
-        >
-          {previewDashedGuideStyle ? <div aria-hidden="true" className="absolute z-0" style={previewDashedGuideStyle} /> : null}
-          {APPEARANCE_BORDER_SIDES.map((side) => renderBorderSideTargetButton(side))}
-          {APPEARANCE_CORNERS.map((corner) => renderCornerTargetButton(corner))}
-          <div
-            className="group/content relative z-10 flex min-h-[96px] min-w-full items-center justify-center text-center text-sm font-semibold text-slate-900"
-            style={{
-              ...(backgroundColorValue === 'transparent'
-                ? transparentFillStyle
-                : { backgroundColor: backgroundColorValue }),
-              width: '100%',
-              maxWidth: '100%',
-              height: `${visualContentHeight}px`,
-              ...previewCornerRadiusStyle,
-              overflow: 'hidden',
-            }}
-            onMouseDown={stopInlineControlEvent}
-            onClick={stopInlineControlEvent}
-          >
-            <div className="relative grid w-fit max-w-full grid-cols-[max-content_62px_12px_62px] items-center gap-0.5 rounded-md bg-white/75 px-1 py-1.5 sm:grid-cols-[max-content_104px_12px_104px] sm:gap-2 sm:px-2" onMouseDown={stopInlineControlEvent} onClick={stopInlineControlEvent}>
-              {renderInlineColorPicker('backgroundColor', '배경 색 선택', 'left-0 top-full mt-1', false)}
+        <div className="max-w-full overflow-visible pb-1 pt-6">
+          <div className="relative w-full min-w-0">
+            <div className="absolute right-1 top-0 z-20 grid w-fit max-w-[calc(100%-0.5rem)] -translate-y-1/2 grid-cols-[62px_42px_42px_38px_62px] items-center gap-0.5 sm:right-2 sm:max-w-full sm:grid-cols-[110px_max-content_max-content_max-content_132px] sm:gap-1">
               {renderInlineNumericInput(
-                'height',
-                '높이',
-                'w-[62px] sm:w-[104px]',
-                'H'
+                'borderWidth',
+                '선 두께',
+                'w-[62px] sm:w-[110px]',
+                'LW'
               )}
-              <span className="text-center text-xs font-semibold text-slate-600">×</span>
+              {renderInlineColorPicker('borderColor', '선 색 선택', 'left-0 top-full mt-1', true, 'LC')}
+              {renderInlineBorderStylePicker()}
+              {renderInlineBorderAlignPicker()}
               {renderInlineNumericInput(
-                'width',
-                '너비',
-                'w-[62px] sm:w-[104px]',
-                'W'
+                'borderRadius',
+                '코너 라운딩',
+                'w-[62px] sm:w-[132px]',
+                'CR'
               )}
-              {styleColorPickerOpen === 'backgroundColor'
-                ? renderInlineColorPickerPanel('backgroundColor', 'left-0 top-full mt-1 w-full', undefined, 'horizontal')
-                : null}
+            </div>
+            <div
+              role="button"
+              tabIndex={0}
+              className={`${boxModelZoneClass('border')} rounded-xl bg-slate-50`}
+              aria-label="외곽선 및 상자 출력 형식 편집"
+              style={{
+                boxSizing: 'border-box',
+                borderColor: borderStyleValue === 'none' ? 'rgba(15, 23, 42, .35)' : borderColorValue,
+                borderStyle: borderStyleValue === 'none' ? 'dashed' : borderStyleValue,
+                borderWidth: `${visualBorderWidth}px`,
+                borderRadius: `${clampVisualNumber(borderRadiusValue, 0, 28)}px`,
+              }}
+              onClick={(event) => selectBoxModelTarget(event, 'border')}
+              onKeyDown={(event) => handleBoxModelTargetKeyDown(event, 'border')}
+            >
+              <div
+                role="button"
+                tabIndex={0}
+                className={`${boxModelZoneClass('content')} group/content flex min-h-[96px] min-w-full items-center justify-center text-center text-sm font-semibold text-slate-900`}
+                aria-label="상자 배경색 및 크기 편집"
+                style={{
+                  ...(backgroundColorValue === 'transparent'
+                    ? transparentFillStyle
+                    : { backgroundColor: backgroundColorValue }),
+                  width: `${visualContentWidth}px`,
+                  maxWidth: '100%',
+                  height: `${visualContentHeight}px`,
+                }}
+                onClick={(event) => selectBoxModelTarget(event, 'content')}
+                onKeyDown={(event) => handleBoxModelTargetKeyDown(event, 'content')}
+              >
+                <div className="relative grid w-fit max-w-full grid-cols-[max-content_62px_12px_62px] items-center gap-0.5 rounded-md bg-white/75 px-1 py-1.5 sm:grid-cols-[max-content_104px_12px_104px] sm:gap-2 sm:px-2" onMouseDown={stopInlineControlEvent} onClick={stopInlineControlEvent}>
+                  {renderInlineColorPicker('backgroundColor', '배경 색 선택', 'left-0 top-full mt-1', false)}
+                  {renderInlineNumericInput(
+                    'height',
+                    '높이',
+                    'w-[62px] sm:w-[104px]',
+                    'H'
+                  )}
+                  <span className="text-center text-xs font-semibold text-slate-600">×</span>
+                  {renderInlineNumericInput(
+                    'width',
+                    '너비',
+                    'w-[62px] sm:w-[104px]',
+                    'W'
+                  )}
+                  {styleColorPickerOpen === 'backgroundColor'
+                    ? renderInlineColorPickerPanel('backgroundColor', 'left-0 top-full mt-1 w-full', undefined, 'horizontal')
+                    : null}
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </>
     );
   };
 
@@ -31088,7 +29888,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   };
 
   const renderRichTextNumericInput = (
-    field: 'fontSize' | 'lineHeight' | 'paddingTop' | 'paddingBottom' | 'paddingLeft' | 'paddingRight',
+    field: 'fontSize' | 'lineHeight' | 'paddingX' | 'paddingY',
     label: string,
     placeholder: string
   ) => (
@@ -31148,13 +29948,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           ? 'border-slate-950 bg-slate-950 text-white'
           : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
       }`;
-    const selectedPaddingField = APPEARANCE_PADDING_FIELD_BY_SIDE[textPaddingEditSide];
-    const selectedPaddingValue = selectionStyleDraft[selectedPaddingField];
-    const selectedPaddingPlaceholder = hasSelection ? '?' : '0';
-    const paddingSideButtonClass = (active: boolean) =>
-      `inline-flex h-7 items-center justify-center rounded-md border px-2 text-[11px] font-semibold transition ${
-        active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
-      }`;
 
     return (
       <div className="space-y-3">
@@ -31181,50 +29974,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </div>
             {renderRichTextNumericInput('fontSize', '글자 크기', '14')}
             {renderRichTextNumericInput('lineHeight', '줄 높이', '20')}
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-                여백
-                {renderStyleApplyStatusIcon(selectedPaddingField)}
-              </label>
-              <div className="grid grid-cols-[repeat(4,minmax(0,1fr))_72px] gap-1">
-                {[
-                  { side: 'top' as const, label: '상' },
-                  { side: 'bottom' as const, label: '하' },
-                  { side: 'left' as const, label: '좌' },
-                  { side: 'right' as const, label: '우' },
-                ].map(({ side, label }) => (
-                  <button
-                    key={`text-padding-side:${side}`}
-                    type="button"
-                    className={paddingSideButtonClass(textPaddingEditSide === side)}
-                    disabled={!hasSelection}
-                    onClick={() => setTextPaddingEditSide(side)}
-                  >
-                    {label}
-                  </button>
-                ))}
-                <div className="relative">
-                  <Input
-                    data-style-field={selectedPaddingField}
-                    value={selectedPaddingValue}
-                    inputMode="decimal"
-                    placeholder={selectedPaddingPlaceholder}
-                    disabled={!hasSelection}
-                    className="h-7 pr-7 text-xs"
-                    onChange={(event) => setStyleFieldDraftValue(selectedPaddingField, event.target.value)}
-                    onBlur={() => applyStyleFieldOnBlur(selectedPaddingField)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.currentTarget.blur();
-                      }
-                    }}
-                  />
-                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-500">
-                    px
-                  </span>
-                </div>
-              </div>
-            </div>
+            {renderRichTextNumericInput('paddingX', '좌우 여백', '0')}
+            {renderRichTextNumericInput('paddingY', '상하 여백', '0')}
             <div className="[&>div>label]:text-xs [&>div>label]:font-semibold [&_button]:h-8 [&_button]:text-xs">
               {renderStyleColorPicker('color', '글자 색')}
             </div>
@@ -32082,6 +30833,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          user-select: text !important;
 	          -webkit-user-select: text !important;
 	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="text"][contenteditable="true"]:empty::before {
+	          content: attr(data-placeholder);
+	          color: rgb(148 163 184);
+	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control,
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control {
 	          width: 100%;
@@ -32090,76 +30845,39 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          box-sizing: border-box;
 	          display: grid;
 	          gap: 4px;
-	          align-content: start;
+	          align-content: center;
 	          color: rgb(15 23 42);
 	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control {
-	          cursor: text;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-display,
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-list {
-	          min-width: 0;
-	          display: grid;
-	          gap: 4px;
-	          align-content: start;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-display-line,
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-item-name {
-	          min-width: 0;
-	          overflow: hidden;
-	          text-overflow: ellipsis;
-	          white-space: nowrap;
-	          font-size: 11px;
-	          line-height: 1.35;
-	          color: rgb(51 65 85);
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-toolbar {
-	          display: none;
-	          grid-auto-flow: column;
-	          justify-content: start;
-	          gap: 6px;
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-label {
+	          display: inline-flex;
+	          width: fit-content;
+	          max-width: 100%;
 	          align-items: center;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="edit"] .v106-template-usage-file-display {
-	          display: none;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="view"] .v106-template-usage-file-list {
-	          display: none;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="edit"] .v106-template-usage-file-toolbar {
-	          display: inline-grid;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-item {
-	          display: grid;
-	          grid-template-columns: minmax(0, 1fr) auto;
+	          justify-content: center;
 	          gap: 6px;
-	          align-items: center;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-add,
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-remove {
 	          border: 1px solid rgb(203 213 225);
-	          border-radius: 999px;
-	          background: rgb(255 255 255);
+	          border-radius: 6px;
+	          background: rgb(248 250 252);
+	          padding: 4px 8px;
+	          font-size: 11px;
+	          font-weight: 700;
 	          color: rgb(51 65 85);
 	          cursor: pointer;
-	          font-size: 10px;
-	          font-weight: 700;
-	          line-height: 1;
 	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-add {
-	          min-width: 22px;
-	          height: 22px;
-	          padding: 0;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-remove {
-	          padding: 4px 8px;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] input[${TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR}="true"] {
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-label input {
 	          position: absolute;
 	          width: 1px;
 	          height: 1px;
 	          opacity: 0;
 	          pointer-events: none;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-name {
+	          min-width: 0;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
+	          white-space: nowrap;
+	          font-size: 11px;
+	          color: rgb(100 116 139);
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control {
 	          grid-template-rows: minmax(0, 1fr) auto;
@@ -32169,9 +30887,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	          width: 100%;
 	          height: 100%;
 	          min-height: 42px;
-	          border: none;
-	          border-radius: 0;
-	          background: transparent;
+	          border: 1px dashed rgb(148 163 184);
+	          border-radius: 6px;
+	          background: rgba(255, 255, 255, .72);
 	          touch-action: none;
 	          cursor: crosshair;
 	        }

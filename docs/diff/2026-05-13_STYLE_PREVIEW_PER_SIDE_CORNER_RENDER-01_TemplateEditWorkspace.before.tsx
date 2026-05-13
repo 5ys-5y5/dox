@@ -14933,7 +14933,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [styleFieldApplyStatus, setStyleFieldApplyStatus] =
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
-  const [activeInlineStyleField, setActiveInlineStyleField] = React.useState<StyleFieldKey | null>(null);
   const [appearanceBoxModelTarget, setAppearanceBoxModelTarget] =
     React.useState<AppearanceBoxModelTarget>('content');
   const [appearanceTargetBorderSides, setAppearanceTargetBorderSides] =
@@ -22402,10 +22401,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     templateDetail?.template.id,
   ]);
 
-  React.useEffect(() => {
-    setActiveInlineStyleField(null);
-  }, [selectedFrameGroupIds, selectedPositionResolvedBoxGroup?.id, selectionPanelTab, templateDetail?.template.id]);
-
   const syncFrameMetadataDraft = React.useCallback(() => {
     const root = previewRef.current;
 
@@ -25350,18 +25345,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
-      const controlElement =
-        stylePanelRef.current?.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-style-field="${field}"]`) || null;
-      const controlValue = controlElement?.value ?? selectionStyleDraft[field];
-      const controlValueMixedBlank =
-        controlElement instanceof HTMLInputElement &&
-        controlElement.getAttribute('data-style-field-mixed') === 'true' &&
-        !controlValue.trim();
-
-      if (controlValueMixedBlank) {
-        setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'idle' }));
-        return;
-      }
+      const controlValue =
+        stylePanelRef.current?.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-style-field="${field}"]`)?.value ??
+        selectionStyleDraft[field];
 
       setSelectionSaveProgress({
         phase: 'running',
@@ -25997,7 +25983,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             setStyleColorPickerOpen(null);
           }}
         >
-          <input data-style-field={field} type="hidden" value={selectionStyleDraft[field]} readOnly />
+          <input data-style-field={field} type="hidden" value={hasAppearanceSelection ? selectionStyleDraft[field] : ''} readOnly />
           <button
             type="button"
             className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-white px-3 py-1 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -30026,163 +30012,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
     const clampVisualNumber = (value: number, minimum: number, maximum: number) =>
       Math.min(Math.max(value, minimum), maximum);
+    const formatDraftValue = (value: string) => (value.trim() ? value.trim() : '혼합');
     const heightValue = parseDraftNumber(selectionStyleDraft.height);
     const borderWidthValue = parseDraftNumber(selectionStyleDraft.borderWidth) || 0;
     const borderRadiusValue = parseDraftNumber(selectionStyleDraft.borderRadius) || 0;
     const borderStyleValue = normalizeFrameBorderStyleValue(selectionStyleDraft.borderStyle, borderWidthValue);
     const borderColorValue = selectionStyleDraft.borderColor.trim() || '#0f172a';
     const backgroundColorValue = selectionStyleDraft.backgroundColor.trim() || 'transparent';
-    const previewRoot = previewRef.current;
-    const previewStyleTargets =
-      hasAppearanceSelection && previewRoot ? resolveSelectionAppearanceStyleTargets(previewRoot) : null;
-    const previewStyleTargetShells = previewStyleTargets
-      ? previewStyleTargets.elements.map((node) =>
-          previewStyleTargets.kind === 'frame' ? resolveFrameLayoutShell(node) : node
-        )
-      : [];
-    const scopedBorderSidesForDisplay =
-      appearanceBoxModelTarget === 'border' && appearanceTargetBorderSides.length > 0
-        ? appearanceTargetBorderSides
-        : APPEARANCE_BORDER_SIDES;
-    const scopedCornersForDisplay =
-      appearanceBoxModelTarget === 'corner' && appearanceTargetCorners.length > 0
-        ? appearanceTargetCorners
-        : APPEARANCE_CORNERS;
-    const computeSharedDisplayState = (values: string[]) => {
-      const normalizedValues = values.map((value) => value.trim());
-      const uniqueValues = Array.from(new Set(normalizedValues));
-      return {
-        value: uniqueValues[0] || '',
-        mixed: uniqueValues.length > 1,
-      };
-    };
-    const borderFieldDisplayState = {
-      borderWidth: computeSharedDisplayState(
-        scopedBorderSidesForDisplay.flatMap((side) =>
-          previewStyleTargetShells.map((shell) =>
-            formatFrameBorderWidthValue(readElementBorderSideAppearance(shell, side).width)
-          )
-        )
-      ),
-      borderStyle: computeSharedDisplayState(
-        scopedBorderSidesForDisplay.flatMap((side) =>
-          previewStyleTargetShells.map((shell) => readElementBorderSideAppearance(shell, side).style || 'none')
-        )
-      ),
-      borderColor: computeSharedDisplayState(
-        scopedBorderSidesForDisplay.flatMap((side) =>
-          previewStyleTargetShells.map((shell) => {
-            const appearance = readElementBorderSideAppearance(shell, side);
-            return colorToHex(appearance.color || '') || appearance.color || '';
-          })
-        )
-      ),
-      borderAlign: computeSharedDisplayState(
-        previewStyleTargetShells.map((shell) => readElementBorderAppearance(shell).align || '')
-      ),
-      borderRadius: computeSharedDisplayState(
-        scopedCornersForDisplay.flatMap((corner) =>
-          previewStyleTargetShells.map((shell) => readElementCornerRadiusValue(shell, corner))
-        )
-      ),
-    } satisfies Partial<Record<StyleFieldKey, { value: string; mixed: boolean }>>;
-    const isStyleFieldDisabled = (field: StyleFieldKey) => {
-      if (appearanceBoxModelTarget === 'corner') {
-        return field === 'borderWidth' || field === 'borderColor' || field === 'borderStyle' || field === 'borderAlign';
-      }
-
-      if (appearanceBoxModelTarget === 'border') {
-        return field === 'borderRadius';
-      }
-
-      return false;
-    };
     const selectionAppearancePreviewWidthPx =
       selectionAppearanceToolbarWidth && Number.isFinite(selectionAppearanceToolbarWidth)
         ? Math.max(1, Math.round(selectionAppearanceToolbarWidth))
         : null;
     const visualContentHeight = heightValue ? clampVisualNumber(heightValue * 0.32, 48, 128) : 70;
     const visualBorderWidth = borderStyleValue === 'none' ? 2 : clampVisualNumber(borderWidthValue || 1, 1, 8);
+    const visualBorderRadius = clampVisualNumber(borderRadiusValue, 0, 28);
     const previewStrokeColor = borderStyleValue === 'none' ? 'rgba(15, 23, 42, .35)' : borderColorValue;
-    const previewBorderSides = APPEARANCE_BORDER_SIDES.reduce<Record<TemplateEdgeSide, { width: number; style: string; color: string }>>(
-      (accumulator, side) => {
-        const sideAppearances = previewStyleTargetShells.map((shell) => readElementBorderSideAppearance(shell, side));
-        const widthToken =
-          sideAppearances.length === 1
-            ? formatFrameBorderWidthValue(sideAppearances[0]?.width || 0)
-            : getSharedValue(sideAppearances.map((appearance) => formatFrameBorderWidthValue(appearance.width)));
-        const widthValue = normalizeFrameBorderWidthValue(widthToken) ?? 0;
-        const styleToken =
-          sideAppearances.length === 1
-            ? sideAppearances[0]?.style || ''
-            : getSharedValue(sideAppearances.map((appearance) => appearance.style));
-        const colorToken =
-          sideAppearances.length === 1
-            ? sideAppearances[0]?.color || ''
-            : getSharedValue(sideAppearances.map((appearance) => appearance.color));
-        const normalizedStyle = normalizeFrameBorderStyleValue(styleToken || 'none', Math.max(widthValue, 1));
-        const hasVisibleBorder = widthValue > 0 && normalizedStyle !== 'none';
-
-        accumulator[side] = {
-          width: hasVisibleBorder ? clampVisualNumber(widthValue, 1, 8) : 0,
-          style: hasVisibleBorder ? normalizedStyle : 'none',
-          color: hasVisibleBorder ? colorToHex(colorToken || '') || colorToken || '#0f172a' : 'transparent',
-        };
-        return accumulator;
-      },
-      {
-        top: { width: 0, style: 'none', color: 'transparent' },
-        right: { width: 0, style: 'none', color: 'transparent' },
-        bottom: { width: 0, style: 'none', color: 'transparent' },
-        left: { width: 0, style: 'none', color: 'transparent' },
-      }
-    );
-    const previewCornerRadii = APPEARANCE_CORNERS.reduce<Record<AppearanceCorner, number>>(
-      (accumulator, corner) => {
-        const cornerValues = previewStyleTargetShells.map((shell) => readElementCornerRadiusValue(shell, corner));
-        const radiusToken =
-          cornerValues.length === 1 ? cornerValues[0] || '' : getSharedValue(cornerValues);
-        const parsedRadius = Number.parseFloat(radiusToken || '');
-        accumulator[corner] = Number.isFinite(parsedRadius) ? clampVisualNumber(parsedRadius, 0, 28) : 0;
-        return accumulator;
-      },
-      {
-        'top-left': clampVisualNumber(borderRadiusValue, 0, 28),
-        'top-right': clampVisualNumber(borderRadiusValue, 0, 28),
-        'bottom-right': clampVisualNumber(borderRadiusValue, 0, 28),
-        'bottom-left': clampVisualNumber(borderRadiusValue, 0, 28),
-      }
-    );
-    const previewHasAnyVisibleBorder = APPEARANCE_BORDER_SIDES.some((side) => {
-      const appearance = previewBorderSides[side];
-      return appearance.width > 0 && appearance.style !== 'none';
-    });
-    const previewCornerRadiusStyle: React.CSSProperties = {
-      borderTopLeftRadius: `${previewCornerRadii['top-left']}px`,
-      borderTopRightRadius: `${previewCornerRadii['top-right']}px`,
-      borderBottomRightRadius: `${previewCornerRadii['bottom-right']}px`,
-      borderBottomLeftRadius: `${previewCornerRadii['bottom-left']}px`,
-    };
-    const previewBorderPresentationStyle: React.CSSProperties = previewHasAnyVisibleBorder
-      ? {
-          borderTopWidth: `${previewBorderSides.top.width}px`,
-          borderTopStyle: previewBorderSides.top.style,
-          borderTopColor: previewBorderSides.top.color,
-          borderRightWidth: `${previewBorderSides.right.width}px`,
-          borderRightStyle: previewBorderSides.right.style,
-          borderRightColor: previewBorderSides.right.color,
-          borderBottomWidth: `${previewBorderSides.bottom.width}px`,
-          borderBottomStyle: previewBorderSides.bottom.style,
-          borderBottomColor: previewBorderSides.bottom.color,
-          borderLeftWidth: `${previewBorderSides.left.width}px`,
-          borderLeftStyle: previewBorderSides.left.style,
-          borderLeftColor: previewBorderSides.left.color,
-        }
-      : {
-          border: 'none',
-        };
+    const previewBorderPresentationStyle: React.CSSProperties =
+      borderStyleValue === 'none'
+        ? {
+            border: 'none',
+          }
+        : {
+            borderColor: previewStrokeColor,
+            borderStyle: borderStyleValue,
+            borderWidth: `${visualBorderWidth}px`,
+          };
     const previewDashedGuideStyle: React.CSSProperties | null =
-      !previewHasAnyVisibleBorder
+      borderStyleValue === 'none'
         ? {
             position: 'absolute',
             inset: `${visualBorderWidth / -2}px`,
@@ -30190,10 +30046,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             borderWidth: `${visualBorderWidth}px`,
             borderStyle: 'dashed',
             borderColor: previewStrokeColor,
-            borderTopLeftRadius: `${previewCornerRadii['top-left'] + visualBorderWidth / 2}px`,
-            borderTopRightRadius: `${previewCornerRadii['top-right'] + visualBorderWidth / 2}px`,
-            borderBottomRightRadius: `${previewCornerRadii['bottom-right'] + visualBorderWidth / 2}px`,
-            borderBottomLeftRadius: `${previewCornerRadii['bottom-left'] + visualBorderWidth / 2}px`,
+            borderRadius: `${visualBorderRadius + visualBorderWidth / 2}px`,
           }
         : null;
     const transparentFillStyle: React.CSSProperties = {
@@ -30451,11 +30304,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         </button>
       );
     };
-    const resolveInlineStyleFieldStateClass = (field: StyleFieldKey, disabled = false) => {
-      if (disabled) {
-        return 'border-slate-200 bg-slate-100 text-slate-400 hover:bg-slate-100';
-      }
-
+    const resolveInlineStyleFieldStateClass = (field: StyleFieldKey) => {
       const applyStatus = styleFieldApplyStatus[field];
 
       if (applyStatus === 'saved') {
@@ -30478,21 +30327,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       widthClassName = 'w-32',
       shortLabel = ariaLabel
     ) => {
-      const displayState = borderFieldDisplayState[field] || {
-        value: hasAppearanceSelection ? selectionStyleDraft[field] : '',
-        mixed: false,
-      };
-      const isEditingField = activeInlineStyleField === field;
-      const disabled = isStyleFieldDisabled(field);
-      const inputStateClass = resolveInlineStyleFieldStateClass(field, disabled);
-      const displayValue = hasAppearanceSelection
-        ? isEditingField
-          ? selectionStyleDraft[field]
-          : displayState.mixed
-            ? ''
-            : displayState.value
-        : '';
-      const mixedPlaceholder = hasAppearanceSelection && displayState.mixed ? '혼합' : '';
+      const inputStateClass = resolveInlineStyleFieldStateClass(field);
+      const displayValue = hasAppearanceSelection ? selectionStyleDraft[field] : '';
 
       return (
         <span
@@ -30506,38 +30342,21 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </span>
           <Input
             data-style-field={field}
-            data-style-field-mixed={displayState.mixed ? 'true' : 'false'}
             value={displayValue}
             inputMode="decimal"
             aria-label={ariaLabel}
             title={ariaLabel}
-            placeholder={mixedPlaceholder}
+            placeholder=""
             className={`h-8 w-full rounded-md border pl-[20px] pr-[16px] text-center text-[11px] font-semibold sm:pl-[50px] sm:pr-5 ${inputStateClass}`}
-            disabled={disabled}
             onFocus={() => {
-              if (disabled) {
-                return;
-              }
-              setActiveInlineStyleField(field);
-              setSelectionStyleDraft((previous) => {
-                const nextValue = displayState.mixed ? '' : displayState.value;
-                return previous[field] === nextValue ? previous : { ...previous, [field]: nextValue };
-              });
               hintAppearanceModeForStyleField(field);
             }}
             onChange={(event) => {
-              if (disabled) {
-                return;
-              }
               hintAppearanceModeForStyleField(field, event.target.value);
               setStyleFieldDraftValue(field, event.target.value);
             }}
             onBlur={() => {
-              if (disabled) {
-                return;
-              }
               applyStyleFieldOnBlur(field);
-              setActiveInlineStyleField((previous) => (previous === field ? null : previous));
               const nextTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
               if (nextTarget === 'border' || nextTarget === 'corner') {
                 clearAppearanceTargetModeIfNoSelection(nextTarget);
@@ -30561,12 +30380,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       style?: React.CSSProperties,
       variant: 'popover' | 'horizontal' = 'popover'
     ) => {
-      const displayState = borderFieldDisplayState[field] || {
-        value: selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : hasAppearanceSelection ? '#0f172a' : ''),
-        mixed: false,
-      };
-      const currentValue = displayState.mixed ? '' : displayState.value;
-      const disabled = isStyleFieldDisabled(field);
+      const currentValue =
+        selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : hasAppearanceSelection ? '#0f172a' : '');
 
       return (
         <div
@@ -30617,28 +30432,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </div>
           {variant === 'popover' ? (
             <Input
-              data-style-field-mixed={displayState.mixed ? 'true' : 'false'}
               value={hasAppearanceSelection ? selectionStyleDraft[field] : ''}
-              placeholder={
-                displayState.mixed
-                  ? '혼합'
-                  : field === 'backgroundColor'
-                    ? 'transparent 또는 #ffffff'
-                    : '#0f172a'
-              }
+              placeholder={field === 'backgroundColor' ? 'transparent 또는 #ffffff' : '#0f172a'}
               className="mt-2 h-8 text-xs"
-              disabled={disabled}
               onChange={(event) => {
-                if (disabled) {
-                  return;
-                }
                 hintAppearanceModeForStyleField(field, event.target.value);
                 setStyleFieldDraftValue(field, event.target.value);
               }}
               onBlur={() => {
-                if (disabled) {
-                  return;
-                }
                 applyStyleFieldOnBlur(field);
                 const nextTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
                 if (nextTarget === 'border' || nextTarget === 'corner') {
@@ -30662,13 +30463,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       showInlinePanel = true,
       shortLabel?: string
     ) => {
-      const displayState = borderFieldDisplayState[field] || {
-        value: selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : hasAppearanceSelection ? '#0f172a' : ''),
-        mixed: false,
-      };
-      const currentValue = displayState.mixed ? '' : displayState.value;
+      const currentValue =
+        selectionStyleDraft[field] || (field === 'backgroundColor' ? 'transparent' : hasAppearanceSelection ? '#0f172a' : '');
       const isOpen = styleColorPickerOpen === field;
-      const disabled = isStyleFieldDisabled(field);
 
       return (
         <div
@@ -30676,9 +30473,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           onMouseDown={stopInlineControlEvent}
           onClick={(event) => {
             event.stopPropagation();
-            if (disabled) {
-              return;
-            }
             if (field === 'backgroundColor') {
               activateAppearanceTargetMode('content', true);
             } else if (hasAppearanceSelection) {
@@ -30704,33 +30498,25 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           <input data-style-field={field} type="hidden" value={selectionStyleDraft[field]} readOnly />
           <button
             type="button"
-            disabled={disabled}
-            className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass(field, disabled)}`}
+            className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass(field)}`}
             aria-label={label}
           >
             <span
               className="h-3.5 w-3.5 rounded border border-slate-200"
               style={{
-                backgroundColor: displayState.mixed ? '#ffffff' : currentValue === 'transparent' ? '#ffffff' : currentValue,
+                backgroundColor: currentValue === 'transparent' ? '#ffffff' : currentValue,
                 backgroundImage:
-                  displayState.mixed
-                    ? 'repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.4) 0px, rgba(148, 163, 184, 0.4) 3px, transparent 3px, transparent 6px)'
-                    : currentValue === 'transparent'
+                  currentValue === 'transparent'
                     ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)'
                     : 'none',
-                backgroundPosition:
-                  displayState.mixed
-                    ? '0 0'
-                    : currentValue === 'transparent'
-                      ? '0 0, 0 5px, 5px -5px, -5px 0px'
-                      : undefined,
-                backgroundSize: displayState.mixed ? '8px 8px' : currentValue === 'transparent' ? '10px 10px' : undefined,
+                backgroundPosition: currentValue === 'transparent' ? '0 0, 0 5px, 5px -5px, -5px 0px' : undefined,
+                backgroundSize: currentValue === 'transparent' ? '10px 10px' : undefined,
               }}
               aria-hidden="true"
             />
             <span>
               <span className={shortLabel ? 'hidden sm:inline' : undefined}>
-                {displayState.mixed ? '혼합' : field === 'backgroundColor' ? '배경' : '선색'}
+                {field === 'backgroundColor' ? '배경' : '선색'}
               </span>
               {shortLabel ? <span className="sm:hidden">{shortLabel}</span> : null}
             </span>
@@ -30746,21 +30532,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyStyleFieldImmediateValue('borderAlign', nextOption.value);
     };
     const renderInlineBorderAlignPicker = () => {
-      const displayState = borderFieldDisplayState.borderAlign || {
-        value: hasAppearanceSelection ? selectionStyleDraft.borderAlign : '',
-        mixed: false,
-      };
-      const currentBorderAlignValue = hasAppearanceSelection ? displayState.value : '';
-      const disabled = isStyleFieldDisabled('borderAlign');
-      const currentLabel = displayState.mixed
-        ? '혼합'
-        : currentBorderAlignValue
+      const currentBorderAlignValue = hasAppearanceSelection ? selectionStyleDraft.borderAlign : '';
+      const currentLabel = currentBorderAlignValue
         ? FRAME_BORDER_ALIGN_LABEL_BY_VALUE.get(currentBorderAlignValue) || currentBorderAlignValue
         : '외곽선 정렬';
       const currentShortLabel =
-        displayState.mixed
-          ? 'MIX'
-          : currentBorderAlignValue === 'inside'
+        currentBorderAlignValue === 'inside'
           ? 'I'
           : currentBorderAlignValue === 'center'
             ? 'C'
@@ -30773,21 +30550,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         onMouseDown={stopInlineControlEvent}
         onClick={stopInlineControlEvent}
       >
-        <input data-style-field="borderAlign" type="hidden" value={displayState.mixed ? '' : currentBorderAlignValue} readOnly />
+        <input data-style-field="borderAlign" type="hidden" value={currentBorderAlignValue} readOnly />
         <button
           type="button"
-          disabled={disabled}
-          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderAlign', disabled)}`}
+          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderAlign')}`}
           onClick={() => {
-            if (disabled) {
-              return;
-            }
             cycleBorderAlignValue();
           }}
           onBlur={() => {
-            if (disabled) {
-              return;
-            }
             clearAppearanceTargetModeIfNoSelection('border');
           }}
           title="클릭할 때마다 내부 → 중앙 → 외곽 순서로 바뀝니다."
@@ -30806,32 +30576,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         onMouseDown={stopInlineControlEvent}
         onClick={stopInlineControlEvent}
       >
-        {(() => {
-          const currentBorderStyleValue =
-            borderFieldDisplayState.borderStyle?.mixed || !hasAppearanceSelection
-              ? ''
-              : borderFieldDisplayState.borderStyle?.value || selectionStyleDraft.borderStyle;
-          const borderStyleDisabled = isStyleFieldDisabled('borderStyle');
-          return (
-            <>
-        <input
-          data-style-field="borderStyle"
-          type="hidden"
-          value={
-            hasAppearanceSelection && !(borderFieldDisplayState.borderStyle?.mixed || false)
-              ? currentBorderStyleValue
-              : ''
-          }
-          readOnly
-        />
+        <input data-style-field="borderStyle" type="hidden" value={hasAppearanceSelection ? selectionStyleDraft.borderStyle : ''} readOnly />
         <button
           type="button"
-          disabled={borderStyleDisabled}
-          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderStyle', borderStyleDisabled)}`}
+          className={`inline-flex h-8 w-full items-center justify-center gap-0.5 rounded-md border px-1 text-[11px] font-semibold sm:gap-1 sm:px-1.5 ${resolveInlineStyleFieldStateClass('borderStyle')}`}
           onClick={() => {
-            if (borderStyleDisabled) {
-              return;
-            }
             if (hasAppearanceSelection) {
               activateAppearanceTargetMode('border');
             } else {
@@ -30842,30 +30591,26 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           onBlur={() =>
             window.setTimeout(() => {
               setBorderStylePickerOpen(false);
-              if (!borderStyleDisabled) {
-                clearAppearanceTargetModeIfNoSelection('border');
-              }
+              clearAppearanceTargetModeIfNoSelection('border');
             }, 120)
           }
         >
           <span>
             <span className="hidden sm:inline">
-              {borderFieldDisplayState.borderStyle?.mixed
-                ? '혼합'
-                : hasAppearanceSelection && currentBorderStyleValue
-                  ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(currentBorderStyleValue) || currentBorderStyleValue
+              {hasAppearanceSelection && selectionStyleDraft.borderStyle
+                ? FRAME_BORDER_STYLE_LABEL_BY_VALUE.get(selectionStyleDraft.borderStyle) || selectionStyleDraft.borderStyle
                 : '외곽선 타입'}
             </span>
             <span className="sm:hidden">LT</span>
           </span>
-          {hasAppearanceSelection && !(borderFieldDisplayState.borderStyle?.mixed || false) && currentBorderStyleValue
-            ? renderBorderStylePreview(currentBorderStyleValue, 'hidden sm:block w-10')
+          {hasAppearanceSelection && selectionStyleDraft.borderStyle
+            ? renderBorderStylePreview(selectionStyleDraft.borderStyle, 'hidden sm:block w-10')
             : null}
         </button>
         {borderStylePickerOpen ? (
           <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-56 overflow-y-auto rounded-md border border-amber-200 bg-white py-1 text-[11px] text-amber-950">
             {FRAME_BORDER_STYLE_OPTIONS.map((option) => {
-              const isSelected = currentBorderStyleValue === option.value;
+              const isSelected = selectionStyleDraft.borderStyle === option.value;
 
               return (
                 <button
@@ -30893,9 +30638,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             })}
           </div>
         ) : null}
-            </>
-          );
-        })()}
       </div>
     );
     return (
@@ -30929,7 +30671,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             boxSizing: 'border-box',
             width: selectionAppearancePreviewWidthPx ? `${selectionAppearancePreviewWidthPx}px` : 'fit-content',
             maxWidth: '100%',
-            ...previewCornerRadiusStyle,
+            borderRadius: `${visualBorderRadius}px`,
             ...previewBorderPresentationStyle,
           }}
           onClick={(event) => selectBoxModelTarget(event, 'border')}
@@ -30947,7 +30689,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               width: '100%',
               maxWidth: '100%',
               height: `${visualContentHeight}px`,
-              ...previewCornerRadiusStyle,
+              borderRadius: `${visualBorderRadius}px`,
               overflow: 'hidden',
             }}
             onMouseDown={stopInlineControlEvent}

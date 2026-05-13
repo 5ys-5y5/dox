@@ -1,0 +1,312 @@
+chrome-devtools 분리 사용 방법
+작성일: 2026-05-13 KST
+
+1. 현재 확인된 상태
+
+- 이 세션에서 `chrome-devtools` MCP 접근을 다시 시도했을 때 아래 오류가 재현됐다.
+  - `The browser is already running for /Users/gy/.cache/chrome-devtools-mcp/chrome-profile. Use --isolated to run multiple browser instances.`
+- 현재 Codex 설정 파일은 `/Users/gy/.codex/config.toml` 이고, `chrome-devtools` 서버는 아래처럼 기본값으로만 실행되고 있다.
+
+  [mcp_servers.chrome-devtools]
+  command = "npx"
+  args = ["-y", "chrome-devtools-mcp@latest"]
+  startup_timeout_ms = 20000
+
+- 즉, 지금 설정은 `chrome-devtools-mcp`가 기본 공유 프로필인
+  `/Users/gy/.cache/chrome-devtools-mcp/chrome-profile`
+  를 잡고 실행한다.
+- 다른 LLM이나 다른 Codex 세션이 같은 프로필을 먼저 점유하면, 이 세션의 `chrome-devtools`는 계속 막힌다.
+
+
+2. 결론
+
+- 해결 핵심은 한 줄이다.
+  - 각 LLM 세션마다 `user-data-dir`를 다르게 준다.
+- 더 안정적으로 하려면 아래 4개를 모두 분리한다.
+  - Chrome 인스턴스
+  - user-data-dir
+  - remote-debugging-port
+  - MCP 연결 대상
+
+
+3. 가장 간단한 해결책: MCP를 새 임시 프로필로 실행
+
+- 장점
+  - 가장 빨리 적용 가능
+  - 기존 Chrome이 다른 세션에서 열려 있어도 충돌 가능성이 크게 줄어든다
+- 단점
+  - 세션을 다시 열 때마다 새 프로필이 생기므로 상태 유지가 약하다
+
+`/Users/gy/.codex/config.toml`에서 기존 `chrome-devtools` 항목을 아래처럼 바꾼다.
+
+  [mcp_servers.chrome-devtools]
+  command = "npx"
+  args = ["-y", "chrome-devtools-mcp@latest", "--isolated=true"]
+  startup_timeout_ms = 20000
+
+- 이 방식은 매번 분리된 임시 프로필을 사용한다.
+- 변경 후에는 현재 Codex 세션을 완전히 종료하고 다시 시작해야 한다.
+- 이미 열린 세션의 `mcp__chrome_devtools__` 도구는 실행 중간에 다른 프로필로 갈아탈 수 없다.
+
+
+4. 상태 유지가 필요한 해결책: 고정 전용 프로필을 하나 더 만든다
+
+- 장점
+  - 같은 LLM 세션군이 같은 테스트 프로필을 계속 쓸 수 있다
+  - 쿠키, 로그인, 테스트 상태를 유지하기 쉽다
+- 단점
+  - 프로필 경로를 직접 관리해야 한다
+
+예시:
+
+  mkdir -p "$HOME/.cache/chrome-devtools-mcp/chrome-profile-llm-b"
+
+`/Users/gy/.codex/config.toml`에서 기존 서버를 바꾸거나, 별도 서버를 추가한다.
+
+기존 서버를 교체하는 방법:
+
+  [mcp_servers.chrome-devtools]
+  command = "npx"
+  args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--user-data-dir=/Users/gy/.cache/chrome-devtools-mcp/chrome-profile-llm-b"
+  ]
+  startup_timeout_ms = 20000
+
+별도 서버를 추가하는 방법:
+
+  [mcp_servers.chrome-devtools-split]
+  command = "npx"
+  args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--user-data-dir=/Users/gy/.cache/chrome-devtools-mcp/chrome-profile-llm-b"
+  ]
+  startup_timeout_ms = 20000
+
+- 별도 서버 이름을 쓰면 기존 `chrome-devtools`와 충돌을 피하면서 병렬 운영이 쉽다.
+- 단, 새 서버 이름을 추가하면 그 이름으로 MCP 도구가 다시 로드되도록 Codex 세션을 재시작해야 한다.
+
+
+5. 가장 안정적인 해결책: Chrome 자체를 별도 포트로 띄우고 MCP는 그쪽으로만 붙인다
+
+- 이 방식이 가장 명확하다.
+- LLM A와 LLM B가 서로 다른 Chrome 인스턴스를 쓰므로, 한쪽 점유가 다른 쪽을 막지 않는다.
+
+macOS 예시:
+
+  mkdir -p "$HOME/.cache/chrome-llm-a" "$HOME/.cache/chrome-llm-b"
+
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --remote-debugging-address=127.0.0.1 \
+    --remote-debugging-port=9222 \
+    --user-data-dir="$HOME/.cache/chrome-llm-a" \
+    --no-first-run \
+    --no-default-browser-check &
+
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --remote-debugging-address=127.0.0.1 \
+    --remote-debugging-port=9223 \
+    --user-data-dir="$HOME/.cache/chrome-llm-b" \
+    --no-first-run \
+    --no-default-browser-check &
+
+그 다음 MCP 설정을 아래처럼 바꾼다.
+
+LLM A:
+
+  [mcp_servers.chrome-devtools]
+  command = "npx"
+  args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--browser-url=http://127.0.0.1:9222"
+  ]
+  startup_timeout_ms = 20000
+
+LLM B:
+
+  [mcp_servers.chrome-devtools]
+  command = "npx"
+  args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--browser-url=http://127.0.0.1:9223"
+  ]
+  startup_timeout_ms = 20000
+
+한 설정 파일 안에서 둘 다 관리하려면 이름을 분리한다.
+
+  [mcp_servers.chrome-devtools-a]
+  command = "npx"
+  args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--browser-url=http://127.0.0.1:9222"
+  ]
+  startup_timeout_ms = 20000
+
+  [mcp_servers.chrome-devtools-b]
+  command = "npx"
+  args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--browser-url=http://127.0.0.1:9223"
+  ]
+  startup_timeout_ms = 20000
+
+
+6. 이 머신에서 바로 권장하는 방식
+
+현재 확인된 상태 기준으로는 아래 순서를 권장한다.
+
+- 1안: 가장 빠른 복구
+  - `chrome-devtools`에 `--isolated=true` 추가
+  - Codex 세션 재시작
+
+- 2안: 반복 작업용
+  - `--user-data-dir=/Users/gy/.cache/chrome-devtools-mcp/chrome-profile-llm-b`
+  - Codex 세션 재시작
+
+- 3안: 여러 LLM을 장기간 병렬 운영
+  - Chrome을 포트 9222, 9223으로 직접 띄움
+  - 각 MCP는 `--browser-url`로 자기 Chrome에만 연결
+
+실무적으로는 3안이 가장 안정적이다.
+
+
+7. 중요한 제한
+
+- 현재 이미 열린 Codex 세션 안에서는, 이미 바인딩된 `mcp__chrome_devtools__`를 다른 프로필로 즉시 전환할 수 없다.
+- 이유는 MCP 도구 바인딩이 세션 시작 시점에 고정되기 때문이다.
+- 즉 아래 작업이 필요하다.
+  1) `~/.codex/config.toml` 수정
+  2) 필요하면 별도 Chrome 실행
+  3) 현재 Codex 세션 종료
+  4) 새 Codex 세션 시작
+
+
+8. 확인 방법
+
+별도 Chrome을 직접 띄운 방식이면 아래로 확인한다.
+
+  curl http://127.0.0.1:9222/json/version
+  curl http://127.0.0.1:9223/json/version
+
+- 응답이 오면 DevTools 포트는 정상이다.
+- 이후 새로 시작한 Codex 세션에서 `chrome-devtools` MCP가 해당 포트에 연결되면 된다.
+
+
+9. 피해야 할 구성
+
+아래처럼 같은 user-data-dir을 두 세션이 공유하면 다시 같은 문제가 난다.
+
+  --user-data-dir=/Users/gy/.cache/chrome-devtools-mcp/chrome-profile
+
+- 포트만 다르게 주고 user-data-dir을 공유하는 방식도 피해야 한다.
+- 기본 브라우저 프로필을 remote debugging 대상으로 바로 쓰는 것도 피하는 편이 안전하다.
+
+
+10. 이번 턴에서 실제 확인한 사실
+
+- `mcp__chrome_devtools__.list_pages`는 여전히 공유 프로필 lock으로 실패했다.
+- `/Users/gy/.codex/config.toml`에는 `chrome-devtools-mcp@latest`만 지정되어 있고, `--isolated`, `--user-data-dir`, `--browser-url` 어느 것도 지정되지 않았다.
+- `/Users/gy/.cache/chrome-devtools-mcp/chrome-profile` 디렉터리는 실제로 존재한다.
+
+즉, 현재 문제는 추측이 아니라 실제 설정과 현재 프로필 경로가 맞물려 재현된 상태다.
+
+
+11. 2026-05-13 추가 실측 결과
+
+- 로컬 캐시에 있는 `chrome-devtools-mcp` 바이너리를 직접 실행하는 것은 성공했다.
+  - 경로: `/Users/gy/.npm/_npx/15c61037b1978c83/node_modules/.bin/chrome-devtools-mcp`
+- 별도 로컬 MCP client로 붙어서 아래까지는 실제로 확인했다.
+  - `initialize` 성공
+  - `tools/list` 성공
+  - tool count 29개 확인
+  - `list_pages` tool 자체도 노출됨
+
+- 즉, `기존 chrome-devtools가 점유 중이라 MCP 서버를 하나 더 못 띄운다`가 현재 최종 문제는 아니다.
+- 공유 프로필 lock 문제는 `--isolated=true` 또는 별도 `--user-data-dir`로 회피 가능하다는 점이 실측으로 다시 확인됐다.
+
+
+12. 이 머신에서 실제로 남은 최종 장애물
+
+- 별도 MCP 서버가 자기 브라우저를 띄우는 순간 브라우저 프로세스가 바로 죽는다.
+- MCP 쪽 증상:
+  - `Protocol error (Target.setDiscoverTargets): Target closed`
+- 사용자가 직접 제공한 macOS crash report 기준 실제 브라우저 종료 원인은 아래다.
+  - 프로세스: `Google Chrome`
+  - 종료: `EXC_CRASH (SIGABRT)`
+  - 스택 핵심:
+    - `HIServices`
+    - `_RegisterApplication`
+    - `TransformProcessType`
+    - `abort()`
+
+- 의미는 단순하다.
+  - `chrome-devtools-mcp` 분리 자체는 가능하다.
+  - 하지만 현재 이 Codex 샌드박스/실행 문맥에서 `Google Chrome.app` 두 번째 자동화 인스턴스를 안정적으로 띄우는 단계에서 macOS 쪽 앱 등록이 abort 난다.
+
+
+13. 따라서 실제로 가장 안정적인 최종 해법
+
+현재 머신에서는 아래 순서가 가장 안전하다.
+
+1) 사용자가 일반 터미널 또는 별도 사용자 세션에서 두 번째 Chrome을 직접 띄운다.
+   - 즉, Codex 샌드박스 밖에서 실행한다.
+   - 이유: 여기서 확인된 crash는 `chrome-devtools-mcp` 문제가 아니라 `Google Chrome.app`의 런치 문맥 문제이기 때문이다.
+
+2) 그 Chrome은 반드시 별도 `user-data-dir`과 별도 remote debugging port를 사용한다.
+
+   예시:
+
+   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+     --headless=new \
+     --no-sandbox \
+     --disable-setuid-sandbox \
+     --disable-dev-shm-usage \
+     --disable-gpu \
+     --hide-scrollbars \
+     --allow-file-access-from-files \
+     --disable-background-networking \
+     --disable-default-apps \
+     --disable-popup-blocking \
+     --disable-extensions \
+     --disable-sync \
+     --metrics-recording-only \
+     --mute-audio \
+     --no-first-run \
+     --no-default-browser-check \
+     --remote-debugging-port=9223 \
+     --user-data-dir="$HOME/.cache/chrome-llm-b" \
+     about:blank
+
+3) 그 다음 Codex의 새 `chrome-devtools` MCP는 브라우저를 직접 띄우지 말고, 이미 떠 있는 Chrome에 `--browser-url`로만 연결한다.
+
+   [mcp_servers.chrome-devtools]
+   command = "npx"
+   args = [
+     "-y",
+     "chrome-devtools-mcp@latest",
+     "--browser-url=http://127.0.0.1:9223"
+   ]
+   startup_timeout_ms = 20000
+
+- 이 방식이면:
+  - 기존 다른 LLM의 `chrome-devtools`는 그대로 둔다.
+  - 새 LLM은 다른 포트/다른 프로필의 Chrome에만 붙는다.
+  - `chrome-devtools-mcp`가 Chrome을 직접 띄우는 단계 자체를 우회하므로, 이번에 실측된 macOS abort 지점을 피할 수 있다.
+
+
+14. 이 문서 기준 최종 판단
+
+- 공유 프로필 lock 문제: 해결 방법 확인 완료
+- 별도 MCP 서버 실행 가능 여부: 확인 완료
+- 현재 샌드박스 안에서 두 번째 `Google Chrome.app` 자동 실행: 실패 원인 확인 완료
+- 따라서 이 머신에서 실제 운영 해법은:
+  - `외부 사용자 세션에서 Chrome 실행`
+  - `Codex는 --browser-url로만 접속`
+
+이 조합이 현재 기준 가장 현실적이고 안정적인 방법이다.

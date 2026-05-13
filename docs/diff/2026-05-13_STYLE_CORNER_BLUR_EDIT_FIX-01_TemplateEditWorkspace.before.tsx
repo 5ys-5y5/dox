@@ -14933,7 +14933,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [styleFieldApplyStatus, setStyleFieldApplyStatus] =
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
-  const [activeInlineStyleField, setActiveInlineStyleField] = React.useState<StyleFieldKey | null>(null);
   const [appearanceBoxModelTarget, setAppearanceBoxModelTarget] =
     React.useState<AppearanceBoxModelTarget>('content');
   const [appearanceTargetBorderSides, setAppearanceTargetBorderSides] =
@@ -22401,10 +22400,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncSelectionStyleDraft,
     templateDetail?.template.id,
   ]);
-
-  React.useEffect(() => {
-    setActiveInlineStyleField(null);
-  }, [selectedFrameGroupIds, selectedPositionResolvedBoxGroup?.id, selectionPanelTab, templateDetail?.template.id]);
 
   const syncFrameMetadataDraft = React.useCallback(() => {
     const root = previewRef.current;
@@ -30482,16 +30477,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         value: hasAppearanceSelection ? selectionStyleDraft[field] : '',
         mixed: false,
       };
-      const isEditingField = activeInlineStyleField === field;
       const disabled = isStyleFieldDisabled(field);
       const inputStateClass = resolveInlineStyleFieldStateClass(field, disabled);
-      const displayValue = hasAppearanceSelection
-        ? isEditingField
-          ? selectionStyleDraft[field]
-          : displayState.mixed
-            ? ''
-            : displayState.value
-        : '';
+      const displayValue = hasAppearanceSelection ? (displayState.mixed ? '' : displayState.value) : '';
       const mixedPlaceholder = hasAppearanceSelection && displayState.mixed ? '혼합' : '';
 
       return (
@@ -30518,11 +30506,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               if (disabled) {
                 return;
               }
-              setActiveInlineStyleField(field);
-              setSelectionStyleDraft((previous) => {
-                const nextValue = displayState.mixed ? '' : displayState.value;
-                return previous[field] === nextValue ? previous : { ...previous, [field]: nextValue };
-              });
               hintAppearanceModeForStyleField(field);
             }}
             onChange={(event) => {
@@ -30537,7 +30520,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 return;
               }
               applyStyleFieldOnBlur(field);
-              setActiveInlineStyleField((previous) => (previous === field ? null : previous));
               const nextTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
               if (nextTarget === 'border' || nextTarget === 'corner') {
                 clearAppearanceTargetModeIfNoSelection(nextTarget);

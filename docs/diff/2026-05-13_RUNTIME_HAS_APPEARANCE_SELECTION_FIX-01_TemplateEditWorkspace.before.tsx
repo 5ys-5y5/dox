@@ -14933,7 +14933,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [selectionStyleDraft, setSelectionStyleDraft] = React.useState<SelectionStyleDraft>(defaultSelectionStyleDraft);
   const [styleFieldApplyStatus, setStyleFieldApplyStatus] =
     React.useState<Record<StyleFieldKey, StyleFieldApplyState>>(defaultStyleFieldApplyStatus);
-  const [activeInlineStyleField, setActiveInlineStyleField] = React.useState<StyleFieldKey | null>(null);
   const [appearanceBoxModelTarget, setAppearanceBoxModelTarget] =
     React.useState<AppearanceBoxModelTarget>('content');
   const [appearanceTargetBorderSides, setAppearanceTargetBorderSides] =
@@ -22402,10 +22401,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     templateDetail?.template.id,
   ]);
 
-  React.useEffect(() => {
-    setActiveInlineStyleField(null);
-  }, [selectedFrameGroupIds, selectedPositionResolvedBoxGroup?.id, selectionPanelTab, templateDetail?.template.id]);
-
   const syncFrameMetadataDraft = React.useCallback(() => {
     const root = previewRef.current;
 
@@ -25997,7 +25992,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             setStyleColorPickerOpen(null);
           }}
         >
-          <input data-style-field={field} type="hidden" value={selectionStyleDraft[field]} readOnly />
+          <input data-style-field={field} type="hidden" value={hasAppearanceSelection ? selectionStyleDraft[field] : ''} readOnly />
           <button
             type="button"
             className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-white px-3 py-1 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -30482,16 +30477,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         value: hasAppearanceSelection ? selectionStyleDraft[field] : '',
         mixed: false,
       };
-      const isEditingField = activeInlineStyleField === field;
       const disabled = isStyleFieldDisabled(field);
       const inputStateClass = resolveInlineStyleFieldStateClass(field, disabled);
-      const displayValue = hasAppearanceSelection
-        ? isEditingField
-          ? selectionStyleDraft[field]
-          : displayState.mixed
-            ? ''
-            : displayState.value
-        : '';
+      const displayValue = hasAppearanceSelection ? (displayState.mixed ? '' : displayState.value) : '';
       const mixedPlaceholder = hasAppearanceSelection && displayState.mixed ? '혼합' : '';
 
       return (
@@ -30518,11 +30506,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               if (disabled) {
                 return;
               }
-              setActiveInlineStyleField(field);
-              setSelectionStyleDraft((previous) => {
-                const nextValue = displayState.mixed ? '' : displayState.value;
-                return previous[field] === nextValue ? previous : { ...previous, [field]: nextValue };
-              });
               hintAppearanceModeForStyleField(field);
             }}
             onChange={(event) => {
@@ -30537,7 +30520,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 return;
               }
               applyStyleFieldOnBlur(field);
-              setActiveInlineStyleField((previous) => (previous === field ? null : previous));
               const nextTarget = APPEARANCE_TARGET_BY_STYLE_FIELD[field];
               if (nextTarget === 'border' || nextTarget === 'corner') {
                 clearAppearanceTargetModeIfNoSelection(nextTarget);
