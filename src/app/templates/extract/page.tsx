@@ -1029,13 +1029,69 @@ const applyExtractFrameBorderAppearanceStyle = (
   }
 };
 
+const applyExtractFrameBorderAppearanceAttrs = (
+  element: HTMLElement,
+  appearance: ExtractFrameBorderAppearance | null
+) => {
+  const width = Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH);
+  const style = normalizeExtractFrameBorderStyle(appearance?.style || DEFAULT_TEMPLATE_FRAME_BORDER_STYLE, width);
+  const color = normalizeExtractFrameBorderColor(appearance?.color || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
+  const hasVisibleBorder = width > 0 && style !== 'none' && color !== 'transparent';
+
+  normalizeExtractFrameDefaultBackground(element);
+  element.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN);
+  element.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, String(Number(width.toFixed(2))));
+  element.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, hasVisibleBorder ? style : 'none');
+  element.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, hasVisibleBorder ? color : 'transparent');
+
+  if (hasVisibleBorder) {
+    element.setAttribute('data-template-frame-outline-style', style);
+  } else {
+    element.removeAttribute('data-template-frame-outline-style');
+  }
+};
+
+const preserveNestedExtractFrameBorderStyles = (shell: HTMLElement) => {
+  const table = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
+
+  if (!table) {
+    return false;
+  }
+
+  const tableCells = Array.from(table.querySelectorAll<HTMLElement>('td, th'));
+
+  if (tableCells.length <= 0) {
+    return false;
+  }
+
+  const tableAppearance = readExtractElementBorderAppearance(table);
+  const cellAppearances = tableCells
+    .map((cell) => readExtractElementBorderAppearance(cell))
+    .filter((appearance): appearance is ExtractFrameBorderAppearance => Boolean(appearance));
+  const shellAppearance = readExtractElementBorderAppearance(shell);
+  const fallbackAppearance = tableAppearance || cellAppearances[0] || shellAppearance;
+
+  if (!fallbackAppearance) {
+    return false;
+  }
+
+  normalizeExtractFrameDefaultBackground(shell);
+  applyExtractFrameBorderAppearanceAttrs(shell, shellAppearance || fallbackAppearance);
+  applyExtractFrameBorderAppearanceAttrs(table, tableAppearance || fallbackAppearance);
+  tableCells.forEach((cell) => {
+    applyExtractFrameBorderAppearanceAttrs(cell, readExtractElementBorderAppearance(cell) || fallbackAppearance);
+  });
+
+  return true;
+};
+
 const clearNestedExtractFrameBorderStyles = (shell: HTMLElement) => {
   const nestedElements: HTMLElement[] = [];
   const table = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
 
   if (table) {
     nestedElements.push(table);
-    table.querySelectorAll<HTMLElement>('td').forEach((cell) => nestedElements.push(cell));
+    table.querySelectorAll<HTMLElement>('td, th').forEach((cell) => nestedElements.push(cell));
   }
 
   shell.querySelectorAll<HTMLElement>(':scope > .v202-frame-group[data-template-frame-group]').forEach((group) => {
@@ -1058,12 +1114,19 @@ const clearNestedExtractFrameBorderStyles = (shell: HTMLElement) => {
 };
 
 const applyExtractDefaultFrameAppearance = (shell: HTMLElement) => {
+  if (preserveNestedExtractFrameBorderStyles(shell)) {
+    return;
+  }
+
   const nestedAppearance = readNestedExtractFrameBorderAppearance(shell);
   const storedWidth = parseExtractFrameNumber(shell.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR));
   const inlineWidth =
     parseExtractFrameNumber(shell.style.borderTopWidth || shell.style.borderWidth) ??
     parseExtractFrameNumber(shell.style.outlineWidth);
-  const width = storedWidth ?? inlineWidth ?? nestedAppearance?.width ?? Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH);
+  const shouldPromoteNestedAppearance = Boolean(nestedAppearance) && storedWidth === null && (!inlineWidth || inlineWidth <= 0);
+  const width = shouldPromoteNestedAppearance
+    ? Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH)
+    : storedWidth ?? inlineWidth ?? nestedAppearance?.width ?? Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH);
   const style = normalizeExtractFrameBorderStyle(
     shell.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
       shell.style.borderTopStyle ||
@@ -1086,7 +1149,7 @@ const applyExtractDefaultFrameAppearance = (shell: HTMLElement) => {
   normalizeExtractFrameDefaultBackground(shell);
   applyExtractFrameBorderAppearanceStyle(shell, {
     align: shell.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) || DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
-    width: storedWidth ?? inlineWidth ?? Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH),
+    width,
     style: style === 'none' && width > 0 ? DEFAULT_TEMPLATE_FRAME_BORDER_STYLE : style,
     color,
   });
