@@ -16412,6 +16412,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
   const deferredTextAutoSizeSyncTimeoutRef = React.useRef<number | null>(null);
+  const textAutoSizeCommandRevisionRef = React.useRef(0);
   const previewEditorStateRetryCountRef = React.useRef(0);
   const deferredPreviewEditorStateRef = React.useRef(false);
   const suppressNextSelectionLayoutReapplyRef = React.useRef<{
@@ -16590,12 +16591,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [setTextAutoSizeUiOverrideForSelection]
   );
-  const previewTextAutoSizeAnchorSelection = React.useCallback(
-    (side: TextAutoSizeAnchorSide) => {
+  const previewTextAutoSizeModeAndAnchorSelection = React.useCallback(
+    (mode: Extract<TextAutoSizeMode, 'height' | 'width'>, side: TextAutoSizeAnchorSide) => {
       const root = previewRef.current;
       const selectionFrameGroupIds = normalizeFrameSelectionIds(selectedFrameGroupIdsRef.current);
 
-      if (!root || selectionFrameGroupIds.length <= 0) {
+      if (
+        !root ||
+        selectionFrameGroupIds.length <= 0 ||
+        (mode === 'height' && !isTextAutoHeightAnchorSide(side)) ||
+        (mode === 'width' && !isTextAutoWidthAnchorSide(side))
+      ) {
         return;
       }
 
@@ -16607,21 +16613,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       const nextState: SelectedTextAutoSizeState = {
         ...currentState,
+        mixed: false,
+        anchorSide: side,
         anchorSideMixed: false,
         heightAnchorSideMixed: false,
         widthAnchorSideMixed: false,
       };
 
-      if (side === 'top' || side === 'bottom') {
-        nextState.heightAnchorSide = side;
-        if (currentState.allHeight) {
-          nextState.anchorSide = side;
-        }
+      if (mode === 'height') {
+        const heightSide = isTextAutoHeightAnchorSide(side) ? side : 'bottom';
+        nextState.heightCount = currentState.totalCount;
+        nextState.widthCount = 0;
+        nextState.fixedCount = 0;
+        nextState.allHeight = true;
+        nextState.allWidth = false;
+        nextState.allFixed = false;
+        nextState.anchorSide = heightSide;
+        nextState.heightAnchorSide = heightSide;
       } else {
-        nextState.widthAnchorSide = side;
-        if (currentState.allWidth) {
-          nextState.anchorSide = side;
-        }
+        const widthSide = isTextAutoWidthAnchorSide(side) ? side : 'right';
+        nextState.heightCount = 0;
+        nextState.widthCount = currentState.totalCount;
+        nextState.fixedCount = 0;
+        nextState.allHeight = false;
+        nextState.allWidth = true;
+        nextState.allFixed = false;
+        nextState.anchorSide = widthSide;
+        nextState.widthAnchorSide = widthSide;
       }
 
       setTextAutoSizeUiOverrideForSelection(selectionFrameGroupIds, nextState);
@@ -24115,8 +24133,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectionPanelTab,
   ]);
 
-  const scheduleDeferredTextAutoSizeSync = React.useCallback((applyChanges?: () => void) => {
+  const beginTextAutoSizeCommand = React.useCallback(() => {
+    textAutoSizeCommandRevisionRef.current += 1;
+    return textAutoSizeCommandRevisionRef.current;
+  }, []);
+
+  const scheduleDeferredTextAutoSizeSync = React.useCallback((applyChanges?: () => void, commandRevision?: number) => {
+    const isCurrentCommand = () =>
+      typeof commandRevision !== 'number' || commandRevision === textAutoSizeCommandRevisionRef.current;
+
     if (typeof window === 'undefined') {
+      if (!isCurrentCommand()) {
+        return;
+      }
       applyChanges?.();
       syncDraftPreviewHtmlRef({ materializePositionGroups: false });
       schedulePreviewEditorState();
@@ -24128,6 +24157,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     cancelDeferredTextAutoSizeSync();
     deferredTextAutoSizeSyncTimeoutRef.current = window.setTimeout(() => {
       deferredTextAutoSizeSyncTimeoutRef.current = null;
+      if (!isCurrentCommand()) {
+        return;
+      }
       applyChanges?.();
       syncDraftPreviewHtmlRef({ materializePositionGroups: false });
       schedulePreviewEditorState();
@@ -25170,6 +25202,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
+    const commandRevision = beginTextAutoSizeCommand();
+
     nodes.forEach((node) => {
       writeFrameAutoSizeModeAttrs(node, mode);
     });
@@ -25177,61 +25211,100 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
 
     scheduleDeferredTextAutoSizeSync(() => {
+      const liveRoot = previewRef.current || root;
+      const liveNodes = collectFrameSelectionAnchors(liveRoot).filter((node) =>
+        activeSelectionIdSet.has(getFrameGroupId(node))
+      );
+
+      liveNodes.forEach((node) => {
+        writeFrameAutoSizeModeAttrs(node, mode);
+      });
+
       if (mode !== 'fixed') {
-        const autoSizeResult = applyTemplateAutoSizeBoxes(root, activeSelectionIds);
+        const autoSizeResult = applyTemplateAutoSizeBoxes(liveRoot, activeSelectionIds);
         if (autoSizeResult.changedCount > 0) {
-          applyPreservedPositionSpacingRelations(root);
+          applyPreservedPositionSpacingRelations(liveRoot);
         }
       }
-    });
+    }, commandRevision);
     const modeLabel =
       mode === 'height' ? '자동 높이 상자' : mode === 'width' ? '자동 너비 상자' : '고정 상자';
     setMessage(`${modeLabel} 설정: ${nodes.length}개 상자`);
   }, [
     applyPreservedPositionSpacingRelations,
+    beginTextAutoSizeCommand,
     scheduleDeferredTextAutoSizeSync,
     syncTextAutoSizeUiOverrideFromSelection,
   ]);
 
-  const setTextAutoSizeAnchorForSelection = React.useCallback((side: TextAutoSizeAnchorSide) => {
-    const root = previewRef.current;
-    const activeSelectionIds = Array.from(
-      new Set(selectedFrameGroupIdsRef.current.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
-    );
-
-    if (!root || activeSelectionIds.length <= 0) {
-      setMessage('자동 크기 기준을 설정할 상자를 먼저 선택하세요.');
-      return;
-    }
-
-    const activeSelectionIdSet = new Set(activeSelectionIds);
-    const targetsAutoHeight = isTextAutoHeightAnchorSide(side);
-    const targetsAutoWidth = isTextAutoWidthAnchorSide(side);
-    const nodes = collectFrameSelectionAnchors(root)
-      .filter((node) => activeSelectionIdSet.has(getFrameGroupId(node)))
-      .filter((node) =>
-        targetsAutoHeight ? readFrameAutoHeightBox(node) : targetsAutoWidth ? readFrameAutoWidthBox(node) : false
+  const setTextAutoSizeModeAndAnchorForSelection = React.useCallback(
+    (mode: Extract<TextAutoSizeMode, 'height' | 'width'>, side: TextAutoSizeAnchorSide) => {
+      const root = previewRef.current;
+      const activeSelectionIds = Array.from(
+        new Set(selectedFrameGroupIdsRef.current.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
       );
 
-    if (nodes.length <= 0) {
-      setMessage('해당 자동 크기 모드의 상자를 찾지 못했습니다.');
-      return;
-    }
+      if (
+        !root ||
+        activeSelectionIds.length <= 0 ||
+        (mode === 'height' && !isTextAutoHeightAnchorSide(side)) ||
+        (mode === 'width' && !isTextAutoWidthAnchorSide(side))
+      ) {
+        setMessage('자동 크기를 설정할 상자를 먼저 선택하세요.');
+        return;
+      }
 
-    nodes.forEach((node) => {
-      writeFrameAutoSizeAnchorAttrs(node, side);
-    });
+      const activeSelectionIdSet = new Set(activeSelectionIds);
+      const nodes = collectFrameSelectionAnchors(root).filter((node) => activeSelectionIdSet.has(getFrameGroupId(node)));
 
-    syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
+      if (nodes.length <= 0) {
+        setMessage('자동 크기를 설정할 상자를 찾지 못했습니다.');
+        return;
+      }
 
-    scheduleDeferredTextAutoSizeSync();
-    const directionLabel =
-      side === 'top' ? '위로 확장' : side === 'bottom' ? '아래로 확장' : side === 'left' ? '왼쪽으로 확장' : '오른쪽으로 확장';
-    setMessage(`자동 크기 기준 ${directionLabel} 설정: ${nodes.length}개 상자`);
-  }, [
-    scheduleDeferredTextAutoSizeSync,
-    syncTextAutoSizeUiOverrideFromSelection,
-  ]);
+      const commandRevision = beginTextAutoSizeCommand();
+      const applyModeAndAnchor = (targetNodes: HTMLElement[]) => {
+        targetNodes.forEach((node) => {
+          writeFrameAutoSizeModeAttrs(node, mode);
+          writeFrameAutoSizeAnchorAttrs(node, side);
+        });
+      };
+
+      applyModeAndAnchor(nodes);
+      syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
+
+      scheduleDeferredTextAutoSizeSync(() => {
+        const liveRoot = previewRef.current || root;
+        const liveNodes = collectFrameSelectionAnchors(liveRoot).filter((node) =>
+          activeSelectionIdSet.has(getFrameGroupId(node))
+        );
+
+        applyModeAndAnchor(liveNodes);
+
+        const autoSizeResult = applyTemplateAutoSizeBoxes(liveRoot, activeSelectionIds);
+        if (autoSizeResult.changedCount > 0) {
+          applyPreservedPositionSpacingRelations(liveRoot);
+        }
+      }, commandRevision);
+
+      const modeLabel = mode === 'height' ? '자동 높이' : '자동 너비';
+      const directionLabel =
+        side === 'top'
+          ? '위로 확장'
+          : side === 'bottom'
+            ? '아래로 확장'
+            : side === 'left'
+              ? '왼쪽으로 확장'
+              : '오른쪽으로 확장';
+      setMessage(`${modeLabel} ${directionLabel} 설정: ${nodes.length}개 상자`);
+    },
+    [
+      applyPreservedPositionSpacingRelations,
+      beginTextAutoSizeCommand,
+      scheduleDeferredTextAutoSizeSync,
+      syncTextAutoSizeUiOverrideFromSelection,
+    ]
+  );
 
   const fitTextAutoSizeSecondaryAxisForSelection = React.useCallback((axis: TextAutoSizeSecondaryFitAxis) => {
     const root = previewRef.current;
@@ -31943,9 +32016,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return null;
     }
 
-    const isHeightModeActive = selectedTextAutoSizeState.allHeight;
-    const isWidthModeActive = selectedTextAutoSizeState.allWidth;
-
     const autoSizeDescription = (() => {
       const highlightClassName = 'rounded bg-sky-100 px-1 py-0.5 font-semibold text-sky-900';
 
@@ -32048,17 +32118,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       selectedTextAutoSizeState.allHeight &&
                         selectedTextAutoSizeState.heightAnchorSide === 'top' &&
                         !selectedTextAutoSizeState.heightAnchorSideMixed,
-                      false,
-                      !isHeightModeActive
+                      false
                     )}
                     onPointerDown={() => {
                       previewTextAutoSizeAnchorDomState('top');
-                      previewTextAutoSizeAnchorSelection('top');
+                      previewTextAutoSizeModeAndAnchorSelection('height', 'top');
                     }}
-                    onClick={() => setTextAutoSizeAnchorForSelection('top')}
+                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('height', 'top')}
                     aria-label="위로 확장"
                     title="위로 확장"
-                    disabled={!isHeightModeActive}
                   >
                     <ArrowUp className="h-3 w-3" />
                   </button>
@@ -32070,17 +32138,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       selectedTextAutoSizeState.allHeight &&
                         selectedTextAutoSizeState.heightAnchorSide === 'bottom' &&
                         !selectedTextAutoSizeState.heightAnchorSideMixed,
-                      true,
-                      !isHeightModeActive
+                      true
                     )}
                     onPointerDown={() => {
                       previewTextAutoSizeAnchorDomState('bottom');
-                      previewTextAutoSizeAnchorSelection('bottom');
+                      previewTextAutoSizeModeAndAnchorSelection('height', 'bottom');
                     }}
-                    onClick={() => setTextAutoSizeAnchorForSelection('bottom')}
+                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('height', 'bottom')}
                     aria-label="아래로 확장"
                     title="아래로 확장"
-                    disabled={!isHeightModeActive}
                   >
                     <ArrowDown className="h-3 w-3" />
                   </button>
@@ -32112,17 +32178,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       selectedTextAutoSizeState.allWidth &&
                         selectedTextAutoSizeState.widthAnchorSide === 'left' &&
                         !selectedTextAutoSizeState.widthAnchorSideMixed,
-                      false,
-                      !isWidthModeActive
+                      false
                     )}
                     onPointerDown={() => {
                       previewTextAutoSizeAnchorDomState('left');
-                      previewTextAutoSizeAnchorSelection('left');
+                      previewTextAutoSizeModeAndAnchorSelection('width', 'left');
                     }}
-                    onClick={() => setTextAutoSizeAnchorForSelection('left')}
+                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('width', 'left')}
                     aria-label="왼쪽으로 확장"
                     title="왼쪽으로 확장"
-                    disabled={!isWidthModeActive}
                   >
                     <ArrowLeft className="h-3 w-3" />
                   </button>
@@ -32134,17 +32198,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                       selectedTextAutoSizeState.allWidth &&
                         selectedTextAutoSizeState.widthAnchorSide === 'right' &&
                         !selectedTextAutoSizeState.widthAnchorSideMixed,
-                      true,
-                      !isWidthModeActive
+                      true
                     )}
                     onPointerDown={() => {
                       previewTextAutoSizeAnchorDomState('right');
-                      previewTextAutoSizeAnchorSelection('right');
+                      previewTextAutoSizeModeAndAnchorSelection('width', 'right');
                     }}
-                    onClick={() => setTextAutoSizeAnchorForSelection('right')}
+                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('width', 'right')}
                     aria-label="오른쪽으로 확장"
                     title="오른쪽으로 확장"
-                    disabled={!isWidthModeActive}
                   >
                     <ArrowRight className="h-3 w-3" />
                   </button>
