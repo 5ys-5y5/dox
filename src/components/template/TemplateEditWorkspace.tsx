@@ -16636,6 +16636,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
   const deferredTextAutoSizeSyncTimeoutRef = React.useRef<number | null>(null);
+  const deferredStylePanelSyncTimeoutRef = React.useRef<number | null>(null);
   const textAutoSizeCommandRevisionRef = React.useRef(0);
   const previewEditorStateRetryCountRef = React.useRef(0);
   const deferredPreviewEditorStateRef = React.useRef(false);
@@ -17395,6 +17396,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (deferredTextAutoSizeSyncTimeoutRef.current !== null) {
         window.clearTimeout(deferredTextAutoSizeSyncTimeoutRef.current);
         deferredTextAutoSizeSyncTimeoutRef.current = null;
+      }
+
+      if (deferredStylePanelSyncTimeoutRef.current !== null) {
+        window.clearTimeout(deferredStylePanelSyncTimeoutRef.current);
+        deferredStylePanelSyncTimeoutRef.current = null;
       }
     };
   }, []);
@@ -24434,6 +24440,56 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectionPanelTab,
   ]);
 
+  const scheduleDeferredStylePanelSync = React.useCallback(
+    (options?: {
+      materializePositionGroups?: boolean;
+      syncEditorState?: boolean;
+      syncSelectionDraft?: boolean;
+      textFit?: boolean;
+      delayMs?: number;
+    }) => {
+      const runSync = () => {
+        syncDraftPreviewHtmlRef({
+          materializePositionGroups: options?.materializePositionGroups ?? false,
+          updatePreviewDomVersion: false,
+          updateRenderedHtml: false,
+        });
+
+        if (options?.syncEditorState) {
+          schedulePreviewEditorState();
+        }
+
+        if (options?.syncSelectionDraft !== false) {
+          syncSelectionStyleDraft();
+        }
+
+        if (options?.textFit) {
+          requestPreviewTextFit();
+        }
+      };
+
+      if (typeof window === 'undefined') {
+        runSync();
+        return;
+      }
+
+      if (deferredStylePanelSyncTimeoutRef.current !== null) {
+        window.clearTimeout(deferredStylePanelSyncTimeoutRef.current);
+      }
+
+      deferredStylePanelSyncTimeoutRef.current = window.setTimeout(() => {
+        deferredStylePanelSyncTimeoutRef.current = null;
+        runSync();
+      }, options?.delayMs ?? 600);
+    },
+    [
+      requestPreviewTextFit,
+      schedulePreviewEditorState,
+      syncDraftPreviewHtmlRef,
+      syncSelectionStyleDraft,
+    ]
+  );
+
   const beginTextAutoSizeCommand = React.useCallback(() => {
     textAutoSizeCommandRevisionRef.current += 1;
     return textAutoSizeCommandRevisionRef.current;
@@ -25463,24 +25519,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0 && !spacingChanged) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
-      syncDraftPreviewHtmlRef({
+      scheduleDeferredStylePanelSync({
         materializePositionGroups: shouldUpdateGeometry || spacingChanged,
-        updatePreviewDomVersion: shouldUpdateGeometry || spacingChanged,
-        updateRenderedHtml: shouldUpdateGeometry || spacingChanged,
+        syncEditorState: shouldUpdateGeometry || spacingChanged || shouldRecalculateAutoSize,
+        textFit: shouldRecalculateAutoSize,
       });
-      if (!shouldUpdateGeometry && shouldRecalculateAutoSize) {
-        schedulePreviewEditorState();
-      }
-      syncSelectionStyleDraft();
-      requestPreviewTextFit();
     },
     [
       applyPreservedPositionSpacingRelations,
-      requestPreviewTextFit,
       resolveSelectionAppearanceStyleTargets,
-      schedulePreviewEditorState,
-      syncDraftPreviewHtmlRef,
-      syncSelectionStyleDraft,
+      scheduleDeferredStylePanelSync,
     ]
   );
 
@@ -27582,11 +27630,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     resolveSelectionAppearanceStyleTargets,
   ]);
 
-  const setStyleFieldDraftValue = React.useCallback((field: StyleFieldKey, value: string) => {
-    setSelectionStyleDraft((previous) => ({ ...previous, [field]: value }));
-    setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'idle' }));
-  }, []);
-
   const applyStyleFieldOnBlur = React.useCallback(
     (
       field: StyleFieldKey,
@@ -27596,7 +27639,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
     ) => {
       const root = previewRef.current;
-      if (!root || resolveSelectionAppearanceStyleTargets(root).elements.length === 0) {
+      if (!root) {
         return;
       }
 
@@ -27620,15 +27663,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'idle' }));
         return;
       }
-
-      setSelectionSaveProgress({
-        phase: 'running',
-        title: '선택 항목 저장',
-        percent: 45,
-        stage: '스타일 반영 중',
-        detail: `${field} 스타일을 반영하고 있습니다.`,
-      });
-      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saving' }));
 
       const patch: FrameStylePatch = {};
 
@@ -27655,26 +27689,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         patch.targetCorners = [...appearanceTargetCorners];
       }
 
-      setSelectionStyleDraft((previous) => ({ ...previous, [field]: controlValue }));
       applySelectionStylePatch(patch);
-      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saved' }));
-      window.setTimeout(() => {
-        setStyleFieldApplyStatus((previous) => (previous[field] === 'saved' ? { ...previous, [field]: 'idle' } : previous));
-      }, 3000);
-      setSelectionSaveProgress({
-        phase: 'completed',
-        title: '선택 항목 저장',
-        percent: 100,
-        stage: '스타일 반영 완료',
-        detail: `${field} 스타일을 반영했습니다.`,
-      });
     },
     [
       appearanceBoxModelTarget,
       appearanceTargetBorderSides,
       appearanceTargetCorners,
       applySelectionStylePatch,
-      resolveSelectionAppearanceStyleTargets,
       selectionStyleDraft,
     ]
   );
@@ -27682,13 +27703,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const applyStyleFieldImmediateValue = React.useCallback(
     (field: StyleFieldKey, value: string) => {
       const root = previewRef.current;
-      if (!root || resolveSelectionAppearanceStyleTargets(root).elements.length === 0) {
+      if (!root) {
         return;
       }
-
-      setStyleFieldDraftValue(field, value);
-      setSelectionStyleDraft((previous) => ({ ...previous, [field]: value }));
-      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saving' }));
 
       const patch: FrameStylePatch = {};
 
@@ -27716,25 +27733,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       applySelectionStylePatch(patch);
-      setStyleFieldApplyStatus((previous) => ({ ...previous, [field]: 'saved' }));
-      window.setTimeout(() => {
-        setStyleFieldApplyStatus((previous) => (previous[field] === 'saved' ? { ...previous, [field]: 'idle' } : previous));
-      }, 3000);
-      setSelectionSaveProgress({
-        phase: 'completed',
-        title: '선택 항목 저장',
-        percent: 100,
-        stage: '스타일 반영 완료',
-        detail: `${field} 스타일을 반영했습니다.`,
-      });
     },
     [
       appearanceBoxModelTarget,
       appearanceTargetBorderSides,
       appearanceTargetCorners,
       applySelectionStylePatch,
-      resolveSelectionAppearanceStyleTargets,
-      setStyleFieldDraftValue,
     ]
   );
 
@@ -28259,7 +28263,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           data-style-field={field}
           value={selectedValue}
           disabled={!hasSelection}
-          onChange={(event) => applyStyleFieldImmediateValue(field, event.target.value)}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            const selectElement = event.currentTarget;
+            window.requestAnimationFrame(() => {
+              selectElement.value = nextValue;
+            });
+            applyStyleFieldImmediateValue(field, nextValue);
+          }}
           className="flex h-8 w-full rounded-md border border-input bg-white px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
         >
           <option value="" disabled={hasSelection}>
@@ -31835,6 +31846,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       if (shouldRestoreTextInputFocus) {
         restoreFrameTextInputFocus(root, frameGroupId, selectionStart, selectionEnd);
       }
+      scheduleDeferredStylePanelSync({
+        materializePositionGroups: true,
+        syncEditorState: true,
+        syncSelectionDraft: false,
+        textFit: true,
+      });
       return;
     }
 
@@ -31846,15 +31863,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     if (previewRef.current) {
       syncFrameRelationshipValueKeys(previewRef.current);
     }
-    syncDraftPreviewHtmlRef();
-    requestPreviewTextFit();
+    scheduleDeferredStylePanelSync({
+      syncSelectionDraft: false,
+      textFit: true,
+    });
 	  }, [
     applyTemplateAutoSizeBoxesWithPreservedLayout,
     cancelDeferredTextAutoSizeSync,
     isTextCanvasEditModeActive,
-    requestPreviewTextFit,
-    selectionPanelTab,
-    syncDraftPreviewHtmlRef,
+    scheduleDeferredStylePanelSync,
     templateUsagePreviewMode,
   ]);
 
@@ -32886,27 +32903,27 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     const boxModelZoneClass = () => 'relative cursor-pointer focus-visible:outline-none';
     const activateAppearanceTargetMode = (target: AppearanceBoxModelTarget, resetSelection = false) => {
       if (target === 'content') {
-        setAppearanceTargetBorderSides([]);
-        setAppearanceTargetCorners([]);
-        setAppearanceBoxModelTarget('content');
+        setAppearanceTargetBorderSides((previous) => (previous.length > 0 ? [] : previous));
+        setAppearanceTargetCorners((previous) => (previous.length > 0 ? [] : previous));
+        setAppearanceBoxModelTarget((previous) => (previous === 'content' ? previous : 'content'));
         return;
       }
 
       const shouldResetSelection = resetSelection || appearanceBoxModelTarget !== target;
 
       if (target === 'border' && shouldResetSelection) {
-        setAppearanceTargetBorderSides([]);
+        setAppearanceTargetBorderSides((previous) => (previous.length > 0 ? [] : previous));
       }
       if (target === 'border') {
-        setAppearanceTargetCorners([]);
+        setAppearanceTargetCorners((previous) => (previous.length > 0 ? [] : previous));
       }
       if (target === 'corner' && shouldResetSelection) {
-        setAppearanceTargetCorners([]);
+        setAppearanceTargetCorners((previous) => (previous.length > 0 ? [] : previous));
       }
       if (target === 'corner') {
-        setAppearanceTargetBorderSides([]);
+        setAppearanceTargetBorderSides((previous) => (previous.length > 0 ? [] : previous));
       }
-      setAppearanceBoxModelTarget(target);
+      setAppearanceBoxModelTarget((previous) => (previous === target ? previous : target));
     };
     const clearAppearanceTargetModeIfNoSelection = (target: Extract<AppearanceBoxModelTarget, 'border' | 'corner'>) => {
       if (target === 'border') {
@@ -33347,7 +33364,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               if (!nextValue) {
                 return;
               }
-              hintAppearanceModeForStyleField(field, nextValue);
+              const selectElement = event.currentTarget;
+              window.requestAnimationFrame(() => {
+                selectElement.value = nextValue;
+              });
               applyStyleFieldImmediateValue(field, nextValue);
             }}
             onBlur={() => {
@@ -33401,7 +33421,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               if (!nextValue) {
                 return;
               }
-              hintAppearanceModeForStyleField('borderAlign', nextValue);
+              const selectElement = event.currentTarget;
+              window.requestAnimationFrame(() => {
+                selectElement.value = nextValue;
+              });
               applyStyleFieldImmediateValue('borderAlign', nextValue);
             }}
             onBlur={() => {
@@ -33460,7 +33483,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   if (!nextValue) {
                     return;
                   }
-                  hintAppearanceModeForStyleField('borderStyle', nextValue);
+                  const selectElement = event.currentTarget;
+                  window.requestAnimationFrame(() => {
+                    selectElement.value = nextValue;
+                  });
                   applyStyleFieldImmediateValue('borderStyle', nextValue);
                 }}
                 onBlur={() => {
@@ -33901,7 +33927,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             data-style-field="fontFamily"
             value={currentFontFamily}
             disabled={!hasSelection}
-            onChange={(event) => applyStyleFieldImmediateValue('fontFamily', event.target.value)}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              const selectElement = event.currentTarget;
+              window.requestAnimationFrame(() => {
+                selectElement.value = nextValue;
+              });
+              applyStyleFieldImmediateValue('fontFamily', nextValue);
+            }}
             className="flex h-8 w-full rounded-md border border-input bg-white px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           >
             {hasCustomFontFamily ? <option value={currentFontFamily}>{currentFontFamily}</option> : null}
