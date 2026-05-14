@@ -611,6 +611,144 @@ const reviewedFieldValueText = (
   candidate: TemplateExtractCandidateDto | undefined
 ) => stringifyTemplateDefaultValue(field.defaultValue ?? candidate?.detectedValue ?? '');
 
+const reviewedFieldCommitKey = (field: Pick<TemplateExtractReviewedFieldInput, 'candidateKey' | 'fieldKey' | 'labelKey'>) =>
+  field.candidateKey || field.fieldKey || field.labelKey || '';
+
+const REVIEWED_FIELD_CARD_SELECTOR = '[data-template-reviewed-field-card="true"]';
+
+const isReviewedFieldInputElement = (element: Element | null) =>
+  (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
+  Boolean(element.closest(REVIEWED_FIELD_CARD_SELECTOR));
+
+const applyReviewedFieldPatches = (
+  fields: TemplateExtractReviewedFieldInput[],
+  patches: Map<string, Partial<TemplateExtractReviewedFieldInput>>
+) =>
+  patches.size <= 0
+    ? fields
+    : fields.map((field) => {
+        const patch = patches.get(reviewedFieldCommitKey(field));
+        return patch ? { ...field, ...patch } : field;
+      });
+
+type DeferredReviewedFieldInputProps = Omit<
+  React.ComponentProps<typeof Input>,
+  'value' | 'defaultValue' | 'onChange'
+> & {
+  value: string;
+  onCommit: (nextValue: string) => void;
+  commitOnEnter?: boolean;
+};
+
+const DeferredReviewedFieldInput = React.memo(function DeferredReviewedFieldInput({
+  value,
+  onFocus,
+  onBlur,
+  onKeyDown,
+  onCommit,
+  commitOnEnter = true,
+  ...inputProps
+}: DeferredReviewedFieldInputProps) {
+  const [draftValue, setDraftValue] = React.useState(value);
+  const isFocusedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!isFocusedRef.current) {
+      setDraftValue(value);
+    }
+  }, [value]);
+
+  const commitDraftValue = React.useCallback(
+    (nextValue: string) => {
+      if (nextValue !== value) {
+        onCommit(nextValue);
+      }
+    },
+    [onCommit, value]
+  );
+
+  return (
+    <Input
+      {...inputProps}
+      value={draftValue}
+      onFocus={(event) => {
+        isFocusedRef.current = true;
+        onFocus?.(event);
+      }}
+      onChange={(event) => setDraftValue(event.target.value)}
+      onBlur={(event) => {
+        isFocusedRef.current = false;
+        commitDraftValue(event.currentTarget.value);
+        onBlur?.(event);
+      }}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented && commitOnEnter && event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+});
+
+type DeferredReviewedFieldTextareaProps = Omit<
+  React.TextareaHTMLAttributes<HTMLTextAreaElement>,
+  'value' | 'defaultValue' | 'onChange'
+> & {
+  value: string;
+  onCommit: (nextValue: string) => void;
+};
+
+const DeferredReviewedFieldTextarea = React.memo(function DeferredReviewedFieldTextarea({
+  value,
+  onFocus,
+  onBlur,
+  onKeyDown,
+  onCommit,
+  ...textareaProps
+}: DeferredReviewedFieldTextareaProps) {
+  const [draftValue, setDraftValue] = React.useState(value);
+  const isFocusedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!isFocusedRef.current) {
+      setDraftValue(value);
+    }
+  }, [value]);
+
+  const commitDraftValue = React.useCallback(
+    (nextValue: string) => {
+      if (nextValue !== value) {
+        onCommit(nextValue);
+      }
+    },
+    [onCommit, value]
+  );
+
+  return (
+    <textarea
+      {...textareaProps}
+      value={draftValue}
+      onFocus={(event) => {
+        isFocusedRef.current = true;
+        onFocus?.(event);
+      }}
+      onChange={(event) => setDraftValue(event.target.value)}
+      onBlur={(event) => {
+        isFocusedRef.current = false;
+        commitDraftValue(event.currentTarget.value);
+        onBlur?.(event);
+      }}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+});
+
 const toTemplateExtractDetailFromTemplate = (
   detail: TemplateDetailResult
 ): TemplateExtractDetailResult => {
@@ -1097,6 +1235,9 @@ const getNextFrameSelection = (previous: string[], frameGroupId: string, isMulti
   return previous.includes(frameGroupId) ? previous : [frameGroupId];
 };
 
+const areStringArraysEqual = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
 const readSelectableFrameNodeRect = (node: HTMLElement): FrameNodeRect => {
   if (node.matches(V106_FRAME_NODE_SELECTOR)) {
     return readFrameNodeRect(node);
@@ -1272,7 +1413,17 @@ const resolveFrameNodeFromEvent = (
   return frameNodes[0]?.node || null;
 };
 
-const applyFrameSelectionHighlight = (root: HTMLElement, selectedIds: string[]) => {
+type FrameSelectionHighlightOptions = {
+  showEditorUi?: boolean;
+};
+
+const applyFrameSelectionHighlight = (
+  root: HTMLElement,
+  selectedIds: string[],
+  options: FrameSelectionHighlightOptions = {}
+) => {
+  const showEditorUi = options.showEditorUi ?? true;
+
   root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
     element.removeAttribute('data-template-selected');
     element.removeAttribute('data-template-primary-selected');
@@ -1298,6 +1449,10 @@ const applyFrameSelectionHighlight = (root: HTMLElement, selectedIds: string[]) 
 
         if (selectedIndex === 0) {
           node.setAttribute('data-template-primary-selected', 'true');
+        }
+
+        if (!showEditorUi) {
+          return;
         }
 
         const badge = document.createElement('div');
@@ -3716,6 +3871,16 @@ export default function TemplateExtractPage() {
   const draftPreviewRef = React.useRef<HTMLDivElement | null>(null);
   const draftPreviewHtmlRef = React.useRef('');
   const appliedFrameProfileKeyRef = React.useRef('');
+  const reviewedSelectionKeyRef = React.useRef('');
+  const pendingReviewedFieldPatchesRef = React.useRef<Map<string, Partial<TemplateExtractReviewedFieldInput>>>(
+    new Map()
+  );
+  const pendingPreviewValueUpdatesRef = React.useRef<
+    Map<string, { field: TemplateExtractReviewedFieldInput; nextValue: string }>
+  >(new Map());
+  const pendingFrameExtractedTextStateRef = React.useRef<FrameExtractedTextState>({});
+  const pendingFrameExtractedTextMetaStateRef = React.useRef<FrameExtractedTextMetaState>({});
+  const previewValueUpdateTimerRef = React.useRef<number | null>(null);
   const frameDragStateRef = React.useRef<FrameDragState | null>(null);
   const frameResizeStateRef = React.useRef<FrameResizeState | null>(null);
   const frameCreateStateRef = React.useRef<FrameCreateState | null>(null);
@@ -3995,6 +4160,17 @@ export default function TemplateExtractPage() {
     setReviewedFields(nextFields);
   }, []);
 
+  React.useEffect(() => {
+    if (previewValueUpdateTimerRef.current !== null) {
+      window.clearTimeout(previewValueUpdateTimerRef.current);
+      previewValueUpdateTimerRef.current = null;
+    }
+    pendingReviewedFieldPatchesRef.current.clear();
+    pendingPreviewValueUpdatesRef.current.clear();
+    pendingFrameExtractedTextStateRef.current = {};
+    pendingFrameExtractedTextMetaStateRef.current = {};
+  }, [draftDetail?.draft.id]);
+
   const getCurrentDraftPreviewHtml = React.useCallback(() => {
     draftPreviewRef.current?.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
       snapFrameNodeEdgesInPage(pageInner);
@@ -4002,12 +4178,22 @@ export default function TemplateExtractPage() {
     const liveHtml = draftPreviewRef.current?.innerHTML?.trim() || '';
     const normalizedLiveHtml = stripDraftPreviewUiState(liveHtml);
     const normalizedBaseLiveHtml = stripFrameExtractedTextStateFromHtml(normalizedLiveHtml);
+    const pendingFrameTextState = pendingFrameExtractedTextStateRef.current;
+    const pendingFrameTextMetaState = pendingFrameExtractedTextMetaStateRef.current;
+    const currentFrameTextState =
+      Object.keys(pendingFrameTextState).length > 0
+        ? { ...frameExtractedTextState, ...pendingFrameTextState }
+        : frameExtractedTextState;
+    const currentFrameTextMetaState =
+      Object.keys(pendingFrameTextMetaState).length > 0
+        ? { ...frameExtractedTextMetaState, ...pendingFrameTextMetaState }
+        : frameExtractedTextMetaState;
 
     if (flattenedFramePreview && normalizedBaseLiveHtml) {
       const nextHtml = applyFrameExtractedTextStateToHtml(
         `${previewDraftStyleText ? `<style>${previewDraftStyleText}</style>` : ''}${normalizedBaseLiveHtml}`,
-        frameExtractedTextState,
-        frameExtractedTextMetaState
+        currentFrameTextState,
+        currentFrameTextMetaState
       );
       return stripExtractOutputFrameAttrs(
         embedExtractPositionGroupAttrs(replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel))
@@ -4018,8 +4204,8 @@ export default function TemplateExtractPage() {
 
     const nextHtml = applyFrameExtractedTextStateToHtml(
       stripFrameExtractedTextStateFromHtml(liveHtml || fallbackHtml),
-      frameExtractedTextState,
-      frameExtractedTextMetaState
+      currentFrameTextState,
+      currentFrameTextMetaState
     );
     return stripExtractOutputFrameAttrs(
       embedExtractPositionGroupAttrs(replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel))
@@ -4271,7 +4457,7 @@ export default function TemplateExtractPage() {
     );
 
     if (frameNodes.length > 0) {
-      applyFrameSelectionHighlight(root, selectedFrameGroupIds);
+      applyFrameSelectionHighlight(root, selectedFrameGroupIds, { showEditorUi: frameEditingEnabled });
       return;
     }
 
@@ -4284,7 +4470,7 @@ export default function TemplateExtractPage() {
     findTemplateValueElements(root, selectedField.labelKey).forEach((element) => {
       element.setAttribute('data-template-selected', 'true');
     });
-  }, [draftDetail?.draft.generatedDraftHtml, reviewedFields, selectedCandidateKey, selectedFrameGroupIds]);
+  }, [draftDetail?.draft.generatedDraftHtml, frameEditingEnabled, reviewedFields, selectedCandidateKey, selectedFrameGroupIds]);
 
 	  React.useEffect(() => {
 	    const root = draftPreviewRef.current;
@@ -4307,6 +4493,10 @@ export default function TemplateExtractPage() {
 	  }, [draftDetail?.draft.generatedDraftHtml, draftPreviewEditRole]);
 
   const syncFrameEditorSelectionState = React.useCallback(() => {
+    if (!frameEditingEnabled) {
+      return;
+    }
+
     const root = draftPreviewRef.current;
     const selectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds);
 
@@ -4345,7 +4535,7 @@ export default function TemplateExtractPage() {
     setFrameEditorChainDepth(selectedNode.getAttribute('data-template-frame-chain-depth') || '');
     setFrameEditorWidthPx(String(Math.round(rect.width)));
     setFrameEditorHeightPx(String(Math.round(rect.height)));
-  }, [selectedFrameGroupIds]);
+  }, [frameEditingEnabled, selectedFrameGroupIds]);
 
   React.useEffect(() => {
     syncFrameEditorSelectionState();
@@ -4354,7 +4544,7 @@ export default function TemplateExtractPage() {
   React.useLayoutEffect(() => {
     const root = draftPreviewRef.current;
 
-    if (!root || selectedFrameGroupIds.length === 0) {
+    if (!frameEditingEnabled || !root || selectedFrameGroupIds.length === 0) {
       return;
     }
 
@@ -4367,6 +4557,7 @@ export default function TemplateExtractPage() {
     }
   }, [
     draftDetail?.draft.generatedDraftHtml,
+    frameEditingEnabled,
     frameEditorChainDepth,
     frameEditorChainKey,
     frameEditorHeightPx,
@@ -5086,13 +5277,19 @@ export default function TemplateExtractPage() {
         saveCurrentFrameProfile();
       }
 
+      const reviewedFieldsForApproval = applyReviewedFieldPatches(
+        reviewedFields,
+        pendingReviewedFieldPatchesRef.current
+      );
+      flushPendingPreviewValueUpdates();
+
       const response = await fetch(`/api/templates/extract/${normalizedDraftId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           templateName,
           layoutResizeMode,
-          reviewedFields,
+          reviewedFields: reviewedFieldsForApproval,
           generatedDraftHtml: getCurrentDraftPreviewHtml(),
         }),
       });
@@ -5102,6 +5299,10 @@ export default function TemplateExtractPage() {
         throw new Error(result.message || '정식 템플릿 승인에 실패했습니다.');
       }
 
+      pendingReviewedFieldPatchesRef.current.clear();
+      pendingPreviewValueUpdatesRef.current.clear();
+      pendingFrameExtractedTextStateRef.current = {};
+      pendingFrameExtractedTextMetaStateRef.current = {};
       setApproveResult(result.data);
       setMessage(
         `정식 템플릿 ${result.data.templateId} 생성 완료. 승인 ${result.data.approvedFieldCount}개, 제외 ${result.data.skippedFieldCount}개`
@@ -5116,6 +5317,7 @@ export default function TemplateExtractPage() {
   };
 
   const handleCopyDraftHtml = async () => {
+    flushPendingPreviewValueUpdates();
     const html = getCurrentDraftPreviewHtml().trim();
 
     if (!html) {
@@ -5144,6 +5346,7 @@ export default function TemplateExtractPage() {
     setMessage(null);
 
     try {
+      flushPendingPreviewValueUpdates();
       const response = await fetch(`/api/templates/extract/${normalizedDraftId}/log`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6881,7 +7084,12 @@ export default function TemplateExtractPage() {
   );
 
   const selectReviewedField = (field: TemplateExtractReviewedFieldInput) => {
-    setSelectedCandidateKey(field.candidateKey || null);
+    const nextCandidateKey = field.candidateKey || null;
+    setSelectedCandidateKey((previous) => (previous === nextCandidateKey ? previous : nextCandidateKey));
+
+    if (nextCandidateKey && reviewedSelectionKeyRef.current.startsWith(`${nextCandidateKey}::`)) {
+      return;
+    }
 
     const root = draftPreviewRef.current;
 
@@ -6901,12 +7109,25 @@ export default function TemplateExtractPage() {
       const matchingIds = matchingFrameNodes
         .map((node) => node.getAttribute('data-template-frame-group') || '')
         .filter(Boolean);
-      setSelectedFrameGroupIds(matchingIds);
+
+      const nextSelectionKey = `${nextCandidateKey || ''}::${matchingIds.join('\u0001')}`;
+      if (reviewedSelectionKeyRef.current === nextSelectionKey) {
+        return;
+      }
+      reviewedSelectionKeyRef.current = nextSelectionKey;
+
+      setSelectedFrameGroupIds((previous) => (areStringArraysEqual(previous, matchingIds) ? previous : matchingIds));
       window.requestAnimationFrame(() => {
         matchingFrameNodes[0]?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
       });
       return;
     }
+
+    const nextSelectionKey = `${nextCandidateKey || ''}::value`;
+    if (reviewedSelectionKeyRef.current === nextSelectionKey) {
+      return;
+    }
+    reviewedSelectionKeyRef.current = nextSelectionKey;
 
     window.requestAnimationFrame(() => {
       const target = findTemplateValueElements(root, field.labelKey)[0];
@@ -6914,93 +7135,158 @@ export default function TemplateExtractPage() {
     });
   };
 
-  const updatePreviewValueForField = (field: TemplateExtractReviewedFieldInput, nextValue: string) => {
+  const applyPendingPreviewValueUpdates = React.useCallback((pendingUpdates: Array<{
+    field: TemplateExtractReviewedFieldInput;
+    nextValue: string;
+  }>) => {
     const root = draftPreviewRef.current;
 
-    if (!root || !field.labelKey) {
+    if (!root || pendingUpdates.length === 0) {
       return;
     }
 
-    const matchedValueElements = findTemplateValueElements(root, field.labelKey);
+    let valueElementUpdated = false;
+    const frameTextUpdates: FrameExtractedTextState = {};
+    const frameTextMetaUpdates: FrameExtractedTextMetaState = {};
 
-    for (const element of matchedValueElements) {
-      element.textContent = nextValue;
-      markTemplateValueElementEdited(element);
-    }
-
-    const matchedFrameNodes =
-      matchedValueElements.length === 0
-        ? Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
-        .filter((node) => !node.matches('[data-template-frame-input="true"]'))
-        .filter(
-          (node) =>
-            normalizeFrameFieldPath(node.getAttribute('data-template-frame-value-key') || '') ===
-            normalizeFrameFieldPath(field.labelKey)
-        )
-        : [];
-
-    if (matchedFrameNodes.length > 0) {
-      setFrameExtractedTextState((previous) => {
-        const nextState = { ...previous };
-
-        matchedFrameNodes.forEach((node) => {
-          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
-
-          if (!extractedTextKey) {
-            return;
-          }
-
-          nextState[extractedTextKey] = formatFrameSourceTextForDisplay(nextValue, {
-            frameGroup: node.getAttribute('data-template-frame-group'),
-            valueKey: node.getAttribute('data-template-frame-value-key'),
-            colorGroup: node.getAttribute('data-template-frame-color-group'),
-          });
-        });
-
-        return nextState;
-      });
-      setFrameExtractedTextMetaState((previous) => {
-        const nextState = { ...previous };
-
-        matchedFrameNodes.forEach((node) => {
-          const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
-
-          if (!extractedTextKey) {
-            return;
-          }
-
-          nextState[extractedTextKey] = {
-            writePolicy: 'display_review',
-            visible: true,
-            needsReview: false,
-            selectedBy: 'reviewed_field_manual_override',
-            fieldType: String(node.getAttribute('data-template-frame-field-type') || '').trim(),
-            semanticRole: String(node.getAttribute('data-template-frame-semantic-role') || '').trim(),
-          };
-        });
-
-        return nextState;
-      });
-      setFrameTextExtractionCompleted(true);
-      if (typeof window !== 'undefined') {
-        window.requestAnimationFrame(() => {
-          requestPreviewTextFit();
-        });
+    pendingUpdates.forEach(({ field, nextValue }) => {
+      if (!field.labelKey) {
+        return;
       }
-      return;
+
+      const matchedValueElements = findTemplateValueElements(root, field.labelKey);
+
+      for (const element of matchedValueElements) {
+        element.textContent = nextValue;
+        markTemplateValueElementEdited(element);
+        valueElementUpdated = true;
+      }
+
+      const matchedFrameNodes =
+        matchedValueElements.length === 0
+          ? Array.from(root.querySelectorAll<HTMLElement>(FRAME_SELECTION_NODE_SELECTOR))
+          .filter((node) => !node.matches('[data-template-frame-input="true"]'))
+          .filter(
+            (node) =>
+              normalizeFrameFieldPath(node.getAttribute('data-template-frame-value-key') || '') ===
+              normalizeFrameFieldPath(field.labelKey)
+          )
+          : [];
+
+      matchedFrameNodes.forEach((node) => {
+        const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
+
+        if (!extractedTextKey) {
+          return;
+        }
+
+        const displayText = formatFrameSourceTextForDisplay(nextValue, {
+          frameGroup: node.getAttribute('data-template-frame-group'),
+          valueKey: node.getAttribute('data-template-frame-value-key'),
+          colorGroup: node.getAttribute('data-template-frame-color-group'),
+        });
+
+        const displayMeta = {
+          writePolicy: 'display_review',
+          visible: true,
+          needsReview: false,
+          selectedBy: 'reviewed_field_manual_override',
+          fieldType: String(node.getAttribute('data-template-frame-field-type') || '').trim(),
+          semanticRole: String(node.getAttribute('data-template-frame-semantic-role') || '').trim(),
+        } satisfies FrameExtractedTextMetaState[string];
+
+        frameTextUpdates[extractedTextKey] = displayText;
+        frameTextMetaUpdates[extractedTextKey] = displayMeta;
+        writeFrameNodeExtractedText(node, displayText, displayMeta);
+      });
+    });
+
+    if (valueElementUpdated) {
+      syncDraftPreviewHtmlRef();
     }
 
-    syncDraftPreviewHtmlRef();
-    requestPreviewTextFit();
-  };
+    if (Object.keys(frameTextUpdates).length > 0) {
+      pendingFrameExtractedTextStateRef.current = {
+        ...pendingFrameExtractedTextStateRef.current,
+        ...frameTextUpdates,
+      };
+      pendingFrameExtractedTextMetaStateRef.current = {
+        ...pendingFrameExtractedTextMetaStateRef.current,
+        ...frameTextMetaUpdates,
+      };
+    }
 
-  const handleReviewedFieldValueChange = (
+    if (valueElementUpdated) {
+      requestPreviewTextFit();
+    }
+  }, [requestPreviewTextFit, syncDraftPreviewHtmlRef]);
+
+  const flushPendingPreviewValueUpdates = React.useCallback(() => {
+    if (previewValueUpdateTimerRef.current !== null) {
+      window.clearTimeout(previewValueUpdateTimerRef.current);
+      previewValueUpdateTimerRef.current = null;
+    }
+
+    const pendingUpdates = Array.from(pendingPreviewValueUpdatesRef.current.values());
+    pendingPreviewValueUpdatesRef.current.clear();
+
+    applyPendingPreviewValueUpdates(pendingUpdates);
+  }, [applyPendingPreviewValueUpdates]);
+
+  const schedulePendingPreviewValueFlush = React.useCallback(
+    (delayMs = 1200) => {
+      if (previewValueUpdateTimerRef.current !== null) {
+        window.clearTimeout(previewValueUpdateTimerRef.current);
+      }
+
+      previewValueUpdateTimerRef.current = window.setTimeout(() => {
+        if (isReviewedFieldInputElement(document.activeElement)) {
+          schedulePendingPreviewValueFlush(600);
+          return;
+        }
+
+        flushPendingPreviewValueUpdates();
+      }, delayMs);
+    },
+    [flushPendingPreviewValueUpdates]
+  );
+
+  const scheduleReviewedFieldPatch = React.useCallback(
+    (field: TemplateExtractReviewedFieldInput, patch: Partial<TemplateExtractReviewedFieldInput>) => {
+      const patchKey = reviewedFieldCommitKey(field);
+      pendingReviewedFieldPatchesRef.current.set(patchKey, {
+        ...(pendingReviewedFieldPatchesRef.current.get(patchKey) || {}),
+        ...patch,
+      });
+    },
+    []
+  );
+
+  const schedulePreviewValueUpdate = React.useCallback(
+    (field: TemplateExtractReviewedFieldInput, nextValue: string) => {
+      const updateKey = reviewedFieldCommitKey(field);
+      pendingPreviewValueUpdatesRef.current.set(updateKey, { field, nextValue });
+
+      schedulePendingPreviewValueFlush();
+    },
+    [schedulePendingPreviewValueFlush]
+  );
+
+  React.useEffect(
+    () => () => {
+      if (previewValueUpdateTimerRef.current !== null) {
+        window.clearTimeout(previewValueUpdateTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const handleReviewedFieldValueCommit = (
     field: TemplateExtractReviewedFieldInput,
     nextValue: string
   ) => {
-    setSelectedCandidateKey(field.candidateKey || null);
-    updateReviewedField(field.candidateKey, { defaultValue: nextValue });
-    updatePreviewValueForField(field, nextValue);
+    scheduleReviewedFieldPatch(field, { defaultValue: nextValue });
+    schedulePreviewValueUpdate(field, nextValue);
   };
 
   const syncPreviewEditTarget = (target: EventTarget | null) => {
@@ -7430,9 +7716,9 @@ export default function TemplateExtractPage() {
                   ))}
                 </select>
                 {isV109FrameGroupVersion(frameGroupVersion) ? (
-                  <Input
+                  <DeferredReviewedFieldInput
                     value={frameProfileName}
-                    onChange={(event) => setFrameProfileName(event.target.value)}
+                    onCommit={setFrameProfileName}
                     disabled={loading || visualSimilarityMeasuring}
                     placeholder={`${String(frameGroupVersion || 'fv1.11')} 저장명`}
                     className="h-10 md:w-52"
@@ -8008,9 +8294,9 @@ export default function TemplateExtractPage() {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">Value Key</label>
-                  <Input
+                  <DeferredReviewedFieldInput
                     value={frameEditorValueKey}
-                    onChange={(event) => setFrameEditorValueKey(event.target.value)}
+                    onCommit={setFrameEditorValueKey}
                     placeholder="예: 공동사업자 > 성명(법인명)"
                   />
                 </div>
@@ -8043,9 +8329,9 @@ export default function TemplateExtractPage() {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">Parent Frame Group</label>
-                  <Input
+                  <DeferredReviewedFieldInput
                     value={frameEditorParentGroup}
-                    onChange={(event) => setFrameEditorParentGroup(event.target.value)}
+                    onCommit={setFrameEditorParentGroup}
                     list="frame-group-id-options"
                     placeholder="parent frame group id"
                   />
@@ -8059,20 +8345,20 @@ export default function TemplateExtractPage() {
                 <div className="grid gap-2 md:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-800">Chain Key</label>
-                    <Input
+                    <DeferredReviewedFieldInput
                       value={frameEditorChainKey}
-                      onChange={(event) => setFrameEditorChainKey(event.target.value)}
+                      onCommit={setFrameEditorChainKey}
                       placeholder="chain key"
                     />
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-800">Chain Depth</label>
-                    <Input
+                    <DeferredReviewedFieldInput
                       type="number"
                       inputMode="numeric"
                       min={0}
                       value={frameEditorChainDepth}
-                      onChange={(event) => setFrameEditorChainDepth(event.target.value)}
+                      onCommit={setFrameEditorChainDepth}
                       placeholder="0"
                     />
                   </div>
@@ -8081,23 +8367,23 @@ export default function TemplateExtractPage() {
                 <div className="grid gap-2 md:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-800">Width (px)</label>
-                    <Input
+                    <DeferredReviewedFieldInput
                       type="number"
                       inputMode="numeric"
                       min={1}
                       value={frameEditorWidthPx}
-                      onChange={(event) => setFrameEditorWidthPx(event.target.value)}
+                      onCommit={setFrameEditorWidthPx}
                       placeholder="width"
                     />
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-800">Height (px)</label>
-                    <Input
+                    <DeferredReviewedFieldInput
                       type="number"
                       inputMode="numeric"
                       min={1}
                       value={frameEditorHeightPx}
-                      onChange={(event) => setFrameEditorHeightPx(event.target.value)}
+                      onCommit={setFrameEditorHeightPx}
                       placeholder="height"
                     />
                   </div>
@@ -8230,7 +8516,7 @@ export default function TemplateExtractPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">원본 제목</label>
-                  <Input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} />
+                  <DeferredReviewedFieldInput value={sourceTitle} onCommit={setSourceTitle} />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-800">원본 PDF 업로드</label>
@@ -8287,7 +8573,7 @@ export default function TemplateExtractPage() {
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-slate-500">템플릿 관리 저장 이름</label>
-                    <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+                    <DeferredReviewedFieldInput value={templateName} onCommit={setTemplateName} />
                   </div>
 
                   <div className="space-y-2">
@@ -8533,15 +8819,30 @@ export default function TemplateExtractPage() {
               {reviewedFields.length > 0 ? (
                 reviewedFields.map((field) => {
                   const candidate = candidateMap.get(field.candidateKey || '');
+                  const pendingFieldPatch = pendingReviewedFieldPatchesRef.current.get(
+                    reviewedFieldCommitKey(field)
+                  );
+                  const displayField = pendingFieldPatch ? { ...field, ...pendingFieldPatch } : field;
                   const isSelected = selectedCandidateKey === field.candidateKey;
-                  const fieldValueText = reviewedFieldValueText(field, candidate);
+                  const fieldValueText = reviewedFieldValueText(displayField, candidate);
 
                   return (
-                    <div
-                      key={field.candidateKey || field.fieldKey}
-                      tabIndex={0}
-                      onClick={() => selectReviewedField(field)}
-                      onFocusCapture={() => selectReviewedField(field)}
+	                    <div
+	                      key={field.candidateKey || field.fieldKey}
+	                      tabIndex={0}
+	                      data-template-reviewed-field-card="true"
+	                      onClick={(event) => {
+	                        const targetElement = event.target instanceof HTMLElement ? event.target : null;
+	                        if (targetElement?.closest('input, textarea, select, button')) {
+	                          return;
+	                        }
+	                        selectReviewedField(field);
+	                      }}
+	                      onFocusCapture={(event) => {
+	                        if (event.target === event.currentTarget) {
+	                          selectReviewedField(field);
+	                        }
+	                      }}
                       onKeyDown={(event) => {
                         if (event.target !== event.currentTarget) {
                           return;
@@ -8570,13 +8871,12 @@ export default function TemplateExtractPage() {
                         >
                           {field.reviewStatus}
                         </Badge>
-                        <Input
-                          value={field.fieldLabel}
-                          onFocus={() => selectReviewedField(field)}
-                          onChange={(event) =>
-                            updateReviewedField(field.candidateKey, { fieldLabel: event.target.value })
-                          }
-                        />
+	                        <DeferredReviewedFieldInput
+	                          value={displayField.fieldLabel}
+	                          onCommit={(nextValue) =>
+	                            scheduleReviewedFieldPatch(field, { fieldLabel: nextValue })
+	                          }
+	                        />
                       </div>
                       <div className="mt-3 grid gap-3">
                         <div className="grid gap-3 md:grid-cols-2">
@@ -8592,21 +8892,19 @@ export default function TemplateExtractPage() {
                         <div className="space-y-1">
                           <label className="text-xs font-medium text-slate-500">선택 항목 수정값</label>
                           {field.fieldType === 'textarea' ? (
-                            <textarea
-                              value={fieldValueText}
-                              onFocus={() => selectReviewedField(field)}
-                              onChange={(event) => handleReviewedFieldValueChange(field, event.target.value)}
-                              className="flex min-h-[96px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            />
-                          ) : (
-                            <Input
-                              value={fieldValueText}
-                              onFocus={() => selectReviewedField(field)}
-                              onChange={(event) => handleReviewedFieldValueChange(field, event.target.value)}
-                            />
+	                            <DeferredReviewedFieldTextarea
+	                              value={fieldValueText}
+	                              onCommit={(nextValue) => handleReviewedFieldValueCommit(field, nextValue)}
+	                              className="flex min-h-[96px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+	                            />
+	                          ) : (
+	                            <DeferredReviewedFieldInput
+	                              value={fieldValueText}
+	                              onCommit={(nextValue) => handleReviewedFieldValueCommit(field, nextValue)}
+	                            />
                           )}
                           <p className="text-xs text-slate-500">
-                            이 값은 왼쪽 초안의 선택된 텍스트와 승인될 HTML에 즉시 반영됩니다.
+                            이 값은 입력을 마치면 왼쪽 초안의 선택된 텍스트와 승인될 HTML에 반영됩니다.
                           </p>
                         </div>
                         <div className="space-y-2">
