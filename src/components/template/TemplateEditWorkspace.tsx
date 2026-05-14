@@ -710,8 +710,10 @@ const TEMPLATE_FRAME_BASE_LINE_HEIGHT_ATTR = 'data-template-frame-base-line-heig
 const TEMPLATE_FRAME_RICHTEXT_ACTIVE_ATTR = 'data-template-frame-richtext-active';
 const TEMPLATE_FRAME_AUTO_HEIGHT_ATTR = 'data-template-frame-auto-height';
 const TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR = 'data-template-frame-auto-height-base';
+const TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR = 'data-template-frame-auto-height-base-explicit';
 const TEMPLATE_FRAME_AUTO_WIDTH_ATTR = 'data-template-frame-auto-width';
 const TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR = 'data-template-frame-auto-width-base';
+const TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR = 'data-template-frame-auto-width-base-explicit';
 const TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR = 'data-template-frame-auto-size-anchor';
 const TEMPLATE_FRAME_LABEL_ATTR = 'data-template-frame-label';
 const TEMPLATE_FRAME_ROLE_ATTR = 'data-template-frame-role';
@@ -3052,6 +3054,14 @@ const readFrameAutoHeightBaseHeight = (node: HTMLElement, currentHeight: number)
   return Math.max(MIN_FRAME_SIZE_PX, currentHeight);
 };
 
+const readFrameAutoHeightBaseExplicit = (node: HTMLElement) =>
+  readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR) === 'true';
+
+const readFrameAutoHeightStoredBaseHeight = (node: HTMLElement) => {
+  const baseHeight = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR));
+  return Number.isFinite(baseHeight) && baseHeight > 0 ? Math.max(MIN_FRAME_SIZE_PX, baseHeight) : null;
+};
+
 const readFrameAutoWidthBaseWidth = (node: HTMLElement, currentWidth: number) => {
   const baseWidth = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR));
 
@@ -3060,6 +3070,14 @@ const readFrameAutoWidthBaseWidth = (node: HTMLElement, currentWidth: number) =>
   }
 
   return Math.max(MIN_FRAME_SIZE_PX, currentWidth);
+};
+
+const readFrameAutoWidthBaseExplicit = (node: HTMLElement) =>
+  readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR) === 'true';
+
+const readFrameAutoWidthStoredBaseWidth = (node: HTMLElement) => {
+  const baseWidth = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR));
+  return Number.isFinite(baseWidth) && baseWidth > 0 ? Math.max(MIN_FRAME_SIZE_PX, baseWidth) : null;
 };
 
 const collectFrameAutoSizeAttrTargets = (node: HTMLElement) => {
@@ -3081,6 +3099,7 @@ const writeFrameAutoHeightBaseAttrs = (node: HTMLElement, height: number) => {
 
   collectFrameAutoSizeAttrTargets(node).forEach((target) => {
     target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR, nextHeight);
+    target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR, 'true');
   });
 };
 
@@ -3093,6 +3112,39 @@ const writeFrameAutoWidthBaseAttrs = (node: HTMLElement, width: number) => {
 
   collectFrameAutoSizeAttrTargets(node).forEach((target) => {
     target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR, nextWidth);
+    target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR, 'true');
+  });
+};
+
+const markFrameAutoHeightBaseExplicitAttrs = (node: HTMLElement) => {
+  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
+    target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR, 'true');
+  });
+};
+
+const markFrameAutoWidthBaseExplicitAttrs = (node: HTMLElement) => {
+  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
+    target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR, 'true');
+  });
+};
+
+const inferLegacyExplicitFrameAutoSizeBaseAttrs = (root: ParentNode) => {
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const currentRect = readFrameNodeRect(node);
+
+    if (readFrameAutoHeightBox(node) && !readFrameAutoHeightBaseExplicit(node)) {
+      const baseHeight = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR));
+      if (baseHeight > 0 && Math.abs(baseHeight - currentRect.height) > 0.5) {
+        markFrameAutoHeightBaseExplicitAttrs(node);
+      }
+    }
+
+    if (readFrameAutoWidthBox(node) && !readFrameAutoWidthBaseExplicit(node)) {
+      const baseWidth = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR));
+      if (baseWidth > 0 && Math.abs(baseWidth - currentRect.width) > 0.5) {
+        markFrameAutoWidthBaseExplicitAttrs(node);
+      }
+    }
   });
 };
 
@@ -3123,6 +3175,7 @@ const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) 
       }
       target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_ATTR);
       target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR);
+      target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR);
       target.setAttribute(TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR, nextAnchorSide);
       return;
     }
@@ -3134,14 +3187,17 @@ const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) 
       }
       target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_ATTR);
       target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR);
+      target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR);
       target.setAttribute(TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR, nextAnchorSide);
       return;
     }
 
     target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_ATTR);
     target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR);
+    target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR);
     target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_ATTR);
     target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR);
+    target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR);
     target.removeAttribute(TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR);
   });
 };
@@ -3711,6 +3767,28 @@ const syncFrameBandShellTableSize = (shell: HTMLElement) => {
 
   table.style.width = shell.style.width;
   table.style.height = shell.style.height;
+};
+
+const syncFrameBandShellTableRowsToShellSize = (shell: HTMLElement) => {
+  const table = shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') || shell.querySelector<HTMLTableElement>('table');
+
+  if (!table) {
+    return;
+  }
+
+  syncFrameBandShellTableSize(shell);
+
+  const rowCount = table.rows.length;
+  const shellHeight = parseFramePx(shell.style.height);
+
+  if (rowCount <= 0 || shellHeight <= 0) {
+    return;
+  }
+
+  setTableRowHeights(
+    table,
+    Array.from({ length: rowCount }, () => getWritableTableSize(shellHeight / rowCount))
+  );
 };
 
 const snapFrameBandShellEdgesInPage = (pageInner: HTMLElement) => {
@@ -8195,7 +8273,8 @@ const shiftShellsBelowBoundary = (
   pageInner: HTMLElement,
   boundaryY: number,
   deltaY: number,
-  excludedShells: HTMLElement[] = []
+  excludedShells: HTMLElement[] = [],
+  options?: { includeAbsolute?: boolean }
 ) => {
   if (Math.abs(deltaY) < 0.5) {
     return;
@@ -8208,7 +8287,7 @@ const shiftShellsBelowBoundary = (
       return;
     }
 
-    if (isAbsolutePositionedShell(shell)) {
+    if (!options?.includeAbsolute && isAbsolutePositionedShell(shell)) {
       return;
     }
 
@@ -8224,12 +8303,27 @@ const shiftShellsBelowBoundary = (
   });
 };
 
-const settleTemplateUsagePreviewVerticalOverlaps = (root: ParentNode) => {
+const settleTemplateUsagePreviewVerticalOverlaps = (
+  root: ParentNode,
+  options?: { includeAbsolute?: boolean }
+) => {
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     const placedRects: FrameNodeRect[] = [];
     const shells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
-      .filter((shell) => !isAbsolutePositionedShell(shell))
+      .filter((shell) => options?.includeAbsolute || !isAbsolutePositionedShell(shell))
       .sort((left, right) => {
+        if (options?.includeAbsolute) {
+          const leftGeometry = readNormalizedBandGeometry(left);
+          const rightGeometry = readNormalizedBandGeometry(right);
+
+          if (leftGeometry && rightGeometry) {
+            return (
+              leftGeometry.rowStart - rightGeometry.rowStart ||
+              leftGeometry.colStart - rightGeometry.colStart
+            );
+          }
+        }
+
         const leftRect = readFrameElementRect(left, pageInner);
         const rightRect = readFrameElementRect(right, pageInner);
         return leftRect.top - rightRect.top || leftRect.left - rightRect.left;
@@ -8268,6 +8362,95 @@ const settleTemplateUsagePreviewVerticalOverlaps = (root: ParentNode) => {
 
     updatePageInnerMinHeight(pageInner);
   });
+};
+
+const applyTemplateUsagePreviewAutoHeightBoundaryFit = (root: ParentNode) => {
+  let changedCount = 0;
+
+  Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
+    const entries = collectFrameSelectionAnchors(pageInner)
+      .map((node) => {
+        const shell = resolveFrameLayoutShell(node);
+        const rect = readFrameElementRect(shell, pageInner);
+        const usesBottomAutoHeight =
+          readFrameAutoHeightBox(node) &&
+          normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom')) === 'bottom';
+
+        return {
+          node,
+          shell,
+          rect,
+          bottom: rect.top + rect.height,
+          usesBottomAutoHeight,
+        };
+      })
+      .sort((left, right) => left.bottom - right.bottom || left.rect.left - right.rect.left);
+
+    const groups: Array<typeof entries> = [];
+
+    entries.forEach((entry) => {
+      const lastGroup = groups[groups.length - 1];
+      const lastBottom = lastGroup?.[0]?.bottom ?? Number.NaN;
+
+      if (lastGroup && Math.abs(entry.bottom - lastBottom) <= FRAME_RESIZE_TOLERANCE_PX) {
+        lastGroup.push(entry);
+        return;
+      }
+
+      groups.push([entry]);
+    });
+
+    groups.forEach((group) => {
+      const currentGroup = group.map((entry) => {
+        const rect = readFrameElementRect(entry.shell, pageInner);
+        return {
+          ...entry,
+          rect,
+          bottom: rect.top + rect.height,
+        };
+      });
+
+      if (!currentGroup.some((entry) => entry.usesBottomAutoHeight)) {
+        return;
+      }
+
+      const currentBottom = Math.max(...currentGroup.map((entry) => entry.bottom));
+      const nextBottom = Math.max(
+        ...currentGroup.map((entry) => {
+          const requiredHeight = entry.usesBottomAutoHeight
+            ? measureRequiredAutoHeightFrameHeight(entry.node)
+            : entry.rect.height;
+          return entry.rect.top + Math.max(MIN_FRAME_SIZE_PX, requiredHeight);
+        })
+      );
+      const deltaY = nextBottom - currentBottom;
+
+      if (!Number.isFinite(nextBottom) || Math.abs(deltaY) <= 0.5) {
+        return;
+      }
+
+      const groupShells = currentGroup.map((entry) => entry.shell);
+
+      currentGroup.forEach((entry) => {
+        const nextRect = {
+          ...entry.rect,
+          height: Math.max(MIN_FRAME_SIZE_PX, nextBottom - entry.rect.top),
+        };
+
+        writePositionedElementPageRect(entry.shell, nextRect, pageInner, {
+          minSize: MIN_WRITABLE_TABLE_SIZE_PX,
+        });
+        syncFrameBandShellTableRowsToShellSize(entry.shell);
+        syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(entry.shell), pageInner);
+      });
+
+      shiftShellsBelowBoundary(pageInner, currentBottom, deltaY, groupShells, { includeAbsolute: true });
+      updatePageInnerMinHeight(pageInner);
+      changedCount += currentGroup.length;
+    });
+  });
+
+  return changedCount;
 };
 
 const pickNormalizedPeerBoundaryCoordinate = (
@@ -8372,8 +8555,8 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (root: ParentNode) => {
         const colAxis = resolveTemplateUsagePreviewNormalizedPeerAxis(geometry, peerGeometries, pageInner, 'col');
         const nextTop = rowAxis.start;
         const nextLeft = colAxis.start;
-        const nextBottom = Math.max(shellRect.top + shellRect.height, rowAxis.end);
-        const nextRight = Math.max(shellRect.left + shellRect.width, colAxis.end);
+        const nextBottom = rowAxis.end;
+        const nextRight = colAxis.end;
         const nextHeight = Math.max(MIN_FRAME_SIZE_PX, nextBottom - nextTop);
         const nextWidth = Math.max(MIN_FRAME_SIZE_PX, nextRight - nextLeft);
 
@@ -8662,21 +8845,6 @@ const resolveFrameAutoHeightBottomDelta = (node: HTMLElement, delta: number) => 
   return -Math.min(Math.abs(delta), capacity, nodeShrinkCapacity);
 };
 
-const resolveFrameAutoHeightOppositeTopDelta = (node: HTMLElement, delta: number) => {
-  if (Math.abs(delta) < 0.5) {
-    return 0;
-  }
-
-  if (delta <= 0) {
-    return delta;
-  }
-
-  const nodeShrinkCapacity = resolveFrameAutoHeightShrinkCapacity(node);
-  const resizeCapacity = resolveFrameResizeTopDelta(node, delta);
-
-  return Math.min(delta, resizeCapacity, nodeShrinkCapacity);
-};
-
 const applyFrameAutoHeightDeltaLocal = (node: HTMLElement, delta: number) => {
   const context = buildFrameResizeContext(node);
 
@@ -8769,50 +8937,6 @@ const collectAutoSizeSameSidePeerNodes = (
   return collectFrameSelectionAnchors(root).filter((candidate) => peerFrameGroupIdSet.has(getFrameGroupId(candidate)));
 };
 
-const collectAutoSizeOppositeVerticalBoundaryPeerNodes = (
-  root: HTMLElement,
-  sourceFrameGroupIds: string[],
-  side: Extract<TemplateEdgeSide, 'bottom'>
-) => {
-  const normalizedSourceFrameGroupIds = Array.from(
-    new Set(sourceFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
-  );
-
-  if (normalizedSourceFrameGroupIds.length === 0) {
-    return [] as HTMLElement[];
-  }
-
-  const snapshot = buildTemplateEdgeTopologySnapshotFromRoot(root);
-  const sourceFrameGroupIdSet = new Set(normalizedSourceFrameGroupIds);
-  const sourceEdges = normalizedSourceFrameGroupIds
-    .map((frameGroupId) => TemplateEdgeTopologyService.getEdgeById(snapshot, `${frameGroupId}:${side}`))
-    .filter((edge): edge is TemplateEdgeDescriptorDto => Boolean(edge));
-
-  if (sourceEdges.length === 0) {
-    return [] as HTMLElement[];
-  }
-
-  const oppositeFrameGroupIdSet = new Set<string>();
-
-  snapshot.edges.forEach((candidateEdge) => {
-    if (
-      candidateEdge.orientation !== 'horizontal' ||
-      candidateEdge.side !== 'top' ||
-      sourceFrameGroupIdSet.has(candidateEdge.frameGroupId)
-    ) {
-      return;
-    }
-
-    if (sourceEdges.some((sourceEdge) => edgesSharePhysicalBoundary(sourceEdge, candidateEdge))) {
-      oppositeFrameGroupIdSet.add(candidateEdge.frameGroupId);
-    }
-  });
-
-  return collectFrameSelectionAnchors(root).filter((candidate) =>
-    oppositeFrameGroupIdSet.has(getFrameGroupId(candidate))
-  );
-};
-
 const applyFrameAutoHeightDelta = (
   node: HTMLElement,
   delta: number,
@@ -8830,16 +8954,9 @@ const applyFrameAutoHeightDelta = (
   const frameGroupId = getFrameGroupId(node);
   const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
   const movingBottomNodes = [node, ...sameSidePeerNodes];
-  const movingBottomFrameGroupIds = movingBottomNodes.map((candidate) => getFrameGroupId(candidate));
-  const oppositeTopPeerNodes = usesTopAnchor
-    ? []
-    : collectAutoSizeOppositeVerticalBoundaryPeerNodes(root, movingBottomFrameGroupIds, 'bottom');
   const constrainedDelta = resolveSharedEdgeResizeDelta(
     delta,
-    [
-      ...movingBottomNodes.map((candidate) => resolveFrameAutoHeightBottomDelta(candidate, delta)),
-      ...oppositeTopPeerNodes.map((candidate) => resolveFrameAutoHeightOppositeTopDelta(candidate, delta)),
-    ].filter((candidateDelta) => Number.isFinite(candidateDelta))
+    movingBottomNodes.map((candidate) => resolveFrameAutoHeightBottomDelta(candidate, delta)).filter((candidateDelta) => Number.isFinite(candidateDelta))
   );
   const applyLocalDelta = usesTopAnchor ? applyFrameAutoHeightFromTopDeltaLocal : applyFrameAutoHeightDeltaLocal;
   const appliedDelta = applyLocalDelta(node, constrainedDelta);
@@ -8858,23 +8975,14 @@ const applyFrameAutoHeightDelta = (
     }
   });
 
-  oppositeTopPeerNodes.forEach((peerNode) => {
-    const peerAppliedDelta = applyFrameResizeTopDelta(peerNode, appliedDelta);
-
-    if (Math.abs(peerAppliedDelta) > 0.5) {
-      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 'n');
-    }
-  });
-
-  if (!usesTopAnchor && !isAbsolutePositionedShell(context.shell) && oppositeTopPeerNodes.length <= 0) {
+  if (!usesTopAnchor) {
     shiftShellsBelowBoundary(
       context.pageInner,
       boundaryY,
       appliedDelta,
-      [context.shell, ...sameSidePeerNodes.map((peerNode) => resolveFrameLayoutShell(peerNode))]
+      [context.shell, ...sameSidePeerNodes.map((peerNode) => resolveFrameLayoutShell(peerNode))],
+      { includeAbsolute: true }
     );
-    updatePageInnerMinHeight(context.pageInner);
-  } else if (!usesTopAnchor) {
     updatePageInnerMinHeight(context.pageInner);
   }
 
@@ -13008,6 +13116,7 @@ const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | und
   clearFrameReviewWarningUi(container);
   stripFrameMetadataMarkers(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
+  inferLegacyExplicitFrameAutoSizeBaseAttrs(container);
 
   collectFrameSelectionAnchors(container).forEach((node) => {
     const role = readFrameRole(node);
@@ -13102,12 +13211,20 @@ const applyTemplateUsagePreviewAutoSize = (
     return;
   }
 
-  applyTemplateAutoSizeBoxes(root, [frameGroupId], {
+  const autoSizeResult = applyTemplateAutoSizeBoxes(root, [frameGroupId], {
     applyRelativeAnchors: false,
   });
-  settleTemplateUsagePreviewVerticalOverlaps(root);
-  syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
-  options?.onLayoutChange?.(root);
+  if (autoSizeResult.changedCount > 0 || isTemplateUsagePreviewModeNode(frameNode)) {
+    if (options?.onLayoutChange) {
+      options.onLayoutChange(root);
+    } else {
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+    }
+  }
 
   if (options?.restoreTextInputFocus) {
     restoreFrameTextInputFocus(root, frameGroupId, options.selectionStart ?? null, options.selectionEnd ?? null);
@@ -13484,8 +13601,11 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     applyTemplateAutoSizeBoxes(root, initialAutoSizedFrameGroupIds, {
       applyRelativeAnchors: false,
     });
-    settleTemplateUsagePreviewVerticalOverlaps(root);
+    applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+    settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
     syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
+    applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+    settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
     options?.onAutoSizeLayoutChange?.(root);
   }
 
@@ -13578,6 +13698,50 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   return Math.ceil(measuredHeight + verticalBorderPx);
 };
 
+const measureNaturalElementContentHeight = (target: HTMLElement) => {
+  const measurementTarget = target.classList.contains('v102-frame-band')
+    ? target.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) || target
+    : target;
+  const targetRect = measurementTarget.getBoundingClientRect();
+  const computedStyle = getComputedStyle(measurementTarget);
+  const clone = measurementTarget.cloneNode(true) as HTMLElement;
+
+  clone.removeAttribute('id');
+  clone.querySelectorAll<HTMLElement>('[id]').forEach((descendant) => {
+    descendant.removeAttribute('id');
+  });
+  clone.querySelectorAll<HTMLElement>('table, tbody, tr, td, th').forEach((descendant) => {
+    descendant.style.height = 'auto';
+    descendant.style.minHeight = '0px';
+    descendant.style.maxHeight = 'none';
+    descendant.style.overflow = 'visible';
+  });
+  clone.style.position = 'fixed';
+  clone.style.left = '-10000px';
+  clone.style.top = '0';
+  clone.style.display = 'block';
+  clone.style.width = toFrameCssPx(targetRect.width || parseFramePx(computedStyle.width));
+  clone.style.height = 'auto';
+  clone.style.minHeight = '0px';
+  clone.style.maxHeight = 'none';
+  clone.style.visibility = 'hidden';
+  clone.style.overflow = 'visible';
+  clone.style.pointerEvents = 'none';
+  clone.style.boxSizing = computedStyle.boxSizing;
+  copyComputedTextMeasurementStyles(computedStyle, clone.style);
+  clone.style.padding = computedStyle.padding;
+  clone.style.border = computedStyle.border;
+  clone.style.whiteSpace = computedStyle.whiteSpace;
+  clone.style.wordBreak = computedStyle.wordBreak;
+  clone.style.overflowWrap = computedStyle.overflowWrap;
+  document.body.appendChild(clone);
+
+  const measuredHeight = Math.max(clone.scrollHeight || 0, clone.getBoundingClientRect().height || 0);
+  clone.remove();
+
+  return Math.ceil(measuredHeight);
+};
+
 const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const computedStyle = getComputedStyle(target);
   const clone = document.createElement('div');
@@ -13607,34 +13771,43 @@ const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputE
   return measuredWidth;
 };
 
-const isTemplateUsagePreviewModeNode = (node: HTMLElement) =>
-  Boolean(node.closest(`.template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"]`));
+const measureRequiredFrameHeightFromTargets = (
+  node: HTMLElement,
+  targets: HTMLElement[]
+) => {
+  const frameRect = resolveFrameLayoutShell(node).getBoundingClientRect();
 
-const measureTemplateUsagePreviewNaturalFrameHeight = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
-  const contentTarget = resolveFrameContentTarget(node);
-  const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
-  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
-  const contentHeightDelta = measureTargets.reduce((maxDelta, target) => {
+  return targets.reduce((maxHeight, target) => {
     const targetRect = target.getBoundingClientRect();
     const requiredTargetHeight =
       target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
         ? measureNaturalTextControlHeight(target)
-        : Math.max(target.scrollHeight || 0, target.offsetHeight || 0, target.clientHeight || 0, targetRect.height || 0);
-    const visibleTargetHeight = Math.max(targetRect.height || 0, target.offsetHeight || 0, target.clientHeight || 0);
+        : measureNaturalElementContentHeight(target);
+    const targetTopOffset = Math.max(0, targetRect.top - frameRect.top);
+    const targetBottomInset = Math.max(0, frameRect.bottom - targetRect.bottom);
+    const requiredFrameHeight = targetTopOffset + requiredTargetHeight + targetBottomInset;
 
-    return Math.max(maxDelta, requiredTargetHeight - visibleTargetHeight);
+    return Math.max(maxHeight, requiredFrameHeight);
   }, Number.NEGATIVE_INFINITY);
-  const resolvedContentHeightDelta = Number.isFinite(contentHeightDelta) ? contentHeightDelta : 0;
+};
 
-  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.height + resolvedContentHeightDelta));
+const isTemplateUsagePreviewModeNode = (node: HTMLElement) =>
+  Boolean(node.closest(`.template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"]`));
+
+const measureTemplateUsagePreviewNaturalFrameHeight = (node: HTMLElement) => {
+  const contentTarget = resolveFrameContentTarget(node);
+  const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+  const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
+  const requiredFrameHeight = measureRequiredFrameHeightFromTargets(node, measureTargets);
+
+  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, Number.isFinite(requiredFrameHeight) ? requiredFrameHeight : 0));
 };
 
 const measureTemplateUsagePreviewNaturalFrameWidth = (node: HTMLElement) => {
   const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
-  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
+  const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
   const contentWidthDelta = measureTargets.reduce((maxDelta, target) => {
     const targetRect = target.getBoundingClientRect();
     const requiredTargetWidth =
@@ -13654,47 +13827,45 @@ const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
   const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+
+  if (isTemplateUsagePreviewModeNode(node)) {
+    const previewBaseHeight =
+      readFrameAutoHeightStoredBaseHeight(node) ??
+      (readFrameAutoHeightBaseExplicit(node) ? readFrameAutoHeightBaseHeight(node, currentRect.height) : MIN_FRAME_SIZE_PX);
+    return Math.ceil(Math.max(previewBaseHeight, measureTemplateUsagePreviewNaturalFrameHeight(node)));
+  }
+
   const baseHeight = readFrameAutoHeightBaseHeight(node, currentRect.height);
 
   if (isTemplateUsagePreviewValueFrameEmpty(node)) {
     return Math.ceil(baseHeight);
   }
 
-  if (isTemplateUsagePreviewModeNode(node)) {
-    return Math.ceil(Math.max(baseHeight, measureTemplateUsagePreviewNaturalFrameHeight(node)));
-  }
+  const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
+  const requiredFrameHeight = measureRequiredFrameHeightFromTargets(node, measureTargets);
 
-  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
-  const extraHeight = measureTargets.reduce((maxExtraHeight, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const requiredTargetHeight =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlHeight(target)
-        : Math.max(target.scrollHeight || 0, target.clientHeight || 0, target.offsetHeight || 0);
-    const visibleTargetHeight = Math.max(target.clientHeight || 0, target.offsetHeight || 0, targetRect.height || 0);
-
-    return Math.max(maxExtraHeight, requiredTargetHeight - visibleTargetHeight);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedExtraHeight = Number.isFinite(extraHeight) ? extraHeight : 0;
-
-  return Math.ceil(Math.max(baseHeight, currentRect.height + resolvedExtraHeight));
+  return Math.ceil(Math.max(baseHeight, Number.isFinite(requiredFrameHeight) ? requiredFrameHeight : 0));
 };
 
 const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
   const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+
+  if (isTemplateUsagePreviewModeNode(node)) {
+    const previewBaseWidth =
+      readFrameAutoWidthStoredBaseWidth(node) ??
+      (readFrameAutoWidthBaseExplicit(node) ? readFrameAutoWidthBaseWidth(node, currentRect.width) : MIN_FRAME_SIZE_PX);
+    return Math.ceil(Math.max(previewBaseWidth, measureTemplateUsagePreviewNaturalFrameWidth(node)));
+  }
+
   const baseWidth = readFrameAutoWidthBaseWidth(node, currentRect.width);
 
   if (isTemplateUsagePreviewValueFrameEmpty(node)) {
     return Math.ceil(baseWidth);
   }
 
-  if (isTemplateUsagePreviewModeNode(node)) {
-    return Math.ceil(Math.max(baseWidth, measureTemplateUsagePreviewNaturalFrameWidth(node)));
-  }
-
-  const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
+  const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
   const extraWidth = measureTargets.reduce((maxExtraWidth, target) => {
     const targetRect = target.getBoundingClientRect();
     const naturalTextControlWidth =
@@ -13716,23 +13887,12 @@ const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
 };
 
 const measureContentFitFrameHeight = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
   const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
-  const contentHeightDelta = measureTargets.reduce((maxDelta, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const requiredTargetHeight =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlHeight(target)
-        : target.scrollHeight || target.getBoundingClientRect().height || target.offsetHeight || target.clientHeight || 0;
-    const visibleTargetHeight = Math.max(target.clientHeight || 0, target.offsetHeight || 0, targetRect.height || 0);
+  const requiredFrameHeight = measureRequiredFrameHeightFromTargets(node, measureTargets);
 
-    return Math.max(maxDelta, requiredTargetHeight - visibleTargetHeight);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedContentHeightDelta = Number.isFinite(contentHeightDelta) ? contentHeightDelta : 0;
-
-  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.height + resolvedContentHeightDelta));
+  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, Number.isFinite(requiredFrameHeight) ? requiredFrameHeight : 0));
 };
 
 const measureContentFitFrameWidth = (node: HTMLElement) => {
@@ -13931,6 +14091,63 @@ const applyTemplateAutoWidthBoxes = (
   };
 };
 
+const applyTemplateAutoHeightTextOverflowCorrections = (
+  root: HTMLElement,
+  frameGroupIds?: string[]
+): {
+  changedCount: number;
+  skippedCount: number;
+  changedFrameGroupIds: string[];
+} => {
+  const targetFrameGroupIdSet = frameGroupIds?.length
+    ? new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+    : null;
+  const changedFrameGroupIds: string[] = [];
+  let skippedCount = 0;
+
+  collectFrameSelectionAnchors(root)
+    .filter((node) => {
+      const frameGroupId = getFrameGroupId(node);
+      return Boolean(frameGroupId) && (!targetFrameGroupIdSet || targetFrameGroupIdSet.has(frameGroupId));
+    })
+    .filter((node) => readFrameAutoHeightBox(node))
+    .sort((left, right) => readFrameNodeRect(left).top - readFrameNodeRect(right).top)
+    .forEach((node) => {
+      const textInput =
+        node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
+        node.querySelector<HTMLInputElement>('[data-template-frame-input="true"]') ||
+        null;
+
+      if (!textInput) {
+        return;
+      }
+
+      const overflowDelta = Math.ceil((textInput.scrollHeight || 0) - (textInput.clientHeight || 0));
+
+      if (overflowDelta <= 0.5) {
+        return;
+      }
+
+      const appliedDelta = applyFrameAutoHeightDelta(
+        node,
+        overflowDelta,
+        normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'))
+      );
+
+      if (Math.abs(appliedDelta) > 0.5) {
+        changedFrameGroupIds.push(getFrameGroupId(node));
+      } else {
+        skippedCount += 1;
+      }
+    });
+
+  return {
+    changedCount: changedFrameGroupIds.length,
+    skippedCount,
+    changedFrameGroupIds,
+  };
+};
+
 const applyTemplateSecondaryContentFit = (
   root: HTMLElement,
   frameGroupIds: string[] | undefined,
@@ -14018,8 +14235,9 @@ const applyTemplateAutoSizeBoxes = (
   const widthResult = options.skipWidth
     ? emptyResult
     : applyTemplateAutoWidthBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
+  const heightOverflowResult = options.skipHeight ? emptyResult : applyTemplateAutoHeightTextOverflowCorrections(root, frameGroupIds);
   const changedFrameGroupIds = Array.from(
-    new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds])
+    new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds, ...heightOverflowResult.changedFrameGroupIds])
   );
 
   if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
@@ -14029,8 +14247,8 @@ const applyTemplateAutoSizeBoxes = (
   }
 
   return {
-    changedCount: heightResult.changedCount + widthResult.changedCount,
-    skippedCount: heightResult.skippedCount + widthResult.skippedCount,
+    changedCount: heightResult.changedCount + widthResult.changedCount + heightOverflowResult.changedCount,
+    skippedCount: heightResult.skippedCount + widthResult.skippedCount + heightOverflowResult.skippedCount,
     changedFrameGroupIds,
   };
 };
@@ -16218,6 +16436,8 @@ const applyFrameStylePatch = (
   }
 
   if (patch.backgroundColor !== undefined) {
+    const nextBackgroundColor =
+      colorToHex(patch.backgroundColor || '') === 'transparent' ? '' : patch.backgroundColor || '';
     if (node !== shellTarget) {
       node.style.backgroundColor = '';
     }
@@ -16225,7 +16445,11 @@ const applyFrameStylePatch = (
       persistedFrameNode.style.backgroundColor = '';
     }
     styleShellTargets.forEach((target) => {
-      target.style.backgroundColor = patch.backgroundColor || '';
+      if (nextBackgroundColor) {
+        target.style.backgroundColor = nextBackgroundColor;
+      } else {
+        target.style.removeProperty('background-color');
+      }
     });
   }
 
@@ -16437,6 +16661,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const lastPersistedDraftHtmlRef = React.useRef('');
   const templateUsagePreviewEditorDraftSnapshotRef = React.useRef('');
   const templateUsagePreviewRenderSnapshotRef = React.useRef('');
+  const textAutoSizePointerHandledRef = React.useRef(false);
 
   const syncSelectionAppearanceToolbarWidth = React.useCallback((toolbarNode: HTMLDivElement | null) => {
     if (!toolbarNode) {
@@ -16539,112 +16764,47 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [setTextAutoSizeUiOverrideForSelection]
   );
-  const previewTextAutoSizeModeSelection = React.useCallback(
-    (mode: TextAutoSizeMode) => {
-      const root = previewRef.current;
-      const selectionFrameGroupIds = normalizeFrameSelectionIds(selectedFrameGroupIdsRef.current);
-
-      if (!root || selectionFrameGroupIds.length <= 0) {
+  const writeTextAutoSizeDescriptionDomState = React.useCallback(
+    (mode: TextAutoSizeMode | 'mixed', side?: TextAutoSizeAnchorSide) => {
+      if (typeof document === 'undefined') {
         return;
       }
 
-      const currentState = readSelectedTextAutoSizeState(root, selectionFrameGroupIds);
+      const descriptionNode = document.querySelector<HTMLElement>('[data-text-autosize-description="true"]');
 
-      if (currentState.totalCount <= 0) {
+      if (!descriptionNode) {
         return;
       }
 
-      const nextState: SelectedTextAutoSizeState = {
-        ...currentState,
-        mixed: false,
-        anchorSideMixed: false,
-        heightAnchorSideMixed: false,
-        widthAnchorSideMixed: false,
+      const primaryNode = descriptionNode.querySelector<HTMLElement>('[data-text-autosize-description-primary="true"]');
+      const middleNode = descriptionNode.querySelector<HTMLElement>('[data-text-autosize-description-middle="true"]');
+      const axisNode = descriptionNode.querySelector<HTMLElement>('[data-text-autosize-description-axis="true"]');
+      const tailNode = descriptionNode.querySelector<HTMLElement>('[data-text-autosize-description-tail="true"]');
+      const writeDescription = (primary: string, middle: string, axis: string, tail: string) => {
+        if (primaryNode) primaryNode.textContent = primary;
+        if (middleNode) middleNode.textContent = middle;
+        if (axisNode) axisNode.textContent = axis;
+        if (tailNode) tailNode.textContent = tail;
       };
 
       if (mode === 'height') {
-        nextState.heightCount = currentState.totalCount;
-        nextState.widthCount = 0;
-        nextState.fixedCount = 0;
-        nextState.allHeight = true;
-        nextState.allWidth = false;
-        nextState.allFixed = false;
-        nextState.anchorSide = nextState.heightAnchorSide;
-      } else if (mode === 'width') {
-        nextState.heightCount = 0;
-        nextState.widthCount = currentState.totalCount;
-        nextState.fixedCount = 0;
-        nextState.allHeight = false;
-        nextState.allWidth = true;
-        nextState.allFixed = false;
-        nextState.anchorSide = nextState.widthAnchorSide;
-      } else {
-        nextState.heightCount = 0;
-        nextState.widthCount = 0;
-        nextState.fixedCount = currentState.totalCount;
-        nextState.allHeight = false;
-        nextState.allWidth = false;
-        nextState.allFixed = true;
-      }
-
-      setTextAutoSizeUiOverrideForSelection(selectionFrameGroupIds, nextState);
-    },
-    [setTextAutoSizeUiOverrideForSelection]
-  );
-  const previewTextAutoSizeModeAndAnchorSelection = React.useCallback(
-    (mode: Extract<TextAutoSizeMode, 'height' | 'width'>, side: TextAutoSizeAnchorSide) => {
-      const root = previewRef.current;
-      const selectionFrameGroupIds = normalizeFrameSelectionIds(selectedFrameGroupIdsRef.current);
-
-      if (
-        !root ||
-        selectionFrameGroupIds.length <= 0 ||
-        (mode === 'height' && !isTextAutoHeightAnchorSide(side)) ||
-        (mode === 'width' && !isTextAutoWidthAnchorSide(side))
-      ) {
+        writeDescription(side === 'top' ? '위쪽' : '아래쪽', '으로 ', '높이', '가 늘어나는 상자');
         return;
       }
 
-      const currentState = readSelectedTextAutoSizeState(root, selectionFrameGroupIds);
-
-      if (currentState.totalCount <= 0) {
+      if (mode === 'width') {
+        writeDescription(side === 'left' ? '왼쪽' : '오른쪽', '으로 ', '너비', '가 늘어나는 상자');
         return;
       }
 
-      const nextState: SelectedTextAutoSizeState = {
-        ...currentState,
-        mixed: false,
-        anchorSide: side,
-        anchorSideMixed: false,
-        heightAnchorSideMixed: false,
-        widthAnchorSideMixed: false,
-      };
-
-      if (mode === 'height') {
-        const heightSide = isTextAutoHeightAnchorSide(side) ? side : 'bottom';
-        nextState.heightCount = currentState.totalCount;
-        nextState.widthCount = 0;
-        nextState.fixedCount = 0;
-        nextState.allHeight = true;
-        nextState.allWidth = false;
-        nextState.allFixed = false;
-        nextState.anchorSide = heightSide;
-        nextState.heightAnchorSide = heightSide;
-      } else {
-        const widthSide = isTextAutoWidthAnchorSide(side) ? side : 'right';
-        nextState.heightCount = 0;
-        nextState.widthCount = currentState.totalCount;
-        nextState.fixedCount = 0;
-        nextState.allHeight = false;
-        nextState.allWidth = true;
-        nextState.allFixed = false;
-        nextState.anchorSide = widthSide;
-        nextState.widthAnchorSide = widthSide;
+      if (mode === 'fixed') {
+        writeDescription('고정 크기', ' ', '', '상자');
+        return;
       }
 
-      setTextAutoSizeUiOverrideForSelection(selectionFrameGroupIds, nextState);
+      writeDescription('상자 타입', '이 서로 다른 상태', '', '');
     },
-    [setTextAutoSizeUiOverrideForSelection]
+    []
   );
   const applyTextAutoSizeToneToElement = React.useCallback((node: HTMLElement | null, active: boolean) => {
     if (!node) {
@@ -16708,6 +16868,36 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
     },
     [applyTextAutoSizeToneToElement, previewTextAutoSizeModeDomState]
+  );
+  const previewSelectedTextAutoSizeDomState = React.useCallback(
+    (state: SelectedTextAutoSizeState) => {
+      if (state.totalCount <= 0) {
+        return;
+      }
+
+      if (state.allHeight) {
+        const side = state.heightAnchorSide === 'top' ? 'top' : 'bottom';
+        previewTextAutoSizeAnchorDomState(side);
+        writeTextAutoSizeDescriptionDomState('height', side);
+        return;
+      }
+
+      if (state.allWidth) {
+        const side = state.widthAnchorSide === 'left' ? 'left' : 'right';
+        previewTextAutoSizeAnchorDomState(side);
+        writeTextAutoSizeDescriptionDomState('width', side);
+        return;
+      }
+
+      if (state.allFixed) {
+        previewTextAutoSizeModeDomState('fixed');
+        writeTextAutoSizeDescriptionDomState('fixed');
+        return;
+      }
+
+      writeTextAutoSizeDescriptionDomState('mixed');
+    },
+    [previewTextAutoSizeAnchorDomState, previewTextAutoSizeModeDomState, writeTextAutoSizeDescriptionDomState]
   );
   const selectionValidationErrorFrameIds = React.useMemo(
     () => Array.from(new Set(selectionValidationIssues.map((issue) => issue.frameGroupId).filter(Boolean))),
@@ -19787,20 +19977,85 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
     [applyPositionSpacingRelationsToRoot, positionSpacingSettingRelations]
   );
-  const applyTemplateUsagePreviewPreservedSpacingRelations = React.useCallback(
-    (root: HTMLElement) => {
-      const changed = applyPreservedPositionSpacingRelations(root);
-      if (!changed) {
-        return;
+  const applyTemplateAutoSizeBoxesWithPreservedLayout = React.useCallback(
+    (root: HTMLElement, frameGroupIds?: string[], options: TemplateAutoSizeApplyOptions = {}) => {
+      const autoSizeResult = applyTemplateAutoSizeBoxes(root, frameGroupIds, {
+        ...options,
+        applyRelativeAnchors: false,
+      });
+
+      if (autoSizeResult.changedCount <= 0) {
+        return autoSizeResult;
       }
 
+      const spacingChanged = applyPreservedPositionSpacingRelations(root);
+      if (!spacingChanged) {
+        applyRelativeAnchoredFrameRectsInRoot(root);
+      }
+
+      return autoSizeResult;
+    },
+    [applyPreservedPositionSpacingRelations]
+  );
+  const applyEditorAutoSizeBoxesWithPreservedLayout = React.useCallback(
+    (root: HTMLElement) => {
+      const autoSizedFrameGroupIds = Array.from(
+        new Set(
+          collectFrameSelectionAnchors(root)
+            .filter((frameNode) => readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))
+            .map((frameNode) => getFrameGroupId(frameNode).trim())
+            .filter((frameGroupId) => Boolean(frameGroupId))
+        )
+      );
+
+      if (autoSizedFrameGroupIds.length <= 0) {
+        return { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
+      }
+
+      return applyTemplateAutoSizeBoxesWithPreservedLayout(root, autoSizedFrameGroupIds);
+    },
+    [applyTemplateAutoSizeBoxesWithPreservedLayout]
+  );
+  const applyTemplateUsagePreviewPreservedSpacingRelations = React.useCallback(
+    (root: HTMLElement) => {
+      applyPreservedPositionSpacingRelations(root);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
       syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
-      settleTemplateUsagePreviewVerticalOverlaps(root);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
       root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
         updatePageInnerMinHeight(pageInner);
       });
     },
     [applyPreservedPositionSpacingRelations]
+  );
+  const applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout = React.useCallback(
+    (root: HTMLElement) => {
+      const autoSizedFrameGroupIds = Array.from(
+        new Set(
+          collectFrameSelectionAnchors(root)
+            .filter((frameNode) => readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))
+            .map((frameNode) => getFrameGroupId(frameNode).trim())
+            .filter((frameGroupId) => Boolean(frameGroupId))
+        )
+      );
+
+      if (autoSizedFrameGroupIds.length <= 0) {
+        return { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
+      }
+
+      const autoSizeResult = applyTemplateAutoSizeBoxes(root, autoSizedFrameGroupIds, {
+        applyRelativeAnchors: false,
+      });
+      const boundaryFitChangedCount = applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+
+      if (autoSizeResult.changedCount > 0 || boundaryFitChangedCount > 0) {
+        applyTemplateUsagePreviewPreservedSpacingRelations(root);
+      }
+
+      return autoSizeResult;
+    },
+    [applyTemplateUsagePreviewPreservedSpacingRelations]
   );
   React.useLayoutEffect(() => {
     templateUsagePreviewAutoSizeLayoutChangeRef.current = applyTemplateUsagePreviewPreservedSpacingRelations;
@@ -19811,6 +20066,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
     };
   }, [applyTemplateUsagePreviewPreservedSpacingRelations]);
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
+    if (!templateUsagePreviewMode || !root || typeof window === 'undefined') {
+      return;
+    }
+
+    enableTemplateUsagePreviewTextControls(root);
+    applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout(root);
+  }, [
+    applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout,
+    surfaceRenderedPreviewHtml,
+    templateUsagePreviewMode,
+  ]);
 	  const applyDefinedPositionRelationGapDraft = React.useCallback(
     (relation: DefinedPositionRelativeRelation, nextGapYRaw: string) => {
       setDefinedPositionRelationGapDraftByKey((previous) => ({
@@ -22904,6 +23173,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
       selectedFrameGroupIdsRef.current = normalizedSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
+      const selectionAutoSizeState = readSelectedTextAutoSizeState(previewRef.current, normalizedSelectionIds);
+      if (selectionAutoSizeState.totalCount > 0) {
+        previewSelectedTextAutoSizeDomState(selectionAutoSizeState);
+      }
       const commitSelectionReactState = () => {
         setSelectedFrameGroupIds(normalizedSelectionIds);
         setEdgeSelectionState(emptyEdgeSelection);
@@ -22930,6 +23203,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       applyFastFrameBoxSelectionVisuals,
       applyRuntimeSelectionUi,
       cancelScheduledPreviewEditorState,
+      previewSelectedTextAutoSizeDomState,
       positionBoxGroups,
       positionOrderLockSelectionMode,
       resolvePositionGroupProxySelections,
@@ -23531,7 +23805,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     root.removeAttribute(TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR);
     root.removeAttribute(TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR);
     let cancelled = false;
+    const applyInitialEditorAutoSize = () => {
+      if (templateUsagePreviewMode) {
+        return;
+      }
+
+      const result = applyEditorAutoSizeBoxesWithPreservedLayout(root);
+      if (result.changedCount <= 0) {
+        return;
+      }
+
+      syncDraftPreviewHtmlRef({
+        materializePositionGroups: false,
+        recordHistory: false,
+      });
+      requestPreviewTextFit();
+    };
     const applyEditorState = async () => {
+      applyInitialEditorAutoSize();
       schedulePreviewEditorState();
       await document.fonts?.ready?.catch(() => undefined);
 
@@ -23539,6 +23830,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         return;
       }
 
+      applyInitialEditorAutoSize();
       schedulePreviewEditorState();
     };
 
@@ -23564,7 +23856,16 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       cancelScheduledPreviewEditorState();
       pageInnerObservers.forEach((observer) => observer.disconnect());
     };
-  }, [cancelScheduledPreviewEditorState, renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
+  }, [
+    applyEditorAutoSizeBoxesWithPreservedLayout,
+    cancelScheduledPreviewEditorState,
+    renderedPreviewHtml,
+    requestPreviewTextFit,
+    schedulePreviewEditorState,
+    selectionPanelTab,
+    syncDraftPreviewHtmlRef,
+    templateUsagePreviewMode,
+  ]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -25208,6 +25509,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       writeFrameAutoSizeModeAttrs(node, mode);
     });
 
+    if (mode !== 'fixed') {
+      applyTemplateAutoSizeBoxesWithPreservedLayout(root, activeSelectionIds);
+    }
+
     syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
 
     scheduleDeferredTextAutoSizeSync(() => {
@@ -25221,17 +25526,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
 
       if (mode !== 'fixed') {
-        const autoSizeResult = applyTemplateAutoSizeBoxes(liveRoot, activeSelectionIds);
-        if (autoSizeResult.changedCount > 0) {
-          applyPreservedPositionSpacingRelations(liveRoot);
-        }
+        applyTemplateAutoSizeBoxesWithPreservedLayout(liveRoot, activeSelectionIds);
       }
     }, commandRevision);
     const modeLabel =
       mode === 'height' ? '자동 높이 상자' : mode === 'width' ? '자동 너비 상자' : '고정 상자';
     setMessage(`${modeLabel} 설정: ${nodes.length}개 상자`);
   }, [
-    applyPreservedPositionSpacingRelations,
+    applyTemplateAutoSizeBoxesWithPreservedLayout,
     beginTextAutoSizeCommand,
     scheduleDeferredTextAutoSizeSync,
     syncTextAutoSizeUiOverrideFromSelection,
@@ -25271,6 +25573,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       };
 
       applyModeAndAnchor(nodes);
+      applyTemplateAutoSizeBoxesWithPreservedLayout(root, activeSelectionIds);
       syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
 
       scheduleDeferredTextAutoSizeSync(() => {
@@ -25281,10 +25584,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
         applyModeAndAnchor(liveNodes);
 
-        const autoSizeResult = applyTemplateAutoSizeBoxes(liveRoot, activeSelectionIds);
-        if (autoSizeResult.changedCount > 0) {
-          applyPreservedPositionSpacingRelations(liveRoot);
-        }
+        applyTemplateAutoSizeBoxesWithPreservedLayout(liveRoot, activeSelectionIds);
       }, commandRevision);
 
       const modeLabel = mode === 'height' ? '자동 높이' : '자동 너비';
@@ -25299,7 +25599,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setMessage(`${modeLabel} ${directionLabel} 설정: ${nodes.length}개 상자`);
     },
     [
-      applyPreservedPositionSpacingRelations,
+      applyTemplateAutoSizeBoxesWithPreservedLayout,
       beginTextAutoSizeCommand,
       scheduleDeferredTextAutoSizeSync,
       syncTextAutoSizeUiOverrideFromSelection,
@@ -29224,6 +29524,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     setSelectionValidationIssues([]);
     setSelectionReviewIssues([]);
     setSelectionSaveProgress(defaultSelectionSaveProgressState);
+    setTextAutoSizeUiOverride(null);
     setSelectedPositionSpacingSettingRelationKey('');
     setPositionSelectionStateRevision((previous) => previous + 1);
     setSelectedFrameGroupIds([]);
@@ -31506,33 +31807,38 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      return;
 	    }
 
-    if (isTextCanvasEditModeActive) {
-      const root = previewRef.current;
-      const frameNode = resolveFrameSelectionAnchor(
-        (frameTextInput || frameEditableScope || target).closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)
-      );
-      const frameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
-      const shouldRestoreTextInputFocus = document.activeElement === frameTextInput;
-      const selectionStart =
-        frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
-          ? frameTextInput.selectionStart
-          : null;
-      const selectionEnd =
-        frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
-          ? frameTextInput.selectionEnd
-          : null;
+    const root = previewRef.current;
+    const frameNode = resolveFrameSelectionAnchor(
+      (frameTextInput || frameEditableScope || target).closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)
+    );
+    const frameGroupId = frameNode ? getFrameGroupId(frameNode) : '';
+    const shouldRestoreTextInputFocus = document.activeElement === frameTextInput;
+    const selectionStart =
+      frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
+        ? frameTextInput.selectionStart
+        : null;
+    const selectionEnd =
+      frameTextInput instanceof HTMLTextAreaElement || frameTextInput instanceof HTMLInputElement
+        ? frameTextInput.selectionEnd
+        : null;
 
-      if (root && frameNode && frameGroupId && (readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))) {
-        markTemplateValueElementEdited(frameTextInput || frameEditableScope || target);
-        const autoSizeResult = applyTemplateAutoSizeBoxes(root, [frameGroupId]);
-        if (autoSizeResult.changedCount > 0) {
-          applyPreservedPositionSpacingRelations(root);
-        }
-
-        if (shouldRestoreTextInputFocus) {
-          restoreFrameTextInputFocus(root, frameGroupId, selectionStart, selectionEnd);
-        }
+    if (root && frameNode && frameGroupId && (readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))) {
+      cancelDeferredTextAutoSizeSync();
+      markTemplateValueElementEdited(frameTextInput || frameEditableScope || target);
+      if (frameTextInput instanceof HTMLTextAreaElement) {
+        frameTextInput.textContent = frameTextInput.value;
+      } else if (frameTextInput instanceof HTMLInputElement) {
+        frameTextInput.setAttribute('value', frameTextInput.value);
       }
+      applyTemplateAutoSizeBoxesWithPreservedLayout(root, [frameGroupId]);
+
+      if (shouldRestoreTextInputFocus) {
+        restoreFrameTextInputFocus(root, frameGroupId, selectionStart, selectionEnd);
+      }
+      return;
+    }
+
+    if (isTextCanvasEditModeActive) {
       return;
     }
 
@@ -31543,7 +31849,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     syncDraftPreviewHtmlRef();
     requestPreviewTextFit();
 	  }, [
-    applyPreservedPositionSpacingRelations,
+    applyTemplateAutoSizeBoxesWithPreservedLayout,
+    cancelDeferredTextAutoSizeSync,
     isTextCanvasEditModeActive,
     requestPreviewTextFit,
     selectionPanelTab,
@@ -32016,22 +32323,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return null;
     }
 
-    const autoSizeDescription = (() => {
-      const highlightClassName = 'rounded bg-sky-100 px-1 py-0.5 font-semibold text-sky-900';
-
+    const highlightClassName = 'rounded bg-sky-100 px-1 py-0.5 font-semibold text-sky-900';
+    const autoSizeDescriptionParts = (() => {
       if (selectedTextAutoSizeState.allHeight) {
         const directionLabel = selectedTextAutoSizeState.heightAnchorSideMixed
           ? '위/아래쪽'
           : selectedTextAutoSizeState.heightAnchorSide === 'top'
             ? '위쪽'
             : '아래쪽';
-        return (
-          <p className="text-[11px] leading-5 text-slate-700">
-            <span className="text-slate-500">→</span>{' '}
-            <span className={highlightClassName}>{directionLabel}</span>으로{' '}
-            <span className={highlightClassName}>높이</span>가 늘어나는 상자
-          </p>
-        );
+        return { primary: directionLabel, middle: '으로 ', axis: '높이', tail: '가 늘어나는 상자' };
       }
 
       if (selectedTextAutoSizeState.allWidth) {
@@ -32040,33 +32340,32 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           : selectedTextAutoSizeState.widthAnchorSide === 'left'
             ? '왼쪽'
             : '오른쪽';
-        return (
-          <p className="text-[11px] leading-5 text-slate-700">
-            <span className="text-slate-500">→</span>{' '}
-            <span className={highlightClassName}>{directionLabel}</span>으로{' '}
-            <span className={highlightClassName}>너비</span>가 늘어나는 상자
-          </p>
-        );
+        return { primary: directionLabel, middle: '으로 ', axis: '너비', tail: '가 늘어나는 상자' };
       }
 
       if (selectedTextAutoSizeState.allFixed) {
-        return (
-          <p className="text-[11px] leading-5 text-slate-700">
-            <span className="text-slate-500">→</span> <span className={highlightClassName}>고정 크기</span> 상자
-          </p>
-        );
+        return { primary: '고정 크기', middle: ' ', axis: '', tail: '상자' };
       }
 
-      return (
-        <p className="text-[11px] leading-5 text-slate-700">
-          <span className="text-slate-500">→</span> <span className={highlightClassName}>상자 타입</span>이 서로 다른 상태
-        </p>
-      );
+      return { primary: '상자 타입', middle: '이 서로 다른 상태', axis: '', tail: '' };
     })();
+    const autoSizeDescription = (
+      <p className="text-[11px] leading-5 text-slate-700" data-text-autosize-description="true">
+        <span className="text-slate-500">→</span>{' '}
+        <span className={highlightClassName} data-text-autosize-description-primary="true">
+          {autoSizeDescriptionParts.primary}
+        </span>
+        <span data-text-autosize-description-middle="true">{autoSizeDescriptionParts.middle}</span>
+        <span className={highlightClassName} data-text-autosize-description-axis="true">
+          {autoSizeDescriptionParts.axis}
+        </span>
+        <span data-text-autosize-description-tail="true">{autoSizeDescriptionParts.tail}</span>
+      </p>
+    );
 
     const needsSourceBoxPick = sizeMatchSourceKind === 'selected-box' && !sizeMatchSourceFrameGroupId.trim();
     const sizeMatchTargetDisabled = needsSourceBoxPick;
-    const applySizeMatchWithTarget = (target: SizeMatchTargetKind) => {
+	    const applySizeMatchWithTarget = (target: SizeMatchTargetKind) => {
       setSizeMatchTargetKind(target);
       if (sizeMatchSourceKind === 'content') {
         if (target === 'width' || target === 'both') {
@@ -32086,6 +32385,72 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
       matchSelectionDimensionFromSource(normalizedSourceFrameGroupId, target);
     };
+    const resolvePreviewAutoSizeAnchorSide = (mode: TextAutoSizeMode): TextAutoSizeAnchorSide | undefined => {
+      if (mode === 'height') {
+        return selectedTextAutoSizeState.heightAnchorSide === 'top' ? 'top' : 'bottom';
+      }
+
+      if (mode === 'width') {
+        return selectedTextAutoSizeState.widthAnchorSide === 'left' ? 'left' : 'right';
+      }
+
+      return undefined;
+    };
+    const handleTextAutoSizeModeControl = (mode: TextAutoSizeMode) => {
+      writeTextAutoSizeDescriptionDomState(mode, resolvePreviewAutoSizeAnchorSide(mode));
+      previewTextAutoSizeModeDomState(mode);
+      setTextAutoSizeModeForSelection(mode);
+    };
+    const handleTextAutoSizeModePointerDown = (
+      event: React.PointerEvent<HTMLButtonElement>,
+      mode: TextAutoSizeMode
+    ) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      textAutoSizePointerHandledRef.current = true;
+      handleTextAutoSizeModeControl(mode);
+    };
+    const handleTextAutoSizeModeClick = (mode: TextAutoSizeMode) => {
+      if (textAutoSizePointerHandledRef.current) {
+        textAutoSizePointerHandledRef.current = false;
+        return;
+      }
+
+      handleTextAutoSizeModeControl(mode);
+    };
+    const handleTextAutoSizeAnchorControl = (
+      mode: Extract<TextAutoSizeMode, 'height' | 'width'>,
+      side: TextAutoSizeAnchorSide
+    ) => {
+      writeTextAutoSizeDescriptionDomState(mode, side);
+      previewTextAutoSizeAnchorDomState(side);
+      setTextAutoSizeModeAndAnchorForSelection(mode, side);
+    };
+    const handleTextAutoSizeAnchorPointerDown = (
+      event: React.PointerEvent<HTMLButtonElement>,
+      mode: Extract<TextAutoSizeMode, 'height' | 'width'>,
+      side: TextAutoSizeAnchorSide
+    ) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      textAutoSizePointerHandledRef.current = true;
+      handleTextAutoSizeAnchorControl(mode, side);
+    };
+    const handleTextAutoSizeAnchorClick = (
+      mode: Extract<TextAutoSizeMode, 'height' | 'width'>,
+      side: TextAutoSizeAnchorSide
+    ) => {
+      if (textAutoSizePointerHandledRef.current) {
+        textAutoSizePointerHandledRef.current = false;
+        return;
+      }
+
+      handleTextAutoSizeAnchorControl(mode, side);
+    };
 
     return (
       <div className="space-y-2">
@@ -32100,11 +32465,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 type="button"
                 data-text-autosize-mode-button="height"
                 className={autoSizeModeWithAuxButtonClass(selectedTextAutoSizeState.allHeight)}
-                onPointerDown={() => {
-                  previewTextAutoSizeModeDomState('height');
-                  previewTextAutoSizeModeSelection('height');
-                }}
-                onClick={() => setTextAutoSizeModeForSelection('height')}
+                onPointerDown={(event) => handleTextAutoSizeModePointerDown(event, 'height')}
+                onClick={() => handleTextAutoSizeModeClick('height')}
               >
                 <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">자동 높이</span>
               </button>
@@ -32120,11 +32482,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         !selectedTextAutoSizeState.heightAnchorSideMixed,
                       false
                     )}
-                    onPointerDown={() => {
-                      previewTextAutoSizeAnchorDomState('top');
-                      previewTextAutoSizeModeAndAnchorSelection('height', 'top');
-                    }}
-                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('height', 'top')}
+                    onPointerDown={(event) => handleTextAutoSizeAnchorPointerDown(event, 'height', 'top')}
+                    onClick={() => handleTextAutoSizeAnchorClick('height', 'top')}
                     aria-label="위로 확장"
                     title="위로 확장"
                   >
@@ -32140,11 +32499,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         !selectedTextAutoSizeState.heightAnchorSideMixed,
                       true
                     )}
-                    onPointerDown={() => {
-                      previewTextAutoSizeAnchorDomState('bottom');
-                      previewTextAutoSizeModeAndAnchorSelection('height', 'bottom');
-                    }}
-                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('height', 'bottom')}
+                    onPointerDown={(event) => handleTextAutoSizeAnchorPointerDown(event, 'height', 'bottom')}
+                    onClick={() => handleTextAutoSizeAnchorClick('height', 'bottom')}
                     aria-label="아래로 확장"
                     title="아래로 확장"
                   >
@@ -32160,11 +32516,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 type="button"
                 data-text-autosize-mode-button="width"
                 className={autoSizeModeWithAuxButtonClass(selectedTextAutoSizeState.allWidth)}
-                onPointerDown={() => {
-                  previewTextAutoSizeModeDomState('width');
-                  previewTextAutoSizeModeSelection('width');
-                }}
-                onClick={() => setTextAutoSizeModeForSelection('width')}
+                onPointerDown={(event) => handleTextAutoSizeModePointerDown(event, 'width')}
+                onClick={() => handleTextAutoSizeModeClick('width')}
               >
                 <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">자동 너비</span>
               </button>
@@ -32180,11 +32533,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         !selectedTextAutoSizeState.widthAnchorSideMixed,
                       false
                     )}
-                    onPointerDown={() => {
-                      previewTextAutoSizeAnchorDomState('left');
-                      previewTextAutoSizeModeAndAnchorSelection('width', 'left');
-                    }}
-                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('width', 'left')}
+                    onPointerDown={(event) => handleTextAutoSizeAnchorPointerDown(event, 'width', 'left')}
+                    onClick={() => handleTextAutoSizeAnchorClick('width', 'left')}
                     aria-label="왼쪽으로 확장"
                     title="왼쪽으로 확장"
                   >
@@ -32200,11 +32550,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                         !selectedTextAutoSizeState.widthAnchorSideMixed,
                       true
                     )}
-                    onPointerDown={() => {
-                      previewTextAutoSizeAnchorDomState('right');
-                      previewTextAutoSizeModeAndAnchorSelection('width', 'right');
-                    }}
-                    onClick={() => setTextAutoSizeModeAndAnchorForSelection('width', 'right')}
+                    onPointerDown={(event) => handleTextAutoSizeAnchorPointerDown(event, 'width', 'right')}
+                    onClick={() => handleTextAutoSizeAnchorClick('width', 'right')}
                     aria-label="오른쪽으로 확장"
                     title="오른쪽으로 확장"
                   >
@@ -32218,11 +32565,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             type="button"
             data-text-autosize-mode-button="fixed"
             className={`${autoSizeRowToneClass(selectedTextAutoSizeState.allFixed)} col-span-2 h-10 w-full justify-center rounded-md border border-slate-300`}
-            onPointerDown={() => {
-              previewTextAutoSizeModeDomState('fixed');
-              previewTextAutoSizeModeSelection('fixed');
-            }}
-            onClick={() => setTextAutoSizeModeForSelection('fixed')}
+            onPointerDown={(event) => handleTextAutoSizeModePointerDown(event, 'fixed')}
+            onClick={() => handleTextAutoSizeModeClick('fixed')}
           >
             고정
           </button>
@@ -34223,11 +34567,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview[data-frame-create-mode="true"] [data-template-edit-scope][data-template-edit-enabled="true"] {
           cursor: crosshair;
         }
-	        .template-edit-preview .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]),
-	        .template-edit-preview .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) {
+	        .template-edit-preview .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]):not([style*="background-color"]):not([style*="background:"]),
+	        .template-edit-preview .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]):not([style*="background-color"]):not([style*="background:"]) {
 	          outline: 1px dashed rgba(15, 23, 42, .34) !important;
           outline-offset: -1px !important;
-          background-color: transparent !important;
           background-image: repeating-linear-gradient(
             135deg,
             rgba(15, 23, 42, .08) 0,
