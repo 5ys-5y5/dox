@@ -410,6 +410,10 @@ const TEMPLATE_FRAME_BORDER_ALIGN_ATTR = 'data-template-frame-border-align';
 const TEMPLATE_FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
 const TEMPLATE_FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
 const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
+const DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN = 'center';
+const DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH = '0.1';
+const DEFAULT_TEMPLATE_FRAME_BORDER_STYLE = 'solid';
+const DEFAULT_TEMPLATE_FRAME_BORDER_COLOR = '#0f172a';
 const EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP = [
   'data-template-frame-role',
   'data-template-frame-role-visual',
@@ -838,42 +842,293 @@ const stripDraftPreviewUiState = (html: string) => {
   return container.innerHTML;
 };
 
+const extractRgbChannelToHex = (value: number) => value.toString(16).padStart(2, '0');
+
+const extractColorToHex = (value: string) => {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (!normalized) {
+    return '';
+  }
+
+  if (normalized === 'transparent') {
+    return 'transparent';
+  }
+
+  if (normalized.startsWith('#')) {
+    if (normalized.length === 4) {
+      return `#${normalized[1]}${normalized[1]}${normalized[2]}${normalized[2]}${normalized[3]}${normalized[3]}`;
+    }
+
+    return normalized;
+  }
+
+  const rgbMatch = normalized.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+
+  if (!rgbMatch) {
+    return normalized;
+  }
+
+  const alphaMatch = normalized.match(/rgba\(\d+,\s*\d+,\s*\d+,\s*([0-9.]+)\)/i);
+
+  if (alphaMatch && Number.parseFloat(alphaMatch[1] || '1') <= 0) {
+    return 'transparent';
+  }
+
+  const [, r, g, b] = rgbMatch;
+  return `#${extractRgbChannelToHex(Number.parseInt(r, 10))}${extractRgbChannelToHex(Number.parseInt(g, 10))}${extractRgbChannelToHex(Number.parseInt(b, 10))}`;
+};
+
+const normalizeExtractFrameBorderColor = (value: string | null | undefined) => {
+  const color = extractColorToHex(String(value || ''));
+
+  if (!color || color === 'transparent') {
+    return color;
+  }
+
+  if (
+    [
+      '#000000',
+      '#020617',
+      '#0f172a',
+      '#111827',
+      '#18181b',
+      '#27272a',
+      '#334155',
+      '#cbd5e1',
+      '#d4d4d8',
+      '#e4e4e7',
+    ].includes(color)
+  ) {
+    return DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
+  }
+
+  return color;
+};
+
+const parseExtractFrameNumber = (value: string | null | undefined) => {
+  const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+};
+
+const normalizeExtractFrameBorderStyle = (value: string | null | undefined, width: number) => {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (!normalized || normalized === 'none' || normalized === 'hidden' || width <= 0) {
+    return width > 0 ? DEFAULT_TEMPLATE_FRAME_BORDER_STYLE : 'none';
+  }
+
+  return normalized;
+};
+
+const normalizeExtractFrameBorderAlign = (value: string | null | undefined) => {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized === 'inside' || normalized === 'outside' || normalized === 'center') {
+    return normalized;
+  }
+
+  return DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN;
+};
+
+const isDefaultExtractBackgroundColor = (value: string | null | undefined) => {
+  const color = extractColorToHex(String(value || ''));
+  return !color || color === 'transparent' || color === '#ffffff';
+};
+
+const normalizeExtractFrameDefaultBackground = (element: HTMLElement) => {
+  if (isDefaultExtractBackgroundColor(element.style.backgroundColor)) {
+    element.style.backgroundColor = 'transparent';
+  }
+};
+
+type ExtractFrameBorderAppearance = {
+  color: string;
+  style: string;
+  width: number;
+};
+
+const readExtractElementBorderAppearance = (element: HTMLElement | null | undefined): ExtractFrameBorderAppearance | null => {
+  if (!element) {
+    return null;
+  }
+
+  const width =
+    parseExtractFrameNumber(element.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR)) ??
+    parseExtractFrameNumber(element.style.borderTopWidth || element.style.borderWidth) ??
+    parseExtractFrameNumber(element.style.outlineWidth);
+  const style = normalizeExtractFrameBorderStyle(
+    element.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
+      element.style.borderTopStyle ||
+      element.style.borderStyle ||
+      element.style.outlineStyle ||
+      '',
+    width ?? 0
+  );
+  const color = normalizeExtractFrameBorderColor(
+    element.getAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) ||
+      element.style.borderTopColor ||
+      element.style.borderColor ||
+      element.style.outlineColor ||
+      ''
+  );
+
+  if (!width || width <= 0 || style === 'none' || !color || color === 'transparent') {
+    return null;
+  }
+
+  return { color, style, width };
+};
+
+const readNestedExtractFrameBorderAppearance = (shell: HTMLElement): ExtractFrameBorderAppearance | null => {
+  const table = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
+  const tableAppearance = readExtractElementBorderAppearance(table);
+
+  if (tableAppearance) {
+    return tableAppearance;
+  }
+
+  const tableCell = table?.querySelector<HTMLElement>('td');
+  return readExtractElementBorderAppearance(tableCell);
+};
+
+const applyExtractFrameBorderAppearanceStyle = (
+  element: HTMLElement,
+  appearance: {
+    align: string;
+    width: number;
+    style: string;
+    color: string;
+  }
+) => {
+  const align = normalizeExtractFrameBorderAlign(appearance.align);
+  const width = Math.max(0, appearance.width);
+  const style = normalizeExtractFrameBorderStyle(appearance.style, width);
+  const color = normalizeExtractFrameBorderColor(appearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
+  const hasVisibleBorder = width > 0 && style !== 'none' && color !== 'transparent';
+  const insideWidth = hasVisibleBorder ? (align === 'outside' ? 0 : align === 'center' ? width / 2 : width) : 0;
+  const outsideWidth = hasVisibleBorder ? (align === 'outside' ? width : align === 'center' ? width - insideWidth : 0) : 0;
+
+  element.style.boxSizing = 'border-box';
+  element.style.borderWidth = `${insideWidth}px`;
+  element.style.borderStyle = hasVisibleBorder && insideWidth > 0 ? style : 'none';
+  element.style.borderColor = hasVisibleBorder ? color : 'transparent';
+  element.style.outlineWidth = `${outsideWidth}px`;
+  element.style.outlineStyle = hasVisibleBorder && outsideWidth > 0 ? style : 'none';
+  element.style.outlineColor = hasVisibleBorder ? color : 'transparent';
+  element.style.outlineOffset = '0px';
+  element.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, align);
+  element.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, String(Number(width.toFixed(2))));
+  element.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, hasVisibleBorder ? style : 'none');
+  element.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, hasVisibleBorder ? color : 'transparent');
+
+  if (hasVisibleBorder) {
+    element.setAttribute('data-template-frame-outline-style', style);
+  } else {
+    element.removeAttribute('data-template-frame-outline-style');
+  }
+};
+
+const clearNestedExtractFrameBorderStyles = (shell: HTMLElement) => {
+  const nestedElements: HTMLElement[] = [];
+  const table = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
+
+  if (table) {
+    nestedElements.push(table);
+    table.querySelectorAll<HTMLElement>('td').forEach((cell) => nestedElements.push(cell));
+  }
+
+  shell.querySelectorAll<HTMLElement>(':scope > .v202-frame-group[data-template-frame-group]').forEach((group) => {
+    nestedElements.push(group);
+  });
+
+  nestedElements.forEach((element) => {
+    element.style.borderWidth = '0px';
+    element.style.borderStyle = 'none';
+    element.style.borderColor = 'transparent';
+    element.style.outline = 'none';
+    element.style.outlineOffset = '0px';
+    normalizeExtractFrameDefaultBackground(element);
+    element.removeAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
+    element.removeAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR);
+    element.removeAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR);
+    element.removeAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
+    element.removeAttribute('data-template-frame-outline-style');
+  });
+};
+
+const applyExtractDefaultFrameAppearance = (shell: HTMLElement) => {
+  const nestedAppearance = readNestedExtractFrameBorderAppearance(shell);
+  const storedWidth = parseExtractFrameNumber(shell.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR));
+  const inlineWidth =
+    parseExtractFrameNumber(shell.style.borderTopWidth || shell.style.borderWidth) ??
+    parseExtractFrameNumber(shell.style.outlineWidth);
+  const width = storedWidth ?? inlineWidth ?? nestedAppearance?.width ?? Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH);
+  const style = normalizeExtractFrameBorderStyle(
+    shell.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
+      shell.style.borderTopStyle ||
+      shell.style.borderStyle ||
+      shell.style.outlineStyle ||
+      nestedAppearance?.style ||
+      '',
+    width
+  );
+  const color =
+    normalizeExtractFrameBorderColor(
+      shell.getAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) ||
+        shell.style.borderTopColor ||
+        shell.style.borderColor ||
+        shell.style.outlineColor ||
+        nestedAppearance?.color ||
+        ''
+    ) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
+
+  normalizeExtractFrameDefaultBackground(shell);
+  applyExtractFrameBorderAppearanceStyle(shell, {
+    align: shell.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) || DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+    width: storedWidth ?? inlineWidth ?? Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH),
+    style: style === 'none' && width > 0 ? DEFAULT_TEMPLATE_FRAME_BORDER_STYLE : style,
+    color,
+  });
+  clearNestedExtractFrameBorderStyles(shell);
+};
+
 const normalizeExtractTransparentFrameGuides = (container: HTMLElement) => {
   container.querySelectorAll<HTMLElement>('.v102-frame-band, .v202-cell-box[data-v106-frame-node="true"]').forEach((shell) => {
     const table = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
     const tableStyle = table?.getAttribute('style') || '';
     const shellStyle = shell.getAttribute('style') || '';
+    const nestedAppearance = readNestedExtractFrameBorderAppearance(shell);
+    const shellAppearance = readExtractElementBorderAppearance(shell);
     const isLegacyDashedGuide =
-      /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(tableStyle) ||
-      /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(shellStyle) ||
-      shell.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) === 'none';
+      !nestedAppearance &&
+      !shellAppearance &&
+      (/\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(tableStyle) ||
+        /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(shellStyle) ||
+        shell.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) === 'none');
 
-    if (!isLegacyDashedGuide) {
+    if (isLegacyDashedGuide) {
+      applyExtractFrameBorderAppearanceStyle(shell, {
+        align: DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+        width: 0,
+        style: 'none',
+        color: 'transparent',
+      });
+      clearNestedExtractFrameBorderStyles(shell);
+      shell.removeAttribute('data-template-frame-outline-style');
       return;
     }
 
-    shell.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
-    shell.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, '0');
-    shell.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, 'none');
-    shell.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, 'transparent');
-    shell.style.borderWidth = '0px';
-    shell.style.borderStyle = 'none';
-    shell.style.borderColor = 'transparent';
-    shell.style.outline = 'none';
-    shell.style.outlineOffset = '0px';
-    shell.removeAttribute('data-template-frame-outline-style');
-
-    if (table) {
-      table.style.borderWidth = '0px';
-      table.style.borderStyle = 'none';
-      table.style.borderColor = 'transparent';
-      table.removeAttribute('data-template-frame-outline-style');
-    }
+    applyExtractDefaultFrameAppearance(shell);
   });
 };
 
 const normalizeExtractTransparentFrameGuidesInHtml = (html: string) => {
   if (!html.trim() || typeof document === 'undefined') {
+    return html;
+  }
+
+  if (!html.includes('v102-frame-band') && !html.includes('data-v106-frame-node')) {
     return html;
   }
 
@@ -1096,18 +1351,15 @@ const normalizeFrameOutlineStyle = (value: string | null | undefined): FrameOutl
 const applyFrameNodeOutlineStyle = (node: HTMLElement, outlineStyle: FrameOutlineStyle) => {
   const isTransparentGuide = outlineStyle === 'dashed';
   const nextBorderStyle = isTransparentGuide ? 'none' : 'solid';
-  const nextBorderWidth = isTransparentGuide ? '0' : '1';
-  const nextBorderColor = isTransparentGuide ? 'transparent' : '#0f172a';
+  const nextBorderWidth = isTransparentGuide ? '0' : DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH;
+  const nextBorderColor = isTransparentGuide ? 'transparent' : DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
 
-  node.style.borderWidth = `${nextBorderWidth}px`;
-  node.style.borderStyle = nextBorderStyle;
-  node.style.borderColor = nextBorderColor;
-  node.style.outline = 'none';
-  node.style.outlineOffset = '0px';
-  node.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
-  node.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, nextBorderWidth);
-  node.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, nextBorderStyle);
-  node.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, nextBorderColor);
+  applyExtractFrameBorderAppearanceStyle(node, {
+    align: DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+    width: Number(nextBorderWidth),
+    style: nextBorderStyle,
+    color: nextBorderColor,
+  });
 };
 
 const writeFrameNodeRect = (node: HTMLElement, rect: FrameNodeRect) => {
@@ -1540,7 +1792,7 @@ const buildV106FrameNode = (snapshot: FrameNodeSnapshot) => {
   box.style.height = `${Math.max(1, Math.round(snapshot.rect.height))}px`;
   box.style.boxSizing = 'border-box';
   applyFrameNodeOutlineStyle(box, normalizeFrameOutlineStyle(snapshot.attrs['data-template-frame-outline-style']));
-  box.style.background = snapshot.colColor || 'rgba(14, 165, 233, 0.14)';
+  box.style.background = 'transparent';
   box.style.overflow = 'hidden';
   box.style.display = 'block';
   box.style.cursor = 'grab';

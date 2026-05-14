@@ -2638,6 +2638,10 @@ const TEMPLATE_FRAME_BORDER_ALIGN_ATTR = 'data-template-frame-border-align';
 const TEMPLATE_FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
 const TEMPLATE_FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
 const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
+const DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN = 'center';
+const DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH = '0.1';
+const DEFAULT_TEMPLATE_FRAME_BORDER_STYLE = 'solid';
+const DEFAULT_TEMPLATE_FRAME_BORDER_COLOR = '#0f172a';
 const TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR: Record<TemplateEdgeSide, string> = {
   top: 'data-template-frame-border-top-width',
   right: 'data-template-frame-border-right-width',
@@ -2692,7 +2696,7 @@ const normalizeFrameBorderAlignValue = (value: string | null | undefined) => {
     return 'outside';
   }
 
-  return 'inside';
+  return DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN;
 };
 const normalizeFrameBorderWidthValue = (value: string | null | undefined) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
@@ -3860,6 +3864,89 @@ const snapFrameBandShellEdgesInPage = (pageInner: HTMLElement) => {
     writePositionedElementPageRect(shell, rect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
     syncFrameBandShellTableSize(shell);
   });
+};
+
+const buildPixelSnappedAxisValueMap = (values: number[], tolerance = FRAME_EDGE_SNAP_TOLERANCE_PX) => {
+  const sortedValues = values
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const snappedValueMap = new Map<number, number>();
+  let cluster: number[] = [];
+
+  const flushCluster = () => {
+    if (!cluster.length) {
+      return;
+    }
+
+    const clusterValue = cluster.reduce((sum, value) => sum + value, 0) / cluster.length;
+    const snappedValue = Math.round(clusterValue);
+    cluster.forEach((value) => {
+      snappedValueMap.set(value, snappedValue);
+    });
+    cluster = [];
+  };
+
+  sortedValues.forEach((value) => {
+    if (!cluster.length) {
+      cluster = [value];
+      return;
+    }
+
+    const clusterAnchor = cluster[0] || value;
+    if (Math.abs(value - clusterAnchor) <= tolerance) {
+      cluster.push(value);
+      return;
+    }
+
+    flushCluster();
+    cluster = [value];
+  });
+  flushCluster();
+
+  return snappedValueMap;
+};
+
+const snapFrameBandShellEdgesToPixelGridInPage = (pageInner: HTMLElement) => {
+  const entries = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
+    .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
+    .map((shell) => ({
+      element: shell,
+      rect: readFrameElementRect(shell, pageInner),
+    }));
+
+  if (!entries.length) {
+    return false;
+  }
+
+  const xSnapMap = buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.left, rect.left + rect.width]));
+  const ySnapMap = buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.top, rect.top + rect.height]));
+  let changed = false;
+
+  entries.forEach(({ element, rect }) => {
+    const nextLeft = xSnapMap.get(rect.left) ?? Math.round(rect.left);
+    const nextRight = xSnapMap.get(rect.left + rect.width) ?? Math.round(rect.left + rect.width);
+    const nextTop = ySnapMap.get(rect.top) ?? Math.round(rect.top);
+    const nextBottom = ySnapMap.get(rect.top + rect.height) ?? Math.round(rect.top + rect.height);
+    const nextRect = {
+      left: nextLeft,
+      top: nextTop,
+      width: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextRight - nextLeft),
+      height: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextBottom - nextTop),
+    };
+
+    if (
+      Math.abs(nextRect.left - rect.left) > 0.001 ||
+      Math.abs(nextRect.top - rect.top) > 0.001 ||
+      Math.abs(nextRect.width - rect.width) > 0.001 ||
+      Math.abs(nextRect.height - rect.height) > 0.001
+    ) {
+      writePositionedElementPageRect(element, nextRect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
+      syncFrameBandShellTableSize(element);
+      changed = true;
+    }
+  });
+
+  return changed;
 };
 
 const writePositionedElementPageRect = (
@@ -7225,13 +7312,11 @@ const syncTemplatePreviewScaledSourceBounds = (pageInner: HTMLElement, bounds: {
 
   const sourceWidth = Math.max(MIN_FRAME_SIZE_PX, Math.ceil(bounds.width));
   const sourceHeight = Math.max(MIN_FRAME_SIZE_PX, Math.ceil(bounds.height));
-  const availableWidth = previewRoot.clientWidth || sourceWidth;
-  const scale = Math.min(availableWidth / sourceWidth, 1);
 
-  previewRoot.style.setProperty('--template-preview-scale', String(scale));
+  previewRoot.style.setProperty('--template-preview-scale', '1');
   previewRoot.style.setProperty('--template-preview-source-width', `${sourceWidth}px`);
   previewRoot.style.setProperty('--template-preview-source-height', `${sourceHeight}px`);
-  previewRoot.style.setProperty('--template-preview-scaled-height', `${sourceHeight * scale}px`);
+  previewRoot.style.setProperty('--template-preview-scaled-height', `${sourceHeight}px`);
 };
 
 const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
@@ -7259,7 +7344,10 @@ const snapTemplateUsagePreviewFrameEdges = (root: ParentNode) => {
   let changed = false;
 
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
-    if (!snapFrameBandShellEdgesInPage(pageInner)) {
+    const edgeSnapChanged = snapFrameBandShellEdgesInPage(pageInner);
+    const pixelSnapChanged = snapFrameBandShellEdgesToPixelGridInPage(pageInner);
+
+    if (!edgeSnapChanged && !pixelSnapChanged) {
       return;
     }
 
@@ -12056,6 +12144,44 @@ const colorToHex = (value: string) => {
   return `#${rgbChannelToHex(Number.parseInt(r, 10))}${rgbChannelToHex(Number.parseInt(g, 10))}${rgbChannelToHex(Number.parseInt(b, 10))}`.toLowerCase();
 };
 
+const normalizeFrameBorderColorValue = (value: string | null | undefined) => {
+  const color = colorToHex(String(value || ''));
+
+  if (!color || color === 'transparent') {
+    return color;
+  }
+
+  if (
+    [
+      '#000000',
+      '#020617',
+      '#0f172a',
+      '#111827',
+      '#18181b',
+      '#27272a',
+      '#334155',
+      '#cbd5e1',
+      '#d4d4d8',
+      '#e4e4e7',
+    ].includes(color)
+  ) {
+    return DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
+  }
+
+  return color;
+};
+
+const isDefaultFrameBackgroundColor = (value: string | null | undefined) => {
+  const color = colorToHex(String(value || ''));
+  return !color || color === 'transparent' || color === '#ffffff';
+};
+
+const normalizeDefaultFrameBackgroundStyle = (element: HTMLElement) => {
+  if (isDefaultFrameBackgroundColor(element.style.backgroundColor)) {
+    element.style.backgroundColor = 'transparent';
+  }
+};
+
 const normalizeNumericStyleValue = (value: string) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
   return Number.isFinite(parsed) ? String(Number(parsed.toFixed(2))) : '';
@@ -12083,6 +12209,53 @@ const hasLegacyTransparentFrameGuide = (element: HTMLElement) => {
   });
 };
 
+const readNestedFrameBorderAppearance = (element: HTMLElement) => {
+  const nestedAppearance = Array.from(
+    element.querySelectorAll<HTMLElement>('table.v102-frame-band-table, table.v102-frame-band-table td, .v202-frame-group[data-template-frame-group]')
+  )
+    .map((candidate) => {
+      const candidateStyle = getComputedStyle(candidate);
+      const sides = [
+        {
+          width: parseFramePx(candidateStyle.borderTopWidth),
+          style: candidateStyle.borderTopStyle,
+          color: candidateStyle.borderTopColor,
+        },
+        {
+          width: parseFramePx(candidateStyle.borderRightWidth),
+          style: candidateStyle.borderRightStyle,
+          color: candidateStyle.borderRightColor,
+        },
+        {
+          width: parseFramePx(candidateStyle.borderBottomWidth),
+          style: candidateStyle.borderBottomStyle,
+          color: candidateStyle.borderBottomColor,
+        },
+        {
+          width: parseFramePx(candidateStyle.borderLeftWidth),
+          style: candidateStyle.borderLeftStyle,
+          color: candidateStyle.borderLeftColor,
+        },
+      ].sort((left, right) => right.width - left.width);
+      const visibleSide = sides.find((side) => side.width > 0 && normalizeFrameBorderStyleValue(side.style, side.width) !== 'none');
+      const candidateWidth = visibleSide?.width || 0;
+
+      if (candidateWidth <= 0) {
+        return null;
+      }
+
+      return {
+        align: DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+        color: normalizeFrameBorderColorValue(visibleSide?.color || '') || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
+        style: normalizeFrameBorderStyleValue(visibleSide?.style || DEFAULT_TEMPLATE_FRAME_BORDER_STYLE, candidateWidth),
+        width: candidateWidth,
+      };
+    })
+    .find((appearance): appearance is { align: string; color: string; style: string; width: number } => Boolean(appearance));
+
+  return nestedAppearance || null;
+};
+
 const readElementBorderSideAppearance = (element: HTMLElement, side: TemplateEdgeSide) => {
   const computedStyle = getComputedStyle(element);
   const styleProp = APPEARANCE_BORDER_SIDE_STYLE_STYLE_PROP[side];
@@ -12090,10 +12263,10 @@ const readElementBorderSideAppearance = (element: HTMLElement, side: TemplateEdg
   const colorProp = APPEARANCE_BORDER_SIDE_COLOR_STYLE_PROP[side];
   const storedWidth = normalizeFrameBorderWidthValue(element.getAttribute(TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR[side]));
   const storedStyle = element.getAttribute(TEMPLATE_FRAME_BORDER_SIDE_STYLE_ATTR[side])?.trim() || '';
-  const storedColor = colorToHex(element.getAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side]) || '');
+  const storedColor = normalizeFrameBorderColorValue(element.getAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side]) || '');
   const width = storedWidth ?? parseFramePx(computedStyle[widthProp]);
   const style = normalizeFrameBorderStyleValue(storedStyle || computedStyle[styleProp], width);
-  const color = storedColor || colorToHex(computedStyle[colorProp] || '') || '#0f172a';
+  const color = storedColor || normalizeFrameBorderColorValue(computedStyle[colorProp] || '') || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
 
   return {
     width,
@@ -12118,7 +12291,7 @@ const persistElementBorderSideAppearance = (
 
   element.style[widthProp] = `${hasVisibleBorder ? appearance.width : 0}px`;
   element.style[styleProp] = hasVisibleBorder ? appearance.style : 'none';
-  element.style[colorProp] = hasVisibleBorder ? appearance.color || '#0f172a' : 'transparent';
+  element.style[colorProp] = hasVisibleBorder ? normalizeFrameBorderColorValue(appearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR : 'transparent';
   element.setAttribute(TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR[side], formatFrameBorderWidthValue(hasVisibleBorder ? appearance.width : 0));
   element.setAttribute(TEMPLATE_FRAME_BORDER_SIDE_STYLE_ATTR[side], hasVisibleBorder ? appearance.style : 'none');
   if (hasVisibleBorder && appearance.color) {
@@ -12137,7 +12310,7 @@ const materializeElementBorderAppearanceToInside = (element: HTMLElement) => {
     persistElementBorderSideAppearance(element, side, {
       width: hasVisibleBorder ? current.width : 0,
       style: hasVisibleBorder ? normalizedStyle : 'none',
-      color: current.color || '#0f172a',
+      color: normalizeFrameBorderColorValue(current.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
     });
   });
 
@@ -12152,10 +12325,10 @@ const materializeElementBorderAppearanceToInside = (element: HTMLElement) => {
   element.style.borderRightStyle = hasVisibleBorder ? normalizedStyle : 'none';
   element.style.borderBottomStyle = hasVisibleBorder ? normalizedStyle : 'none';
   element.style.borderLeftStyle = hasVisibleBorder ? normalizedStyle : 'none';
-  element.style.borderTopColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
-  element.style.borderRightColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
-  element.style.borderBottomColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
-  element.style.borderLeftColor = hasVisibleBorder ? current.color || '#0f172a' : 'transparent';
+  element.style.borderTopColor = hasVisibleBorder ? normalizeFrameBorderColorValue(current.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR : 'transparent';
+  element.style.borderRightColor = hasVisibleBorder ? normalizeFrameBorderColorValue(current.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR : 'transparent';
+  element.style.borderBottomColor = hasVisibleBorder ? normalizeFrameBorderColorValue(current.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR : 'transparent';
+  element.style.borderLeftColor = hasVisibleBorder ? normalizeFrameBorderColorValue(current.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR : 'transparent';
   element.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
 };
 
@@ -12210,48 +12383,7 @@ const readElementBorderAppearance = (element: HTMLElement) => {
   );
 
   if (!hasStoredBorderAppearance && width <= 0 && element.classList.contains('v102-frame-band')) {
-    const nestedAppearance = Array.from(
-      element.querySelectorAll<HTMLElement>('table.v102-frame-band-table, .v202-frame-group[data-template-frame-group]')
-    )
-      .map((candidate) => {
-        const candidateStyle = getComputedStyle(candidate);
-        const sides = [
-          {
-            width: parseFramePx(candidateStyle.borderTopWidth),
-            style: candidateStyle.borderTopStyle,
-            color: candidateStyle.borderTopColor,
-          },
-          {
-            width: parseFramePx(candidateStyle.borderRightWidth),
-            style: candidateStyle.borderRightStyle,
-            color: candidateStyle.borderRightColor,
-          },
-          {
-            width: parseFramePx(candidateStyle.borderBottomWidth),
-            style: candidateStyle.borderBottomStyle,
-            color: candidateStyle.borderBottomColor,
-          },
-          {
-            width: parseFramePx(candidateStyle.borderLeftWidth),
-            style: candidateStyle.borderLeftStyle,
-            color: candidateStyle.borderLeftColor,
-          },
-        ].sort((left, right) => right.width - left.width);
-        const visibleSide = sides.find((side) => side.width > 0 && normalizeFrameBorderStyleValue(side.style, side.width) !== 'none');
-        const candidateWidth = visibleSide?.width || 0;
-
-        if (candidateWidth <= 0) {
-          return null;
-        }
-
-        return {
-          align: 'inside',
-          color: colorToHex(visibleSide?.color || '') || '#0f172a',
-          style: normalizeFrameBorderStyleValue(visibleSide?.style || 'solid', candidateWidth),
-          width: candidateWidth,
-        };
-      })
-      .find((appearance): appearance is { align: string; color: string; style: string; width: number } => Boolean(appearance));
+    const nestedAppearance = readNestedFrameBorderAppearance(element);
 
     if (nestedAppearance) {
       return nestedAppearance;
@@ -12260,7 +12392,7 @@ const readElementBorderAppearance = (element: HTMLElement) => {
 
   return {
     align,
-    color: storedColor || inferredColor || '#0f172a',
+    color: normalizeFrameBorderColorValue(storedColor || inferredColor || '') || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
     style,
     width,
   };
@@ -12274,8 +12406,8 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
   const hasExplicitBorderColor = patch.borderColor !== undefined;
   const nextColorCandidate =
     patch.borderColor !== undefined
-      ? colorToHex(patch.borderColor) || patch.borderColor || current.color || '#0f172a'
-      : current.color || '#0f172a';
+      ? normalizeFrameBorderColorValue(patch.borderColor) || patch.borderColor || current.color || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
+      : normalizeFrameBorderColorValue(current.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
 
   if (patch.borderWidth !== undefined) {
     nextWidth = normalizeFrameBorderWidthValue(patch.borderWidth) ?? 0;
@@ -12296,10 +12428,10 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
   const hasVisibleBorder = nextWidth > 0 && nextStyle !== 'none';
   const nextColor = hasVisibleBorder
     ? hasExplicitBorderColor
-      ? nextColorCandidate || '#0f172a'
+      ? nextColorCandidate || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
       : nextColorCandidate && nextColorCandidate !== 'transparent'
         ? nextColorCandidate
-        : '#0f172a'
+        : DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
     : nextColorCandidate || 'transparent';
   const insideWidth = hasVisibleBorder
     ? nextAlign === 'outside'
@@ -12344,7 +12476,7 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
     persistElementBorderSideAppearance(element, side, {
       width: hasVisibleBorder ? nextWidth : 0,
       style: hasVisibleBorder ? nextStyle : 'none',
-      color: nextColor || '#0f172a',
+      color: nextColor || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
     });
   });
 };
@@ -12371,8 +12503,8 @@ const applyElementBorderSideAppearanceStylePatch = (
     const hasExplicitBorderColor = patch.borderColor !== undefined;
     const nextColorCandidate =
       patch.borderColor !== undefined
-        ? colorToHex(patch.borderColor) || patch.borderColor || current.color || '#0f172a'
-        : current.color || '#0f172a';
+        ? normalizeFrameBorderColorValue(patch.borderColor) || patch.borderColor || current.color || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
+        : normalizeFrameBorderColorValue(current.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
 
     if (patch.borderWidth !== undefined) {
       nextWidth = normalizeFrameBorderWidthValue(patch.borderWidth) ?? 0;
@@ -12393,10 +12525,10 @@ const applyElementBorderSideAppearanceStylePatch = (
     const hasVisibleBorder = nextWidth > 0 && nextStyle !== 'none';
     const nextColor = hasVisibleBorder
       ? hasExplicitBorderColor
-        ? nextColorCandidate || '#0f172a'
+        ? nextColorCandidate || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
         : nextColorCandidate && nextColorCandidate !== 'transparent'
           ? nextColorCandidate
-          : '#0f172a'
+          : DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
       : nextColorCandidate || 'transparent';
 
     persistElementBorderSideAppearance(element, side, {
@@ -12461,7 +12593,7 @@ const applyElementPaddingStylePatch = (element: HTMLElement, patch: FrameStylePa
 
 const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
   shell
-    .querySelectorAll<HTMLElement>('table.v102-frame-band-table, .v202-frame-group[data-template-frame-group]')
+    .querySelectorAll<HTMLElement>('table.v102-frame-band-table, table.v102-frame-band-table td, .v202-frame-group[data-template-frame-group]')
     .forEach((element) => {
       element.style.boxSizing = 'border-box';
       element.style.borderWidth = '0px';
@@ -12469,6 +12601,7 @@ const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
       element.style.borderColor = 'transparent';
       element.style.outline = 'none';
       element.style.outlineOffset = '0px';
+      normalizeDefaultFrameBackgroundStyle(element);
       element.removeAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
       element.removeAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR);
       element.removeAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR);
@@ -12486,16 +12619,26 @@ const normalizeFrameBorderAppearanceLayersInPage = (pageInner: HTMLElement) => {
   let changed = false;
 
   Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
+    normalizeDefaultFrameBackgroundStyle(shell);
+    const nestedAppearance = readNestedFrameBorderAppearance(shell);
+
+    const hasSideBorderAppearance = (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).some(
+      (side) =>
+        shell.hasAttribute(TEMPLATE_FRAME_BORDER_SIDE_WIDTH_ATTR[side]) ||
+        shell.hasAttribute(TEMPLATE_FRAME_BORDER_SIDE_STYLE_ATTR[side]) ||
+        shell.hasAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side])
+    );
     const hasShellBorderAppearance =
       shell.hasAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR) ||
       shell.hasAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
       shell.hasAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) ||
-      shell.hasAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
-    const hasLegacyTransparentGuide = !hasShellBorderAppearance && hasLegacyTransparentFrameGuide(shell);
+      shell.hasAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) ||
+      hasSideBorderAppearance;
+    const hasLegacyTransparentGuide = !nestedAppearance && !hasShellBorderAppearance && hasLegacyTransparentFrameGuide(shell);
 
     if (hasLegacyTransparentGuide) {
       applyElementBorderAppearanceStylePatch(shell, {
-        borderAlign: 'inside',
+        borderAlign: DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
         borderColor: 'transparent',
         borderStyle: 'none',
         borderWidth: '0',
@@ -12506,10 +12649,63 @@ const normalizeFrameBorderAppearanceLayersInPage = (pageInner: HTMLElement) => {
     }
 
     if (!hasShellBorderAppearance) {
+      applyElementBorderAppearanceStylePatch(shell, {
+        borderAlign: DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+        borderColor: DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
+        borderStyle: DEFAULT_TEMPLATE_FRAME_BORDER_STYLE,
+        borderWidth: DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH,
+      });
+      clearNestedFrameBorderAppearanceStyles(shell);
+      changed = true;
       return;
     }
 
     const shellAppearance = readElementBorderAppearance(shell);
+    const hasStoredBorderWidth = shell.hasAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR);
+    const hasStoredBorderStyle = shell.hasAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR);
+    const hasStoredBorderColor = shell.hasAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
+    const hasStoredBorderAlign = shell.hasAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
+    const shouldPromoteNestedAppearance =
+      Boolean(nestedAppearance) &&
+      !hasSideBorderAppearance &&
+      (shellAppearance.width <= 0 || shellAppearance.style === 'none' || shellAppearance.color === 'transparent');
+    const effectiveShellAppearance = shouldPromoteNestedAppearance && nestedAppearance ? nestedAppearance : shellAppearance;
+
+    if (!hasSideBorderAppearance) {
+      applyElementBorderAppearanceStylePatch(shell, {
+        borderAlign: hasStoredBorderAlign && !shouldPromoteNestedAppearance ? shellAppearance.align : DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+        borderColor: shouldPromoteNestedAppearance
+          ? normalizeFrameBorderColorValue(effectiveShellAppearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
+          : hasStoredBorderColor
+            ? normalizeFrameBorderColorValue(shellAppearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR
+            : shellAppearance.style === 'none' || shellAppearance.width <= 0
+              ? 'transparent'
+              : DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
+        borderStyle: shouldPromoteNestedAppearance
+          ? effectiveShellAppearance.style
+          : hasStoredBorderStyle
+            ? shellAppearance.style
+            : shellAppearance.width > 0
+              ? shellAppearance.style
+              : DEFAULT_TEMPLATE_FRAME_BORDER_STYLE,
+        borderWidth: shouldPromoteNestedAppearance
+          ? DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH
+          : hasStoredBorderWidth
+            ? formatFrameBorderWidthValue(shellAppearance.width)
+            : shellAppearance.width > 0
+            ? DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH
+            : '0',
+      });
+    } else {
+      (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).forEach((side) => {
+        const sideAppearance = readElementBorderSideAppearance(shell, side);
+        persistElementBorderSideAppearance(shell, side, {
+          ...sideAppearance,
+          color: normalizeFrameBorderColorValue(sideAppearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
+        });
+      });
+    }
+
     if (shellAppearance.width > 0 && shellAppearance.style !== 'none') {
       shell.setAttribute('data-template-frame-outline-style', shellAppearance.style);
     } else {
@@ -17686,9 +17882,8 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     const sourceRect = readPreviewSourceRect(root);
-    const availableWidth = root.clientWidth;
 
-    if (!sourceRect || !availableWidth) {
+    if (!sourceRect) {
       root.removeAttribute('data-template-preview-scaled');
       root.style.removeProperty('--template-preview-scale');
       root.style.removeProperty('--template-preview-source-width');
@@ -17698,15 +17893,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       return;
     }
 
-    const scale = Math.min(availableWidth / sourceRect.width, 1);
-    const nextZoom = Math.max(20, Number((scale * 100).toFixed(1)));
-
     root.setAttribute('data-template-preview-scaled', 'true');
-    root.style.setProperty('--template-preview-scale', String(scale));
+    root.style.setProperty('--template-preview-scale', '1');
     root.style.setProperty('--template-preview-source-width', `${sourceRect.width}px`);
     root.style.setProperty('--template-preview-source-height', `${sourceRect.height}px`);
-    root.style.setProperty('--template-preview-scaled-height', `${sourceRect.height * scale}px`);
-    setPreviewZoom((previous) => (Math.abs(previous - nextZoom) <= 0.25 ? previous : nextZoom));
+    root.style.setProperty('--template-preview-scaled-height', `${sourceRect.height}px`);
+    setPreviewZoom((previous) => (Math.abs(previous - 100) <= 0.25 ? previous : 100));
   }, []);
 
   const getFrameNodes = React.useCallback(
@@ -34575,7 +34767,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     selectionPanelTab === 'metadata' ? 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' : 'w-44 max-w-[calc(100%_-_1.5rem)]';
   const canvasToolbarGroupClassName = 'min-w-0 rounded-md bg-white';
   const canvasToolbarButtonBaseClassName =
-    'relative inline-flex h-9 w-full min-w-0 items-center justify-center gap-1.5 whitespace-nowrap border border-slate-300 px-2 text-xs font-semibold transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900 disabled:pointer-events-none disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100';
+    'v106-canvas-toolbar-button relative inline-flex h-9 w-full min-w-0 items-center justify-center gap-1.5 whitespace-nowrap border border-slate-300 px-2 text-xs font-semibold transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900 disabled:pointer-events-none disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100';
   const getCanvasToolbarButtonStateClassName = (active: boolean, disabled = false) => {
     if (disabled) {
       return 'border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-100';
@@ -34602,16 +34794,29 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   return (
     <div className="space-y-6">
       <style>{`
+        .v106-canvas-toolbar {
+          container-type: inline-size;
+        }
+        @container (max-width: 860px) {
+          .v106-canvas-toolbar .v106-canvas-toolbar-label {
+            display: none;
+          }
+          .v106-canvas-toolbar .v106-canvas-toolbar-button {
+            gap: 0;
+            padding-left: 0;
+            padding-right: 0;
+          }
+        }
         .template-edit-preview {
           position: relative;
           display: flex;
-          justify-content: center;
+          justify-content: flex-start;
           align-items: flex-start;
           box-sizing: border-box;
           width: 100%;
           max-width: none;
           min-height: 0;
-          overflow: hidden;
+          overflow: auto;
           border-top: 1px solid rgb(226 232 240);
           border-radius: 0;
           background: rgb(226 232 240) !important;
@@ -34626,6 +34831,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
           left: auto;
           top: 0;
+          flex: 0 0 auto;
           width: var(--template-preview-source-width, auto) !important;
           min-height: var(--template-preview-source-height, auto) !important;
           height: var(--template-preview-source-height, auto);
@@ -35755,13 +35961,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </CardHeader>
           <CardContent className="px-6 pb-3 pt-0">
             <div
-              className="grid w-full min-w-0 items-stretch"
+              className="v106-canvas-toolbar grid w-full min-w-0 items-stretch"
               style={{
                 gridTemplateColumns:
-                  'repeat(2,minmax(0,1fr)) 8px repeat(4,minmax(0,1fr)) 8px repeat(4,minmax(0,1fr)) 8px repeat(2,minmax(0,1fr)) 8px repeat(5,minmax(0,1fr))',
+                  'minmax(30px,2fr) 8px repeat(2,minmax(30px,2fr)) 8px repeat(2,minmax(30px,2fr)) 8px minmax(30px,2fr) 8px minmax(30px,2fr) repeat(3,minmax(30px,1fr))',
               }}
             >
-              <div className={`col-span-2 ${canvasToolbarGroupClassName}`}>
+              <div className={canvasToolbarGroupClassName}>
                 <button
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(templateUsagePreviewMode, !renderedPreviewHtml.trim())}`}
@@ -35772,11 +35978,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   title={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
                 >
                   {templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  <span>{templateUsagePreviewMode ? '편집 모드' : '미리보기'}</span>
+                  <span className="v106-canvas-toolbar-label">{templateUsagePreviewMode ? '편집 모드' : '미리보기'}</span>
                 </button>
               </div>
               <div aria-hidden="true" />
-              <div className={`col-span-4 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
+              <div className={`col-span-2 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
                 <button
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode)}`}
@@ -35786,7 +35992,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   title="선택 모드"
                 >
                   <MousePointer2 className="h-4 w-4" />
-                  <span>선택</span>
+                  <span className="v106-canvas-toolbar-label">선택</span>
                 </button>
                 <button
                   type="button"
@@ -35797,11 +36003,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   title="이동 모드"
                 >
                   <Move className="h-4 w-4" />
-                  <span>이동</span>
+                  <span className="v106-canvas-toolbar-label">이동</span>
                 </button>
               </div>
               <div aria-hidden="true" />
-              <div className={`col-span-4 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
+              <div className={`col-span-2 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
                 <button
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !canUndoCanvasHistory || templateUsagePreviewMode)}`}
@@ -35811,7 +36017,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   title="되돌리기"
                 >
                   <Undo2 className="h-4 w-4" />
-                  <span>되돌리기</span>
+                  <span className="v106-canvas-toolbar-label">되돌리기</span>
                 </button>
                 <button
                   type="button"
@@ -35822,29 +36028,33 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   title="다시 실행하기"
                 >
                   <Redo2 className="h-4 w-4" />
-                  <span>다시 실행</span>
+                  <span className="v106-canvas-toolbar-label">다시 실행</span>
                 </button>
               </div>
               <div aria-hidden="true" />
-              <div className={`col-span-2 ${canvasToolbarGroupClassName}`}>
+              <div className={canvasToolbarGroupClassName}>
                 <button
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(false)}`}
                   onClick={() => setShowCanvasLegend((previous) => !previous)}
                 >
                   <FileText className="h-4 w-4" />
-                  {showCanvasLegend ? '범례 숨기기' : '범례 보기'}
+                  <span className="v106-canvas-toolbar-label">{showCanvasLegend ? '범례 숨기기' : '범례 보기'}</span>
                 </button>
               </div>
               <div aria-hidden="true" />
-              <div className={`col-span-5 grid grid-cols-5 ${canvasToolbarGroupClassName}`} aria-label="캔버스 아이콘 표시 및 크기">
+              <div
+                className={`col-span-4 grid ${canvasToolbarGroupClassName}`}
+                style={{ gridTemplateColumns: 'minmax(30px,2fr) repeat(3,minmax(30px,1fr))' }}
+                aria-label="캔버스 아이콘 표시 및 크기"
+              >
                 <button
                   type="button"
-                  className={`col-span-2 ${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false)}`}
                   onClick={() => setShowMetadataIcons((previous) => !previous)}
                 >
                   <CircleDot className="h-4 w-4" />
-                  {showMetadataIcons ? '아이콘 끄기' : '아이콘 켜기'}
+                  <span className="v106-canvas-toolbar-label">{showMetadataIcons ? '아이콘 끄기' : '아이콘 켜기'}</span>
                 </button>
                 {CANVAS_ICON_SCALE_OPTIONS.map((scale) => (
                   <button
