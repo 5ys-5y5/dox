@@ -1177,6 +1177,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   handlePreviewInput,
 }: TemplateEditPreviewSurfaceProps) {
   const surfaceShellRef = React.useRef<HTMLDivElement | null>(null);
+  const previewNodeRef = React.useRef<HTMLDivElement | null>(null);
   const floatingOverlayNodeRefs = React.useRef<Record<TemplateFloatingOverlayId, HTMLDivElement | null>>({
     summary: null,
     style: null,
@@ -1201,6 +1202,20 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     metadataRoleSecondary: 'top-right',
     metadataRoleTertiary: 'top-right',
   });
+  const setPreviewSurfaceNode = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      previewNodeRef.current = node;
+      setPreviewNode(node);
+    },
+    [setPreviewNode]
+  );
+  React.useLayoutEffect(() => {
+    if (!templateUsagePreviewMode || !previewNodeRef.current) {
+      return;
+    }
+
+    enableTemplateUsagePreviewTextControls(previewNodeRef.current);
+  }, [renderedPreviewHtml, templateUsagePreviewMode]);
   const [styleOverlayCollapsed, setStyleOverlayCollapsed] = React.useState(true);
   const [summaryOverlayCollapsed, setSummaryOverlayCollapsed] = React.useState(true);
   const [actionOverlayCollapsed, setActionOverlayCollapsed] = React.useState(false);
@@ -2029,7 +2044,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   return (
     <CardContent ref={surfaceShellRef} className="relative overflow-hidden p-0">
       <div
-        ref={setPreviewNode}
+        ref={setPreviewSurfaceNode}
         className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 p-4 template-clone template-clone--raster-first-v2-structured"
         data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
         data-canvas-icon-scale={canvasIconScale}
@@ -8598,6 +8613,23 @@ const buildTemplateEdgeTopologySnapshotFromRoot = (root: HTMLElement): TemplateE
   });
 };
 
+const resolveFrameAutoHeightMinimumHeight = (node: HTMLElement) => {
+  const currentRect = readFrameNodeRect(node);
+
+  if (readFrameAutoHeightBox(node)) {
+    return Math.max(MIN_FRAME_SIZE_PX, measureRequiredAutoHeightFrameHeight(node));
+  }
+
+  return Math.max(MIN_FRAME_SIZE_PX, currentRect.height);
+};
+
+const resolveFrameAutoHeightShrinkCapacity = (node: HTMLElement) => {
+  const currentRect = readFrameNodeRect(node);
+  const minimumHeight = resolveFrameAutoHeightMinimumHeight(node);
+
+  return Math.max(0, currentRect.height - minimumHeight);
+};
+
 const resolveFrameAutoHeightBottomDelta = (node: HTMLElement, delta: number) => {
   const context = buildFrameResizeContext(node);
 
@@ -8613,8 +8645,10 @@ const resolveFrameAutoHeightBottomDelta = (node: HTMLElement, delta: number) => 
     return Math.abs(delta) < 0.5 ? 0 : delta;
   }
 
+  const nodeShrinkCapacity = resolveFrameAutoHeightShrinkCapacity(node);
+
   if (!context.table || context.rowHeights.length === 0) {
-    return -Math.min(Math.abs(delta), Math.max(0, context.shellRect.height - MIN_FRAME_SIZE_PX));
+    return -Math.min(Math.abs(delta), nodeShrinkCapacity);
   }
 
   const minimums = readTableRowMinimums(context.table, context.rowHeights);
@@ -8625,7 +8659,22 @@ const resolveFrameAutoHeightBottomDelta = (node: HTMLElement, delta: number) => 
   };
   const capacity = getRangeShrinkCapacity(context.rowHeights, minimums, shrinkRange);
 
-  return -Math.min(Math.abs(delta), capacity);
+  return -Math.min(Math.abs(delta), capacity, nodeShrinkCapacity);
+};
+
+const resolveFrameAutoHeightOppositeTopDelta = (node: HTMLElement, delta: number) => {
+  if (Math.abs(delta) < 0.5) {
+    return 0;
+  }
+
+  if (delta <= 0) {
+    return delta;
+  }
+
+  const nodeShrinkCapacity = resolveFrameAutoHeightShrinkCapacity(node);
+  const resizeCapacity = resolveFrameResizeTopDelta(node, delta);
+
+  return Math.min(delta, resizeCapacity, nodeShrinkCapacity);
 };
 
 const applyFrameAutoHeightDeltaLocal = (node: HTMLElement, delta: number) => {
@@ -8720,6 +8769,50 @@ const collectAutoSizeSameSidePeerNodes = (
   return collectFrameSelectionAnchors(root).filter((candidate) => peerFrameGroupIdSet.has(getFrameGroupId(candidate)));
 };
 
+const collectAutoSizeOppositeVerticalBoundaryPeerNodes = (
+  root: HTMLElement,
+  sourceFrameGroupIds: string[],
+  side: Extract<TemplateEdgeSide, 'bottom'>
+) => {
+  const normalizedSourceFrameGroupIds = Array.from(
+    new Set(sourceFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+  );
+
+  if (normalizedSourceFrameGroupIds.length === 0) {
+    return [] as HTMLElement[];
+  }
+
+  const snapshot = buildTemplateEdgeTopologySnapshotFromRoot(root);
+  const sourceFrameGroupIdSet = new Set(normalizedSourceFrameGroupIds);
+  const sourceEdges = normalizedSourceFrameGroupIds
+    .map((frameGroupId) => TemplateEdgeTopologyService.getEdgeById(snapshot, `${frameGroupId}:${side}`))
+    .filter((edge): edge is TemplateEdgeDescriptorDto => Boolean(edge));
+
+  if (sourceEdges.length === 0) {
+    return [] as HTMLElement[];
+  }
+
+  const oppositeFrameGroupIdSet = new Set<string>();
+
+  snapshot.edges.forEach((candidateEdge) => {
+    if (
+      candidateEdge.orientation !== 'horizontal' ||
+      candidateEdge.side !== 'top' ||
+      sourceFrameGroupIdSet.has(candidateEdge.frameGroupId)
+    ) {
+      return;
+    }
+
+    if (sourceEdges.some((sourceEdge) => edgesSharePhysicalBoundary(sourceEdge, candidateEdge))) {
+      oppositeFrameGroupIdSet.add(candidateEdge.frameGroupId);
+    }
+  });
+
+  return collectFrameSelectionAnchors(root).filter((candidate) =>
+    oppositeFrameGroupIdSet.has(getFrameGroupId(candidate))
+  );
+};
+
 const applyFrameAutoHeightDelta = (
   node: HTMLElement,
   delta: number,
@@ -8736,15 +8829,18 @@ const applyFrameAutoHeightDelta = (
   const root = context.pageInner.closest<HTMLElement>('.template-edit-preview') || context.pageInner;
   const frameGroupId = getFrameGroupId(node);
   const sameSidePeerNodes = frameGroupId ? collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom') : [];
-  const constrainedDelta =
-    sameSidePeerNodes.length > 0
-      ? resolveSharedEdgeResizeDelta(
-          delta,
-          [node, ...sameSidePeerNodes]
-            .map((candidate) => resolveFrameAutoHeightBottomDelta(candidate, delta))
-            .filter((candidateDelta) => Number.isFinite(candidateDelta))
-        )
-      : delta;
+  const movingBottomNodes = [node, ...sameSidePeerNodes];
+  const movingBottomFrameGroupIds = movingBottomNodes.map((candidate) => getFrameGroupId(candidate));
+  const oppositeTopPeerNodes = usesTopAnchor
+    ? []
+    : collectAutoSizeOppositeVerticalBoundaryPeerNodes(root, movingBottomFrameGroupIds, 'bottom');
+  const constrainedDelta = resolveSharedEdgeResizeDelta(
+    delta,
+    [
+      ...movingBottomNodes.map((candidate) => resolveFrameAutoHeightBottomDelta(candidate, delta)),
+      ...oppositeTopPeerNodes.map((candidate) => resolveFrameAutoHeightOppositeTopDelta(candidate, delta)),
+    ].filter((candidateDelta) => Number.isFinite(candidateDelta))
+  );
   const applyLocalDelta = usesTopAnchor ? applyFrameAutoHeightFromTopDeltaLocal : applyFrameAutoHeightDeltaLocal;
   const appliedDelta = applyLocalDelta(node, constrainedDelta);
 
@@ -8762,13 +8858,23 @@ const applyFrameAutoHeightDelta = (
     }
   });
 
-  if (!usesTopAnchor && !isAbsolutePositionedShell(context.shell)) {
+  oppositeTopPeerNodes.forEach((peerNode) => {
+    const peerAppliedDelta = applyFrameResizeTopDelta(peerNode, appliedDelta);
+
+    if (Math.abs(peerAppliedDelta) > 0.5) {
+      rebaseRelativeAnchorConfigForResizeDirection(peerNode, context.pageInner, 'n');
+    }
+  });
+
+  if (!usesTopAnchor && !isAbsolutePositionedShell(context.shell) && oppositeTopPeerNodes.length <= 0) {
     shiftShellsBelowBoundary(
       context.pageInner,
       boundaryY,
       appliedDelta,
       [context.shell, ...sameSidePeerNodes.map((peerNode) => resolveFrameLayoutShell(peerNode))]
     );
+    updatePageInnerMinHeight(context.pageInner);
+  } else if (!usesTopAnchor) {
     updatePageInnerMinHeight(context.pageInner);
   }
 
@@ -10732,7 +10838,9 @@ const extractPreviewRenderHtml = (root: HTMLElement) => {
 
 const enableFrameTextInputForEditing = (input: HTMLTextAreaElement | HTMLInputElement) => {
   input.removeAttribute('readonly');
+  input.removeAttribute('disabled');
   input.readOnly = false;
+  input.disabled = false;
   input.tabIndex = 0;
   input.style.setProperty('pointer-events', 'auto', 'important');
   input.style.setProperty('user-select', 'text', 'important');
@@ -10828,7 +10936,14 @@ const restoreFrameTextInputFocus = (
 };
 
 const applyFrameTextEditingMode = (root: HTMLElement, enabled: boolean) => {
+  const usagePreviewMode = root.getAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR) === 'true';
+
   root.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]').forEach((input) => {
+    if (usagePreviewMode && input.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'text') {
+      enableFrameTextInputForEditing(input);
+      return;
+    }
+
     if (!enabled) {
       disableFrameTextInputEditing(input);
     }
@@ -12354,6 +12469,37 @@ const applyTemplateUsagePreviewValueTextTone = (target: HTMLElement) => {
   target.style.setProperty('-webkit-text-fill-color', tonedColor);
 };
 
+const enableTemplateUsagePreviewTextControl = (target: HTMLElement) => {
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+    target.removeAttribute('readonly');
+    target.removeAttribute('disabled');
+    target.readOnly = false;
+    target.disabled = false;
+    target.tabIndex = 0;
+    target.style.setProperty('pointer-events', 'auto', 'important');
+    target.style.setProperty('user-select', 'text', 'important');
+    target.style.setProperty('-webkit-user-select', 'text', 'important');
+    target.style.cursor = 'text';
+    target.style.caretColor = '';
+    return;
+  }
+
+  target.setAttribute('contenteditable', 'true');
+  target.setAttribute('role', 'textbox');
+  target.tabIndex = 0;
+  target.style.setProperty('pointer-events', 'auto', 'important');
+  target.style.setProperty('user-select', 'text', 'important');
+  target.style.setProperty('-webkit-user-select', 'text', 'important');
+  target.style.cursor = 'text';
+  target.style.caretColor = '';
+};
+
+const enableTemplateUsagePreviewTextControls = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="text"]`).forEach((control) => {
+    enableTemplateUsagePreviewTextControl(control);
+  });
+};
+
 const replaceFrameContentTarget = (node: HTMLElement, replacement: HTMLElement) => {
   const target = resolveFrameContentTarget(node);
   const computedStyle = getComputedStyle(target);
@@ -12420,14 +12566,10 @@ const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
     input.setAttribute('value', '');
     input.removeAttribute('placeholder');
     input.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
-    input.removeAttribute('readonly');
-    input.removeAttribute('disabled');
-    input.readOnly = false;
-    input.disabled = false;
-    input.tabIndex = 0;
     if (input instanceof HTMLTextAreaElement) {
       input.textContent = '';
     }
+    enableTemplateUsagePreviewTextControl(input);
     applyTemplateUsagePreviewValueTextTone(input);
     return;
   }
@@ -12439,7 +12581,7 @@ const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
   target.setAttribute('aria-label', label);
   target.removeAttribute('data-placeholder');
   target.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
-  target.tabIndex = 0;
+  enableTemplateUsagePreviewTextControl(target);
   applyTemplateUsagePreviewValueTextTone(target);
 };
 
@@ -12873,6 +13015,7 @@ const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | und
       prepareTemplateUsagePreviewValueBox(node);
     }
   });
+  enableTemplateUsagePreviewTextControls(container);
 
   return container.innerHTML.trim();
 };
@@ -13015,6 +13158,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
           .filter((node): node is HTMLElement => Boolean(node))
       )
     );
+
+  enableTemplateUsagePreviewTextControls(root);
+
   const syncSignatureStateByContext = (contextKey: string, patch: SignatureStatePatch = {}) => {
     if (!contextKey) {
       return;
@@ -13523,7 +13669,7 @@ const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
     const targetRect = target.getBoundingClientRect();
     const requiredTargetHeight =
       target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? Math.max(target.scrollHeight || 0, target.clientHeight || 0, target.offsetHeight || 0)
+        ? measureNaturalTextControlHeight(target)
         : Math.max(target.scrollHeight || 0, target.clientHeight || 0, target.offsetHeight || 0);
     const visibleTargetHeight = Math.max(target.clientHeight || 0, target.offsetHeight || 0, targetRect.height || 0);
 
@@ -13578,7 +13724,7 @@ const measureContentFitFrameHeight = (node: HTMLElement) => {
     const targetRect = target.getBoundingClientRect();
     const requiredTargetHeight =
       target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? Math.max(target.scrollHeight || 0, target.clientHeight || 0, target.offsetHeight || 0)
+        ? measureNaturalTextControlHeight(target)
         : target.scrollHeight || target.getBoundingClientRect().height || target.offsetHeight || target.clientHeight || 0;
     const visibleTargetHeight = Math.max(target.clientHeight || 0, target.offsetHeight || 0, targetRect.height || 0);
 
@@ -17130,6 +17276,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root);
       },
     });
+  }, [surfaceRenderedPreviewHtml, templateUsagePreviewMode]);
+
+  React.useLayoutEffect(() => {
+    if (!templateUsagePreviewMode || !previewRef.current) {
+      return;
+    }
+
+    enableTemplateUsagePreviewTextControls(previewRef.current);
   }, [surfaceRenderedPreviewHtml, templateUsagePreviewMode]);
 
   const persistTemplateDraftHtml = React.useCallback(
@@ -22311,6 +22465,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      if (node && renderedPreviewHtml) {
 	        syncPreviewSurfaceCloneAttrs(node);
 	        if (templateUsagePreviewMode) {
+	          enableTemplateUsagePreviewTextControls(node);
 	          syncPreviewSurfaceScale(node);
 	          return;
 	        }
