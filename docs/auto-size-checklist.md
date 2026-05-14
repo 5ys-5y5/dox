@@ -28,5 +28,6 @@
 | 미리보기 | value 상자 입력/삭제 후 주변 행 | 주변 normalized band 행/열 경계가 유지되고 상자가 겹치지 않는다 | 통과: `band-4`~`band-8` 겹침 0건 |
 | 미리보기 | 자동 너비 value 상자 빈 값 | 명시 최소 너비가 있으면 그 너비를 하한으로 유지한다 | 통과: `band-0-header` 300px |
 | 미리보기 | 자동 너비 value 상자 값 입력 | 입력한 값+여백 필요 너비까지 늘어난다 | 통과: `band-0-header` 300px -> 1094.1px |
-| 공통 | peer edge 연결 상자 | 연결된 상자들은 edge 관계를 유지한다 | 통과: `status-history-1` 50px = `band-3` 25px + `band-4` 25px |
+| 미리보기 | `signature_image` 런타임 상자 | 캔버스 해상도는 레이아웃 내용으로 쓰지 않되, `지우기` 버튼처럼 실제 보이는 내용은 자동 높이 계산에 반영한다 | 통과: `band-8-cell-4` 버튼이 상자 안에 포함되고 겹침 0건 |
+| 공통 | peer edge 연결 상자 | 연결된 상자들은 edge 관계를 유지한다 | 통과: 편집/미리보기/편집 복귀 모두 `status-history-1:left` = `band-3-cell-2:right` = `band-4-cell-2:right`, 겹침 0건 |
 | 공통 | 간격 설정 그룹 | 자동 크기 후 설정된 간격을 유지한다 | 통과: 자동 크기 후 preserved spacing pass 실행 및 시각 붕괴 없음 |

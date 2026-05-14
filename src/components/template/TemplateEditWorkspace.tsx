@@ -2931,6 +2931,18 @@ const readFrameRuntimeMode = (node: HTMLElement) => {
   return '' as const;
 };
 
+const isSignatureImageRuntimeFrame = (node: HTMLElement) => {
+  const boxKind = readFrameBoxKind(node);
+
+  if (boxKind !== 'signature') {
+    return false;
+  }
+
+  const runtimeMode = readFrameRuntimeMode(node);
+
+  return runtimeMode === 'signature_image' || !runtimeMode;
+};
+
 const readFrameAutoHeightBox = (node: HTMLElement) => readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_ATTR) === 'true';
 
 const readFrameAutoWidthBox = (node: HTMLElement) => readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_ATTR) === 'true';
@@ -7206,6 +7218,24 @@ const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
 
   pageInner.style.minHeight = `${nextHeight}px`;
   syncTemplatePreviewScaledSourceBounds(pageInner, { width: nextWidth, height: nextHeight });
+};
+
+const snapTemplateUsagePreviewFrameEdges = (root: ParentNode) => {
+  let changed = false;
+
+  Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
+    if (!snapFrameBandShellEdgesInPage(pageInner)) {
+      return;
+    }
+
+    Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
+      syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(shell), pageInner);
+    });
+    updatePageInnerMinHeight(pageInner);
+    changed = true;
+  });
+
+  return changed;
 };
 
 const buildTableCellLayoutPositions = (table: HTMLTableElement): TableCellLayoutPosition[] => {
@@ -13132,12 +13162,6 @@ const applyTemplateUsagePreviewAutoSize = (
     return;
   }
 
-  const frameBoxKind = readFrameBoxKind(frameNode);
-  const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(frameNode);
-  if (frameBoxKind === 'signature' && runtimeMode === 'signature_image') {
-    return;
-  }
-
   const frameGroupId = getFrameGroupId(frameNode);
 
   if (!frameGroupId || (!readFrameAutoHeightBox(frameNode) && !readFrameAutoWidthBox(frameNode))) {
@@ -13156,6 +13180,7 @@ const applyTemplateUsagePreviewAutoSize = (
       syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
       applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
       settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      snapTemplateUsagePreviewFrameEdges(root);
     }
   }
 
@@ -13521,9 +13546,7 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
             return false;
           }
 
-          const frameBoxKind = readFrameBoxKind(frameNode);
-          const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(frameNode);
-          return !(frameBoxKind === 'signature' && runtimeMode === 'signature_image');
+          return true;
         })
         .map((frameNode) => getFrameGroupId(frameNode).trim())
         .filter((frameGroupId) => Boolean(frameGroupId))
@@ -13539,6 +13562,7 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
     applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
     settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+    snapTemplateUsagePreviewFrameEdges(root);
     options?.onAutoSizeLayoutChange?.(root);
   }
 
@@ -13769,6 +13793,98 @@ const measureTemplateUsagePreviewNaturalFrameWidth = (node: HTMLElement) => {
   return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, Number.isFinite(requiredFrameWidth) ? requiredFrameWidth : 0));
 };
 
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_CONTENT_INSET_PX = 6;
+
+const parseNonNegativeCssPx = (value: string | null | undefined) => {
+  const parsed = Number.parseFloat(String(value ?? ''));
+
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+};
+
+const collectTemplateUsagePreviewSignatureImageContentTargets = (node: HTMLElement) => {
+  const contentTarget = resolveFrameContentTarget(node);
+
+  if (!contentTarget || typeof window === 'undefined') {
+    return [] as HTMLElement[];
+  }
+
+  return Array.from(contentTarget.querySelectorAll<HTMLElement>('*')).filter((target) => {
+    if (target.matches(`canvas[${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CANVAS_ATTR}="true"]`)) {
+      return false;
+    }
+
+    const rect = target.getBoundingClientRect();
+
+    if (rect.width <= 0 && rect.height <= 0) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(target);
+
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+};
+
+const measureTemplateUsagePreviewSignatureImageContentHeight = (node: HTMLElement) => {
+  const frameRect = resolveFrameLayoutShell(node).getBoundingClientRect();
+
+  return collectTemplateUsagePreviewSignatureImageContentTargets(node).reduce((maxHeight, target) => {
+    const targetRect = target.getBoundingClientRect();
+    const style = window.getComputedStyle(target);
+    const marginTop = parseNonNegativeCssPx(style.marginTop);
+    const marginBottom = parseNonNegativeCssPx(style.marginBottom);
+
+    if (style.position === 'absolute' || style.position === 'fixed') {
+      const topInset = parseNonNegativeCssPx(style.top);
+      const bottomInset = parseNonNegativeCssPx(style.bottom);
+      const compactInset =
+        Math.min(topInset, TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_CONTENT_INSET_PX * 4) +
+        Math.min(bottomInset, TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_CONTENT_INSET_PX * 4);
+      const requiredHeight =
+        targetRect.height +
+        marginTop +
+        marginBottom +
+        Math.max(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_CONTENT_INSET_PX * 2, compactInset);
+
+      return Math.max(maxHeight, requiredHeight);
+    }
+
+    const requiredHeight = Math.max(0, targetRect.bottom - frameRect.top) + marginBottom;
+
+    return Math.max(maxHeight, requiredHeight);
+  }, MIN_FRAME_SIZE_PX);
+};
+
+const measureTemplateUsagePreviewSignatureImageContentWidth = (node: HTMLElement) => {
+  const frameRect = resolveFrameLayoutShell(node).getBoundingClientRect();
+
+  return collectTemplateUsagePreviewSignatureImageContentTargets(node).reduce((maxWidth, target) => {
+    const targetRect = target.getBoundingClientRect();
+    const style = window.getComputedStyle(target);
+    const marginLeft = parseNonNegativeCssPx(style.marginLeft);
+    const marginRight = parseNonNegativeCssPx(style.marginRight);
+
+    if (style.position === 'absolute' || style.position === 'fixed') {
+      const leftInset = parseNonNegativeCssPx(style.left);
+      const rightInset = parseNonNegativeCssPx(style.right);
+      const compactInset =
+        Math.min(leftInset, TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_CONTENT_INSET_PX * 4) +
+        Math.min(rightInset, TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_CONTENT_INSET_PX * 4);
+      const requiredWidth =
+        targetRect.width +
+        marginLeft +
+        marginRight +
+        Math.max(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_CONTENT_INSET_PX * 2, compactInset);
+
+      return Math.max(maxWidth, requiredWidth);
+    }
+
+    const requiredWidth = Math.max(0, targetRect.right - frameRect.left) + marginRight;
+
+    return Math.max(maxWidth, requiredWidth);
+  }, MIN_FRAME_SIZE_PX);
+};
+
 const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
@@ -13777,6 +13893,12 @@ const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
     const previewBaseHeight =
       readFrameAutoHeightStoredBaseHeight(node) ??
       (readFrameAutoHeightBaseExplicit(node) ? readFrameAutoHeightBaseHeight(node) : MIN_FRAME_SIZE_PX);
+
+    if (isSignatureImageRuntimeFrame(node)) {
+      return Math.ceil(
+        Math.max(MIN_FRAME_SIZE_PX, previewBaseHeight, measureTemplateUsagePreviewSignatureImageContentHeight(node))
+      );
+    }
 
     return Math.ceil(Math.max(previewBaseHeight, measureTemplateUsagePreviewNaturalFrameHeight(node)));
   }
@@ -13797,6 +13919,12 @@ const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
     const previewBaseWidth =
       readFrameAutoWidthStoredBaseWidth(node) ??
       (readFrameAutoWidthBaseExplicit(node) ? readFrameAutoWidthBaseWidth(node) : MIN_FRAME_SIZE_PX);
+
+    if (isSignatureImageRuntimeFrame(node)) {
+      return Math.ceil(
+        Math.max(MIN_FRAME_SIZE_PX, previewBaseWidth, measureTemplateUsagePreviewSignatureImageContentWidth(node))
+      );
+    }
 
     return Math.ceil(Math.max(previewBaseWidth, measureTemplateUsagePreviewNaturalFrameWidth(node)));
   }
@@ -19940,6 +20068,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
       applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
       settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      snapTemplateUsagePreviewFrameEdges(root);
       root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
         updatePageInnerMinHeight(pageInner);
       });
