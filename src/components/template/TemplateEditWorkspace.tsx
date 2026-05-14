@@ -39,7 +39,6 @@ import { renderToStaticMarkup } from 'react-dom/server.browser';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
-import { UnderlineTabs } from '../design-system/tabs';
 import { EntityPicker, type EntityPickerOption } from '../ui/EntityPicker';
 import { Input } from '../ui/Input';
 import { applyTemplateExtractEditableTextFit } from '../../lib/templateExtractEditableTextFit';
@@ -210,7 +209,7 @@ type FrameRelationPreviewMode =
   | { kind: 'value-select'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] }
   | { kind: 'value-linked'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
 
-type SelectionPanelTab = 'metadata' | 'position' | 'text';
+type SelectionPanelTab = 'metadata' | 'position';
 type CanvasInteractionMode = 'select' | 'move';
 type CanvasIconScale = 's' | 'm' | 'l';
 
@@ -620,6 +619,7 @@ type TemplateEditPreviewSurfaceProps = {
   metadataRoleTertiaryOverlay?: TemplateFloatingOverlayContent;
   styleOverlay?: TemplateFloatingOverlayContent;
   styleOverlayLabel?: string;
+  sizeTypeOverlay?: TemplateFloatingOverlayContent;
   textStyleOverlay?: TemplateFloatingOverlayContent;
   textStyleOverlayCollapsed: boolean;
   setTextStyleOverlayCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
@@ -638,6 +638,7 @@ type SummaryOverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-r
 type TemplateFloatingOverlayId =
   | 'summary'
   | 'style'
+  | 'sizeType'
   | 'textStyle'
   | 'action'
   | 'metadataName'
@@ -788,7 +789,7 @@ const SUMMARY_OVERLAY_INSET_PX = 12;
 const FLOATING_OVERLAY_STACK_GAP_PX = 12;
 const SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX = 32;
 const SUMMARY_OVERLAY_CLICK_DRAG_THRESHOLD_PX = 4;
-const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'style', 'textStyle', 'action'];
+const POSITION_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'style', 'sizeType', 'textStyle', 'action'];
 const METADATA_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = [
   'summary',
   'metadataName',
@@ -796,8 +797,6 @@ const METADATA_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = [
   'metadataRoleSecondary',
   'metadataRoleTertiary',
 ];
-const TEXT_FLOATING_OVERLAY_STACK_ORDER: TemplateFloatingOverlayId[] = ['summary', 'action'];
-
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
   if (element.getAttribute(attrName) === nextValue) {
     return;
@@ -1165,6 +1164,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   metadataRoleTertiaryOverlay,
   styleOverlay,
   styleOverlayLabel = '스타일',
+  sizeTypeOverlay,
   textStyleOverlay,
   textStyleOverlayCollapsed,
   setTextStyleOverlayCollapsed,
@@ -1183,6 +1183,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const floatingOverlayNodeRefs = React.useRef<Record<TemplateFloatingOverlayId, HTMLDivElement | null>>({
     summary: null,
     style: null,
+    sizeType: null,
     textStyle: null,
     action: null,
     metadataName: null,
@@ -1197,6 +1198,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const [floatingOverlayCorners, setFloatingOverlayCorners] = React.useState<Record<TemplateFloatingOverlayId, SummaryOverlayCorner>>({
     summary: 'top-left',
     style: 'top-right',
+    sizeType: 'top-right',
     textStyle: 'top-right',
     action: 'top-right',
     metadataName: 'top-right',
@@ -1219,6 +1221,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     enableTemplateUsagePreviewTextControls(previewNodeRef.current);
   }, [renderedPreviewHtml, templateUsagePreviewMode]);
   const [styleOverlayCollapsed, setStyleOverlayCollapsed] = React.useState(true);
+  const [sizeTypeOverlayCollapsed, setSizeTypeOverlayCollapsed] = React.useState(true);
   const [summaryOverlayCollapsed, setSummaryOverlayCollapsed] = React.useState(true);
   const [actionOverlayCollapsed, setActionOverlayCollapsed] = React.useState(false);
   const [metadataNameOverlayCollapsed, setMetadataNameOverlayCollapsed] = React.useState(true);
@@ -1228,6 +1231,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const [floatingOverlayViewportRevision, setFloatingOverlayViewportRevision] = React.useState(0);
   const hasSummaryOverlay = Boolean(summaryOverlay);
   const hasStyleOverlay = Boolean(styleOverlay);
+  const hasSizeTypeOverlay = Boolean(sizeTypeOverlay);
   const hasTextStyleOverlay = Boolean(textStyleOverlay);
   const hasActionOverlay = Boolean(actionOverlay);
   const hasMetadataNameOverlay = Boolean(metadataNameOverlay);
@@ -1286,6 +1290,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     renderedPreviewHtml,
     summaryOverlayCollapsed,
     styleOverlayCollapsed,
+    sizeTypeOverlayCollapsed,
     textStyleOverlayCollapsed,
     actionOverlayCollapsed,
     metadataNameOverlayCollapsed,
@@ -1294,6 +1299,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     metadataRoleTertiaryOverlayCollapsed,
     hasSummaryOverlay,
     hasStyleOverlay,
+    hasSizeTypeOverlay,
     hasTextStyleOverlay,
     hasActionOverlay,
     hasMetadataNameOverlay,
@@ -1355,6 +1361,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return summaryOverlayCollapsed;
       case 'style':
         return styleOverlayCollapsed;
+      case 'sizeType':
+        return sizeTypeOverlayCollapsed;
       case 'textStyle':
         return textStyleOverlayCollapsed;
       case 'action':
@@ -1378,6 +1386,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         return hasSummaryOverlay;
       case 'style':
         return hasStyleOverlay;
+      case 'sizeType':
+        return hasSizeTypeOverlay;
       case 'textStyle':
         return hasTextStyleOverlay;
       case 'action':
@@ -1400,10 +1410,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       return METADATA_FLOATING_OVERLAY_STACK_ORDER;
     }
 
-    if (selectionPanelTab === 'text') {
-      return TEXT_FLOATING_OVERLAY_STACK_ORDER;
-    }
-
     return POSITION_FLOATING_OVERLAY_STACK_ORDER;
   };
 
@@ -1417,6 +1423,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     }
 
     if (overlayId === 'textStyle') {
+      return 300;
+    }
+
+    if (overlayId === 'sizeType') {
       return 300;
     }
 
@@ -1438,6 +1448,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
           return 73;
         case 'style':
           return 104;
+        case 'sizeType':
+          return 118;
         case 'textStyle':
           return 113;
         case 'action':
@@ -1460,6 +1472,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 
     if (overlayId === 'textStyle') {
       return 672;
+    }
+
+    if (overlayId === 'sizeType') {
+      return 250;
     }
 
     if (overlayId === 'metadataName' || overlayId === 'metadataRolePrimary' || overlayId === 'metadataRoleSecondary' || overlayId === 'metadataRoleTertiary') {
@@ -1612,6 +1628,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       hasMetadataRoleTertiaryOverlay,
       readFloatingOverlayFallbackWidth,
       hasStyleOverlay,
+      hasSizeTypeOverlay,
       hasTextStyleOverlay,
       hasSummaryOverlay,
       metadataNameOverlayCollapsed,
@@ -1620,6 +1637,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       metadataRoleTertiaryOverlayCollapsed,
       actionOverlayCollapsed,
       styleOverlayCollapsed,
+      sizeTypeOverlayCollapsed,
       textStyleOverlayCollapsed,
       summaryOverlayCollapsed,
       selectionPanelTab,
@@ -1844,6 +1862,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     },
     [finishFloatingOverlayDrag]
   );
+  const finishSizeTypeOverlayDrag = React.useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      finishFloatingOverlayDrag(event, () => setSizeTypeOverlayCollapsed((current) => !current));
+    },
+    [finishFloatingOverlayDrag]
+  );
   const finishTextStyleOverlayDrag = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       finishFloatingOverlayDrag(event, () => setTextStyleOverlayCollapsed((current) => !current));
@@ -1934,12 +1958,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
           ? 'z-[73]'
           : overlayId === 'action' || overlayId === 'metadataName'
             ? 'z-[72]'
-            : overlayId === 'style'
+            : overlayId === 'style' || overlayId === 'sizeType'
               ? 'z-[71]'
               : 'z-[70]';
     const pinnedOverlayStyle = resolveFloatingOverlayPinnedStyle(overlayId, overlayCorner, isCollapsed);
     const overlayPinnedStyle =
-      overlayId === 'style' || overlayId === 'textStyle'
+      overlayId === 'style' || overlayId === 'sizeType' || overlayId === 'textStyle'
         ? {
             ...pinnedOverlayStyle,
             maxWidth: '250px',
@@ -2022,6 +2046,8 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
               className={
                 overlayId === 'style'
                   ? 'inline-flex w-fit max-w-full flex-col items-start gap-2.5 p-2'
+                  : overlayId === 'sizeType'
+                    ? 'max-w-full p-2'
                   : 'max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2'
               }
             >
@@ -2105,6 +2131,15 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         setStyleOverlayCollapsed,
         finishStyleOverlayDrag,
         styleOverlay,
+        { expandedWidthClassName: 'w-fit max-w-[250px]' }
+      )}
+      {renderFloatingOverlaySection(
+        'sizeType',
+        '상자 크기 타입',
+        sizeTypeOverlayCollapsed,
+        setSizeTypeOverlayCollapsed,
+        finishSizeTypeOverlayDrag,
+        sizeTypeOverlay,
         { expandedWidthClassName: 'w-fit max-w-[250px]' }
       )}
       {renderFloatingOverlaySection(
@@ -16594,8 +16629,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   >('');
   const [moveGroupAssignmentTargetGroupId, setMoveGroupAssignmentTargetGroupId] = React.useState('');
   const [positionGroupEditMode, setPositionGroupEditMode] = React.useState<PositionGroupEditMode>({ kind: 'idle' });
-  const isTextCanvasEditModeActive =
-    selectionPanelTab === 'text' || (selectionPanelTab === 'position' && !positionTextStyleOverlayCollapsed);
+  const isTextCanvasEditModeActive = selectionPanelTab === 'position' && !positionTextStyleOverlayCollapsed;
   const textCanvasEditModeActiveRef = React.useRef(isTextCanvasEditModeActive);
   const [expandedPositionBoxGroupIds, setExpandedPositionBoxGroupIds] = React.useState<Record<string, boolean>>({});
   const [expandedPositionSummarySections, setExpandedPositionSummarySections] = React.useState<Record<string, boolean>>({});
@@ -32351,7 +32385,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     );
   };
 
-  const renderTextAutoSizeControls = () => {
+  const renderTextAutoSizeControls = (section: 'boxType' | 'sizeMatch') => {
     const activeStyleSelectionIds =
       selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
         ? selectedPositionResolvedFrameGroupIds
@@ -32423,7 +32457,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     const needsSourceBoxPick = sizeMatchSourceKind === 'selected-box' && !sizeMatchSourceFrameGroupId.trim();
     const sizeMatchTargetDisabled = needsSourceBoxPick;
-	    const applySizeMatchWithTarget = (target: SizeMatchTargetKind) => {
+    const applySizeMatchWithTarget = (target: SizeMatchTargetKind) => {
       setSizeMatchTargetKind(target);
       if (sizeMatchSourceKind === 'content') {
         if (target === 'width' || target === 'both') {
@@ -32510,8 +32544,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       handleTextAutoSizeAnchorControl(mode, side);
     };
 
-    return (
-      <div className="space-y-2">
+    if (section === 'boxType') {
+      return (
+        <div className="space-y-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
           <span>상자 타입</span>
           {autoSizeDescription}
@@ -32629,6 +32664,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             고정
           </button>
         </div>
+      </div>
+      );
+    }
+
+    return (
         <div className="space-y-1">
           <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">크기 맞추기</label>
           <div className="space-y-2">
@@ -32695,7 +32735,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             ) : null}
           </div>
         </div>
-      </div>
     );
   };
 
@@ -33727,19 +33766,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             </div>
           </div>
         </div>
-        <div
-          className="min-w-0 max-w-full space-y-1"
-          style={{
-            width: selectionAppearancePreviewWidthPx ? `${selectionAppearancePreviewWidthPx}px` : 'fit-content',
-            maxWidth: '100%',
-          }}
-          onMouseDown={stopInlineControlEvent}
-          onClick={stopInlineControlEvent}
-        >
-          {hasAppearanceSelection ? (
-            renderTextAutoSizeControls()
-          ) : null}
-        </div>
       </>
     );
   };
@@ -33750,6 +33776,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     return renderSelectionAppearanceControls();
+  };
+
+  const renderPositionBoxSizeTypeOverlay = () => {
+    if (selectionPanelTab !== 'position') {
+      return null;
+    }
+
+    return (
+      <div className="space-y-2.5">
+        {renderTextAutoSizeControls('boxType')}
+        {renderTextPaddingControls()}
+        {renderTextAutoSizeControls('sizeMatch')}
+      </div>
+    );
   };
 
   const renderPositionTextStyleOverlay = () => {
@@ -33895,28 +33935,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     </div>
   );
 
-  const renderTextCanvasActionControls = () => {
+  const renderTextPaddingControls = () => {
     const activeStyleSelectionIds =
       selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
         ? selectedPositionResolvedFrameGroupIds
         : selectedFrameGroupIds;
     const hasSelection = activeStyleSelectionIds.length > 0;
-    const currentFontFamily = selectionStyleDraft.fontFamily || '';
-    const hasCustomFontFamily =
-      Boolean(currentFontFamily) &&
-      !RICH_TEXT_FONT_FAMILY_OPTIONS.some((option) => option.value === currentFontFamily);
-    const fontWeightValue = selectionStyleDraft.fontWeight.trim().toLowerCase();
-    const isBold =
-      fontWeightValue === 'bold' || (Number.isFinite(Number.parseInt(fontWeightValue, 10)) && Number.parseInt(fontWeightValue, 10) >= 600);
-    const isItalic = selectionStyleDraft.fontStyle.trim().toLowerCase() === 'italic';
-    const isUnderline = hasTextDecorationToken(selectionStyleDraft.textDecorationLine, 'underline');
-    const isStrikeThrough = hasTextDecorationToken(selectionStyleDraft.textDecorationLine, 'line-through');
-    const styleButtonClass = (active: boolean) =>
-      `inline-flex h-8 items-center justify-center border-r border-slate-200 text-xs font-semibold transition last:border-r-0 ${
-        active
-          ? 'bg-slate-950 text-white'
-          : 'bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-      }`;
     const paddingFieldsBySide = APPEARANCE_PADDING_SIDES.map((side) => {
       const field = APPEARANCE_PADDING_FIELD_BY_SIDE[side];
       const rawValue = hasSelection ? String(selectionStyleDraft[field] || '') : '';
@@ -33957,6 +33981,94 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     };
 
     return (
+      <div className="space-y-1">
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+          여백
+          {renderStyleApplyStatusIcon(paddingStatusField)}
+        </label>
+        <div className="grid grid-cols-2 gap-1.5">
+          {paddingFieldsBySide.map(({ side, field, label, isMixed, displayValue, state }) => (
+            <div key={`text-padding-field:${side}`} className="grid grid-cols-[56px_minmax(0,1fr)] items-center gap-1">
+              <button
+                type="button"
+                className={`inline-flex h-7 w-14 items-center justify-center rounded-md border text-[11px] font-semibold transition ${paddingSideButtonClassByState(state)}`}
+                disabled={!hasSelection}
+                onClick={() => {
+                  if (!hasSelection) {
+                    return;
+                  }
+                  const input = stylePanelRef.current?.querySelector<HTMLInputElement>(`[data-style-field="${field}"]`);
+                  input?.focus();
+                }}
+              >
+                {label}
+              </button>
+              <div className="relative">
+                <Input
+                  key={`text-padding:${field}:${hasSelection ? 'selected' : 'empty'}:${selectionStyleDraft[field]}`}
+                  data-style-field={field}
+                  data-style-field-mixed={isMixed ? 'true' : 'false'}
+                  defaultValue={hasSelection ? displayValue : ''}
+                  inputMode="decimal"
+                  placeholder={hasSelection ? (isMixed ? MIXED_PADDING_DISPLAY_LABEL : '0') : ''}
+                  disabled={!hasSelection}
+                  className={`h-7 pr-7 text-xs disabled:opacity-100 ${paddingInputClassByState(state)}`}
+                  onFocus={(event) => {
+                    if (isMixed && event.currentTarget.value.trim() === MIXED_PADDING_DISPLAY_LABEL) {
+                      event.currentTarget.value = '';
+                    }
+                  }}
+                  onBlur={(event) => {
+                    const normalizedValue = event.currentTarget.value.trim();
+                    if (isMixed && (!normalizedValue || normalizedValue === MIXED_PADDING_DISPLAY_LABEL)) {
+                      applyStyleFieldOnBlur(field, '', { mixedBlank: true });
+                      return;
+                    }
+                    applyStyleFieldOnBlur(field, event.currentTarget.value, {
+                      mixedBlank: isMixed && !normalizedValue,
+                    });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-500">
+                  px
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTextCanvasActionControls = () => {
+    const activeStyleSelectionIds =
+      selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
+        ? selectedPositionResolvedFrameGroupIds
+        : selectedFrameGroupIds;
+    const hasSelection = activeStyleSelectionIds.length > 0;
+    const currentFontFamily = selectionStyleDraft.fontFamily || '';
+    const hasCustomFontFamily =
+      Boolean(currentFontFamily) &&
+      !RICH_TEXT_FONT_FAMILY_OPTIONS.some((option) => option.value === currentFontFamily);
+    const fontWeightValue = selectionStyleDraft.fontWeight.trim().toLowerCase();
+    const isBold =
+      fontWeightValue === 'bold' || (Number.isFinite(Number.parseInt(fontWeightValue, 10)) && Number.parseInt(fontWeightValue, 10) >= 600);
+    const isItalic = selectionStyleDraft.fontStyle.trim().toLowerCase() === 'italic';
+    const isUnderline = hasTextDecorationToken(selectionStyleDraft.textDecorationLine, 'underline');
+    const isStrikeThrough = hasTextDecorationToken(selectionStyleDraft.textDecorationLine, 'line-through');
+    const styleButtonClass = (active: boolean) =>
+      `inline-flex h-8 items-center justify-center border-r border-slate-200 text-xs font-semibold transition last:border-r-0 ${
+        active
+          ? 'bg-slate-950 text-white'
+          : 'bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+      }`;
+
+    return (
       <div className="space-y-2.5">
         <div className="space-y-1">
           <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
@@ -33991,68 +34103,6 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           {renderRichTextNumericInput('lineHeight', '줄 높이', '20', hasSelection)}
           <div className="[&>div>label]:text-xs [&>div>label]:font-semibold [&_select]:h-8 [&_select]:text-xs">
             {renderStyleColorPicker('color', '글자 색')}
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-            여백
-            {renderStyleApplyStatusIcon(paddingStatusField)}
-          </label>
-          <div className="grid grid-cols-2 gap-1.5">
-            {paddingFieldsBySide.map(({ side, field, label, isMixed, displayValue, state }) => (
-              <div key={`text-padding-field:${side}`} className="grid grid-cols-[56px_minmax(0,1fr)] items-center gap-1">
-                <button
-                  type="button"
-                  className={`inline-flex h-7 w-14 items-center justify-center rounded-md border text-[11px] font-semibold transition ${paddingSideButtonClassByState(state)}`}
-                  disabled={!hasSelection}
-                  onClick={() => {
-                    if (!hasSelection) {
-                      return;
-                    }
-                    const input = stylePanelRef.current?.querySelector<HTMLInputElement>(`[data-style-field="${field}"]`);
-                    input?.focus();
-                  }}
-                >
-                  {label}
-                </button>
-                <div className="relative">
-                  <Input
-                    key={`text-padding:${field}:${hasSelection ? 'selected' : 'empty'}:${selectionStyleDraft[field]}`}
-                    data-style-field={field}
-                    data-style-field-mixed={isMixed ? 'true' : 'false'}
-                    defaultValue={hasSelection ? displayValue : ''}
-                    inputMode="decimal"
-                    placeholder={hasSelection ? (isMixed ? MIXED_PADDING_DISPLAY_LABEL : '0') : ''}
-                    disabled={!hasSelection}
-                    className={`h-7 pr-7 text-xs disabled:opacity-100 ${paddingInputClassByState(state)}`}
-                    onFocus={(event) => {
-                      if (isMixed && event.currentTarget.value.trim() === MIXED_PADDING_DISPLAY_LABEL) {
-                        event.currentTarget.value = '';
-                      }
-                    }}
-                    onBlur={(event) => {
-                      const normalizedValue = event.currentTarget.value.trim();
-                      if (isMixed && (!normalizedValue || normalizedValue === MIXED_PADDING_DISPLAY_LABEL)) {
-                        applyStyleFieldOnBlur(field, '', { mixedBlank: true });
-                        return;
-                      }
-                      applyStyleFieldOnBlur(field, event.currentTarget.value, {
-                        mixedBlank: isMixed && !normalizedValue,
-                      });
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.currentTarget.blur();
-                      }
-                    }}
-                  />
-                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-500">
-                    px
-                  </span>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
 
@@ -34523,6 +34573,31 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const canvasActionOverlayLabel = '기능 버튼';
   const canvasActionOverlayWidthClassName =
     selectionPanelTab === 'metadata' ? 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' : 'w-44 max-w-[calc(100%_-_1.5rem)]';
+  const canvasToolbarGroupClassName = 'min-w-0 rounded-md bg-white';
+  const canvasToolbarButtonBaseClassName =
+    'relative inline-flex h-9 w-full min-w-0 items-center justify-center gap-1.5 whitespace-nowrap border border-slate-300 px-2 text-xs font-semibold transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900 disabled:pointer-events-none disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100';
+  const getCanvasToolbarButtonStateClassName = (active: boolean, disabled = false) => {
+    if (disabled) {
+      return 'border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-100';
+    }
+
+    return active ? 'border-slate-300 bg-slate-900 text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-900 hover:bg-slate-50';
+  };
+  const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'middle' | 'last') => {
+    if (position === 'single') {
+      return 'rounded-md';
+    }
+
+    if (position === 'first') {
+      return 'rounded-l-md';
+    }
+
+    if (position === 'last') {
+      return '-ml-px rounded-r-md';
+    }
+
+    return '-ml-px';
+  };
 
   return (
     <div className="space-y-6">
@@ -34778,21 +34853,18 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           position: relative;
           z-index: 22;
         }
-        .template-edit-preview[data-selection-panel-tab="text"] [data-template-frame-input="true"],
         .template-edit-preview[${TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR}="true"] [data-template-frame-input="true"] {
           pointer-events: auto !important;
           user-select: text !important;
           -webkit-user-select: text !important;
           cursor: text !important;
         }
-        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"] [data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"],
         .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[${TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR}="true"] [data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
           pointer-events: auto !important;
           user-select: text !important;
           -webkit-user-select: text !important;
           cursor: text !important;
         }
-        .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[data-selection-panel-tab="text"][data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"],
         .template-edit-preview.template-clone.template-clone--raster-first-v2-structured[${TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR}="true"][data-template-extraction-stage="frames"]:not([data-template-frame-group-version="v1.01"]) .v202-frame-group-input[data-template-frame-input="true"] {
           pointer-events: auto !important;
           user-select: text !important;
@@ -35656,107 +35728,139 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           <CardHeader>
 		            <div className="flex items-center justify-between gap-3">
 		              <CardTitle>상자 편집 캔버스</CardTitle>
-		              <div className="flex items-center gap-2">
-		                <Button
-		                  size="sm"
-		                  variant="outline"
-		                  className={templateUsagePreviewMode ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800' : ''}
-		                  onClick={toggleTemplateUsagePreviewMode}
-		                  disabled={!renderedPreviewHtml.trim()}
-		                  aria-pressed={templateUsagePreviewMode}
-		                  aria-label={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
-		                  title={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
-		                >
-		                  {templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-		                </Button>
-		                <div className="inline-flex overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="캔버스 조작 모드">
-		                  <button
-		                    type="button"
-	                    className={`inline-flex h-8 w-8 items-center justify-center transition ${
-	                      canvasInteractionMode === 'select'
-	                        ? 'bg-slate-900 text-white'
-	                        : 'bg-white text-slate-600 hover:bg-slate-100'
-	                    }`}
-		                    onClick={() => setCanvasInteractionMode('select')}
-		                    disabled={templateUsagePreviewMode}
-		                    aria-label="선택 모드"
-	                    title="선택 모드"
-	                  >
-	                    <MousePointer2 className="h-4 w-4" />
-	                  </button>
-	                  <button
-	                    type="button"
-	                    className={`inline-flex h-8 w-8 items-center justify-center border-l border-slate-300 transition ${
-	                      canvasInteractionMode === 'move'
-	                        ? 'bg-slate-900 text-white'
-	                        : 'bg-white text-slate-600 hover:bg-slate-100'
-	                    }`}
-		                    onClick={() => setCanvasInteractionMode('move')}
-		                    disabled={templateUsagePreviewMode}
-	                    aria-label="이동 모드"
-	                    title="이동 모드"
-	                  >
-	                    <Move className="h-4 w-4" />
-	                  </button>
-	                </div>
-	                <Button
-	                  size="sm"
-                  variant="outline"
-	                  onClick={handleUndoCanvasHistory}
-	                  disabled={!canUndoCanvasHistory || templateUsagePreviewMode}
+		              <div className={`grid min-w-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="상자 편집 탭">
+		                {([
+		                  { key: 'position', label: '크기 및 위치', icon: Move },
+		                  { key: 'metadata', label: '속성', icon: KeyRound },
+		                ] as const).map((tab, index) => {
+		                  const TabIcon = tab.icon;
+		                  const isActive = selectionPanelTab === tab.key;
+		                  return (
+		                    <button
+		                      key={`selection-panel-tab:${tab.key}`}
+		                      type="button"
+		                      className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(index === 0 ? 'first' : 'last')} ${getCanvasToolbarButtonStateClassName(isActive)}`}
+		                      onClick={() => setSelectionPanelTab(tab.key)}
+		                      aria-pressed={isActive}
+		                      aria-label={tab.label}
+		                      title={tab.label}
+		                    >
+		                      <TabIcon className="h-4 w-4" />
+		                      <span>{tab.label}</span>
+		                    </button>
+		                  );
+		                })}
+		              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="px-6 pb-3 pt-0">
+            <div
+              className="grid w-full min-w-0 items-stretch"
+              style={{
+                gridTemplateColumns:
+                  'repeat(2,minmax(0,1fr)) 8px repeat(4,minmax(0,1fr)) 8px repeat(4,minmax(0,1fr)) 8px repeat(2,minmax(0,1fr)) 8px repeat(5,minmax(0,1fr))',
+              }}
+            >
+              <div className={`col-span-2 ${canvasToolbarGroupClassName}`}>
+                <button
+                  type="button"
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(templateUsagePreviewMode, !renderedPreviewHtml.trim())}`}
+                  onClick={toggleTemplateUsagePreviewMode}
+                  disabled={!renderedPreviewHtml.trim()}
+                  aria-pressed={templateUsagePreviewMode}
+                  aria-label={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
+                  title={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
+                >
+                  {templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  <span>{templateUsagePreviewMode ? '편집 모드' : '미리보기'}</span>
+                </button>
+              </div>
+              <div aria-hidden="true" />
+              <div className={`col-span-4 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
+                <button
+                  type="button"
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode)}`}
+                  onClick={() => setCanvasInteractionMode('select')}
+                  disabled={templateUsagePreviewMode}
+                  aria-label="선택 모드"
+                  title="선택 모드"
+                >
+                  <MousePointer2 className="h-4 w-4" />
+                  <span>선택</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode)}`}
+                  onClick={() => setCanvasInteractionMode('move')}
+                  disabled={templateUsagePreviewMode}
+                  aria-label="이동 모드"
+                  title="이동 모드"
+                >
+                  <Move className="h-4 w-4" />
+                  <span>이동</span>
+                </button>
+              </div>
+              <div aria-hidden="true" />
+              <div className={`col-span-4 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
+                <button
+                  type="button"
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !canUndoCanvasHistory || templateUsagePreviewMode)}`}
+                  onClick={handleUndoCanvasHistory}
+                  disabled={!canUndoCanvasHistory || templateUsagePreviewMode}
                   aria-label="되돌리기"
                   title="되돌리기"
                 >
                   <Undo2 className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-	                  onClick={handleRedoCanvasHistory}
-	                  disabled={!canRedoCanvasHistory || templateUsagePreviewMode}
+                  <span>되돌리기</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !canRedoCanvasHistory || templateUsagePreviewMode)}`}
+                  onClick={handleRedoCanvasHistory}
+                  disabled={!canRedoCanvasHistory || templateUsagePreviewMode}
                   aria-label="다시 실행하기"
                   title="다시 실행하기"
                 >
                   <Redo2 className="h-4 w-4" />
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setShowCanvasLegend((previous) => !previous)}>
+                  <span>다시 실행</span>
+                </button>
+              </div>
+              <div aria-hidden="true" />
+              <div className={`col-span-2 ${canvasToolbarGroupClassName}`}>
+                <button
+                  type="button"
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(false)}`}
+                  onClick={() => setShowCanvasLegend((previous) => !previous)}
+                >
+                  <FileText className="h-4 w-4" />
                   {showCanvasLegend ? '범례 숨기기' : '범례 보기'}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setShowMetadataIcons((previous) => !previous)}>
+                </button>
+              </div>
+              <div aria-hidden="true" />
+              <div className={`col-span-5 grid grid-cols-5 ${canvasToolbarGroupClassName}`} aria-label="캔버스 아이콘 표시 및 크기">
+                <button
+                  type="button"
+                  className={`col-span-2 ${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false)}`}
+                  onClick={() => setShowMetadataIcons((previous) => !previous)}
+                >
+                  <CircleDot className="h-4 w-4" />
                   {showMetadataIcons ? '아이콘 끄기' : '아이콘 켜기'}
-                </Button>
-                <div className="inline-flex overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="캔버스 아이콘 크기">
-                  {CANVAS_ICON_SCALE_OPTIONS.map((scale) => (
-                    <button
-                      key={`canvas-icon-scale:${scale}`}
-                      type="button"
-                      className={`inline-flex h-8 min-w-8 items-center justify-center border-l border-slate-300 px-2 text-xs font-semibold uppercase transition first:border-l-0 ${
-                        canvasIconScale === scale
-                          ? 'bg-slate-900 text-white'
-                          : 'bg-white text-slate-600 hover:bg-slate-100'
-                      }`}
-                      onClick={() => setCanvasIconScale(scale)}
-                      aria-pressed={canvasIconScale === scale}
-                      aria-label={`캔버스 아이콘 크기 ${scale.toUpperCase()}`}
-                      title={`캔버스 아이콘 크기 ${scale.toUpperCase()}`}
-                    >
-                      {scale.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
+                </button>
+                {CANVAS_ICON_SCALE_OPTIONS.map((scale) => (
+                  <button
+                    key={`canvas-icon-scale:${scale}`}
+                    type="button"
+                    className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(scale === 'l' ? 'last' : 'middle')} uppercase ${getCanvasToolbarButtonStateClassName(canvasIconScale === scale)}`}
+                    onClick={() => setCanvasIconScale(scale)}
+                    aria-pressed={canvasIconScale === scale}
+                    aria-label={`캔버스 아이콘 크기 ${scale.toUpperCase()}`}
+                    title={`캔버스 아이콘 크기 ${scale.toUpperCase()}`}
+                  >
+                    <span>{scale.toUpperCase()}</span>
+                  </button>
+                ))}
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="px-6 pb-3 pt-0">
-            <UnderlineTabs<SelectionPanelTab>
-              tabs={[
-                { key: 'position', label: '크기 및 위치' },
-                { key: 'metadata', label: '속성' },
-                { key: 'text', label: '텍스트' },
-              ]}
-              activeKey={selectionPanelTab}
-              onSelect={setSelectionPanelTab}
-            />
           </CardContent>
           {showCanvasLegend ? (
             <CardContent className="p-6 pt-0">
@@ -36056,6 +36160,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            }
 	            styleOverlay={templateUsagePreviewMode ? null : renderPositionBoxStyleOverlay()}
 	            styleOverlayLabel="상자 스타일"
+	            sizeTypeOverlay={templateUsagePreviewMode ? null : renderPositionBoxSizeTypeOverlay()}
 	            textStyleOverlay={templateUsagePreviewMode ? null : renderPositionTextStyleOverlay()}
 	            textStyleOverlayCollapsed={positionTextStyleOverlayCollapsed}
 	            setTextStyleOverlayCollapsed={setPositionTextStyleOverlayCollapsed}
