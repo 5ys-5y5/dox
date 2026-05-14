@@ -3044,50 +3044,93 @@ const readStoredFrameAutoSizeAnchorSide = (node: HTMLElement): TextAutoSizeAncho
   return isTextAutoSizeAnchorSide(storedSide) ? storedSide : null;
 };
 
-const readFrameAutoHeightBaseHeight = (node: HTMLElement, currentHeight: number) => {
-  const baseHeight = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR));
+const readFrameAutoHeightBaseHeight = (node: HTMLElement) => {
+  const baseHeight = readFrameAutoSizeStoredBaseValue(
+    node,
+    TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR,
+    TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR
+  );
 
-  if (Number.isFinite(baseHeight) && baseHeight > 0) {
+  if (baseHeight !== null) {
     return Math.max(MIN_FRAME_SIZE_PX, baseHeight);
   }
 
-  return Math.max(MIN_FRAME_SIZE_PX, currentHeight);
+  return MIN_FRAME_SIZE_PX;
 };
+
+const readFrameAutoSizeBaseExplicit = (node: HTMLElement, baseAttr: string, explicitAttr: string) =>
+  collectFrameAutoSizeAttrTargets(node).some((target) => {
+    const base = parseFramePx(target.getAttribute(baseAttr));
+    return target.getAttribute(explicitAttr) === 'true' && Number.isFinite(base) && base > 0;
+  });
 
 const readFrameAutoHeightBaseExplicit = (node: HTMLElement) =>
-  readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR) === 'true';
+  readFrameAutoSizeBaseExplicit(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR);
 
 const readFrameAutoHeightStoredBaseHeight = (node: HTMLElement) => {
-  const baseHeight = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR));
-  return Number.isFinite(baseHeight) && baseHeight > 0 ? Math.max(MIN_FRAME_SIZE_PX, baseHeight) : null;
+  return readFrameAutoSizeStoredBaseValue(
+    node,
+    TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR,
+    TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR
+  );
 };
 
-const readFrameAutoWidthBaseWidth = (node: HTMLElement, currentWidth: number) => {
-  const baseWidth = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR));
+const readFrameAutoWidthBaseWidth = (node: HTMLElement) => {
+  const baseWidth = readFrameAutoSizeStoredBaseValue(
+    node,
+    TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR,
+    TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR
+  );
 
-  if (Number.isFinite(baseWidth) && baseWidth > 0) {
+  if (baseWidth !== null) {
     return Math.max(MIN_FRAME_SIZE_PX, baseWidth);
   }
 
-  return Math.max(MIN_FRAME_SIZE_PX, currentWidth);
+  return MIN_FRAME_SIZE_PX;
 };
 
 const readFrameAutoWidthBaseExplicit = (node: HTMLElement) =>
-  readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR) === 'true';
+  readFrameAutoSizeBaseExplicit(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR, TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR);
 
 const readFrameAutoWidthStoredBaseWidth = (node: HTMLElement) => {
-  const baseWidth = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR));
-  return Number.isFinite(baseWidth) && baseWidth > 0 ? Math.max(MIN_FRAME_SIZE_PX, baseWidth) : null;
+  return readFrameAutoSizeStoredBaseValue(
+    node,
+    TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR,
+    TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR
+  );
 };
 
 const collectFrameAutoSizeAttrTargets = (node: HTMLElement) => {
+  const shellNode = resolveFrameLayoutShell(node);
   const persistedFrameNode = resolvePersistedFrameNode(node);
+  const frameGroupId = getFrameGroupId(node).trim();
+  const shellPersistedFrameNode =
+    frameGroupId && shellNode !== persistedFrameNode
+      ? shellNode.querySelector<HTMLElement>(
+          `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${escapeCssAttributeValue(frameGroupId)}"]`
+        )
+      : null;
   const textarea =
     node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
     persistedFrameNode?.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
+    shellPersistedFrameNode?.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
     null;
 
-  return Array.from(new Set([node, persistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
+  return Array.from(new Set([node, shellNode, persistedFrameNode, shellPersistedFrameNode, textarea].filter(Boolean))) as HTMLElement[];
+};
+
+const readFrameAutoSizeStoredBaseValue = (node: HTMLElement, baseAttr: string, explicitAttr: string) => {
+  const targets = collectFrameAutoSizeAttrTargets(node);
+  const readTargetBase = (target: HTMLElement) => {
+    const base = parseFramePx(target.getAttribute(baseAttr));
+    return Number.isFinite(base) && base > 0 ? Math.max(MIN_FRAME_SIZE_PX, base) : null;
+  };
+  const explicitBase = targets
+    .filter((target) => target.getAttribute(explicitAttr) === 'true')
+    .map(readTargetBase)
+    .find((base): base is number => base !== null);
+
+  return explicitBase ?? null;
 };
 
 const writeFrameAutoHeightBaseAttrs = (node: HTMLElement, height: number) => {
@@ -3116,38 +3159,6 @@ const writeFrameAutoWidthBaseAttrs = (node: HTMLElement, width: number) => {
   });
 };
 
-const markFrameAutoHeightBaseExplicitAttrs = (node: HTMLElement) => {
-  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
-    target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR, 'true');
-  });
-};
-
-const markFrameAutoWidthBaseExplicitAttrs = (node: HTMLElement) => {
-  collectFrameAutoSizeAttrTargets(node).forEach((target) => {
-    target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR, 'true');
-  });
-};
-
-const inferLegacyExplicitFrameAutoSizeBaseAttrs = (root: ParentNode) => {
-  collectFrameSelectionAnchors(root).forEach((node) => {
-    const currentRect = readFrameNodeRect(node);
-
-    if (readFrameAutoHeightBox(node) && !readFrameAutoHeightBaseExplicit(node)) {
-      const baseHeight = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR));
-      if (baseHeight > 0 && Math.abs(baseHeight - currentRect.height) > 0.5) {
-        markFrameAutoHeightBaseExplicitAttrs(node);
-      }
-    }
-
-    if (readFrameAutoWidthBox(node) && !readFrameAutoWidthBaseExplicit(node)) {
-      const baseWidth = parseFramePx(readFrameMetadataAttr(node, TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR));
-      if (baseWidth > 0 && Math.abs(baseWidth - currentRect.width) > 0.5) {
-        markFrameAutoWidthBaseExplicitAttrs(node);
-      }
-    }
-  });
-};
-
 const writeFrameAutoSizeAnchorAttrs = (node: HTMLElement, side: TextAutoSizeAnchorSide) => {
   collectFrameAutoSizeAttrTargets(node).forEach((target) => {
     target.setAttribute(TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR, side);
@@ -3156,9 +3167,6 @@ const writeFrameAutoSizeAnchorAttrs = (node: HTMLElement, side: TextAutoSizeAnch
 
 const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) => {
   const targets = collectFrameAutoSizeAttrTargets(node);
-  const rect = readFrameNodeRect(node);
-  const baseHeight = Number(rect.height.toFixed(3));
-  const baseWidth = Number(rect.width.toFixed(3));
   const currentAnchorSide = readFrameAutoSizeAnchorSide(node, mode === 'width' ? 'right' : 'bottom');
   const nextAnchorSide =
     mode === 'width'
@@ -3170,8 +3178,9 @@ const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) 
   targets.forEach((target) => {
     if (mode === 'height') {
       target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_ATTR, 'true');
-      if (!target.hasAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR)) {
-        target.setAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR, String(baseHeight));
+      if (target.getAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR) !== 'true') {
+        target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR);
+        target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_EXPLICIT_ATTR);
       }
       target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_ATTR);
       target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR);
@@ -3182,8 +3191,9 @@ const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) 
 
     if (mode === 'width') {
       target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_ATTR, 'true');
-      if (!target.hasAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR)) {
-        target.setAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR, String(baseWidth));
+      if (target.getAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR) !== 'true') {
+        target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR);
+        target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR);
       }
       target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_ATTR);
       target.removeAttribute(TEMPLATE_FRAME_AUTO_HEIGHT_BASE_ATTR);
@@ -8453,78 +8463,61 @@ const applyTemplateUsagePreviewAutoHeightBoundaryFit = (root: ParentNode) => {
   return changedCount;
 };
 
-const pickNormalizedPeerBoundaryCoordinate = (
-  values: number[],
-  fallback: number,
-  mode: 'start' | 'inner' | 'end'
-) => {
-  const coordinates = values.filter((value) => Number.isFinite(value)).sort((left, right) => left - right);
-
-  if (coordinates.length === 0) {
-    return fallback;
-  }
-
-  if (mode === 'start') {
-    return coordinates[0];
-  }
-
-  if (mode === 'end') {
-    return coordinates[coordinates.length - 1];
-  }
-
-  return coordinates[Math.floor(coordinates.length / 2)];
-};
-
-const resolveTemplateUsagePreviewNormalizedPeerAxis = (
-  geometry: NormalizedBandGeometry,
-  peerGeometries: NormalizedBandGeometry[],
+const resolveNormalizedBandAxisBoundaries = (
+  geometries: NormalizedBandGeometry[],
   pageInner: HTMLElement,
   axis: 'row' | 'col'
 ) => {
-  const shellRect = readFrameElementRect(geometry.shell, pageInner);
-  const rangeStart = axis === 'row' ? geometry.rowStart : geometry.colStart;
-  const rangeEnd = axis === 'row' ? geometry.rowEnd : geometry.colEnd;
-  const origin = axis === 'row' ? shellRect.top : shellRect.left;
-  const size = axis === 'row' ? shellRect.height : shellRect.width;
-  const span = Math.max(1, rangeEnd - rangeStart);
-  const boundaryCoordinates = Array.from({ length: span + 1 }, (_, index) => {
-    const boundaryIndex = rangeStart + index;
-    const fallback = origin + (size * index) / span;
-    const candidates: number[] = [];
-
-    peerGeometries.forEach((peerGeometry) => {
-      const peerRect = readFrameElementRect(peerGeometry.shell, pageInner);
-      const peerStartIndex = axis === 'row' ? peerGeometry.rowStart : peerGeometry.colStart;
-      const peerEndIndex = axis === 'row' ? peerGeometry.rowEnd : peerGeometry.colEnd;
-      const peerStart = axis === 'row' ? peerRect.top : peerRect.left;
-      const peerEnd = axis === 'row' ? peerRect.top + peerRect.height : peerRect.left + peerRect.width;
-
-      if (peerStartIndex === boundaryIndex) {
-        candidates.push(peerStart);
-      }
-
-      if (peerEndIndex === boundaryIndex) {
-        candidates.push(peerEnd);
-      }
-    });
-
-    return pickNormalizedPeerBoundaryCoordinate(
-      candidates,
-      fallback,
-      index === 0 ? 'start' : index === span ? 'end' : 'inner'
-    );
-  });
-  const sizes = boundaryCoordinates.slice(1).map((coordinate, index) =>
-    Math.max(axis === 'row' ? MIN_TABLE_ROW_HEIGHT_PX : MIN_WRITABLE_TABLE_SIZE_PX, coordinate - boundaryCoordinates[index])
+  const maxBoundaryIndex = geometries.reduce(
+    (maxIndex, geometry) => Math.max(maxIndex, axis === 'row' ? geometry.rowEnd : geometry.colEnd),
+    0
   );
-  const total = sizes.reduce((sum, axisSize) => sum + axisSize, 0);
+  const minimumSize = axis === 'row' ? MIN_TABLE_ROW_HEIGHT_PX : MIN_WRITABLE_TABLE_SIZE_PX;
+  const candidatesByBoundary = Array.from({ length: maxBoundaryIndex + 1 }, () => [] as number[]);
 
-  return {
-    start: boundaryCoordinates[0],
-    end: boundaryCoordinates[boundaryCoordinates.length - 1],
-    sizes,
-    total,
-  };
+  geometries.forEach((geometry) => {
+    const shellRect = readFrameElementRect(geometry.shell, pageInner);
+    const rangeStart = axis === 'row' ? geometry.rowStart : geometry.colStart;
+    const rangeEnd = axis === 'row' ? geometry.rowEnd : geometry.colEnd;
+    const origin = axis === 'row' ? shellRect.top : shellRect.left;
+    const size = axis === 'row' ? shellRect.height : shellRect.width;
+    const span = Math.max(1, rangeEnd - rangeStart);
+
+    if (candidatesByBoundary[rangeStart]) {
+      candidatesByBoundary[rangeStart].push(origin);
+    }
+    if (candidatesByBoundary[rangeEnd]) {
+      candidatesByBoundary[rangeEnd].push(origin + size);
+    }
+
+    for (let boundaryOffset = 1; boundaryOffset < span; boundaryOffset += 1) {
+      const boundaryIndex = rangeStart + boundaryOffset;
+      if (candidatesByBoundary[boundaryIndex]) {
+        candidatesByBoundary[boundaryIndex].push(origin + (size * boundaryOffset) / span);
+      }
+    }
+  });
+
+  const firstBoundaryCandidates = candidatesByBoundary[0].filter((value) => Number.isFinite(value));
+  const allCandidates = candidatesByBoundary.flat().filter((value) => Number.isFinite(value));
+  const firstBoundary =
+    firstBoundaryCandidates.length > 0
+      ? Math.min(...firstBoundaryCandidates)
+      : allCandidates.length > 0
+        ? Math.min(...allCandidates)
+        : 0;
+  const boundaries = [firstBoundary];
+
+  for (let boundaryIndex = 1; boundaryIndex <= maxBoundaryIndex; boundaryIndex += 1) {
+    const boundaryCandidates = candidatesByBoundary[boundaryIndex].filter((value) => Number.isFinite(value));
+    const candidateBoundary =
+      boundaryCandidates.length > 0
+        ? Math.max(...boundaryCandidates)
+        : boundaries[boundaryIndex - 1] + minimumSize;
+    boundaries[boundaryIndex] = Math.max(boundaries[boundaryIndex - 1] + minimumSize, candidateBoundary);
+  }
+
+  return boundaries;
 };
 
 const syncTemplateUsagePreviewNormalizedBandPeerBounds = (root: ParentNode) => {
@@ -8543,22 +8536,25 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (root: ParentNode) => {
       });
 
     geometriesBySourceKey.forEach((sourceGeometries) => {
-      sourceGeometries.forEach((geometry) => {
-        const peerGeometries = sourceGeometries.filter((candidate) => candidate.shell !== geometry.shell);
+      const rowBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'row');
+      const colBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'col');
 
-        if (peerGeometries.length === 0) {
+      sourceGeometries.forEach((geometry) => {
+        if (sourceGeometries.length <= 1) {
           return;
         }
 
         const shellRect = readFrameElementRect(geometry.shell, pageInner);
-        const rowAxis = resolveTemplateUsagePreviewNormalizedPeerAxis(geometry, peerGeometries, pageInner, 'row');
-        const colAxis = resolveTemplateUsagePreviewNormalizedPeerAxis(geometry, peerGeometries, pageInner, 'col');
-        const nextTop = rowAxis.start;
-        const nextLeft = colAxis.start;
-        const nextBottom = rowAxis.end;
-        const nextRight = colAxis.end;
+        const nextTop = rowBoundaries[geometry.rowStart];
+        const nextLeft = colBoundaries[geometry.colStart];
+        const nextBottom = rowBoundaries[geometry.rowEnd];
+        const nextRight = colBoundaries[geometry.colEnd];
         const nextHeight = Math.max(MIN_FRAME_SIZE_PX, nextBottom - nextTop);
         const nextWidth = Math.max(MIN_FRAME_SIZE_PX, nextRight - nextLeft);
+
+        if (![nextTop, nextLeft, nextBottom, nextRight].every((value) => Number.isFinite(value))) {
+          return;
+        }
 
         if (
           Math.abs(shellRect.top - nextTop) <= 0.5 &&
@@ -8569,18 +8565,12 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (root: ParentNode) => {
           return;
         }
 
-        const rowSizes = [...rowAxis.sizes];
-        const colSizes = [...colAxis.sizes];
-        const extraHeight = nextHeight - rowAxis.total;
-        const extraWidth = nextWidth - colAxis.total;
-
-        if (rowSizes.length > 0 && extraHeight > 0.5) {
-          rowSizes[rowSizes.length - 1] += extraHeight;
-        }
-
-        if (colSizes.length > 0 && extraWidth > 0.5) {
-          colSizes[colSizes.length - 1] += extraWidth;
-        }
+        const rowSizes = rowBoundaries
+          .slice(geometry.rowStart + 1, geometry.rowEnd + 1)
+          .map((boundary, index) => Math.max(MIN_TABLE_ROW_HEIGHT_PX, boundary - rowBoundaries[geometry.rowStart + index]));
+        const colSizes = colBoundaries
+          .slice(geometry.colStart + 1, geometry.colEnd + 1)
+          .map((boundary, index) => Math.max(MIN_WRITABLE_TABLE_SIZE_PX, boundary - colBoundaries[geometry.colStart + index]));
 
         const table =
           geometry.shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') ||
@@ -13116,7 +13106,6 @@ const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | und
   clearFrameReviewWarningUi(container);
   stripFrameMetadataMarkers(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
-  inferLegacyExplicitFrameAutoSizeBaseAttrs(container);
 
   collectFrameSelectionAnchors(container).forEach((node) => {
     const role = readFrameRole(node);
@@ -13127,62 +13116,6 @@ const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | und
   enableTemplateUsagePreviewTextControls(container);
 
   return container.innerHTML.trim();
-};
-
-const isTemplateUsagePreviewValueFrameEmpty = (frameNode: HTMLElement) => {
-  const valueBox =
-    frameNode.getAttribute(TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR) === 'true'
-      ? frameNode
-      : frameNode.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"]`);
-
-  if (!valueBox) {
-    return false;
-  }
-
-  const frameInput =
-    valueBox.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
-    valueBox.querySelector<HTMLInputElement>('[data-template-frame-input="true"]') ||
-    frameNode.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
-    frameNode.querySelector<HTMLInputElement>('[data-template-frame-input="true"]');
-
-  if (frameInput) {
-    return String(frameInput.value || '').trim().length === 0;
-  }
-
-  const control =
-    (valueBox.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) ? valueBox : null) ||
-    valueBox.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}]`) ||
-    frameNode.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}]`);
-
-  if (control) {
-    const controlType = control.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR);
-
-    if (controlType === 'attachment') {
-      return readTemplateUsagePreviewFileNames(control).length === 0;
-    }
-
-    if (controlType === 'signature') {
-      const runtimeMode = control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || '';
-      const hasImage = String(control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR) || '').trim().length > 0;
-      const hasHistory = readTemplateUsagePreviewSignatureHistory(control).length > 0;
-      const status = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR) === 'signed';
-
-      if (runtimeMode === 'signature_history') {
-        return !hasHistory;
-      }
-
-      if (runtimeMode === 'signature_image') {
-        return !hasImage;
-      }
-
-      return !status;
-    }
-
-    return String(control.textContent || '').trim().length === 0;
-  }
-
-  const contentTarget = resolveFrameContentTarget(valueBox);
-  return String(contentTarget.textContent || '').trim().length === 0;
 };
 
 const applyTemplateUsagePreviewAutoSize = (
@@ -13791,6 +13724,30 @@ const measureRequiredFrameHeightFromTargets = (
   }, Number.NEGATIVE_INFINITY);
 };
 
+const measureRequiredFrameWidthFromTargets = (
+  node: HTMLElement,
+  targets: HTMLElement[]
+) => {
+  const frameRect = resolveFrameLayoutShell(node).getBoundingClientRect();
+
+  return targets.reduce((maxWidth, target) => {
+    const targetRect = target.getBoundingClientRect();
+    const naturalTextControlWidth =
+      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
+        ? measureNaturalTextControlWidth(target)
+        : 0;
+    const requiredTargetWidth =
+      naturalTextControlWidth > 0
+        ? naturalTextControlWidth
+        : Math.max(target.scrollWidth || 0, target.offsetWidth || 0, target.clientWidth || 0, targetRect.width || 0);
+    const targetLeftOffset = Math.max(0, targetRect.left - frameRect.left);
+    const targetRightInset = Math.max(0, frameRect.right - targetRect.right);
+    const requiredFrameWidth = targetLeftOffset + requiredTargetWidth + targetRightInset;
+
+    return Math.max(maxWidth, requiredFrameWidth);
+  }, Number.NEGATIVE_INFINITY);
+};
+
 const isTemplateUsagePreviewModeNode = (node: HTMLElement) =>
   Boolean(node.closest(`.template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"]`));
 
@@ -13804,42 +13761,27 @@ const measureTemplateUsagePreviewNaturalFrameHeight = (node: HTMLElement) => {
 };
 
 const measureTemplateUsagePreviewNaturalFrameWidth = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
   const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
-  const contentWidthDelta = measureTargets.reduce((maxDelta, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const requiredTargetWidth =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlWidth(target)
-        : Math.max(target.scrollWidth || 0, target.offsetWidth || 0, target.clientWidth || 0, targetRect.width || 0);
-    const visibleTargetWidth = targetRect.width || target.offsetWidth || target.clientWidth || 0;
+  const requiredFrameWidth = measureRequiredFrameWidthFromTargets(node, measureTargets);
 
-    return Math.max(maxDelta, requiredTargetWidth - visibleTargetWidth);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedContentWidthDelta = Number.isFinite(contentWidthDelta) ? contentWidthDelta : 0;
-
-  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.width + resolvedContentWidthDelta));
+  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, Number.isFinite(requiredFrameWidth) ? requiredFrameWidth : 0));
 };
 
 const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
 
   if (isTemplateUsagePreviewModeNode(node)) {
     const previewBaseHeight =
       readFrameAutoHeightStoredBaseHeight(node) ??
-      (readFrameAutoHeightBaseExplicit(node) ? readFrameAutoHeightBaseHeight(node, currentRect.height) : MIN_FRAME_SIZE_PX);
+      (readFrameAutoHeightBaseExplicit(node) ? readFrameAutoHeightBaseHeight(node) : MIN_FRAME_SIZE_PX);
+
     return Math.ceil(Math.max(previewBaseHeight, measureTemplateUsagePreviewNaturalFrameHeight(node)));
   }
 
-  const baseHeight = readFrameAutoHeightBaseHeight(node, currentRect.height);
-
-  if (isTemplateUsagePreviewValueFrameEmpty(node)) {
-    return Math.ceil(baseHeight);
-  }
+  const baseHeight = readFrameAutoHeightBaseHeight(node);
 
   const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
   const requiredFrameHeight = measureRequiredFrameHeightFromTargets(node, measureTargets);
@@ -13848,42 +13790,23 @@ const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
 };
 
 const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
 
   if (isTemplateUsagePreviewModeNode(node)) {
     const previewBaseWidth =
       readFrameAutoWidthStoredBaseWidth(node) ??
-      (readFrameAutoWidthBaseExplicit(node) ? readFrameAutoWidthBaseWidth(node, currentRect.width) : MIN_FRAME_SIZE_PX);
+      (readFrameAutoWidthBaseExplicit(node) ? readFrameAutoWidthBaseWidth(node) : MIN_FRAME_SIZE_PX);
+
     return Math.ceil(Math.max(previewBaseWidth, measureTemplateUsagePreviewNaturalFrameWidth(node)));
   }
 
-  const baseWidth = readFrameAutoWidthBaseWidth(node, currentRect.width);
-
-  if (isTemplateUsagePreviewValueFrameEmpty(node)) {
-    return Math.ceil(baseWidth);
-  }
+  const baseWidth = readFrameAutoWidthBaseWidth(node);
 
   const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
-  const extraWidth = measureTargets.reduce((maxExtraWidth, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const naturalTextControlWidth =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlWidth(target)
-        : 0;
-    const targetScrollWidth = Math.max(target.scrollWidth || 0, naturalTextControlWidth);
-    const targetClientWidth = target.clientWidth || 0;
-    const targetOffsetWidth = target.offsetWidth || 0;
-    const requiredTargetWidth =
-      naturalTextControlWidth > 0 ? naturalTextControlWidth : Math.max(targetScrollWidth, targetClientWidth, targetOffsetWidth);
-    const visibleTargetWidth = targetRect.width || targetOffsetWidth || targetClientWidth;
+  const requiredFrameWidth = measureRequiredFrameWidthFromTargets(node, measureTargets);
 
-    return Math.max(maxExtraWidth, requiredTargetWidth - visibleTargetWidth);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedExtraWidth = Number.isFinite(extraWidth) ? extraWidth : 0;
-
-  return Math.ceil(Math.max(baseWidth, currentRect.width + resolvedExtraWidth));
+  return Math.ceil(Math.max(baseWidth, Number.isFinite(requiredFrameWidth) ? requiredFrameWidth : 0));
 };
 
 const measureContentFitFrameHeight = (node: HTMLElement) => {
@@ -13896,27 +13819,12 @@ const measureContentFitFrameHeight = (node: HTMLElement) => {
 };
 
 const measureContentFitFrameWidth = (node: HTMLElement) => {
-  const currentRect = readFrameNodeRect(node);
   const contentTarget = resolveFrameContentTarget(node);
   const textInput = node.querySelector<HTMLElement>('[data-template-frame-input="true"]');
   const measureTargets = Array.from(new Set([contentTarget, textInput].filter(Boolean) as HTMLElement[]));
-  const contentWidthDelta = measureTargets.reduce((maxDelta, target) => {
-    const targetRect = target.getBoundingClientRect();
-    const naturalTextControlWidth =
-      target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
-        ? measureNaturalTextControlWidth(target)
-        : 0;
-    const requiredTargetWidth =
-      naturalTextControlWidth > 0
-        ? naturalTextControlWidth
-        : Math.max(target.scrollWidth || 0, target.clientWidth || 0, target.offsetWidth || 0);
-    const visibleTargetWidth = targetRect.width || target.offsetWidth || target.clientWidth;
+  const requiredFrameWidth = measureRequiredFrameWidthFromTargets(node, measureTargets);
 
-    return Math.max(maxDelta, requiredTargetWidth - visibleTargetWidth);
-  }, Number.NEGATIVE_INFINITY);
-  const resolvedContentWidthDelta = Number.isFinite(contentWidthDelta) ? contentWidthDelta : 0;
-
-  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, currentRect.width + resolvedContentWidthDelta));
+  return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, Number.isFinite(requiredFrameWidth) ? requiredFrameWidth : 0));
 };
 
 type TemplateAutoSizeApplyOptions = {
@@ -14207,6 +14115,7 @@ const applyTemplateSecondaryContentFit = (
 
   if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
     materializePositionGroupWrappers(root);
+    syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
     ensureRelativeAnchorConfigs(root);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
@@ -14242,6 +14151,7 @@ const applyTemplateAutoSizeBoxes = (
 
   if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
     materializePositionGroupWrappers(root);
+    syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
     ensureRelativeAnchorConfigs(root);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
@@ -19995,6 +19905,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       const spacingChanged = applyPreservedPositionSpacingRelations(root);
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
       if (!spacingChanged) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
@@ -20055,7 +19966,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       });
       const boundaryFitChangedCount = applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
 
-      if (autoSizeResult.changedCount > 0 || boundaryFitChangedCount > 0) {
+      if (autoSizeResult.changedCount > 0 || boundaryFitChangedCount > 0 || isTemplateUsagePreviewModeNode(root)) {
         applyTemplateUsagePreviewPreservedSpacingRelations(root);
       }
 
@@ -22811,7 +22722,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             applyRelativeAnchoredFrameRectsInRoot(liveNode);
           }
 
-          const autoSizeResult = applyTemplateAutoSizeBoxes(liveNode);
+          const autoSizeResult = applyEditorAutoSizeBoxesWithPreservedLayout(liveNode);
 
           if (autoSizeResult.changedCount > 0) {
             syncDraftPreviewHtmlRef({ recordHistory: false });
@@ -22821,6 +22732,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     },
 	    [
 	      positionOrderLockSelectionMode,
+	      applyEditorAutoSizeBoxesWithPreservedLayout,
 	      renderedPreviewHtml,
 	      schedulePreviewEditorState,
 	      selectionPanelTab,
@@ -24522,7 +24434,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       schedulePreviewEditorState();
       syncSelectionStyleDraft();
       requestPreviewTextFit();
-    }, 0);
+    }, 600);
   }, [
     cancelDeferredTextAutoSizeSync,
     requestPreviewTextFit,
@@ -32754,11 +32666,10 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
 
       const normalizedValues = targetNodes.map((node) => {
-        const currentRect = readFrameNodeRect(node);
         const minimumSize =
           autoSizeMinimumAxis === 'height'
-            ? readFrameAutoHeightBaseHeight(node, currentRect.height)
-            : readFrameAutoWidthBaseWidth(node, currentRect.width);
+            ? readFrameAutoHeightBaseHeight(node)
+            : readFrameAutoWidthBaseWidth(node);
 
         return String(Number(Math.max(MIN_FRAME_SIZE_PX, minimumSize).toFixed(3)));
       });

@@ -37,6 +37,26 @@ A. `Transport closed` + config가 `--browser-url=http://127.0.0.1:9223`
   - 이 경우 `setup_split_chrome_devtools.command`를 반복 실행해도 같은 실패를 재현할 수 있다.
 
 
+A-2. `Transport closed` + 로그에 `MCP server stderr (npx): Assertion failed`
+
+- 원인:
+  - Chrome/페이지 조작 중 `chrome-devtools-mcp` 프로세스 자체가 비정상 종료된 상태.
+  - 이 경우 `~/.codex/config.toml`이 이미 `--isolated=true`여도, 현재 Codex 세션에 붙어 있던 MCP stdio transport가 닫힌 뒤라 같은 세션에서 `list_pages`를 다시 호출해도 복구되지 않는다.
+- 확인:
+  - `~/.codex/log/codex-tui.log`에서 아래 문구를 찾는다.
+    - `MCP server stderr (npx): Assertion failed`
+    - `tool call failed for chrome-devtools/list_pages`
+    - `Caused by: Transport closed`
+- 처리:
+  1) `~/.codex/config.toml`의 `[mcp_servers.chrome-devtools]`가 `args = ["-y", "chrome-devtools-mcp@latest", "--isolated=true"]`인지 확인
+  2) 이미 isolated라면 설정 스크립트를 반복 실행하지 말고 이 Codex 창만 재시작
+  3) 재시작 직후 첫 호출로 `list_pages` 확인
+- 주의:
+  - 기존 다른 LLM이 사용 중인 Chrome/DevTools는 종료하지 않는다.
+  - 현재 세션에서 `Transport closed`가 난 뒤에는 코드 수정 검증용 브라우저 접근이 불가능할 수 있으므로, 재시작 후 즉시 브라우저 검증부터 수행한다.
+  - 현재 Codex 샌드박스가 `~/.codex/config.toml` 백업/수정을 막으면 `setup_chrome_devtools_isolated.mjs`가 `EPERM: operation not permitted, copyfile ... config.toml.bak...`로 실패할 수 있다. 이 경우 설정은 이미 isolated인지 먼저 확인하고, 스크립트 반복 대신 Codex 창 재시작을 우선한다.
+
+
 B. `browser profile in use`, `Use --isolated` 류 충돌 메시지
 
 - 원인:
@@ -82,6 +102,7 @@ C. 장기적으로 상태 유지(쿠키/세션) 필요
 - `--browser-url=http://127.0.0.1:9223`로 고정된 상태에서, 현재 Codex 문맥은 로컬 포트 접근이 불가해 `Transport closed`가 발생할 수 있다.
 - 이 상황에서는 split 스크립트 반복보다 isolated 전환이 우선이다.
 - 설정 변경 후 재시작하지 않으면 MCP 바인딩이 유지되어 복구되지 않는다.
+- isolated 전환 후에도 `Assertion failed`로 MCP 프로세스가 죽으면 설정 문제가 아니라 현 세션 transport 종료 상태다. 이 경우 이 Codex 창 재시작이 필요하다.
 
 
 참고: 수동 설정 예시
