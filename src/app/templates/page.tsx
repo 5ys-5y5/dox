@@ -14,7 +14,6 @@ export default function TemplatesPage() {
         <TemplateEditWorkspace
           initialTemplateId={templateIdFromQuery}
           templateListDisplay="inline"
-          showGuaranteedExtractControls
         />
       </div>
     </main>

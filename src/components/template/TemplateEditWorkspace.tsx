@@ -17,7 +17,6 @@ import {
   Eye,
   EyeOff,
   FileText,
-  FileUp,
   GripHorizontal,
   Italic,
   KeyRound,
@@ -33,7 +32,6 @@ import {
   Trash2,
   Underline,
   Undo2,
-  Wand2,
 } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
@@ -41,17 +39,9 @@ import { renderToStaticMarkup } from 'react-dom/server.browser';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
-import PreviewPipelineInspector, { type PreviewPipelineStage } from './PreviewPipelineInspector';
 import { EntityPicker, type EntityPickerOption } from '../ui/EntityPicker';
 import { Input } from '../ui/Input';
 import { applyTemplateExtractEditableTextFit } from '../../lib/templateExtractEditableTextFit';
-import {
-  buildGuaranteedDraftHtmlFromFrameDraft,
-  createGuaranteedFrameDraftWithPdf,
-  GUARANTEED_TEMPLATE_EXTRACT_ENGINE_VERSION,
-  GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION,
-  GUARANTEED_TEMPLATE_EXTRACT_FRAME_TEXT_VERSION,
-} from '../../lib/templateGuaranteedExtractClient';
 import type {
   TemplateEdgeDescriptorDto,
   TemplateEdgeFrameDto,
@@ -139,8 +129,6 @@ type SelectionSaveProgressState = {
   stage: string;
   detail: string;
 };
-
-type TemplatePreviewPipelineStageKey = 'raw' | 'normalize' | 'layout' | 'fit';
 
 type StyleFieldKey = keyof SelectionStyleDraft;
 type StyleFieldApplyState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -621,7 +609,6 @@ type TemplateEditWorkspaceProps = {
   initialDraft?: TemplateEditWorkspaceInitialDraft | null;
   hideHeader?: boolean;
   templateListDisplay?: 'picker' | 'inline';
-  showGuaranteedExtractControls?: boolean;
   onTemplateSaved?: (template: TemplateRecordDto) => void;
 };
 
@@ -2220,28 +2207,6 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 });
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const CANVAS_ICON_SCALE_OPTIONS: CanvasIconScale[] = ['s', 'm', 'l'];
-const TEMPLATE_PREVIEW_PIPELINE_STAGES: PreviewPipelineStage[] = [
-  {
-    key: 'raw',
-    label: '원본 Draft',
-    description: '불러온 draftHtml 그대로 표시합니다.',
-  },
-  {
-    key: 'normalize',
-    label: 'Frame Normalize',
-    description: 'frame band normalize, clone attr 동기화, 편집 권한 적용 단계입니다.',
-  },
-  {
-    key: 'layout',
-    label: '레이아웃 보정',
-    description: 'position group, relative anchor, autosize box 보정을 적용한 상태입니다.',
-  },
-  {
-    key: 'fit',
-    label: 'Preview Text Fit',
-    description: 'applyTemplateExtractEditableTextFit() 를 적용한 최종 편집 preview 상태입니다.',
-  },
-];
 const TEMPLATE_FRAME_BOX_KIND_OPTIONS: TemplateFrameBoxKind[] = ['text', 'attachment', 'signature'];
 const TEMPLATE_FRAME_ROLE_OPTIONS: TemplateFrameRole[] = ['key', 'value', 'key_value'];
 const TEXT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['static_label', 'editable_text'];
@@ -16994,7 +16959,6 @@ export default function TemplateEditWorkspace({
   initialDraft = null,
   hideHeader = false,
   templateListDisplay = 'picker',
-  showGuaranteedExtractControls = false,
   onTemplateSaved,
 }: TemplateEditWorkspaceProps) {
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
@@ -17069,9 +17033,6 @@ export default function TemplateEditWorkspace({
   const [showCanvasLegend, setShowCanvasLegend] = React.useState(false);
   const [templateUsagePreviewMode, setTemplateUsagePreviewMode] = React.useState(false);
   const [templateUsagePreviewHtml, setTemplateUsagePreviewHtml] = React.useState('');
-  const [previewPipelineInspectorEnabled, setPreviewPipelineInspectorEnabled] = React.useState(false);
-  const [previewPipelineStageIndex, setPreviewPipelineStageIndex] = React.useState(0);
-  const [previewPipelineApprovedStageIndex, setPreviewPipelineApprovedStageIndex] = React.useState(0);
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   React.useEffect(() => {
     textCanvasEditModeActiveRef.current = isTextCanvasEditModeActive;
@@ -17099,8 +17060,6 @@ export default function TemplateEditWorkspace({
   const [previewDomVersion, setPreviewDomVersion] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
-  const [guaranteedExtractFile, setGuaranteedExtractFile] = React.useState<File | null>(null);
-  const [guaranteedExtractLoading, setGuaranteedExtractLoading] = React.useState(false);
   const [workspaceDraft, setWorkspaceDraft] = React.useState<TemplateEditWorkspaceInitialDraft | null>(null);
   const [canvasHistoryRevision, setCanvasHistoryRevision] = React.useState(0);
   const [textAutoSizeUiOverride, setTextAutoSizeUiOverride] = React.useState<{
@@ -17110,7 +17069,6 @@ export default function TemplateEditWorkspace({
   const [positionSelectionClickChainSnapshot, setPositionSelectionClickChainSnapshot] =
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
-  const guaranteedExtractFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const selectionAppearanceToolbarRef = React.useRef<HTMLDivElement | null>(null);
   const previousSelectionPanelTabRef = React.useRef<SelectionPanelTab>('position');
@@ -17199,17 +17157,7 @@ export default function TemplateEditWorkspace({
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const previewPipelineActiveStageIndex = previewPipelineInspectorEnabled
-    ? previewPipelineStageIndex
-    : TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1;
-  const previewPipelineActiveStageKey =
-    (TEMPLATE_PREVIEW_PIPELINE_STAGES[previewPipelineActiveStageIndex]?.key as TemplatePreviewPipelineStageKey | undefined) ||
-    'fit';
-  const surfaceRenderedPreviewHtml = previewPipelineInspectorEnabled
-    ? renderedPreviewHtml
-    : templateUsagePreviewMode
-      ? templateUsagePreviewHtml
-      : renderedPreviewHtml;
+  const surfaceRenderedPreviewHtml = templateUsagePreviewMode ? templateUsagePreviewHtml : renderedPreviewHtml;
   const selectedEdgeMemberCount = React.useMemo(
     () => new Set(edgeSelectionState.tokens.flatMap((token) => token.memberEdgeIds)).size,
     [edgeSelectionState]
@@ -17218,47 +17166,6 @@ export default function TemplateEditWorkspace({
   const selectedEdgeAnchorIds = edgeSelectionState.tokens.map((token) => token.anchorEdgeId);
   const selectedEdgeClickedCount = edgeRoleDiagnostics.selectedEdgeClickedIds.length;
   const selectedEdgeAutoMultiCount = edgeRoleDiagnostics.selectedEdgeAutoMultiIds.length;
-
-  React.useEffect(() => {
-    if (!previewPipelineInspectorEnabled) {
-      return;
-    }
-
-    setPreviewPipelineStageIndex(0);
-    setPreviewPipelineApprovedStageIndex(0);
-  }, [previewPipelineInspectorEnabled, renderedPreviewHtml, templateDetail?.template.id, workspaceDraft?.draftKey]);
-
-  const handleTogglePreviewPipelineInspector = React.useCallback(() => {
-    setPreviewPipelineInspectorEnabled((previous) => {
-      const nextEnabled = !previous;
-
-      if (nextEnabled) {
-        if (templateUsagePreviewMode) {
-          setTemplateUsagePreviewMode(false);
-          setTemplateUsagePreviewHtml('');
-        }
-        setPreviewPipelineStageIndex(0);
-        setPreviewPipelineApprovedStageIndex(0);
-        return true;
-      }
-
-      setPreviewPipelineStageIndex(TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1);
-      setPreviewPipelineApprovedStageIndex(TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1);
-      return false;
-    });
-  }, [templateUsagePreviewMode]);
-
-  const handleSelectPreviewPipelineStage = React.useCallback((stageIndex: number) => {
-    setPreviewPipelineStageIndex(stageIndex);
-  }, []);
-
-  const handleApproveNextPreviewPipelineStage = React.useCallback(() => {
-    setPreviewPipelineApprovedStageIndex((previous) => {
-      const nextApprovedStageIndex = Math.min(TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1, previous + 1);
-      setPreviewPipelineStageIndex(nextApprovedStageIndex);
-      return nextApprovedStageIndex;
-    });
-  }, []);
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
   const primarySelectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds) || null;
   const canEditSingleSelection = selectedFrameGroupIds.length === 1;
@@ -18154,10 +18061,6 @@ export default function TemplateEditWorkspace({
   );
 
   const requestPreviewTextFit = React.useCallback(() => {
-    if (previewPipelineInspectorEnabled) {
-      return;
-    }
-
     const root = previewRef.current;
 
     if (!root || typeof window === 'undefined') {
@@ -18167,13 +18070,9 @@ export default function TemplateEditWorkspace({
     window.requestAnimationFrame(() => {
       applyTemplateExtractEditableTextFit(root);
     });
-  }, [previewPipelineInspectorEnabled]);
+  }, []);
 
   const applyPreviewTextFitImmediately = React.useCallback(() => {
-    if (previewPipelineInspectorEnabled) {
-      return;
-    }
-
     const root = previewRef.current;
 
     if (!root) {
@@ -18181,7 +18080,7 @@ export default function TemplateEditWorkspace({
     }
 
     applyTemplateExtractEditableTextFit(root);
-  }, [previewPipelineInspectorEnabled]);
+  }, []);
 
   const syncPreviewSurfaceScale = React.useCallback((rootArg?: HTMLElement | null) => {
     const root = rootArg || previewRef.current;
@@ -23168,57 +23067,8 @@ export default function TemplateEditWorkspace({
     [buildLiveEdgeTopologySnapshot]
   );
 
-  const runPreviewPipelineInspectorStage = React.useCallback(
-    async (root: HTMLElement, stageIndex: number) => {
-      syncPreviewSurfaceCloneAttrs(root);
-      syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
-      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-        root,
-        selectionPanelTab === 'position' && positionOrderLockSelectionMode
-      );
-      applyPreviewEditPermissions(root, selectionPanelTab, false);
-
-      if (stageIndex >= 1) {
-        ensurePreviewFrameBandNormalization(root);
-        syncPreviewSurfaceCloneAttrs(root);
-      }
-
-      if (stageIndex >= 2) {
-        if (selectionPanelTab === 'position') {
-          materializePositionGroupWrappers(root);
-          ensureRelativeAnchorConfigs(root);
-          normalizePositionGroupRelativeAnchors(root);
-          applyRelativeAnchoredFrameRectsInRoot(root);
-        }
-
-        applyEditorAutoSizeBoxesWithPreservedLayout(root);
-      }
-
-      syncPreviewSurfaceScale(root);
-
-      if (stageIndex >= 3) {
-        await document.fonts?.ready?.catch(() => undefined);
-        await new Promise<void>((resolve) => {
-          window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
-        });
-        applyTemplateExtractEditableTextFit(root);
-        syncPreviewSurfaceScale(root);
-      }
-    },
-    [
-      applyEditorAutoSizeBoxesWithPreservedLayout,
-      positionOrderLockSelectionMode,
-      selectionPanelTab,
-      syncPreviewSurfaceScale,
-    ]
-  );
-
 	  const schedulePreviewEditorState = React.useCallback(() => {
 	    if (typeof window === 'undefined') {
-	      return;
-	    }
-
-	    if (previewPipelineInspectorEnabled) {
 	      return;
 	    }
 
@@ -23372,7 +23222,6 @@ export default function TemplateEditWorkspace({
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
       visibleMetadataReviewIssues,
-      previewPipelineInspectorEnabled,
 	    syncPreviewSurfaceScale,
 	    templateUsagePreviewMode,
 	  ]);
@@ -23381,11 +23230,6 @@ export default function TemplateEditWorkspace({
 	      previewRef.current = node;
 
 	      if (node && renderedPreviewHtml) {
-          if (previewPipelineInspectorEnabled) {
-            void runPreviewPipelineInspectorStage(node, previewPipelineActiveStageIndex);
-            return;
-          }
-
 	        syncPreviewSurfaceCloneAttrs(node);
 	        if (templateUsagePreviewMode) {
 	          enableTemplateUsagePreviewTextControls(node);
@@ -23450,12 +23294,9 @@ export default function TemplateEditWorkspace({
       }
     },
 	    [
-        previewPipelineActiveStageIndex,
-        previewPipelineInspectorEnabled,
 	      positionOrderLockSelectionMode,
 	      applyEditorAutoSizeBoxesWithPreservedLayout,
 	      renderedPreviewHtml,
-        runPreviewPipelineInspectorStage,
 	      schedulePreviewEditorState,
 	      selectionPanelTab,
 	      syncDraftPreviewHtmlRef,
@@ -23463,19 +23304,6 @@ export default function TemplateEditWorkspace({
 	      templateUsagePreviewMode,
 	    ]
 	  );
-
-  React.useEffect(() => {
-    if (!previewPipelineInspectorEnabled || !previewRef.current || !surfaceRenderedPreviewHtml.trim()) {
-      return;
-    }
-
-    void runPreviewPipelineInspectorStage(previewRef.current, previewPipelineActiveStageIndex);
-  }, [
-    previewPipelineActiveStageIndex,
-    previewPipelineInspectorEnabled,
-    runPreviewPipelineInspectorStage,
-    surfaceRenderedPreviewHtml,
-  ]);
 
   const applyRuntimeSelectionUi = React.useCallback(
     (
@@ -24403,57 +24231,6 @@ export default function TemplateEditWorkspace({
     },
     [loadTemplate, syncTemplateQuery]
   );
-
-  const handleGuaranteedExtractFileChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const nextFile = event.target.files?.[0] || null;
-    setGuaranteedExtractFile(nextFile);
-    setMessage(nextFile ? `${nextFile.name} 파일을 선택했습니다.` : null);
-  }, []);
-
-  const handleGuaranteedExtract = React.useCallback(async () => {
-    if (!guaranteedExtractFile) {
-      setMessage('추출할 PDF 파일을 먼저 선택하세요.');
-      return;
-    }
-
-    setGuaranteedExtractLoading(true);
-    setMessage(null);
-
-    try {
-      const detail = await createGuaranteedFrameDraftWithPdf({
-        file: guaranteedExtractFile,
-        sourceTitle: guaranteedExtractFile.name,
-        engineVersion: GUARANTEED_TEMPLATE_EXTRACT_ENGINE_VERSION,
-        frameGroupVersion: GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION,
-      });
-      const generatedDraftHtml = detail.draft.generatedDraftHtml?.trim() || '';
-
-      if (!generatedDraftHtml) {
-        throw new Error('템플릿 추출 결과 HTML이 비어 있습니다.');
-      }
-
-      const { draftHtml } = await buildGuaranteedDraftHtmlFromFrameDraft({
-        generatedDraftHtml,
-        renderModelSourceHtml: detail.draft.generatedDraftHtml || detail.draft.sourceContent || '',
-      });
-
-      const sourceBaseName = guaranteedExtractFile.name.replace(/\.[^.]+$/u, '').trim();
-      setWorkspaceDraft({
-        draftKey: `${detail.draft.id}:${Date.now()}`,
-        templateName: sourceBaseName ? `${sourceBaseName} 템플릿` : '새 템플릿 초안',
-        sourceDocumentName: detail.draft.sourceTitle || guaranteedExtractFile.name,
-        draftHtml,
-        layoutResizeMode: 'grow_height',
-      });
-      setMessage(
-        `${GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION} + ${GUARANTEED_TEMPLATE_EXTRACT_FRAME_TEXT_VERSION} 조합으로 추출한 초안을 불러왔습니다. 저장 전까지 템플릿 리스트에는 추가되지 않습니다.`
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '템플릿 추출에 실패했습니다.');
-    } finally {
-      setGuaranteedExtractLoading(false);
-    }
-  }, [guaranteedExtractFile]);
 
   React.useEffect(() => {
     void loadTemplates();
@@ -36351,7 +36128,7 @@ export default function TemplateEditWorkspace({
           </Link>
 	          <Button
               onClick={() => void saveTemplate()}
-              disabled={saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode || previewPipelineInspectorEnabled}
+              disabled={saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode}
             >
 	            {saving ? '저장 중...' : templateDetail ? '현재 템플릿 저장' : renderedPreviewHtml.trim() ? '초안 저장' : '현재 템플릿 저장'}
 	          </Button>
@@ -36373,51 +36150,6 @@ export default function TemplateEditWorkspace({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {showGuaranteedExtractControls ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="green">PDF 추출</Badge>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION} + {GUARANTEED_TEMPLATE_EXTRACT_FRAME_TEXT_VERSION}
-                    </p>
-                  </div>
-                  <p className="text-xs text-slate-600">
-                    추출 결과는 저장 전 초안으로 바로 캔버스에 표시되고, 저장하면 템플릿 리스트에 추가됩니다.
-                  </p>
-                </div>
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    ref={guaranteedExtractFileInputRef}
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    className="hidden"
-                    onChange={handleGuaranteedExtractFileChange}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 min-w-0 justify-start gap-2 sm:w-72"
-                    onClick={() => guaranteedExtractFileInputRef.current?.click()}
-                  >
-                    <FileUp className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{guaranteedExtractFile ? guaranteedExtractFile.name : 'PDF 파일 업로드'}</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    className="h-10 gap-2"
-                    onClick={() => void handleGuaranteedExtract()}
-                    disabled={guaranteedExtractLoading || !guaranteedExtractFile}
-                  >
-                    {guaranteedExtractLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                    {guaranteedExtractLoading ? '추출 중...' : '보장 조합 추출'}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
           <div className={`grid gap-4 ${hideHeader ? 'xl:grid-cols-[1.2fr_auto_auto]' : 'xl:grid-cols-[1.2fr_auto]'}`}>
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-800">
@@ -36578,7 +36310,7 @@ export default function TemplateEditWorkspace({
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(templateUsagePreviewMode, !renderedPreviewHtml.trim())}`}
                   onClick={toggleTemplateUsagePreviewMode}
-                  disabled={!renderedPreviewHtml.trim() || previewPipelineInspectorEnabled}
+                  disabled={!renderedPreviewHtml.trim()}
                   aria-pressed={templateUsagePreviewMode}
                   aria-label={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
                   title={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
@@ -36591,9 +36323,9 @@ export default function TemplateEditWorkspace({
               <div className={`col-span-2 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode)}`}
                   onClick={() => setCanvasInteractionMode('select')}
-                  disabled={templateUsagePreviewMode || previewPipelineInspectorEnabled}
+                  disabled={templateUsagePreviewMode}
                   aria-label="선택 모드"
                   title="선택 모드"
                 >
@@ -36602,9 +36334,9 @@ export default function TemplateEditWorkspace({
                 </button>
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode)}`}
                   onClick={() => setCanvasInteractionMode('move')}
-                  disabled={templateUsagePreviewMode || previewPipelineInspectorEnabled}
+                  disabled={templateUsagePreviewMode}
                   aria-label="이동 모드"
                   title="이동 모드"
                 >
@@ -36616,9 +36348,9 @@ export default function TemplateEditWorkspace({
               <div className={`col-span-2 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !canUndoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !canUndoCanvasHistory || templateUsagePreviewMode)}`}
                   onClick={handleUndoCanvasHistory}
-                  disabled={!canUndoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled}
+                  disabled={!canUndoCanvasHistory || templateUsagePreviewMode}
                   aria-label="되돌리기"
                   title="되돌리기"
                 >
@@ -36627,9 +36359,9 @@ export default function TemplateEditWorkspace({
                 </button>
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !canRedoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !canRedoCanvasHistory || templateUsagePreviewMode)}`}
                   onClick={handleRedoCanvasHistory}
-                  disabled={!canRedoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled}
+                  disabled={!canRedoCanvasHistory || templateUsagePreviewMode}
                   aria-label="다시 실행하기"
                   title="다시 실행하기"
                 >
@@ -36677,19 +36409,6 @@ export default function TemplateEditWorkspace({
                 ))}
               </div>
             </div>
-          </CardContent>
-          <CardContent className="px-6 pb-3 pt-0">
-            <PreviewPipelineInspector
-              title="편집 preview DOM"
-              summary="불러온 draftHtml을 원본 -> frame normalize -> 레이아웃 보정 -> preview text fit 순서로 직접 넘기며 어느 단계에서 편집 preview DOM이 깨지는지 확인합니다. 검사 중에는 캔버스 편집과 저장을 잠급니다."
-              enabled={previewPipelineInspectorEnabled}
-              stages={TEMPLATE_PREVIEW_PIPELINE_STAGES}
-              activeStageIndex={previewPipelineActiveStageIndex}
-              approvedStageIndex={previewPipelineApprovedStageIndex}
-              onToggleEnabled={handleTogglePreviewPipelineInspector}
-              onSelectStage={handleSelectPreviewPipelineStage}
-              onApproveNextStage={handleApproveNextPreviewPipelineStage}
-            />
           </CardContent>
           {showCanvasLegend ? (
             <CardContent className="p-6 pt-0">
@@ -36963,11 +36682,7 @@ export default function TemplateEditWorkspace({
 		            </CardContent>
 		          ) : null}
 	          <TemplateEditPreviewSurface
-              key={
-                previewPipelineInspectorEnabled
-                  ? `template-preview-stage:${previewPipelineActiveStageKey}:${selectionPanelTab}`
-                  : 'template-preview-stage:live'
-              }
+              key="template-preview-stage:live"
 	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
 	            boxCreationMode={templateUsagePreviewMode ? false : boxCreationMode}
 	            canvasIconScale={canvasIconScale}
@@ -36975,47 +36690,34 @@ export default function TemplateEditWorkspace({
 	            templateUsagePreviewMode={templateUsagePreviewMode}
 	            selectionPanelTab={selectionPanelTab}
 	            showMetadataIcons={templateUsagePreviewMode ? false : showMetadataIcons}
-	            actionOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : resolveCanvasActionOverlay()}
+	            actionOverlay={templateUsagePreviewMode ? null : resolveCanvasActionOverlay()}
 	            actionOverlayLabel={canvasActionOverlayLabel}
 	            actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
 	            metadataNameOverlay={
 	              !templateUsagePreviewMode &&
-                !previewPipelineInspectorEnabled &&
                 selectionPanelTab === 'metadata' &&
                 selectedFrameGroupIds.length <= 1
 	                ? renderMetadataNameOverlay
 	                : null
 	            }
-	            metadataRolePrimaryOverlay={
-	              !templateUsagePreviewMode && !previewPipelineInspectorEnabled && selectionPanelTab === 'metadata'
-                  ? renderMetadataRolePrimaryOverlay
-                  : null
-	            }
-	            metadataRoleSecondaryOverlay={
-	              !templateUsagePreviewMode && !previewPipelineInspectorEnabled && selectionPanelTab === 'metadata'
-                  ? renderMetadataRoleSecondaryOverlay
-                  : null
-	            }
-	            metadataRoleTertiaryOverlay={
-	              !templateUsagePreviewMode && !previewPipelineInspectorEnabled && selectionPanelTab === 'metadata'
-                  ? renderMetadataRoleTertiaryOverlay
-                  : null
-	            }
-	            styleOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderPositionBoxStyleOverlay()}
+	            metadataRolePrimaryOverlay={!templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRolePrimaryOverlay : null}
+	            metadataRoleSecondaryOverlay={!templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleSecondaryOverlay : null}
+	            metadataRoleTertiaryOverlay={!templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleTertiaryOverlay : null}
+	            styleOverlay={templateUsagePreviewMode ? null : renderPositionBoxStyleOverlay()}
 	            styleOverlayLabel="상자 스타일"
-	            sizeTypeOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderPositionBoxSizeTypeOverlay()}
-	            textStyleOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderPositionTextStyleOverlay()}
+	            sizeTypeOverlay={templateUsagePreviewMode ? null : renderPositionBoxSizeTypeOverlay()}
+	            textStyleOverlay={templateUsagePreviewMode ? null : renderPositionTextStyleOverlay()}
 	            textStyleOverlayCollapsed={positionTextStyleOverlayCollapsed}
 	            setTextStyleOverlayCollapsed={setPositionTextStyleOverlayCollapsed}
 	            textStyleOverlayExpandedWidthClassName="w-fit max-w-[250px]"
-	            summaryOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderSelectionSummaryBox()}
+	            summaryOverlay={templateUsagePreviewMode ? null : renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}
-            handlePreviewPointerDown={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerDown}
-            handlePreviewPointerMove={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerMove}
-            handlePreviewPointerUp={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerUp}
-            handlePreviewPointerCancel={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerCancel}
-            handlePreviewClickCapture={previewPipelineInspectorEnabled ? () => undefined : handlePreviewClickCapture}
-            handlePreviewInput={previewPipelineInspectorEnabled ? () => undefined : handlePreviewInput}
+            handlePreviewPointerDown={handlePreviewPointerDown}
+            handlePreviewPointerMove={handlePreviewPointerMove}
+            handlePreviewPointerUp={handlePreviewPointerUp}
+            handlePreviewPointerCancel={handlePreviewPointerCancel}
+            handlePreviewClickCapture={handlePreviewClickCapture}
+            handlePreviewInput={handlePreviewInput}
           />
         </Card>
       </div>
