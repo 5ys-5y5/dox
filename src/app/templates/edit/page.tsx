@@ -10,8 +10,8 @@ export default function TemplateEditPage() {
 
   return (
     <main className="min-h-screen bg-white">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-10 md:px-8">
-        <TemplateEditWorkspace initialTemplateId={templateIdFromQuery} />
+      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
+        <TemplateEditWorkspace initialTemplateId={templateIdFromQuery} templateListDisplay="inline" />
       </div>
     </main>
   );

@@ -1,10 +1,11 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { Input } from '../../../components/ui/Input';
+import type { TemplateEditWorkspaceInitialDraft } from '../../../components/template/TemplateEditWorkspace';
 import type {
   TemplateExtractApproveResult,
   TemplateExtractDetailResult,
@@ -24,6 +25,8 @@ const DEFAULT_ENGINE_VERSION = '47';
 const FIXED_LAYOUT_RESIZE_MODE: TemplateLayoutResizeMode = 'grow_height';
 const RECENT_UPLOAD_CACHE_NAME = 'template-extract-recent-upload-v1';
 const RECENT_UPLOAD_CACHE_KEY = '/__template_extract_recent_upload__';
+const TEMPLATE_SAVE_DOCUMENT_ROOT_ATTR = 'data-template-document-root';
+const RASTER_FIRST_ROOT_SELECTOR = '.template-clone--raster-first-v2-structured';
 
 const NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS: Array<{
   value: TemplateExtractNonImageFrameTextVersion;
@@ -96,6 +99,51 @@ const decodeRecentUploadHeaderValue = (value: string | null) => {
   }
 };
 
+const sanitizeExtractDraftHtmlForTemplateSave = (html: string) => {
+  const trimmedHtml = html.trim();
+
+  if (!trimmedHtml || typeof DOMParser === 'undefined') {
+    return trimmedHtml;
+  }
+
+  const parser = new DOMParser();
+  const documentRoot = parser.parseFromString(trimmedHtml, 'text/html');
+
+  documentRoot.querySelectorAll<HTMLElement>(RASTER_FIRST_ROOT_SELECTOR).forEach((element) => {
+    element.setAttribute(TEMPLATE_SAVE_DOCUMENT_ROOT_ATTR, 'true');
+  });
+
+  documentRoot.querySelectorAll<HTMLStyleElement>('style').forEach((styleElement) => {
+    const originalCss = styleElement.textContent || '';
+
+    if (!originalCss.includes(RASTER_FIRST_ROOT_SELECTOR)) {
+      return;
+    }
+
+    let nextCss = originalCss.replace(
+      /\.template-clone--raster-first-v2-structured(?!\[data-template-document-root="true"\])/g,
+      `${RASTER_FIRST_ROOT_SELECTOR}[${TEMPLATE_SAVE_DOCUMENT_ROOT_ATTR}="true"]`
+    );
+
+    nextCss = nextCss.replace(
+      /(\.template-clone--raster-first-v2-structured\[data-template-document-root="true"\]\s*\{)([\s\S]*?)(\})/g,
+      (_match, start, body, end) => {
+        const cleanedBody = String(body)
+          .replace(/^\s*width:\s*fit-content;\s*$/gm, '')
+          .replace(/^\s*margin:\s*0\s+auto;\s*$/gm, '')
+          .replace(/\n{3,}/g, '\n\n');
+        return `${start}${cleanedBody}${end}`;
+      }
+    );
+
+    if (nextCss !== originalCss) {
+      styleElement.textContent = nextCss;
+    }
+  });
+
+  return documentRoot.body.innerHTML.trim();
+};
+
 const loadRecentPdfUploadFromBrowserCache = async (): Promise<File | null> => {
   if (typeof window === 'undefined' || !('caches' in window)) {
     return null;
@@ -157,7 +205,36 @@ const loadRecentPdfUploadMetaFromBrowserCache = async (): Promise<RecentPdfUploa
   return { name, lastModified, size };
 };
 
-export default function TemplateExtractPage() {
+export type TemplateExtractWorkspaceProps = {
+  hideHeader?: boolean;
+  showSaveControls?: boolean;
+  showPreview?: boolean;
+  onDraftReady?: (draft: TemplateEditWorkspaceInitialDraft) => void;
+  showStatusSection?: boolean;
+  statusResetKey?: number;
+  onStatusChange?: (status: TemplateExtractWorkspaceStatus | null) => void;
+};
+
+export type TemplateExtractWorkspaceStatus =
+  | {
+      kind: 'approve';
+      message: string;
+      templateId: string;
+    }
+  | {
+      kind: 'message';
+      message: string;
+    };
+
+export function TemplateExtractWorkspace({
+  hideHeader = false,
+  showSaveControls = true,
+  showPreview = true,
+  onDraftReady,
+  showStatusSection = true,
+  statusResetKey = 0,
+  onStatusChange,
+}: TemplateExtractWorkspaceProps) {
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [frameGroupVersion, setFrameGroupVersion] = React.useState<TemplateExtractFrameGroupVersion>('fv1.11');
   const [frameTextExtractionMode, setFrameTextExtractionMode] =
@@ -180,6 +257,29 @@ export default function TemplateExtractPage() {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const previewBodyRef = React.useRef<HTMLDivElement | null>(null);
   const [recentUploadMeta, setRecentUploadMeta] = React.useState<RecentPdfUploadMeta | null>(null);
+  const lastDeliveredDraftKeyRef = React.useRef('');
+
+  React.useEffect(() => {
+    if (!message && !approveResult) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setMessage('');
+      setApproveResult(null);
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [approveResult, message]);
+
+  React.useEffect(() => {
+    if (!statusResetKey) {
+      return;
+    }
+
+    setMessage('');
+    setApproveResult(null);
+  }, [statusResetKey]);
 
   const currentFrameReadyKey = React.useMemo(
     () => buildFrameReadyKey(selectedFile, frameGroupVersion),
@@ -207,6 +307,52 @@ export default function TemplateExtractPage() {
   const textExtractionReady = Boolean(selectedFile) && frameReadyKey === currentFrameReadyKey;
   const currentTextVersion =
     frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion;
+
+  React.useEffect(() => {
+    if (!onDraftReady || !currentDraft || !currentDraftHtml.trim()) {
+      return;
+    }
+
+    const draftKey = `${currentDraft.draft.id}:${extractConfigKey}:${currentDraftHtml.length}`;
+
+    if (lastDeliveredDraftKeyRef.current === draftKey) {
+      return;
+    }
+
+    lastDeliveredDraftKeyRef.current = draftKey;
+    onDraftReady({
+      draftKey,
+      templateName: templateName.trim() || toBaseFileName(selectedFile) || '새 템플릿 초안',
+      sourceDocumentName: selectedFile?.name || null,
+      draftHtml: currentDraftHtml.trim(),
+      layoutResizeMode: FIXED_LAYOUT_RESIZE_MODE,
+    });
+  }, [currentDraft, currentDraftHtml, extractConfigKey, onDraftReady, selectedFile, templateName]);
+
+  React.useEffect(() => {
+    if (!onStatusChange) {
+      return;
+    }
+
+    if (approveResult) {
+      onStatusChange({
+        kind: 'approve',
+        message: '템플릿 관리 저장을 완료했습니다.',
+        templateId: approveResult.templateId,
+      });
+      return;
+    }
+
+    if (message) {
+      onStatusChange({
+        kind: 'message',
+        message,
+      });
+      return;
+    }
+
+    onStatusChange(null);
+  }, [approveResult, message, onStatusChange]);
 
   const syncPreviewDocumentScale = React.useCallback(() => {
     const root = previewBodyRef.current;
@@ -390,7 +536,6 @@ export default function TemplateExtractPage() {
         lastModified: nextFile.lastModified,
         size: nextFile.size,
       });
-      setMessage(`최근 업로드한 PDF를 불러왔습니다. (${nextFile.name})`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '최근 업로드한 PDF를 불러오지 못했습니다.');
     }
@@ -554,6 +699,7 @@ export default function TemplateExtractPage() {
     setMessage('');
 
     try {
+      const saveDraftHtml = sanitizeExtractDraftHtmlForTemplateSave(currentDraftHtml);
       const response = await fetch(`/api/templates/extract/${currentDraft.draft.id}/approve`, {
         method: 'POST',
         headers: {
@@ -562,7 +708,7 @@ export default function TemplateExtractPage() {
         body: JSON.stringify({
           templateName: templateName.trim(),
           layoutResizeMode: FIXED_LAYOUT_RESIZE_MODE,
-          generatedDraftHtml: currentDraftHtml.trim(),
+          generatedDraftHtml: saveDraftHtml,
         }),
       });
       const result = (await response.json()) as ExtractApiResponse<TemplateExtractApproveResult>;
@@ -580,16 +726,16 @@ export default function TemplateExtractPage() {
     }
   }, [currentDraft?.draft.id, currentDraftHtml, templateName]);
 
-  return (
-    <main className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-slate-950">템플릿 추출</h1>
-          <p className="text-sm text-slate-600">
-            프레임 그룹 생성, 프레임 텍스트 추출, 전체 추출 단계 실행과 저장만 남긴 페이지입니다.
-          </p>
-        </div>
+  const headerSection = hideHeader ? null : (
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold text-slate-950">템플릿 추출</h1>
+        <p className="text-sm text-slate-600">
+          프레임 그룹 생성, 프레임 텍스트 추출, 전체 추출 단계 실행과 저장만 남긴 페이지입니다.
+        </p>
+      </div>
 
+      {showSaveControls ? (
         <div className="flex w-full flex-col gap-3 lg:max-w-[560px] lg:flex-row lg:items-end">
           <div className="relative lg:flex-1">
             <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
@@ -612,12 +758,16 @@ export default function TemplateExtractPage() {
             저장
           </Button>
         </div>
+      ) : null}
+    </div>
+  );
 
-      </div>
-
-      {approveResult ? (
-        <Card className="border-slate-200 bg-slate-50">
-          <CardContent className="p-4 text-sm text-slate-700">
+  const statusSection = showStatusSection
+    ? approveResult ? (
+    <Card className="border-slate-200 bg-slate-50">
+      <CardContent className="p-4 text-sm text-slate-700">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <p className="font-medium text-slate-950">저장 완료</p>
             <p>템플릿 ID: {approveResult.templateId}</p>
             <a
@@ -626,160 +776,204 @@ export default function TemplateExtractPage() {
             >
               저장된 템플릿 편집하기
             </a>
-          </CardContent>
-        </Card>
-      ) : message ? (
-        <Card className="border-slate-200 bg-slate-50">
-          <CardContent className="p-4 text-sm text-slate-700">{message}</CardContent>
-        </Card>
-      ) : null}
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="알림 닫기"
+            title="알림 닫기"
+            onClick={() => setApproveResult(null)}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </CardContent>
+    </Card>
+  ) : message ? (
+    <Card className="border-slate-200 bg-slate-50">
+      <CardContent className="p-4 text-sm text-slate-700">
+        <div className="flex items-start justify-between gap-3">
+          <p className="min-w-0 flex-1">{message}</p>
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="알림 닫기"
+            title="알림 닫기"
+            onClick={() => setMessage('')}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </CardContent>
+    </Card>
+  ) : null
+    : null;
 
-      <div className="grid items-start gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
-        <div className="space-y-6">
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>원본 PDF 업로드</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,application/pdf"
-                onChange={(event) => void handleSelectedFileChange(event)}
-                className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
-              />
-              {recentUploadMeta ? (
-                <Button variant="outline" disabled={loading} onClick={() => void handleRestoreRecentUpload()} className="w-full justify-start">
-                  최근 업로드 불러오기: {recentUploadMeta.name}
-                </Button>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>추출 실행</CardTitle>
-              <CardDescription>프레임 버전과 텍스트 버전을 고른 뒤 필요한 단계만 실행합니다.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                <div>
-                  <Button
-                    variant="outline"
-                    disabled={loading}
-                    onClick={() => setVersionOptionsVisible((previous) => !previous)}
-                    className="w-full"
-                  >
-                    {versionOptionsVisible ? '버전 숨기기' : '버전 선택하기'}
+  const controlsSection = (
+    <div className="space-y-6">
+      <Card className="border-slate-200">
+        <CardHeader>
+          <CardTitle>PDF 추출</CardTitle>
+          <CardDescription>프레임 버전과 텍스트 버전을 고른 뒤 필요한 단계만 실행합니다.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={(event) => void handleSelectedFileChange(event)}
+              className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+            />
+            {recentUploadMeta ? (
+              <Button
+                variant="outline"
+                disabled={loading}
+                onClick={() => void handleRestoreRecentUpload()}
+                className="w-full justify-start"
+              >
+                최근 업로드 불러오기: {recentUploadMeta.name}
+              </Button>
+            ) : null}
+          </div>
+          <div className="space-y-3">
+            <div>
+              <Button
+                variant="outline"
+                disabled={loading}
+                onClick={() => setVersionOptionsVisible((previous) => !previous)}
+                className="w-full"
+              >
+                {versionOptionsVisible ? '버전 숨기기' : '버전 선택하기'}
+              </Button>
+            </div>
+            {versionOptionsVisible ? (
+              <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="space-y-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-800">프레임 그룹 버전</label>
+                    <select
+                      value={frameGroupVersion}
+                      onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
+                      disabled={loading}
+                      className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
+                    >
+                      {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button variant="outline" disabled={loading || !selectedFile} onClick={() => void handleCreateFrameGroups()}>
+                    프레임 그룹 생성
                   </Button>
                 </div>
-                {versionOptionsVisible ? (
-                  <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <div className="space-y-2">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-slate-800">프레임 그룹 버전</label>
-                        <select
-                          value={frameGroupVersion}
-                          onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
-                          disabled={loading}
-                          className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
-                        >
-                          {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      </div>
-                      <Button variant="outline" disabled={loading || !selectedFile} onClick={() => void handleCreateFrameGroups()}>
-                        프레임 그룹 생성
-                      </Button>
-                    </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">텍스트 추출 버전</label>
-                      <select
-                        value={currentTextVersion}
-                        onChange={(event) =>
-                          frameTextExtractionMode === 'image'
-                            ? setImageFrameTextExtractionVersion(event.target.value as TemplateExtractImageFrameTextVersion)
-                            : setFrameTextExtractionVersion(event.target.value as TemplateExtractNonImageFrameTextVersion)
-                        }
-                        disabled={loading}
-                        className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
-                      >
-                        {(frameTextExtractionMode === 'image'
-                          ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-                          : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-                        ).map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="grid gap-2">
-                        <Button
-                          variant="outline"
-                          disabled={loading}
-                          onClick={() =>
-                            setFrameTextExtractionMode((previous) =>
-                              previous === 'image' ? 'non_image' : 'image'
-                            )
-                          }
-                        >
-                          {frameTextExtractionMode === 'image' ? '이미지' : '비 이미지'}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          disabled={loading || !textExtractionReady}
-                          onClick={() => void handleExtractFrameText()}
-                        >
-                          프레임 텍스트 추출
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
                 <div className="space-y-2">
-                  <div className="flex items-stretch gap-2">
-                    <Button disabled={loading || !selectedFile} onClick={() => void handleRunFullExtract()} className="flex-1">
-                      전체 추출
-                    </Button>
+                  <label className="text-sm font-medium text-slate-800">텍스트 추출 버전</label>
+                  <select
+                    value={currentTextVersion}
+                    onChange={(event) =>
+                      frameTextExtractionMode === 'image'
+                        ? setImageFrameTextExtractionVersion(event.target.value as TemplateExtractImageFrameTextVersion)
+                        : setFrameTextExtractionVersion(event.target.value as TemplateExtractNonImageFrameTextVersion)
+                    }
+                    disabled={loading}
+                    className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
+                  >
+                    {(frameTextExtractionMode === 'image'
+                      ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                      : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                    ).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="grid gap-2">
                     <Button
-                      type="button"
                       variant="outline"
                       disabled={loading}
-                      onClick={() => setStageActionsVisible((previous) => !previous)}
-                      aria-label={stageActionsVisible ? '단계 실행 접기' : '단계 실행 펼치기'}
-                      title={stageActionsVisible ? '단계 실행 접기' : '단계 실행 펼치기'}
-                      className="w-10 shrink-0 px-0"
+                      onClick={() =>
+                        setFrameTextExtractionMode((previous) =>
+                          previous === 'image' ? 'non_image' : 'image'
+                        )
+                      }
                     >
-                      {stageActionsVisible ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      {frameTextExtractionMode === 'image' ? '이미지' : '비 이미지'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={loading || !textExtractionReady}
+                      onClick={() => void handleExtractFrameText()}
+                    >
+                      프레임 텍스트 추출
                     </Button>
                   </div>
-                  {stageActionsVisible ? (
-                    <div className="grid grid-cols-1 gap-2 pl-4">
-                      <Button
-                        variant="outline"
-                        disabled={loading || !selectedFile}
-                        onClick={() => void handleRunValueStage()}
-                      >
-                        1. 값 추출
-                      </Button>
-                      <Button
-                        variant="outline"
-                        disabled={loading || !valueStageDraft || !valueStageHtml.trim()}
-                        onClick={handleRunPhysicalStage}
-                      >
-                        2. 물리적 보정
-                      </Button>
-                    </div>
-                  ) : null}
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            ) : null}
+            <div className="space-y-2">
+              <div className="flex items-stretch gap-2">
+                <Button disabled={loading || !selectedFile} onClick={() => void handleRunFullExtract()} className="flex-1">
+                  전체 추출
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={loading}
+                  onClick={() => setStageActionsVisible((previous) => !previous)}
+                  aria-label={stageActionsVisible ? '단계 실행 접기' : '단계 실행 펼치기'}
+                  title={stageActionsVisible ? '단계 실행 접기' : '단계 실행 펼치기'}
+                  className="w-10 shrink-0 px-0"
+                >
+                  {stageActionsVisible ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </Button>
+              </div>
+              {stageActionsVisible ? (
+                <div className="grid grid-cols-1 gap-2 pl-4">
+                  <Button
+                    variant="outline"
+                    disabled={loading || !selectedFile}
+                    onClick={() => void handleRunValueStage()}
+                  >
+                    1. 값 추출
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={loading || !valueStageDraft || !valueStageHtml.trim()}
+                    onClick={handleRunPhysicalStage}
+                  >
+                    2. 물리적 보정
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  if (!showPreview) {
+    return (
+      <div className="space-y-6">
+        {headerSection}
+        {statusSection}
+        {controlsSection}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {headerSection}
+
+      {statusSection}
+
+      <div className="grid items-start gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+        <div className="space-y-6">{controlsSection}</div>
 
         <div className="min-w-0 self-start overflow-hidden rounded-xl border border-slate-200 bg-card text-card-foreground">
           <style>{`
@@ -838,6 +1032,14 @@ export default function TemplateExtractPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+export default function TemplateExtractPage() {
+  return (
+    <main className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
+      <TemplateExtractWorkspace />
     </main>
   );
 }

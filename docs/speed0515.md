@@ -1,0 +1,65 @@
+# Template Edit Speed 0515
+
+목표: `/templates`, `/templates/edit` 의 `상자 편집 캔버스` 에서 선택과 수정이 체감상 즉시 반영되고, 주요 상호작용이 100ms 이내에 끝나도록 개선한다.
+
+공유 코드 기준:
+- 캔버스: `src/components/template/TemplateEditWorkspace.tsx`
+- `/templates` 와 `/templates/edit` 는 같은 캔버스를 사용해야 한다.
+- 성능 개선은 공유 코드에만 적용한다.
+
+측정 환경:
+- 기준 템플릿: `b5f87a4b-44d9-4cbc-a183-60355a4d6456`
+- 기준 페이지:
+  - `http://localhost:3001/templates?templateId=b5f87a4b-44d9-4cbc-a183-60355a4d6456`
+  - `http://localhost:3001/templates/edit?templateId=b5f87a4b-44d9-4cbc-a183-60355a4d6456`
+- 측정 방식:
+  - Chrome DevTools 실제 페이지 조작
+  - DOM 상태 변경 시점 기준 측정
+  - 필요한 경우 performance trace 병행
+
+체크리스트:
+
+| ID | 유형 | 조작 | 기준 | 최초 측정 | 개선 후 | 상태 | 메모 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| P-01 | 단일 선택 | 단일 상자 클릭 | 100ms 이하 | 240.8ms | 8.8~15.5ms | 완료 | 스타일 패널 열린 상태 기준. 대표값 `band-3-cell-1/2`, `status-history-1`, `band-14-cell-4` |
+| P-02 | 다중 선택 | Shift 포함 복수 상자 선택 | 100ms 이하 | 382.3ms | 5.5ms | 완료 | `band-3-cell-1 + band-3-cell-2` 선택 후 width 필드가 `혼합`으로 바뀌는 시점 기준 |
+| P-03 | 그룹 선택 | 단일 그룹 선택 | 100ms 이하 | 10.3ms | 10.3ms | 완료 | 임시 그룹 생성 후 프레임 상태 `90` 에서 그룹 상태 `혼합`으로 돌아오는 클릭 체인 기준 |
+| P-04 | 텍스트 수정 | 값 상자 텍스트 입력/blur | 100ms 이하 | 0.8ms | 0.8ms | 완료 | 입력 활성화 11.2ms, 실제 input/blur 반영 0.8ms |
+| P-05 | 선 두께 | 숫자 입력 후 blur | 100ms 이하 | 4.9ms | 4.9ms | 완료 | `band-3-cell-2` shell border width `1px ↔ 2px` |
+| P-06 | 선 종류 | 셀렉트 변경 | 100ms 이하 | 2.8ms | 2.8ms | 완료 | `solid ↔ dashed` |
+| P-07 | 선 색 | 셀렉트 변경 | 100ms 이하 | 0.4ms | 0.4ms | 완료 | `#0f172a ↔ #dbeafe` |
+| P-08 | 배경색 | 셀렉트 변경 | 100ms 이하 | 0.5ms | 0.5ms | 완료 | `transparent ↔ slate-50` |
+| P-09 | 코너 라운딩 | 숫자 입력 후 blur | 100ms 이하 | 0.5ms | 0.5ms | 완료 | `0px ↔ 10px` |
+| P-10 | 높이 | 숫자 입력 후 blur | 100ms 이하 | 5.2ms | 5.2ms | 완료 | `25px ↔ 55px` |
+| P-11 | 자동 높이 | 버튼 클릭 | 100ms 이하 | 15.0ms | 15.0ms | 완료 | `band-3-cell-1` 단일 선택 기준, `data-template-frame-auto-height=\"true\"` + 버튼 활성 시점 |
+| P-12 | 자동 너비 | 버튼 클릭 | 100ms 이하 | 29.6ms | 29.6ms | 완료 | `band-3-cell-1` 단일 선택 기준, `auto-height -> auto-width` 전환 완료 시점 |
+| P-13 | 텍스트 스타일 | 글자 크기/색상 변경 | 100ms 이하 | 8.2ms / 0.4ms | 8.2ms / 0.4ms | 완료 | 글자 크기 8.2ms, 글자 색 0.4ms |
+| P-14 | 여백 | 상/하/좌/우 변경 | 100ms 이하 | 4.3ms / 3.5ms / 3.2ms / 2.9ms | 4.3ms / 3.5ms / 3.2ms / 2.9ms | 완료 | 상/하/좌/우 각각 측정, 최악값 4.3ms |
+
+병목 후보:
+- `syncDraftPreviewHtmlRef`
+- `schedulePreviewEditorState`
+- `syncSelectionStyleDraft`
+- `requestPreviewTextFit`
+- 자동 크기 후속 동기화
+
+적용한 개선:
+- 위치 탭 단일 선택에서 click-chain 전체를 타지 않는 직접 선택 경로 추가
+- marquee hit-entry 생성 지연 로딩으로 일반 클릭 시 full scan 제거
+- 선택 즉시 DOM 시각 효과와 패널 control value를 먼저 동기화하고, React selection state는 다음 frame으로 지연
+- `selectionStyleDraft` 동기화 시 visible control DOM을 즉시 갱신해 패널 값 표시 지연 제거
+- `selectionStyleDraft` 값이 실제로 바뀐 경우에만 React state를 교체하도록 막아 불필요한 전체 패널 rerender 제거
+- `syncPreviewSurfaceScale` 의 ref-callback 상태 갱신을 guard 처리해 nested update 루프 차단
+- 자동 높이/너비 상자 타입 전환은 즉시 DOM 반영 후, 600ms 뒤에 같은 auto-size 레이아웃 계산을 다시 돌리던 중복 경로를 제거
+- 최소 높이/너비 입력은 blur 시 즉시 auto-size 재계산과 spacing 보정을 수행하고, 뒤에서는 저장/패널/텍스트 fit 동기화만 수행하도록 변경
+
+공유 검증 메모:
+- 모든 수정은 `src/components/template/TemplateEditWorkspace.tsx` 공유 코드에만 적용했다.
+- `/templates`, `/templates/edit` 는 같은 캔버스를 사용한다.
+- `/templates` 대표 smoke check에서는 `Space + Drag` 와 단일 선택 경로가 같은 방식으로 동작하는 것을 확인했다.
+
+원칙:
+- 선택 시각 효과는 즉시 적용
+- 저장용 HTML 동기화는 필요한 경우에만 지연
+- 레이아웃 재계산과 무관한 변경은 전체 preview normalize 를 강제하지 않음
+- 기존 기능 회귀 금지
