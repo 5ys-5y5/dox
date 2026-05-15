@@ -1,13 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
-import { EntityPicker } from '../../../components/ui/EntityPicker';
+import PreviewPipelineInspector, { type PreviewPipelineStage } from '../../../components/template/PreviewPipelineInspector';
 import { Input } from '../../../components/ui/Input';
 import { applyTemplateExtractEditableTextFit } from '../../../lib/templateExtractEditableTextFit';
+import { extractGuaranteedNonImageTextStateFromRoot } from '../../../lib/templateGuaranteedExtractClient';
 import {
   formatTemplateExtractEngineVersionLabel,
   isTemplateExtractProfiledFrameGroupVersion,
@@ -114,6 +115,7 @@ type FrameEditorRole = 'group' | 'key' | 'value' | 'key_value';
 type FrameOutlineStyle = 'solid' | 'dashed';
 type FrameNodeRect = { left: number; top: number; width: number; height: number };
 type FrameResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+type ExtractPreviewPipelineStageKey = 'received' | 'clone' | 'text' | 'fit';
 type FrameNodeSnapshot = {
   pageNumber: string;
   attrs: Record<string, string>;
@@ -367,6 +369,22 @@ type StoredFrameProfile = {
   frames: FrameNodeSnapshot[];
 };
 type FrameTextExtractionVersion = 'niv1.01' | 'niv1.02' | 'niv1.12';
+type FullExtractDebugStepKey = 'extract_values' | 'physical_correction' | 'visual_correction';
+type DraftRunSnapshot = {
+  extractionStage: TemplateExtractExtractionStage;
+  frameStage: boolean;
+  selectedFile: File | null;
+  sourceTitle: string;
+  sourceKind: TemplateExtractSourceKind;
+  sourceContent: string;
+  similarTemplateIds: string[];
+  engineVersion: TemplateExtractEngineVersion;
+  activeFrameGroupVersion: TemplateExtractFrameGroupVersion;
+  activeRequestedFrameGroupVersion: string;
+  frameTextExtractionMode: FrameTextExtractionMode;
+  frameTextExtractionVersion: FrameTextExtractionVersion;
+  imageFrameTextExtractionVersion: ImageFrameTextExtractionVersion;
+};
 type CrossValidationViewMode = 'side_by_side' | 'overlay';
 type CrossValidationPreviewState = {
   pdfPageDataUrls: string[];
@@ -379,6 +397,33 @@ const V106_FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const V106_FRAME_DELETE_BUTTON_SELECTOR = '[data-v106-delete-button="true"]';
 const RAW_FRAME_NODE_SELECTOR = '.v202-frame-group[data-template-frame-group]';
 const FRAME_SELECTION_NODE_SELECTOR = `${V106_FRAME_NODE_SELECTOR}, ${RAW_FRAME_NODE_SELECTOR}`;
+const EXTRACT_PREVIEW_PIPELINE_STAGES: PreviewPipelineStage[] = [
+  {
+    key: 'received',
+    label: '원본 수신',
+    description: '추출 API가 반환한 generatedDraftHtml 그대로 표시합니다.',
+  },
+  {
+    key: 'clone',
+    label: 'Preview Clone',
+    description: 'flattenFramePreviewMarkup() 으로 preview clone 구조를 만든 상태입니다.',
+  },
+  {
+    key: 'text',
+    label: '텍스트 재적용',
+    description: '추출 텍스트 상태와 render model 을 다시 적용한 상태입니다.',
+  },
+  {
+    key: 'fit',
+    label: 'Preview Text Fit',
+    description: 'applyTemplateExtractEditableTextFit() 를 적용한 최종 preview DOM 상태입니다.',
+  },
+];
+const FULL_EXTRACT_DEBUG_STEP_LABEL: Record<FullExtractDebugStepKey, string> = {
+  extract_values: '값 추출',
+  physical_correction: '물리적 보정',
+  visual_correction: '시각적 보정',
+};
 const FRAME_SELECTION_BADGE_CLASS = 'v106-frame-selection-badge';
 const FRAME_DELETE_BUTTON_CLASS = 'v106-frame-delete-button';
 const FRAME_CREATE_GHOST_CLASS = 'v106-frame-create-ghost';
@@ -410,10 +455,12 @@ const TEMPLATE_FRAME_BORDER_ALIGN_ATTR = 'data-template-frame-border-align';
 const TEMPLATE_FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
 const TEMPLATE_FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
 const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
+const TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR = 'data-template-transparent-frame-guide';
 const DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN = 'center';
 const DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH = '0.1';
 const DEFAULT_TEMPLATE_FRAME_BORDER_STYLE = 'solid';
 const DEFAULT_TEMPLATE_FRAME_BORDER_COLOR = '#0f172a';
+const EXTRACT_PHYSICAL_STEP_PX = 5;
 const EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP = [
   'data-template-frame-role',
   'data-template-frame-role-visual',
@@ -695,64 +742,6 @@ const DeferredReviewedFieldInput = React.memo(function DeferredReviewedFieldInpu
   );
 });
 
-type DeferredReviewedFieldTextareaProps = Omit<
-  React.TextareaHTMLAttributes<HTMLTextAreaElement>,
-  'value' | 'defaultValue' | 'onChange'
-> & {
-  value: string;
-  onCommit: (nextValue: string) => void;
-};
-
-const DeferredReviewedFieldTextarea = React.memo(function DeferredReviewedFieldTextarea({
-  value,
-  onFocus,
-  onBlur,
-  onKeyDown,
-  onCommit,
-  ...textareaProps
-}: DeferredReviewedFieldTextareaProps) {
-  const [draftValue, setDraftValue] = React.useState(value);
-  const isFocusedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!isFocusedRef.current) {
-      setDraftValue(value);
-    }
-  }, [value]);
-
-  const commitDraftValue = React.useCallback(
-    (nextValue: string) => {
-      if (nextValue !== value) {
-        onCommit(nextValue);
-      }
-    },
-    [onCommit, value]
-  );
-
-  return (
-    <textarea
-      {...textareaProps}
-      value={draftValue}
-      onFocus={(event) => {
-        isFocusedRef.current = true;
-        onFocus?.(event);
-      }}
-      onChange={(event) => setDraftValue(event.target.value)}
-      onBlur={(event) => {
-        isFocusedRef.current = false;
-        commitDraftValue(event.currentTarget.value);
-        onBlur?.(event);
-      }}
-      onKeyDown={(event) => {
-        onKeyDown?.(event);
-        if (!event.defaultPrevented && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-          event.currentTarget.blur();
-        }
-      }}
-    />
-  );
-});
-
 const toTemplateExtractDetailFromTemplate = (
   detail: TemplateDetailResult
 ): TemplateExtractDetailResult => {
@@ -942,13 +931,86 @@ const normalizeExtractFrameDefaultBackground = (element: HTMLElement) => {
   }
 };
 
+const syncExtractTransparentFrameGuideAttr = (element: HTMLElement, hasVisibleBorder: boolean) => {
+  normalizeExtractFrameDefaultBackground(element);
+  const backgroundColor = extractColorToHex(element.style.backgroundColor || element.style.background || '');
+  const hasTransparentBackground =
+    !backgroundColor || backgroundColor === 'transparent' || backgroundColor === '#ffffff';
+
+  if (!hasVisibleBorder && hasTransparentBackground) {
+    element.setAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR, 'true');
+    return;
+  }
+
+  element.removeAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR);
+};
+
 type ExtractFrameBorderAppearance = {
   color: string;
   style: string;
   width: number;
 };
 
+const hasStoredExtractVisibleBorderAppearance = (element: HTMLElement | null | undefined) => {
+  if (!element) {
+    return false;
+  }
+
+  const width = parseExtractFrameNumber(element.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR)) ?? 0;
+  const style = normalizeExtractFrameBorderStyle(element.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) || '', width);
+  const color = normalizeExtractFrameBorderColor(element.getAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) || '');
+  return width > 0 && style !== 'none' && Boolean(color) && color !== 'transparent';
+};
+
+const isExtractTransparentGuideMarker = (element: HTMLElement | null | undefined) => {
+  if (!element || hasStoredExtractVisibleBorderAppearance(element)) {
+    return false;
+  }
+
+  const outlineStyle = String(element.getAttribute('data-template-frame-outline-style') || '').trim().toLowerCase();
+  const inlineStyle = element.getAttribute('style') || '';
+  return outlineStyle === 'dashed' || /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(inlineStyle);
+};
+
 const readExtractElementBorderAppearance = (element: HTMLElement | null | undefined): ExtractFrameBorderAppearance | null => {
+  if (!element) {
+    return null;
+  }
+
+  if (isExtractTransparentGuideMarker(element)) {
+    return null;
+  }
+
+  const width =
+    parseExtractFrameNumber(element.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR)) ??
+    parseExtractFrameNumber(element.style.borderTopWidth || element.style.borderWidth) ??
+    parseExtractFrameNumber(element.style.outlineWidth);
+  const style = normalizeExtractFrameBorderStyle(
+    element.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) ||
+      element.style.borderTopStyle ||
+      element.style.borderStyle ||
+      element.style.outlineStyle ||
+      '',
+    width ?? 0
+  );
+  const color = normalizeExtractFrameBorderColor(
+    element.getAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) ||
+      element.style.borderTopColor ||
+      element.style.borderColor ||
+      element.style.outlineColor ||
+      ''
+  );
+
+  if (!width || width <= 0 || style === 'none' || !color || color === 'transparent') {
+    return null;
+  }
+
+  return { color, style, width };
+};
+
+const readRawExtractElementBorderAppearance = (
+  element: HTMLElement | null | undefined
+): ExtractFrameBorderAppearance | null => {
   if (!element) {
     return null;
   }
@@ -971,6 +1033,32 @@ const readExtractElementBorderAppearance = (element: HTMLElement | null | undefi
       element.style.borderColor ||
       element.style.outlineColor ||
       ''
+  );
+
+  if (!width || width <= 0 || style === 'none' || !color || color === 'transparent') {
+    return null;
+  }
+
+  return { color, style, width };
+};
+
+const readInlineExtractPeerEdgeAppearanceForValueStage = (
+  element: HTMLElement | null | undefined
+): ExtractFrameBorderAppearance | null => {
+  if (!element) {
+    return null;
+  }
+
+  const width =
+    parseExtractFrameNumber(element.style.borderTopWidth) ??
+    parseExtractFrameNumber(element.style.borderLeftWidth) ??
+    parseExtractFrameNumber(element.style.borderWidth);
+  const style = normalizeExtractFrameBorderStyle(
+    element.style.borderTopStyle || element.style.borderLeftStyle || element.style.borderStyle || '',
+    width ?? 0
+  );
+  const color = normalizeExtractFrameBorderColor(
+    element.style.borderTopColor || element.style.borderLeftColor || element.style.borderColor || ''
   );
 
   if (!width || width <= 0 || style === 'none' || !color || color === 'transparent') {
@@ -1021,6 +1109,7 @@ const applyExtractFrameBorderAppearanceStyle = (
   element.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, String(Number(width.toFixed(2))));
   element.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, hasVisibleBorder ? style : 'none');
   element.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, hasVisibleBorder ? color : 'transparent');
+  syncExtractTransparentFrameGuideAttr(element, hasVisibleBorder);
 
   if (hasVisibleBorder) {
     element.setAttribute('data-template-frame-outline-style', style);
@@ -1043,6 +1132,7 @@ const applyExtractFrameBorderAppearanceAttrs = (
   element.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, String(Number(width.toFixed(2))));
   element.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, hasVisibleBorder ? style : 'none');
   element.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, hasVisibleBorder ? color : 'transparent');
+  syncExtractTransparentFrameGuideAttr(element, hasVisibleBorder);
 
   if (hasVisibleBorder) {
     element.setAttribute('data-template-frame-outline-style', style);
@@ -1079,7 +1169,17 @@ const preserveNestedExtractFrameBorderStyles = (shell: HTMLElement) => {
   applyExtractFrameBorderAppearanceAttrs(shell, shellAppearance || fallbackAppearance);
   applyExtractFrameBorderAppearanceAttrs(table, tableAppearance || fallbackAppearance);
   tableCells.forEach((cell) => {
-    applyExtractFrameBorderAppearanceAttrs(cell, readExtractElementBorderAppearance(cell) || fallbackAppearance);
+    const cellAppearance = readExtractElementBorderAppearance(cell) || fallbackAppearance;
+    applyExtractFrameBorderAppearanceAttrs(cell, cellAppearance);
+
+    if (cell.matches('.v202-frame-group[data-template-frame-group]') && cellAppearance.style !== 'none' && cellAppearance.color !== 'transparent') {
+      applyExtractFrameBorderAppearanceStyle(cell, {
+        align: DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+        width: cellAppearance.width || Number(DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH),
+        style: cellAppearance.style,
+        color: cellAppearance.color,
+      });
+    }
   });
 
   return true;
@@ -1110,6 +1210,7 @@ const clearNestedExtractFrameBorderStyles = (shell: HTMLElement) => {
     element.removeAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR);
     element.removeAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
     element.removeAttribute('data-template-frame-outline-style');
+    element.removeAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR);
   });
 };
 
@@ -1161,14 +1262,36 @@ const normalizeExtractTransparentFrameGuides = (container: HTMLElement) => {
     const table = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
     const tableStyle = table?.getAttribute('style') || '';
     const shellStyle = shell.getAttribute('style') || '';
+    const nestedFrameGroupCount = shell.querySelectorAll<HTMLElement>('.v202-frame-group[data-template-frame-group]').length;
     const nestedAppearance = readNestedExtractFrameBorderAppearance(shell);
     const shellAppearance = readExtractElementBorderAppearance(shell);
+    const shouldUseNestedTransparentGuideMarker = nestedFrameGroupCount <= 1;
+    const hasNestedTransparentGuideMarker =
+      shouldUseNestedTransparentGuideMarker &&
+      ((table
+        ? Array.from(table.querySelectorAll<HTMLElement>('[data-template-frame-outline-style="dashed"]')).some(
+            isExtractTransparentGuideMarker
+          )
+        : false) ||
+        Array.from(
+          shell.querySelectorAll<HTMLElement>(':scope > .v202-frame-group[data-template-frame-outline-style="dashed"]')
+        ).some(isExtractTransparentGuideMarker));
+    const hasTransparentGuideMarker =
+      isExtractTransparentGuideMarker(shell) || isExtractTransparentGuideMarker(table) || hasNestedTransparentGuideMarker;
+
+    if (shell.classList.contains('v102-frame-band') && nestedFrameGroupCount > 1) {
+      shell.setAttribute('data-template-frame-container-guide-skip', 'true');
+    } else {
+      shell.removeAttribute('data-template-frame-container-guide-skip');
+    }
+
     const isLegacyDashedGuide =
-      !nestedAppearance &&
-      !shellAppearance &&
-      (/\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(tableStyle) ||
-        /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(shellStyle) ||
-        shell.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) === 'none');
+      hasTransparentGuideMarker ||
+      (!nestedAppearance &&
+        !shellAppearance &&
+        (/\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(tableStyle) ||
+          /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(shellStyle) ||
+          shell.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) === 'none'));
 
     if (isLegacyDashedGuide) {
       applyExtractFrameBorderAppearanceStyle(shell, {
@@ -1184,6 +1307,56 @@ const normalizeExtractTransparentFrameGuides = (container: HTMLElement) => {
 
     applyExtractDefaultFrameAppearance(shell);
   });
+};
+
+const hasExplicitExtractTransparentGuideIntent = (element: HTMLElement | null | undefined) => {
+  if (!element) {
+    return false;
+  }
+
+  const outlineStyle = String(element.getAttribute('data-template-frame-outline-style') || '').trim().toLowerCase();
+
+  if (outlineStyle === 'dashed') {
+    return true;
+  }
+
+  const inlineStyle = element.getAttribute('style') || '';
+  return /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(inlineStyle) || /\boutline[^;"']*\bdashed\b/i.test(inlineStyle);
+};
+
+const refreshExtractTransparentFrameGuideAttrs = (container: HTMLElement) => {
+  container
+    .querySelectorAll<HTMLElement>(
+      '.v102-frame-band, .v202-cell-box[data-v106-frame-node="true"], .v202-frame-group[data-template-frame-group]'
+    )
+    .forEach((shell) => {
+      const nestedFrameGroupCount = shell.classList.contains('v102-frame-band')
+        ? shell.querySelectorAll<HTMLElement>('.v202-frame-group[data-template-frame-group]').length
+        : 0;
+      const directTable = shell.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
+      const directFrameGroups = Array.from(
+        shell.querySelectorAll<HTMLElement>(':scope > .v202-frame-group[data-template-frame-group]')
+      );
+
+      if (shell.classList.contains('v102-frame-band') && nestedFrameGroupCount > 1) {
+        shell.setAttribute('data-template-frame-container-guide-skip', 'true');
+      } else {
+        shell.removeAttribute('data-template-frame-container-guide-skip');
+      }
+
+      const explicitGuideIntent =
+        hasExplicitExtractTransparentGuideIntent(shell) ||
+        hasExplicitExtractTransparentGuideIntent(directTable) ||
+        directFrameGroups.some((group) => hasExplicitExtractTransparentGuideIntent(group));
+
+      if (explicitGuideIntent) {
+        normalizeExtractFrameDefaultBackground(shell);
+        shell.setAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR, 'true');
+        return;
+      }
+
+      shell.removeAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR);
+    });
 };
 
 const normalizeExtractTransparentFrameGuidesInHtml = (html: string) => {
@@ -1220,6 +1393,291 @@ const stripExtractOutputFrameAttrs = (html: string) => {
     EXTRACT_OUTPUT_FRAME_ATTRS_TO_STRIP.forEach((attrName) => {
       element.removeAttribute(attrName);
     });
+  });
+
+  return container.innerHTML;
+};
+
+const readExtractSolidBorderEvidenceForValueStage = (element: HTMLElement): ExtractFrameBorderAppearance | null => {
+  const selfAppearance = readRawExtractElementBorderAppearance(element);
+
+  if (selfAppearance?.style === 'solid') {
+    return selfAppearance;
+  }
+
+  const directTable = element.querySelector<HTMLElement>(':scope > table.v102-frame-band-table');
+  const tableAppearance = readRawExtractElementBorderAppearance(directTable);
+
+  if (tableAppearance?.style === 'solid') {
+    return tableAppearance;
+  }
+
+  const directGroups = Array.from(
+    element.querySelectorAll<HTMLElement>(':scope > .v202-frame-group[data-template-frame-group]')
+  );
+
+  for (const group of directGroups) {
+    const groupAppearance = readRawExtractElementBorderAppearance(group);
+
+    if (groupAppearance?.style === 'solid') {
+      return groupAppearance;
+    }
+  }
+
+  return null;
+};
+
+const applyExtractTableCellPeerEdgeBorderStyle = (
+  cell: HTMLElement,
+  appearance: ExtractFrameBorderAppearance
+) => {
+  const table = cell.closest('table.v102-frame-band-table');
+  const peerCells = table
+    ? Array.from(
+        table.querySelectorAll<HTMLElement>('td.v202-frame-group[data-template-frame-group], th.v202-frame-group[data-template-frame-group]')
+      )
+    : [];
+  const peerAppearance =
+    peerCells
+      .filter((peer) => peer !== cell)
+      .map((peer) => readInlineExtractPeerEdgeAppearanceForValueStage(peer))
+      .find((nextAppearance): nextAppearance is ExtractFrameBorderAppearance => Boolean(nextAppearance && nextAppearance.style === 'solid')) ||
+    null;
+  const rowStarts = peerCells
+    .map((peer) => parseExtractFrameNumber(peer.getAttribute('data-template-frame-row-start')))
+    .filter((value): value is number => Number.isFinite(value));
+  const colStarts = peerCells
+    .map((peer) => parseExtractFrameNumber(peer.getAttribute('data-template-frame-col-start')))
+    .filter((value): value is number => Number.isFinite(value));
+  const rowStart = parseExtractFrameNumber(cell.getAttribute('data-template-frame-row-start'));
+  const colStart = parseExtractFrameNumber(cell.getAttribute('data-template-frame-col-start'));
+  const minRowStart = rowStarts.length > 0 ? Math.min(...rowStarts) : null;
+  const minColStart = colStarts.length > 0 ? Math.min(...colStarts) : null;
+  const effectiveAppearance = peerAppearance || appearance;
+  const color =
+    normalizeExtractFrameBorderColor(effectiveAppearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
+  const style = normalizeExtractFrameBorderStyle(effectiveAppearance.style, effectiveAppearance.width);
+  const width = Math.max(0, effectiveAppearance.width);
+  const hasVisibleBorder = width > 0 && style !== 'none' && color !== 'transparent';
+  const showTop = hasVisibleBorder && rowStart !== null && minRowStart !== null && rowStart > minRowStart;
+  const showLeft = hasVisibleBorder && colStart !== null && minColStart !== null && colStart > minColStart;
+
+  cell.style.boxSizing = 'border-box';
+  cell.style.borderTopWidth = showTop ? `${width}px` : '0px';
+  cell.style.borderTopStyle = showTop ? style : 'none';
+  cell.style.borderTopColor = showTop ? color : 'transparent';
+  cell.style.borderRightWidth = '0px';
+  cell.style.borderRightStyle = 'none';
+  cell.style.borderRightColor = 'transparent';
+  cell.style.borderBottomWidth = '0px';
+  cell.style.borderBottomStyle = 'none';
+  cell.style.borderBottomColor = 'transparent';
+  cell.style.borderLeftWidth = showLeft ? `${width}px` : '0px';
+  cell.style.borderLeftStyle = showLeft ? style : 'none';
+  cell.style.borderLeftColor = showLeft ? color : 'transparent';
+  cell.style.outline = 'none';
+  cell.style.outlineOffset = '0px';
+  cell.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, 'inside');
+  cell.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, String(Number(width.toFixed(2))));
+  cell.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, hasVisibleBorder ? style : 'none');
+  cell.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, hasVisibleBorder ? color : 'transparent');
+  syncExtractTransparentFrameGuideAttr(cell, hasVisibleBorder);
+
+  if (hasVisibleBorder) {
+    cell.setAttribute('data-template-frame-outline-style', style);
+  } else {
+    cell.removeAttribute('data-template-frame-outline-style');
+  }
+};
+
+const preserveExtractTableCellPeerEdgeBorderStyleForValueStage = (
+  cell: HTMLElement,
+  appearance: ExtractFrameBorderAppearance
+) => {
+  const color =
+    normalizeExtractFrameBorderColor(appearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR;
+  const style = normalizeExtractFrameBorderStyle(appearance.style, appearance.width);
+  const width = Math.max(0, appearance.width);
+  const hasVisibleBorder = width > 0 && style !== 'none' && color !== 'transparent';
+
+  normalizeExtractFrameDefaultBackground(cell);
+  cell.style.boxSizing = 'border-box';
+  cell.style.outline = 'none';
+  cell.style.outlineOffset = '0px';
+  cell.removeAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR);
+  cell.removeAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR);
+  cell.removeAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR);
+  cell.removeAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR);
+  syncExtractTransparentFrameGuideAttr(cell, hasVisibleBorder);
+
+  if (hasVisibleBorder) {
+    cell.setAttribute('data-template-frame-outline-style', style);
+  } else {
+    cell.removeAttribute('data-template-frame-outline-style');
+  }
+};
+
+const applyExtractValueCorrectionsInHtml = (html: string) => {
+  if (!html.trim() || typeof document === 'undefined') {
+    return html;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+
+  container
+    .querySelectorAll<HTMLElement>(
+      '.v102-frame-band, .v202-cell-box[data-v106-frame-node="true"], .v202-frame-group[data-template-frame-group]'
+    )
+    .forEach((element) => {
+    if (!hasExplicitExtractTransparentGuideIntent(element)) {
+      return;
+    }
+
+    const solidEvidence = readExtractSolidBorderEvidenceForValueStage(element);
+
+    if (solidEvidence) {
+      const isTableCellFrameGroup =
+        element.matches('.v202-frame-group[data-template-frame-group]') &&
+        (element.tagName === 'TD' || element.tagName === 'TH');
+
+      if (isTableCellFrameGroup) {
+        preserveExtractTableCellPeerEdgeBorderStyleForValueStage(element, solidEvidence);
+      } else {
+        applyExtractFrameBorderAppearanceStyle(element, {
+          align: element.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) || DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+          width: solidEvidence.width,
+          style: solidEvidence.style,
+          color: solidEvidence.color,
+        });
+      }
+
+      if (element.matches('.v102-frame-band, .v202-cell-box[data-v106-frame-node="true"]')) {
+        clearNestedExtractFrameBorderStyles(element);
+      }
+
+      clearExtractGuideDecoration(element);
+      return;
+    }
+
+    clearExtractGuideDecoration(element);
+    applyExtractFrameBorderAppearanceStyle(element, {
+      align: element.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) || DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN,
+      width: 0,
+      style: 'none',
+      color: 'transparent',
+    });
+  });
+
+  return container.innerHTML;
+};
+
+const buildDraftDetailWithGeneratedHtml = (
+  detail: TemplateExtractDetailResult,
+  generatedDraftHtml: string
+): TemplateExtractDetailResult => ({
+  ...detail,
+  draft: {
+    ...detail.draft,
+    generatedDraftHtml,
+  },
+});
+
+const applyExtractPhysicalCorrectionsInHtml = (html: string) => {
+  if (!html.trim() || typeof document === 'undefined') {
+    return html;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+
+  materializeExtractFrameBandTableGeometry(container);
+  quantizeExtractFrameBandTableGeometry(container, EXTRACT_PHYSICAL_STEP_PX);
+  const pageScopes = Array.from(container.querySelectorAll<HTMLElement>('.page-inner'));
+
+  if (pageScopes.length > 0) {
+    pageScopes.forEach((pageInner) => {
+      snapExtractShellEdgesInScope(pageInner, EXTRACT_PHYSICAL_STEP_PX);
+    });
+  } else {
+    snapExtractShellEdgesInScope(container, EXTRACT_PHYSICAL_STEP_PX);
+  }
+
+  syncExtractFrameBandTablesToShellRects(container, EXTRACT_PHYSICAL_STEP_PX);
+  return container.innerHTML;
+};
+
+const clearExtractGuideDecoration = (element: HTMLElement) => {
+  element.removeAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR);
+  element.removeAttribute('data-template-frame-container-guide-skip');
+
+  if (/repeating-linear-gradient\(/i.test(element.style.backgroundImage || '')) {
+    element.style.backgroundImage = 'none';
+  }
+};
+
+const applyExtractVisualCorrectionsInHtml = (html: string) => {
+  if (!html.trim() || typeof document === 'undefined') {
+    return html;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+
+  container.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    clearExtractGuideDecoration(element);
+  });
+
+  container.querySelectorAll<HTMLElement>('.v102-frame-band, .v202-cell-box[data-v106-frame-node="true"]').forEach((shell) => {
+    const nestedAppearance = readNestedExtractFrameBorderAppearance(shell);
+    const shellAppearance = readExtractElementBorderAppearance(shell);
+    const currentAlign = shell.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) || DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN;
+
+    if (shellAppearance) {
+      applyExtractFrameBorderAppearanceStyle(shell, {
+        align: currentAlign,
+        width: shellAppearance.width,
+        style: shellAppearance.style,
+        color: shellAppearance.color,
+      });
+    } else if (nestedAppearance) {
+      applyExtractFrameBorderAppearanceStyle(shell, {
+        align: currentAlign,
+        width: nestedAppearance.width,
+        style: nestedAppearance.style,
+        color: nestedAppearance.color,
+      });
+      clearNestedExtractFrameBorderStyles(shell);
+    } else {
+      applyExtractFrameBorderAppearanceStyle(shell, {
+        align: currentAlign,
+        width: 0,
+        style: 'none',
+        color: 'transparent',
+      });
+      clearNestedExtractFrameBorderStyles(shell);
+    }
+  });
+
+  container.querySelectorAll<HTMLElement>('.v202-frame-group[data-template-frame-group]').forEach((group) => {
+    const appearance = readExtractElementBorderAppearance(group);
+    const currentAlign = group.getAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR) || DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN;
+
+    if (appearance) {
+      applyExtractFrameBorderAppearanceStyle(group, {
+        align: currentAlign,
+        width: appearance.width,
+        style: appearance.style,
+        color: appearance.color,
+      });
+    } else {
+      applyExtractFrameBorderAppearanceStyle(group, {
+        align: currentAlign,
+        width: 0,
+        style: 'none',
+        color: 'transparent',
+      });
+    }
   });
 
   return container.innerHTML;
@@ -1408,6 +1866,215 @@ const readFrameNodeRect = (node: HTMLElement): FrameNodeRect => ({
   height: Math.max(1, parseFramePx(node.style.height)),
 });
 
+const formatExtractFramePx = (value: number) => `${Number(Math.max(0, value).toFixed(2))}px`;
+const snapExtractValueToStep = (value: number, step = EXTRACT_PHYSICAL_STEP_PX) =>
+  Math.max(0, Math.round(value / step) * step);
+
+const snapExtractAxisSizesToPixelBoundaries = (sizes: number[], minimumSize = 1) => {
+  if (sizes.length <= 0) {
+    return sizes;
+  }
+
+  const boundaries = [0];
+  let cursor = 0;
+  sizes.forEach((size) => {
+    cursor += Math.max(minimumSize, size);
+    boundaries.push(cursor);
+  });
+
+  const snappedBoundaries = boundaries.map((value) => Math.round(value));
+  for (let index = 1; index < snappedBoundaries.length; index += 1) {
+    snappedBoundaries[index] = Math.max(snappedBoundaries[index] || 0, (snappedBoundaries[index - 1] || 0) + minimumSize);
+  }
+
+  return sizes.map((_, index) => Math.max(minimumSize, (snappedBoundaries[index + 1] || 0) - (snappedBoundaries[index] || 0)));
+};
+
+const distributeExtractAxisSizesToStepTotal = (
+  sizes: number[],
+  targetTotal: number,
+  step = EXTRACT_PHYSICAL_STEP_PX,
+  minimumSize = EXTRACT_PHYSICAL_STEP_PX
+) => {
+  if (sizes.length <= 0) {
+    return sizes;
+  }
+
+  const safeTargetTotal = Math.max(minimumSize * sizes.length, snapExtractValueToStep(targetTotal, step));
+  const sourceTotal = sizes.reduce((sum, size) => sum + Math.max(minimumSize, size), 0);
+  const proportionalBase =
+    sourceTotal > 0
+      ? sizes.map((size) => Math.max(minimumSize, (Math.max(minimumSize, size) / sourceTotal) * safeTargetTotal))
+      : sizes.map(() => safeTargetTotal / sizes.length);
+  const nextSizes = proportionalBase.map((size) => Math.max(minimumSize, snapExtractValueToStep(size, step)));
+  let diff = safeTargetTotal - nextSizes.reduce((sum, size) => sum + size, 0);
+  let cursor = nextSizes.length - 1;
+  let guard = 0;
+
+  while (diff !== 0 && guard < 4096) {
+    const index = ((cursor % nextSizes.length) + nextSizes.length) % nextSizes.length;
+    const delta = diff > 0 ? step : -step;
+    const candidate = (nextSizes[index] || minimumSize) + delta;
+
+    if (candidate >= minimumSize) {
+      nextSizes[index] = candidate;
+      diff -= delta;
+    }
+
+    cursor -= 1;
+    guard += 1;
+  }
+
+  return nextSizes.map((size) => Math.max(minimumSize, size));
+};
+
+const readExtractTableColumnWidths = (table: HTMLTableElement) =>
+  Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+    .map((col) => parseFramePx(col.style.width || col.getAttribute('width') || ''))
+    .filter((width) => width > 0);
+
+const readExtractTableRowHeights = (table: HTMLTableElement) =>
+  Array.from(table.rows)
+    .map((row) => parseFramePx(row.style.height || row.getAttribute('height') || ''))
+    .filter((height) => height > 0);
+
+const quantizeExtractFrameBandTableGeometry = (container: ParentNode, step = EXTRACT_PHYSICAL_STEP_PX) => {
+  container.querySelectorAll<HTMLElement>('.v102-frame-band').forEach((shell) => {
+    const table = shell.querySelector<HTMLTableElement>(':scope > table.v102-frame-band-table');
+    const snappedLeft = shell.style.left.trim() ? snapExtractValueToStep(parseFramePx(shell.style.left), step) : null;
+    const snappedTop = shell.style.top.trim() ? snapExtractValueToStep(parseFramePx(shell.style.top), step) : null;
+
+    if (snappedLeft !== null) {
+      shell.style.left = formatExtractFramePx(snappedLeft);
+    }
+    if (snappedTop !== null) {
+      shell.style.top = formatExtractFramePx(snappedTop);
+    }
+
+    if (!table) {
+      const shellWidth = parseFramePx(shell.style.width);
+      const shellHeight = parseFramePx(shell.style.height);
+
+      if (shellWidth > 0) {
+        shell.style.width = formatExtractFramePx(Math.max(step, snapExtractValueToStep(shellWidth, step)));
+      }
+      if (shellHeight > 0) {
+        shell.style.height = formatExtractFramePx(Math.max(step, snapExtractValueToStep(shellHeight, step)));
+      }
+      return;
+    }
+
+    const colElements = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+    const colWidths = readExtractTableColumnWidths(table);
+    const rowElements = Array.from(table.rows);
+    const rowHeights = readExtractTableRowHeights(table);
+    const shellWidth = parseFramePx(shell.style.width) || colWidths.reduce((sum, width) => sum + width, 0);
+    const shellHeight = parseFramePx(shell.style.height) || rowHeights.reduce((sum, height) => sum + height, 0);
+    const quantizedShellWidth = shellWidth > 0 ? Math.max(step, snapExtractValueToStep(shellWidth, step)) : 0;
+    const quantizedShellHeight = shellHeight > 0 ? Math.max(step, snapExtractValueToStep(shellHeight, step)) : 0;
+
+    if (colElements.length > 0 && colWidths.length === colElements.length && quantizedShellWidth > 0) {
+      const nextWidths = distributeExtractAxisSizesToStepTotal(colWidths, quantizedShellWidth, step, step);
+      nextWidths.forEach((width, index) => {
+        const col = colElements[index];
+        if (col) {
+          col.style.width = formatExtractFramePx(width);
+        }
+      });
+      table.style.width = formatExtractFramePx(nextWidths.reduce((sum, width) => sum + width, 0));
+      shell.style.width = table.style.width;
+    } else if (quantizedShellWidth > 0) {
+      table.style.width = formatExtractFramePx(quantizedShellWidth);
+      shell.style.width = table.style.width;
+    }
+
+    if (rowElements.length > 0 && rowHeights.length === rowElements.length && quantizedShellHeight > 0) {
+      const nextHeights = distributeExtractAxisSizesToStepTotal(rowHeights, quantizedShellHeight, step, step);
+      nextHeights.forEach((height, index) => {
+        const row = rowElements[index];
+        if (row) {
+          row.style.height = formatExtractFramePx(height);
+        }
+      });
+      table.style.height = formatExtractFramePx(nextHeights.reduce((sum, height) => sum + height, 0));
+      shell.style.height = table.style.height;
+    } else if (quantizedShellHeight > 0) {
+      table.style.height = formatExtractFramePx(quantizedShellHeight);
+      shell.style.height = table.style.height;
+    }
+  });
+};
+
+const materializeExtractFrameBandTableGeometry = (container: ParentNode) => {
+  container.querySelectorAll<HTMLElement>('.v102-frame-band').forEach((shell) => {
+    const table = shell.querySelector<HTMLTableElement>(':scope > table.v102-frame-band-table');
+
+    if (!table) {
+      return;
+    }
+
+    const shellLeft = parseFramePx(shell.style.left);
+    const shellTop = parseFramePx(shell.style.top);
+    if (shell.style.left.trim()) {
+      shell.style.left = formatExtractFramePx(Math.round(shellLeft));
+    }
+    if (shell.style.top.trim()) {
+      shell.style.top = formatExtractFramePx(Math.round(shellTop));
+    }
+
+    const colElements = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+    const colWidths = readExtractTableColumnWidths(table);
+    if (colElements.length > 0 && colWidths.length === colElements.length) {
+      const snappedColWidths = snapExtractAxisSizesToPixelBoundaries(colWidths);
+      snappedColWidths.forEach((width, index) => {
+        const col = colElements[index];
+        if (col) {
+          col.style.width = formatExtractFramePx(width);
+        }
+      });
+      const tableWidth = snappedColWidths.reduce((sum, width) => sum + width, 0);
+      table.style.width = formatExtractFramePx(tableWidth);
+      shell.style.width = formatExtractFramePx(tableWidth);
+    } else {
+      const shellWidth = parseFramePx(shell.style.width);
+      if (shellWidth > 0) {
+        shell.style.width = formatExtractFramePx(Math.round(shellWidth));
+      }
+    }
+
+    const rows = Array.from(table.rows);
+    const rowHeights = readExtractTableRowHeights(table);
+    if (rows.length > 0 && rowHeights.length === rows.length) {
+      const snappedRowHeights = snapExtractAxisSizesToPixelBoundaries(rowHeights);
+      snappedRowHeights.forEach((height, index) => {
+        const row = rows[index];
+        if (row) {
+          row.style.height = formatExtractFramePx(height);
+        }
+      });
+      const tableHeight = snappedRowHeights.reduce((sum, height) => sum + height, 0);
+      table.style.height = formatExtractFramePx(tableHeight);
+      shell.style.height = formatExtractFramePx(tableHeight);
+    } else {
+      const shellHeight = parseFramePx(shell.style.height);
+      if (shellHeight > 0) {
+        shell.style.height = formatExtractFramePx(Math.round(shellHeight));
+      }
+    }
+  });
+};
+
+const materializeExtractFrameBandTableGeometryInHtml = (html: string) => {
+  if (!html.trim() || typeof document === 'undefined' || !html.includes('v102-frame-band-table')) {
+    return html;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  materializeExtractFrameBandTableGeometry(container);
+  return container.innerHTML;
+};
+
 const normalizeFrameOutlineStyle = (value: string | null | undefined): FrameOutlineStyle =>
   String(value || '').trim().toLowerCase() === 'dashed' ? 'dashed' : 'solid';
 
@@ -1513,6 +2180,165 @@ const snapFrameNodeEdgesInPage = (pageInner: HTMLElement) => {
   });
 
   return changed;
+};
+
+const readStyledShellRect = (node: HTMLElement): FrameNodeRect | null => {
+  if (!node.style.left.trim() || !node.style.top.trim() || !node.style.width.trim() || !node.style.height.trim()) {
+    return null;
+  }
+
+  return {
+    left: parseFramePx(node.style.left),
+    top: parseFramePx(node.style.top),
+    width: Math.max(1, parseFramePx(node.style.width)),
+    height: Math.max(1, parseFramePx(node.style.height)),
+  };
+};
+
+const writeStyledShellRect = (node: HTMLElement, rect: FrameNodeRect) => {
+  node.style.left = formatExtractFramePx(rect.left);
+  node.style.top = formatExtractFramePx(rect.top);
+  node.style.width = formatExtractFramePx(rect.width);
+  node.style.height = formatExtractFramePx(rect.height);
+};
+
+const buildSteppedAxisValueMap = (
+  values: number[],
+  tolerance = FRAME_EDGE_SNAP_TOLERANCE_PX,
+  step = EXTRACT_PHYSICAL_STEP_PX
+) => {
+  const sortedValues = values
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const snappedValueMap = new Map<number, number>();
+  let cluster: number[] = [];
+
+  const flushCluster = () => {
+    if (!cluster.length) {
+      return;
+    }
+
+    const average = cluster.reduce((sum, value) => sum + value, 0) / cluster.length;
+    const snappedValue = snapExtractValueToStep(average, step);
+    cluster.forEach((value) => {
+      snappedValueMap.set(value, snappedValue);
+    });
+    cluster = [];
+  };
+
+  sortedValues.forEach((value) => {
+    if (!cluster.length) {
+      cluster = [value];
+      return;
+    }
+
+    const anchor = cluster[0] || value;
+    if (Math.abs(value - anchor) <= tolerance) {
+      cluster.push(value);
+      return;
+    }
+
+    flushCluster();
+    cluster = [value];
+  });
+  flushCluster();
+
+  return snappedValueMap;
+};
+
+const snapExtractShellEdgesInScope = (scope: ParentNode, step = EXTRACT_PHYSICAL_STEP_PX) => {
+  const entries = Array.from(
+    scope.querySelectorAll<HTMLElement>('.v102-frame-band, .v202-cell-box[data-v106-frame-node="true"]')
+  )
+    .map((node) => {
+      const rect = readStyledShellRect(node);
+      return rect ? { node, rect } : null;
+    })
+    .filter((entry): entry is { node: HTMLElement; rect: FrameNodeRect } => Boolean(entry));
+
+  if (entries.length <= 0) {
+    return false;
+  }
+
+  const xSnapMap = buildSteppedAxisValueMap(
+    entries.flatMap(({ rect }) => [rect.left, rect.left + rect.width]),
+    FRAME_EDGE_SNAP_TOLERANCE_PX,
+    step
+  );
+  const ySnapMap = buildSteppedAxisValueMap(
+    entries.flatMap(({ rect }) => [rect.top, rect.top + rect.height]),
+    FRAME_EDGE_SNAP_TOLERANCE_PX,
+    step
+  );
+  let changed = false;
+
+  entries.forEach(({ node, rect }) => {
+    const nextLeft = xSnapMap.get(rect.left) ?? snapExtractValueToStep(rect.left, step);
+    const nextRight = xSnapMap.get(rect.left + rect.width) ?? snapExtractValueToStep(rect.left + rect.width, step);
+    const nextTop = ySnapMap.get(rect.top) ?? snapExtractValueToStep(rect.top, step);
+    const nextBottom = ySnapMap.get(rect.top + rect.height) ?? snapExtractValueToStep(rect.top + rect.height, step);
+    const nextRect = {
+      left: nextLeft,
+      top: nextTop,
+      width: Math.max(step, nextRight - nextLeft),
+      height: Math.max(step, nextBottom - nextTop),
+    };
+
+    if (
+      nextRect.left !== rect.left ||
+      nextRect.top !== rect.top ||
+      nextRect.width !== rect.width ||
+      nextRect.height !== rect.height
+    ) {
+      writeStyledShellRect(node, nextRect);
+      changed = true;
+    }
+  });
+
+  return changed;
+};
+
+const syncExtractFrameBandTablesToShellRects = (container: ParentNode, step = EXTRACT_PHYSICAL_STEP_PX) => {
+  container.querySelectorAll<HTMLElement>('.v102-frame-band').forEach((shell) => {
+    const table = shell.querySelector<HTMLTableElement>(':scope > table.v102-frame-band-table');
+
+    if (!table) {
+      return;
+    }
+
+    const shellWidth = parseFramePx(shell.style.width);
+    const shellHeight = parseFramePx(shell.style.height);
+    const colElements = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+    const rowElements = Array.from(table.rows);
+    const colWidths = readExtractTableColumnWidths(table);
+    const rowHeights = readExtractTableRowHeights(table);
+
+    if (shellWidth > 0 && colElements.length > 0 && colWidths.length === colElements.length) {
+      const nextWidths = distributeExtractAxisSizesToStepTotal(colWidths, shellWidth, step, step);
+      nextWidths.forEach((width, index) => {
+        const col = colElements[index];
+        if (col) {
+          col.style.width = formatExtractFramePx(width);
+        }
+      });
+      table.style.width = formatExtractFramePx(nextWidths.reduce((sum, width) => sum + width, 0));
+    } else if (shellWidth > 0) {
+      table.style.width = formatExtractFramePx(shellWidth);
+    }
+
+    if (shellHeight > 0 && rowElements.length > 0 && rowHeights.length === rowElements.length) {
+      const nextHeights = distributeExtractAxisSizesToStepTotal(rowHeights, shellHeight, step, step);
+      nextHeights.forEach((height, index) => {
+        const row = rowElements[index];
+        if (row) {
+          row.style.height = formatExtractFramePx(height);
+        }
+      });
+      table.style.height = formatExtractFramePx(nextHeights.reduce((sum, height) => sum + height, 0));
+    } else if (shellHeight > 0) {
+      table.style.height = formatExtractFramePx(shellHeight);
+    }
+  });
 };
 
 const clampFrameNodeRect = (
@@ -4146,12 +4972,14 @@ export default function TemplateExtractPage() {
   const [layoutResizeMode, setLayoutResizeMode] =
     React.useState<TemplateLayoutResizeMode>('grow_height');
   const [draftDetail, setDraftDetail] = React.useState<TemplateExtractDetailResult | null>(null);
+  const [fullExtractDebugSnapshot, setFullExtractDebugSnapshot] = React.useState<DraftRunSnapshot | null>(null);
+  const [fullExtractDebugResponse, setFullExtractDebugResponse] = React.useState<TemplateExtractDetailResult | null>(null);
+  const [fullExtractDebugActiveStep, setFullExtractDebugActiveStep] = React.useState<FullExtractDebugStepKey | null>(null);
   const [visualSimilarityReport, setVisualSimilarityReport] =
     React.useState<TemplateExtractVisualSimilarityReport | null>(null);
   const [crossValidationPreview, setCrossValidationPreview] =
     React.useState<CrossValidationPreviewState | null>(null);
   const [crossValidationReferenceVisible, setCrossValidationReferenceVisible] = React.useState(false);
-  const [transparentFrameGuideVisible, setTransparentFrameGuideVisible] = React.useState(true);
   const [crossValidationViewMode, setCrossValidationViewMode] =
     React.useState<CrossValidationViewMode>('side_by_side');
   const [crossValidationPageIndex, setCrossValidationPageIndex] = React.useState(0);
@@ -4196,6 +5024,9 @@ export default function TemplateExtractPage() {
   const pendingFrameExtractedTextStateRef = React.useRef<FrameExtractedTextState>({});
   const pendingFrameExtractedTextMetaStateRef = React.useRef<FrameExtractedTextMetaState>({});
   const previewValueUpdateTimerRef = React.useRef<number | null>(null);
+  const [extractPreviewPipelineInspectorEnabled, setExtractPreviewPipelineInspectorEnabled] = React.useState(false);
+  const [extractPreviewPipelineStageIndex, setExtractPreviewPipelineStageIndex] = React.useState(0);
+  const [extractPreviewPipelineApprovedStageIndex, setExtractPreviewPipelineApprovedStageIndex] = React.useState(0);
   const frameDragStateRef = React.useRef<FrameDragState | null>(null);
   const frameResizeStateRef = React.useRef<FrameResizeState | null>(null);
   const frameCreateStateRef = React.useRef<FrameCreateState | null>(null);
@@ -4328,6 +5159,45 @@ export default function TemplateExtractPage() {
     const nextHtml = applyFrameExtractedTextStateToHtml(baseHtml, frameExtractedTextState, frameExtractedTextMetaState);
     return replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel);
   }, [appliedImageFrameTextRenderModel, frameExtractedTextMetaState, frameExtractedTextState, frameRevision, previewDraftBaseHtml]);
+  const buildComputedDraftPreviewHtml = React.useCallback(() => {
+    const pendingFrameTextState = pendingFrameExtractedTextStateRef.current;
+    const pendingFrameTextMetaState = pendingFrameExtractedTextMetaStateRef.current;
+    const currentFrameTextState =
+      Object.keys(pendingFrameTextState).length > 0
+        ? { ...frameExtractedTextState, ...pendingFrameTextState }
+        : frameExtractedTextState;
+    const currentFrameTextMetaState =
+      Object.keys(pendingFrameTextMetaState).length > 0
+        ? { ...frameExtractedTextMetaState, ...pendingFrameTextMetaState }
+        : frameExtractedTextMetaState;
+    const baseHtml = (frameRevision > 0 ? draftPreviewHtmlRef.current : previewDraftBaseHtml) || previewDraftBaseHtml;
+    const nextHtml = applyFrameExtractedTextStateToHtml(baseHtml, currentFrameTextState, currentFrameTextMetaState);
+    return stripExtractOutputFrameAttrs(
+      embedExtractPositionGroupAttrs(replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel))
+    );
+  }, [
+    appliedImageFrameTextRenderModel,
+    frameExtractedTextMetaState,
+    frameExtractedTextState,
+    frameRevision,
+    previewDraftBaseHtml,
+  ]);
+  const extractPreviewPipelineStageHtml = React.useMemo<Record<ExtractPreviewPipelineStageKey, string>>(
+    () => ({
+      received: draftDetail?.draft.generatedDraftHtml || '',
+      clone: previewDraftCopyHtml,
+      text: renderedDraftHtml,
+      fit: renderedDraftHtml,
+    }),
+    [draftDetail?.draft.generatedDraftHtml, previewDraftCopyHtml, renderedDraftHtml]
+  );
+  const extractPreviewPipelineActiveStageIndex = extractPreviewPipelineInspectorEnabled
+    ? extractPreviewPipelineStageIndex
+    : EXTRACT_PREVIEW_PIPELINE_STAGES.length - 1;
+  const extractPreviewPipelineActiveStageKey =
+    (EXTRACT_PREVIEW_PIPELINE_STAGES[extractPreviewPipelineActiveStageIndex]?.key as ExtractPreviewPipelineStageKey | undefined) ||
+    'fit';
+  const extractPreviewDisplayHtml = extractPreviewPipelineStageHtml[extractPreviewPipelineActiveStageKey] || renderedDraftHtml;
   const requestedFrameGroupVersion = React.useMemo(
     () => buildRequestedFrameGroupVersion(String(frameGroupVersion || 'fv1.11'), frameProfileName),
     [frameGroupVersion, frameProfileName]
@@ -4357,12 +5227,19 @@ export default function TemplateExtractPage() {
     (normalizedCurrentFrameGroupVersionTag === GUARANTEED_FRAME_GROUP_VERSION ||
       normalizedCurrentFrameGroupVersionTag === `${GUARANTEED_FRAME_GROUP_VERSION}-default`);
   const frameEditingEnabled = false;
-  const activeFrameTextExtractionVersionLabel =
-    frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion;
   const fullExtractVersionSummary =
     frameTextExtractionMode === 'image'
       ? `${String(frameGroupVersion || GUARANTEED_FRAME_GROUP_VERSION)} -> 이미지 ${imageFrameTextExtractionVersion}`
       : `${String(frameGroupVersion || GUARANTEED_FRAME_GROUP_VERSION)} -> 비 이미지 ${frameTextExtractionVersion}`;
+
+  React.useEffect(() => {
+    if (!extractPreviewPipelineInspectorEnabled) {
+      return;
+    }
+
+    setExtractPreviewPipelineStageIndex(0);
+    setExtractPreviewPipelineApprovedStageIndex(0);
+  }, [draftDetail?.draft.id, draftDetail?.draft.generatedDraftHtml, extractPreviewPipelineInspectorEnabled]);
 
   React.useEffect(() => {
     if (!isV109FrameGroupVersion(frameGroupVersion)) {
@@ -4486,7 +5363,39 @@ export default function TemplateExtractPage() {
     pendingFrameExtractedTextMetaStateRef.current = {};
   }, [draftDetail?.draft.id]);
 
+  const handleToggleExtractPreviewPipelineInspector = React.useCallback(() => {
+    setExtractPreviewPipelineInspectorEnabled((previous) => {
+      const nextEnabled = !previous;
+
+      if (nextEnabled) {
+        setExtractPreviewPipelineStageIndex(0);
+        setExtractPreviewPipelineApprovedStageIndex(0);
+        return true;
+      }
+
+      setExtractPreviewPipelineStageIndex(EXTRACT_PREVIEW_PIPELINE_STAGES.length - 1);
+      setExtractPreviewPipelineApprovedStageIndex(EXTRACT_PREVIEW_PIPELINE_STAGES.length - 1);
+      return false;
+    });
+  }, []);
+
+  const handleSelectExtractPreviewPipelineStage = React.useCallback((stageIndex: number) => {
+    setExtractPreviewPipelineStageIndex(stageIndex);
+  }, []);
+
+  const handleApproveNextExtractPreviewPipelineStage = React.useCallback(() => {
+    setExtractPreviewPipelineApprovedStageIndex((previous) => {
+      const nextApprovedStageIndex = Math.min(EXTRACT_PREVIEW_PIPELINE_STAGES.length - 1, previous + 1);
+      setExtractPreviewPipelineStageIndex(nextApprovedStageIndex);
+      return nextApprovedStageIndex;
+    });
+  }, []);
+
   const getCurrentDraftPreviewHtml = React.useCallback(() => {
+    if (extractPreviewPipelineInspectorEnabled) {
+      return buildComputedDraftPreviewHtml();
+    }
+
     draftPreviewRef.current?.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
       snapFrameNodeEdgesInPage(pageInner);
     });
@@ -4526,6 +5435,8 @@ export default function TemplateExtractPage() {
       embedExtractPositionGroupAttrs(replaceReplicaRenderModelInHtml(nextHtml, appliedImageFrameTextRenderModel))
     );
   }, [
+    buildComputedDraftPreviewHtml,
+    extractPreviewPipelineInspectorEnabled,
     appliedImageFrameTextRenderModel,
     flattenedFramePreview,
     frameExtractedTextMetaState,
@@ -4794,16 +5705,6 @@ export default function TemplateExtractPage() {
 	      return;
 	    }
 
-	    normalizeExtractTransparentFrameGuides(root);
-	  }, [flattenedFramePreview, renderedDraftHtml]);
-
-	  React.useEffect(() => {
-	    const root = draftPreviewRef.current;
-
-	    if (!root) {
-	      return;
-	    }
-
 	    applyDraftPreviewEditPermissions(root, draftPreviewEditRole);
 	  }, [draftDetail?.draft.generatedDraftHtml, draftPreviewEditRole]);
 
@@ -4899,7 +5800,45 @@ export default function TemplateExtractPage() {
   React.useEffect(() => () => clearDraftProgressTimer(), [clearDraftProgressTimer]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (
+      typeof window === 'undefined' ||
+      !extractPreviewPipelineInspectorEnabled ||
+      extractPreviewPipelineActiveStageKey !== 'fit'
+    ) {
+      return;
+    }
+
+    const root = draftPreviewRef.current;
+
+    if (!root) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const fitEditableText = async () => {
+      await document.fonts?.ready?.catch(() => undefined);
+
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+      });
+
+      if (cancelled) {
+        return;
+      }
+
+      applyTemplateExtractEditableTextFit(root);
+    };
+
+    void fitEditableText();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [extractPreviewDisplayHtml, extractPreviewPipelineActiveStageKey, extractPreviewPipelineInspectorEnabled]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || extractPreviewPipelineInspectorEnabled) {
       return;
     }
 
@@ -4931,7 +5870,7 @@ export default function TemplateExtractPage() {
     return () => {
       cancelled = true;
     };
-  }, [draftDetail?.draft.generatedDraftHtml]);
+  }, [draftDetail?.draft.generatedDraftHtml, extractPreviewPipelineInspectorEnabled]);
 
   const clearVisualSimilarityProgressTimer = React.useCallback(() => {
     if (visualProgressTimerRef.current !== null) {
@@ -5204,6 +6143,222 @@ export default function TemplateExtractPage() {
     [beginProcessingProgress, updateDraftProgress]
   );
 
+  const buildDraftRunSnapshot = React.useCallback(
+    (
+      extractionStage: TemplateExtractExtractionStage = 'full',
+      options?: {
+        frameGroupVersionOverride?: TemplateExtractFrameGroupVersion;
+        requestedFrameGroupVersionOverride?: TemplateExtractFrameGroupVersion;
+      }
+    ): DraftRunSnapshot | null => {
+      if (extractionStage === 'frames' && !selectedFile) {
+        setMessage('프레임 그룹 생성은 PDF 업로드에서만 지원합니다.');
+        return null;
+      }
+
+      const activeFrameGroupVersion = options?.frameGroupVersionOverride || frameGroupVersion;
+      const activeRequestedFrameGroupVersion =
+        options?.requestedFrameGroupVersionOverride ||
+        buildRequestedFrameGroupVersion(
+          String(activeFrameGroupVersion || GUARANTEED_FRAME_GROUP_VERSION),
+          frameProfileName
+        );
+
+      return {
+        extractionStage,
+        frameStage: extractionStage === 'frames',
+        selectedFile,
+        sourceTitle,
+        sourceKind,
+        sourceContent,
+        similarTemplateIds: similarTemplateIdsText
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean),
+        engineVersion,
+        activeFrameGroupVersion,
+        activeRequestedFrameGroupVersion,
+        frameTextExtractionMode,
+        frameTextExtractionVersion,
+        imageFrameTextExtractionVersion,
+      };
+    },
+    [
+      engineVersion,
+      frameGroupVersion,
+      frameProfileName,
+      frameTextExtractionMode,
+      frameTextExtractionVersion,
+      imageFrameTextExtractionVersion,
+      selectedFile,
+      similarTemplateIdsText,
+      sourceContent,
+      sourceKind,
+      sourceTitle,
+    ]
+  );
+
+  const initializeDraftRun = React.useCallback(
+    (snapshot: DraftRunSnapshot, nextLoading = true) => {
+      setLoading(nextLoading);
+      setMessage(null);
+      setApproveResult(null);
+      setVisualSimilarityReport(null);
+      setDraftProgressAction(snapshot.extractionStage);
+      setProgressPanelExpanded(true);
+      clearDraftProgressTimer();
+      clearVisualSimilarityProgressTimer();
+      setVisualSimilarityProgress({
+        visible: false,
+        phase: 'idle',
+        activeStep: null,
+        percent: 0,
+        stage: '',
+        detail: '',
+      });
+      visualMeasurementLogFileNameRef.current = '';
+      lastVisualMeasurementLogEventKeyRef.current = '';
+      lastVisualMeasurementKeyRef.current = '';
+      setDraftProgress({
+        visible: true,
+        phase: snapshot.selectedFile ? 'uploading' : 'processing',
+        percent: snapshot.selectedFile ? 4 : 12,
+        stage: snapshot.selectedFile
+          ? snapshot.frameStage
+            ? 'PDF를 업로드하고 프레임 그룹을 준비하고 있습니다.'
+            : '파일을 업로드하고 있습니다.'
+          : '문서를 준비하고 있습니다.',
+        detail: snapshot.selectedFile
+          ? snapshot.frameStage
+            ? '브라우저에서 서버로 PDF를 전송한 뒤 프레임 그룹만 먼저 추출합니다.'
+            : '브라우저에서 서버로 파일을 전송합니다.'
+          : '붙여 넣은 원본 본문을 읽어 템플릿 초안을 준비합니다.',
+      });
+    },
+    [clearDraftProgressTimer, clearVisualSimilarityProgressTimer]
+  );
+
+  const requestDraftRun = React.useCallback(
+    async (snapshot: DraftRunSnapshot) => {
+      let result: { success: boolean; data?: TemplateExtractDetailResult; message?: string };
+
+      if (snapshot.selectedFile) {
+        const formData = new FormData();
+        formData.append('sourceTitle', snapshot.sourceTitle);
+        formData.append('similarTemplateIds', snapshot.similarTemplateIds.join(','));
+        formData.append('engineVersion', snapshot.engineVersion);
+        formData.append('extractionStage', snapshot.extractionStage);
+        formData.append('frameGroupVersion', snapshot.activeRequestedFrameGroupVersion);
+        formData.append('file', snapshot.selectedFile);
+
+        if (snapshot.extractionStage === 'full') {
+          formData.append('frameTextExtractionMode', snapshot.frameTextExtractionMode);
+
+          if (snapshot.frameTextExtractionMode === 'image') {
+            formData.append(
+              'imageFrameTextExtractionVersion',
+              snapshot.imageFrameTextExtractionVersion
+            );
+            formData.append('imageOcrVersion', snapshot.imageFrameTextExtractionVersion);
+          } else {
+            formData.append('frameTextExtractionVersion', snapshot.frameTextExtractionVersion);
+          }
+        }
+
+        result = await createDraftWithFileUpload(formData, snapshot.extractionStage);
+      } else {
+        beginProcessingProgress(
+          22,
+          snapshot.frameStage ? '프레임 그룹을 분석하고 있습니다.' : '문서를 분석하고 있습니다.',
+          snapshot.frameStage
+            ? '원본 본문에서 프레임 그룹 구조만 분리하고 있습니다.'
+            : '원본 본문을 읽고 템플릿 초안과 추천 항목을 조립하고 있습니다.'
+        );
+        const response = await fetch('/api/templates/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceTitle: snapshot.sourceTitle,
+            sourceKind: snapshot.sourceKind,
+            sourceContent: snapshot.sourceContent,
+            similarTemplateIds: snapshot.similarTemplateIds,
+            engineVersion: snapshot.engineVersion,
+            extractionStage: snapshot.extractionStage,
+            frameGroupVersion: snapshot.activeRequestedFrameGroupVersion,
+          }),
+        });
+        result = await response.json();
+      }
+
+      if (!result.success || !result.data) {
+        throw new Error(result.message || '추출 초안 생성에 실패했습니다.');
+      }
+
+      return result.data;
+    },
+    [beginProcessingProgress, createDraftWithFileUpload]
+  );
+
+  const applyDraftRunResult = React.useCallback(
+    (snapshot: DraftRunSnapshot, detail: TemplateExtractDetailResult) => {
+      clearDraftProgressTimer();
+      setDraftProgress({
+        visible: true,
+        phase: 'completed',
+        percent: 100,
+        stage: snapshot.frameStage ? '프레임 그룹 생성을 완료했습니다.' : '초안 생성을 완료했습니다.',
+        detail: snapshot.frameStage
+          ? '원본 문서에서 프레임 그룹만 먼저 분리했습니다.'
+          : '원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다.',
+      });
+      setDraftDetail(detail);
+      setLoadedTemplateId(null);
+      setPreviewPaneMode('draft');
+      setSelectedDraftId(detail.draft.id);
+      syncReviewedFields(toReviewedFields(detail));
+      persistRecentDraft(detail);
+      const actualExtractionStage =
+        detail?.pipelineTrace?.extractionStage === 'frames' ? 'frames' : snapshot.extractionStage;
+      const versionLabel = formatTemplateExtractEngineVersionLabel(snapshot.engineVersion);
+      setMessage(
+        actualExtractionStage === 'frames'
+          ? `프레임 그룹 초안을 만들었습니다. (${String(snapshot.activeFrameGroupVersion || snapshot.activeRequestedFrameGroupVersion)}, ${versionLabel})`
+          : `원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${String(snapshot.activeFrameGroupVersion || snapshot.activeRequestedFrameGroupVersion)} -> ${snapshot.frameTextExtractionMode === 'image' ? snapshot.imageFrameTextExtractionVersion : snapshot.frameTextExtractionVersion}, ${versionLabel})`
+      );
+    },
+    [clearDraftProgressTimer, persistRecentDraft, syncReviewedFields]
+  );
+
+  const commitFullExtractStageDetail = React.useCallback(
+    (
+      detail: TemplateExtractDetailResult,
+      stage: FullExtractDebugStepKey,
+      progress: {
+        phase: DraftCreateProgressState['phase'];
+        percent: number;
+        stage: string;
+        detail: string;
+      },
+      messageText: string
+    ) => {
+      setDraftDetail(detail);
+      setLoadedTemplateId(null);
+      setPreviewPaneMode('draft');
+      setSelectedDraftId(detail.draft.id);
+      persistRecentDraft(detail);
+      setDraftProgress({
+        visible: true,
+        phase: progress.phase,
+        percent: progress.percent,
+        stage: progress.stage,
+        detail: progress.detail,
+      });
+      setFullExtractDebugActiveStep(stage);
+      setMessage(messageText);
+    },
+    [persistRecentDraft]
+  );
+
   const loadDraft = React.useCallback(
     async (draftId: string) => {
       const normalizedDraftId = draftId.trim();
@@ -5312,7 +6467,7 @@ export default function TemplateExtractPage() {
         body: JSON.stringify({
           templateName,
           sourceDocumentName: sourceTitle,
-          draftHtml: getCurrentDraftPreviewHtml(),
+          draftHtml: materializeExtractFrameBandTableGeometryInHtml(getCurrentDraftPreviewHtml()),
           layoutResizeMode,
         }),
       });
@@ -5434,131 +6589,49 @@ export default function TemplateExtractPage() {
       requestedFrameGroupVersionOverride?: TemplateExtractFrameGroupVersion;
     }
   ) => {
-    if (extractionStage === 'frames' && !selectedFile) {
-      setMessage('프레임 그룹 생성은 PDF 업로드에서만 지원합니다.');
+    const snapshot = buildDraftRunSnapshot(extractionStage, options);
+
+    if (!snapshot) {
       return;
     }
 
-    const activeFrameGroupVersion = options?.frameGroupVersionOverride || frameGroupVersion;
-    const activeRequestedFrameGroupVersion =
-      options?.requestedFrameGroupVersionOverride ||
-      buildRequestedFrameGroupVersion(String(activeFrameGroupVersion || GUARANTEED_FRAME_GROUP_VERSION), frameProfileName);
-    const frameStage = extractionStage === 'frames';
-    setLoading(true);
-    setMessage(null);
-    setApproveResult(null);
-    setVisualSimilarityReport(null);
-    setDraftProgressAction(extractionStage);
-    setProgressPanelExpanded(true);
-    clearDraftProgressTimer();
-    clearVisualSimilarityProgressTimer();
-    setVisualSimilarityProgress({
-      visible: false,
-      phase: 'idle',
-      activeStep: null,
-      percent: 0,
-      stage: '',
-      detail: '',
-    });
-    visualMeasurementLogFileNameRef.current = '';
-    lastVisualMeasurementLogEventKeyRef.current = '';
-    lastVisualMeasurementKeyRef.current = '';
-    setDraftProgress({
-      visible: true,
-      phase: selectedFile ? 'uploading' : 'processing',
-      percent: selectedFile ? 4 : 12,
-      stage: selectedFile
-        ? frameStage
-          ? 'PDF를 업로드하고 프레임 그룹을 준비하고 있습니다.'
-          : '파일을 업로드하고 있습니다.'
-        : '문서를 준비하고 있습니다.',
-      detail: selectedFile
-        ? frameStage
-          ? '브라우저에서 서버로 PDF를 전송한 뒤 프레임 그룹만 먼저 추출합니다.'
-          : '브라우저에서 서버로 파일을 전송합니다.'
-        : '붙여 넣은 원본 본문을 읽어 템플릿 초안을 준비합니다.',
-    });
+    initializeDraftRun(snapshot, true);
+    setFullExtractDebugSnapshot(null);
+    setFullExtractDebugResponse(null);
+    setFullExtractDebugActiveStep(null);
 
     try {
-      const similarTemplateIds = similarTemplateIdsText
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean);
+      const detail = await requestDraftRun(snapshot);
 
-      let result;
-
-      if (selectedFile) {
-        const formData = new FormData();
-        formData.append('sourceTitle', sourceTitle);
-        formData.append('similarTemplateIds', similarTemplateIds.join(','));
-        formData.append('engineVersion', engineVersion);
-        formData.append('extractionStage', extractionStage);
-        formData.append('frameGroupVersion', activeRequestedFrameGroupVersion);
-        formData.append('file', selectedFile);
-
-        if (extractionStage === 'full') {
-          formData.append('frameTextExtractionMode', frameTextExtractionMode);
-
-          if (frameTextExtractionMode === 'image') {
-            formData.append('imageFrameTextExtractionVersion', imageFrameTextExtractionVersion);
-            formData.append('imageOcrVersion', imageFrameTextExtractionVersion);
-          } else {
-            formData.append('frameTextExtractionVersion', frameTextExtractionVersion);
-          }
-        }
-
-        result = await createDraftWithFileUpload(formData, extractionStage);
-      } else {
-        beginProcessingProgress(
-          22,
-          frameStage ? '프레임 그룹을 분석하고 있습니다.' : '문서를 분석하고 있습니다.',
-          frameStage
-            ? '원본 본문에서 프레임 그룹 구조만 분리하고 있습니다.'
-            : '원본 본문을 읽고 템플릿 초안과 추천 항목을 조립하고 있습니다.'
-        );
-        const response = await fetch('/api/templates/extract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sourceTitle,
-            sourceKind,
-            sourceContent,
-            similarTemplateIds,
-            engineVersion,
-            extractionStage,
-            frameGroupVersion: activeRequestedFrameGroupVersion,
-          }),
-        });
-        result = await response.json();
+      if (extractionStage !== 'full') {
+        applyDraftRunResult(snapshot, detail);
+        return;
       }
 
-      if (!result.success) {
-        throw new Error(result.message || '추출 초안 생성에 실패했습니다.');
-      }
+      const extractedHtml = applyExtractValueCorrectionsInHtml(detail.draft.generatedDraftHtml || '');
+      const extractedDetail = buildDraftDetailWithGeneratedHtml(detail, extractedHtml);
+      const physicalHtml = applyExtractPhysicalCorrectionsInHtml(extractedDetail.draft.generatedDraftHtml || '');
+      const physicalDetail = buildDraftDetailWithGeneratedHtml(extractedDetail, physicalHtml);
+      const visualHtml = applyExtractVisualCorrectionsInHtml(physicalDetail.draft.generatedDraftHtml || '');
+      const visualDetail = buildDraftDetailWithGeneratedHtml(physicalDetail, visualHtml);
 
-      clearDraftProgressTimer();
-      setDraftProgress({
-        visible: true,
-        phase: 'completed',
-        percent: 100,
-        stage: frameStage ? '프레임 그룹 생성을 완료했습니다.' : '초안 생성을 완료했습니다.',
-        detail: frameStage
-          ? '원본 문서에서 프레임 그룹만 먼저 분리했습니다.'
-          : '원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다.',
-      });
-      setDraftDetail(result.data);
-      setLoadedTemplateId(null);
-      setPreviewPaneMode('draft');
-      setSelectedDraftId(result.data.draft.id);
-      syncReviewedFields(toReviewedFields(result.data));
-      persistRecentDraft(result.data);
-      const actualExtractionStage =
-        result.data?.pipelineTrace?.extractionStage === 'frames' ? 'frames' : extractionStage;
-      const versionLabel = formatTemplateExtractEngineVersionLabel(engineVersion);
-      setMessage(
-        actualExtractionStage === 'frames'
-          ? `프레임 그룹 초안을 만들었습니다. (${String(activeFrameGroupVersion || activeRequestedFrameGroupVersion)}, ${versionLabel})`
-          : `원본 문서를 읽어 템플릿 초안과 추천 항목을 만들었습니다. (${String(activeFrameGroupVersion || activeRequestedFrameGroupVersion)} -> ${activeFrameTextExtractionVersionLabel}, ${versionLabel})`
+      setFullExtractDebugSnapshot(snapshot);
+      setFullExtractDebugResponse(extractedDetail);
+      syncReviewedFields(toReviewedFields(visualDetail));
+      commitFullExtractStageDetail(
+        visualDetail,
+        'visual_correction',
+        {
+          phase: 'completed',
+          percent: 100,
+          stage: '전체 추출 3단계를 완료했습니다.',
+          detail: '값 추출 -> 물리적 보정 -> 시각적 보정을 순서대로 적용했습니다.',
+        },
+        `전체 추출을 완료했습니다. (${String(snapshot.activeFrameGroupVersion || snapshot.activeRequestedFrameGroupVersion)} -> ${
+          snapshot.frameTextExtractionMode === 'image'
+            ? snapshot.imageFrameTextExtractionVersion
+            : snapshot.frameTextExtractionVersion
+        }, ${formatTemplateExtractEngineVersionLabel(snapshot.engineVersion)})`
       );
     } catch (error) {
       clearDraftProgressTimer();
@@ -5576,11 +6649,105 @@ export default function TemplateExtractPage() {
     }
   };
 
+  const handleRunFullExtractValueStage = React.useCallback(async () => {
+    const snapshot = buildDraftRunSnapshot('full');
+
+    if (!snapshot) {
+      return;
+    }
+
+    initializeDraftRun(snapshot, true);
+    setFullExtractDebugSnapshot(snapshot);
+    setFullExtractDebugResponse(null);
+    setFullExtractDebugActiveStep(null);
+
+    try {
+      const detail = await requestDraftRun(snapshot);
+      const extractedHtml = applyExtractValueCorrectionsInHtml(detail.draft.generatedDraftHtml || '');
+      const extractedDetail = buildDraftDetailWithGeneratedHtml(detail, extractedHtml);
+      setFullExtractDebugResponse(extractedDetail);
+      applyDraftRunResult(snapshot, extractedDetail);
+      setFullExtractDebugActiveStep('extract_values');
+      setMessage(
+        `값 추출을 완료했습니다. (${String(snapshot.activeFrameGroupVersion || snapshot.activeRequestedFrameGroupVersion)} -> ${
+          snapshot.frameTextExtractionMode === 'image'
+            ? snapshot.imageFrameTextExtractionVersion
+            : snapshot.frameTextExtractionVersion
+        })`
+      );
+    } catch (error) {
+      clearDraftProgressTimer();
+      setDraftProgress((previous) => ({
+        visible: true,
+        phase: 'failed',
+        percent: Math.max(previous.percent, 18),
+        stage: '값 추출이 중단되었습니다.',
+        detail: error instanceof Error ? error.message : '값 추출에 실패했습니다.',
+      }));
+      setMessage(error instanceof Error ? error.message : '값 추출에 실패했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }, [applyDraftRunResult, buildDraftRunSnapshot, clearDraftProgressTimer, initializeDraftRun, requestDraftRun]);
+
+  const handleRunFullExtractPhysicalStage = React.useCallback(() => {
+    if (!fullExtractDebugResponse) {
+      setMessage('먼저 1. 값 추출을 실행하세요.');
+      return;
+    }
+
+    const physicalHtml = applyExtractPhysicalCorrectionsInHtml(fullExtractDebugResponse.draft.generatedDraftHtml || '');
+    const physicalDetail = buildDraftDetailWithGeneratedHtml(fullExtractDebugResponse, physicalHtml);
+
+    commitFullExtractStageDetail(
+      physicalDetail,
+      'physical_correction',
+      {
+        phase: 'processing',
+        percent: 88,
+        stage: '프레임 물리적 보정을 완료했습니다.',
+        detail: 'peer edge를 맞추고 프레임 크기 수치를 5px 단위로 정리했습니다.',
+      },
+      '프레임 물리적 보정을 적용했습니다.'
+    );
+  }, [commitFullExtractStageDetail, fullExtractDebugResponse]);
+
+  const handleRunFullExtractVisualStage = React.useCallback(() => {
+    if (!fullExtractDebugResponse) {
+      setMessage('먼저 1. 값 추출을 실행하세요.');
+      return;
+    }
+
+    const physicalHtml = applyExtractPhysicalCorrectionsInHtml(fullExtractDebugResponse.draft.generatedDraftHtml || '');
+    const physicalDetail = buildDraftDetailWithGeneratedHtml(fullExtractDebugResponse, physicalHtml);
+    const visualHtml = applyExtractVisualCorrectionsInHtml(physicalDetail.draft.generatedDraftHtml || '');
+    const visualDetail = buildDraftDetailWithGeneratedHtml(physicalDetail, visualHtml);
+
+    commitFullExtractStageDetail(
+      visualDetail,
+      'visual_correction',
+      {
+        phase: 'completed',
+        percent: 100,
+        stage: '시각적 보정을 완료했습니다.',
+        detail: '실선/투명 해석을 정리하고 색상을 transparent/slate-200/slate-900로 확정했습니다.',
+      },
+      '시각적 보정을 적용했습니다.'
+    );
+  }, [commitFullExtractStageDetail, fullExtractDebugResponse]);
+
   const handleApprove = async () => {
     const normalizedDraftId = selectedDraftId.trim();
 
     if (!normalizedDraftId) {
       setMessage('승인할 초안을 먼저 선택하세요.');
+      return;
+    }
+
+    const approvalDraftHtml = draftDetail?.draft.generatedDraftHtml?.trim() || '';
+
+    if (!approvalDraftHtml) {
+      setMessage('저장할 추출 초안 HTML이 없습니다.');
       return;
     }
 
@@ -5596,7 +6763,6 @@ export default function TemplateExtractPage() {
         reviewedFields,
         pendingReviewedFieldPatchesRef.current
       );
-      flushPendingPreviewValueUpdates();
 
       const response = await fetch(`/api/templates/extract/${normalizedDraftId}/approve`, {
         method: 'POST',
@@ -5605,7 +6771,7 @@ export default function TemplateExtractPage() {
           templateName,
           layoutResizeMode,
           reviewedFields: reviewedFieldsForApproval,
-          generatedDraftHtml: getCurrentDraftPreviewHtml(),
+          generatedDraftHtml: approvalDraftHtml,
         }),
       });
       const result = await response.json();
@@ -6293,80 +7459,9 @@ export default function TemplateExtractPage() {
             activeImageFrameTextExtractionVersion
           );
         } else if (activeFrameTextExtractionVersion === 'niv1.12') {
-          const framePlansByPageNumber = new Map<
-            string,
-            Array<{
-              key: string;
-              frameRect: FrameNodeRect;
-              sourceTextHint: string;
-              node: HTMLElement;
-            }>
-          >();
-
-          frameNodes.forEach((node) => {
-            const pageNumber =
-              node.getAttribute('data-template-frame-page') ||
-              node.closest<HTMLElement>('.page-inner')?.getAttribute('data-page') ||
-              '1';
-            const extractedTextKey = buildFrameExtractedTextKeyFromNode(node);
-
-            if (!extractedTextKey) {
-              return;
-            }
-
-            const pagePlans = framePlansByPageNumber.get(pageNumber) || [];
-            pagePlans.push({
-              key: extractedTextKey,
-              frameRect: readSelectableFrameNodeRect(node),
-              sourceTextHint: readFrameNodeSourceText(node),
-              node,
-            });
-            framePlansByPageNumber.set(pageNumber, pagePlans);
-          });
-
-          framePlansByPageNumber.forEach((plans, pageNumber) => {
-            const pageModel = pageModelByPageNumber.get(pageNumber) || renderModel?.pages?.[0];
-            const normalizedPlans = plans.map((plan) => {
-              const valueKey = plan.node.getAttribute('data-template-frame-value-key') || '';
-              const frameGroup = plan.node.getAttribute('data-template-frame-group') || '';
-              const colorGroup = plan.node.getAttribute('data-template-frame-color-group') || '';
-              const fieldType = inferImageFrameFieldType(valueKey, plan.sourceTextHint, frameGroup);
-              const semanticRole = inferImageFrameSemanticRole(
-                valueKey,
-                plan.sourceTextHint,
-                fieldType,
-                frameGroup,
-                plan.node.getAttribute('data-template-frame-col-start') || ''
-              );
-
-              return {
-                key: plan.key,
-                frameRect: plan.frameRect,
-                sourceTextHint: plan.sourceTextHint,
-                valueKey,
-                frameGroup,
-                colorGroup,
-                semanticRole,
-                fieldType,
-              };
-            });
-            const extractedTextState = extractFrameTextStateFromRenderPageV112(pageModel, normalizedPlans);
-
-            plans.forEach((plan) => {
-              const nextText = extractedTextState[plan.key] || '';
-              const normalizedText = formatFrameSourceTextForDisplay(nextText, {
-                frameGroup: plan.node.getAttribute('data-template-frame-group'),
-                valueKey: plan.node.getAttribute('data-template-frame-value-key'),
-                colorGroup: plan.node.getAttribute('data-template-frame-color-group'),
-              });
-
-              nextExtractedTextState[plan.key] = normalizedText;
-
-              if (normalizedText) {
-                filledCount += 1;
-              }
-            });
-          });
+          const guaranteedExtractResult = extractGuaranteedNonImageTextStateFromRoot(root, renderModel);
+          Object.assign(nextExtractedTextState, guaranteedExtractResult.extractedTextState);
+          filledCount = guaranteedExtractResult.filledCount;
         } else {
           frameNodes.forEach((node) => {
             const pageNumber =
@@ -7754,11 +8849,8 @@ export default function TemplateExtractPage() {
   const previewSourceKind = draftDetail?.draft.sourceKind || sourceKind;
   const rawPreviewSourceContent = draftDetail?.draft.sourceContent || sourceContent;
   const previewSourceContent = React.useMemo(
-    () =>
-      previewSourceKind === 'html'
-        ? normalizeExtractTransparentFrameGuidesInHtml(rawPreviewSourceContent)
-        : rawPreviewSourceContent,
-    [previewSourceKind, rawPreviewSourceContent]
+    () => rawPreviewSourceContent,
+    [rawPreviewSourceContent]
   );
   const hasGeneratedDraftHtml = Boolean((draftDetail?.draft.generatedDraftHtml || '').trim());
   const activePreviewPaneMode = previewPaneMode === 'draft' && !hasGeneratedDraftHtml ? 'source' : previewPaneMode;
@@ -7886,8 +8978,12 @@ export default function TemplateExtractPage() {
         .template-extract-draft-preview [data-v106-frame-node="true"] {
           cursor: pointer;
         }
-        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]),
-        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) {
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] .v102-frame-band[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-frame-container-guide-skip="true"]):not([data-template-selected="true"]),
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] .v102-frame-band[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-frame-container-guide-skip="true"]):not([data-template-selected="true"]),
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] .v202-cell-box[data-v106-frame-node="true"][${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-selected="true"]),
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] .v202-cell-box[data-v106-frame-node="true"][${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-selected="true"]),
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] .v202-frame-group[data-template-frame-group][${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-selected="true"]),
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] .v202-frame-group[data-template-frame-group][${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-selected="true"]) {
           outline: 1px dashed rgba(15, 23, 42, .34) !important;
           outline-offset: -1px !important;
           background-color: transparent !important;
@@ -7899,10 +8995,10 @@ export default function TemplateExtractPage() {
             transparent 9px
           ) !important;
         }
-        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table,
-        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table,
-        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table td,
-        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] [data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]) > .v102-frame-band-table td {
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] .v102-frame-band[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-frame-container-guide-skip="true"]):not([data-template-selected="true"]) > .v102-frame-band-table,
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] .v102-frame-band[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-frame-container-guide-skip="true"]):not([data-template-selected="true"]) > .v102-frame-band-table,
+        .template-extract-draft-preview[data-transparent-frame-guide-visible="true"] .v102-frame-band[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-frame-container-guide-skip="true"]):not([data-template-selected="true"]) > .v102-frame-band-table td,
+        .template-extract-html-preview[data-transparent-frame-guide-visible="true"] .v102-frame-band[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-frame-container-guide-skip="true"]):not([data-template-selected="true"]) > .v102-frame-band-table td {
           border-color: transparent !important;
           background-color: transparent !important;
         }
@@ -7932,7 +9028,7 @@ export default function TemplateExtractPage() {
             0 0 0 4px rgba(37, 99, 235, .22),
             inset 0 0 0 1px rgba(255, 255, 255, .96) !important;
           background: rgba(219, 234, 254, .55) !important;
-          color: #111827 !important;
+          color: #0f172a !important;
           opacity: 1 !important;
         }
         .template-extract-draft-preview [data-template-primary-selected="true"] {
@@ -8115,196 +9211,158 @@ export default function TemplateExtractPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <div className="space-y-2">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">전체 추출 1열: 프레임 그룹 버전</p>
-                <p className="text-xs text-slate-500">기본 성공 조합은 <code>fv1.11</code> 입니다.</p>
+          <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <div className="space-y-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">전체 추출 1열: 프레임 그룹 버전</p>
+                  <p className="text-xs text-slate-500">기본 성공 조합은 <code>fv1.11</code> 입니다.</p>
+                </div>
+                <select
+                  value={frameGroupVersion}
+                  onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
+                  disabled={loading || visualSimilarityMeasuring}
+                  className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">전체 추출 2열: 텍스트 추출 결정</p>
+                  <p className="text-xs text-slate-500">
+                    현재 실행 조합: <code>{fullExtractVersionSummary}</code>
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 md:flex-row">
+                  <div className="inline-flex h-10 items-center gap-1 rounded-md border border-input bg-white p-1">
+                    <Button
+                      variant={frameTextExtractionMode === 'non_image' ? 'default' : 'ghost'}
+                      className="h-8 px-3 text-xs"
+                      onClick={() => setFrameTextExtractionMode('non_image')}
+                      disabled={loading || visualSimilarityMeasuring}
+                    >
+                      비 이미지
+                    </Button>
+                    <Button
+                      variant={frameTextExtractionMode === 'image' ? 'default' : 'ghost'}
+                      className="h-8 px-3 text-xs"
+                      onClick={() => setFrameTextExtractionMode('image')}
+                      disabled={loading || visualSimilarityMeasuring}
+                    >
+                      이미지
+                    </Button>
+                  </div>
+                  <select
+                    value={frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion}
+                    onChange={(event) =>
+                      frameTextExtractionMode === 'image'
+                        ? setImageFrameTextExtractionVersion(event.target.value as ImageFrameTextExtractionVersion)
+                        : setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)
+                    }
+                    disabled={loading || visualSimilarityMeasuring}
+                    className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {(frameTextExtractionMode === 'image'
+                      ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                      : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                    ).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-end md:justify-end">
+                <Button
+                  onClick={() => void handleCreateDraft('full')}
+                  disabled={loading || visualSimilarityMeasuring || !selectedFile}
+                  title={selectedFile ? undefined : 'PDF 파일을 먼저 선택하세요.'}
+                >
+                  전체 추출 일괄 실행
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-sky-200 bg-white p-4">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-slate-950">전체 추출 단계 실행</p>
+                <p className="text-xs text-slate-500">
+                  전체 추출은 값 추출 {'->'} 물리적 보정 {'->'} 시각적 보정 순서로만 진행합니다. 각 버튼은 해당 단계만 실행합니다.
+                </p>
+              </div>
+
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                <Button
+                  variant={fullExtractDebugActiveStep === 'extract_values' ? 'default' : 'outline'}
+                  onClick={() => void handleRunFullExtractValueStage()}
+                  disabled={loading || visualSimilarityMeasuring || !selectedFile}
+                  title={selectedFile ? undefined : 'PDF 파일을 먼저 선택하세요.'}
+                >
+                  1. 값 추출
+                </Button>
+                <Button
+                  variant={fullExtractDebugActiveStep === 'physical_correction' ? 'default' : 'outline'}
+                  onClick={handleRunFullExtractPhysicalStage}
+                  disabled={loading || visualSimilarityMeasuring || !fullExtractDebugResponse}
+                >
+                  2. 물리적 보정
+                </Button>
+                <Button
+                  variant={fullExtractDebugActiveStep === 'visual_correction' ? 'default' : 'outline'}
+                  onClick={handleRunFullExtractVisualStage}
+                  disabled={loading || visualSimilarityMeasuring || !fullExtractDebugResponse}
+                >
+                  3. 시각적 보정
+                </Button>
+              </div>
+
+              <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 md:grid-cols-3">
+                <div>
+                  <p className="font-semibold text-slate-900">값 추출 조합</p>
+                  <p>
+                    {fullExtractDebugSnapshot
+                      ? `${String(fullExtractDebugSnapshot.activeFrameGroupVersion)} -> ${
+                          fullExtractDebugSnapshot.frameTextExtractionMode === 'image'
+                            ? fullExtractDebugSnapshot.imageFrameTextExtractionVersion
+                            : fullExtractDebugSnapshot.frameTextExtractionVersion
+                        }`
+                      : '아직 없음'}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900">추출 draft</p>
+                  <p>{fullExtractDebugResponse?.draft.id || '아직 없음'}</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900">현재 단계</p>
+                  <p>{fullExtractDebugActiveStep ? FULL_EXTRACT_DEBUG_STEP_LABEL[fullExtractDebugActiveStep] : '대기'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-slate-950">엔진 선택</p>
               <select
-                value={frameGroupVersion}
-                onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
+                value={engineVersion}
+                onChange={(event) => setEngineVersion(event.target.value as TemplateExtractEngineVersion)}
                 disabled={loading || visualSimilarityMeasuring}
                 className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
+                {TEMPLATE_EXTRACT_ENGINE_VERSION_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
               </select>
             </div>
-            <div className="space-y-2">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">전체 추출 2열: 텍스트 추출 결정</p>
-                <p className="text-xs text-slate-500">
-                  현재 실행 조합: <code>{fullExtractVersionSummary}</code>
-                </p>
-              </div>
-              <div className="flex flex-col gap-2 md:flex-row">
-                <div className="inline-flex h-10 items-center gap-1 rounded-md border border-input bg-white p-1">
-                  <Button
-                    variant={frameTextExtractionMode === 'non_image' ? 'default' : 'ghost'}
-                    className="h-8 px-3 text-xs"
-                    onClick={() => setFrameTextExtractionMode('non_image')}
-                    disabled={loading || visualSimilarityMeasuring}
-                  >
-                    비 이미지
-                  </Button>
-                  <Button
-                    variant={frameTextExtractionMode === 'image' ? 'default' : 'ghost'}
-                    className="h-8 px-3 text-xs"
-                    onClick={() => setFrameTextExtractionMode('image')}
-                    disabled={loading || visualSimilarityMeasuring}
-                  >
-                    이미지
-                  </Button>
-                </div>
-                <select
-                  value={frameTextExtractionMode === 'image' ? imageFrameTextExtractionVersion : frameTextExtractionVersion}
-                  onChange={(event) =>
-                    frameTextExtractionMode === 'image'
-                      ? setImageFrameTextExtractionVersion(event.target.value as ImageFrameTextExtractionVersion)
-                      : setFrameTextExtractionVersion(event.target.value as FrameTextExtractionVersion)
-                  }
-                  disabled={loading || visualSimilarityMeasuring}
-                  className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {(frameTextExtractionMode === 'image'
-                    ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-                    : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-                  ).map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex items-end md:justify-end">
-              <Button
-                onClick={() => void handleCreateDraft('full')}
-                disabled={loading || visualSimilarityMeasuring || !selectedFile}
-                title={selectedFile ? undefined : 'PDF 파일을 먼저 선택하세요.'}
-              >
-                전체 추출
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto]">
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-slate-950">부가 점검 및 엔진 선택</p>
-              <div className="flex flex-col gap-2 md:flex-row">
-                <select
-                  value={engineVersion}
-                  onChange={(event) => setEngineVersion(event.target.value as TemplateExtractEngineVersion)}
-                  disabled={loading || visualSimilarityMeasuring}
-                  className="flex h-10 min-w-0 rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {TEMPLATE_EXTRACT_ENGINE_VERSION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-                  교차 검증은 텍스트 추출이 끝난 뒤 현재 결과와 원본 PDF를 병치 또는 겹쳐서 확인합니다.
-                </div>
-              </div>
-            </div>
-            <div className="flex items-end md:justify-end">
-              <Button
-                variant="outline"
-                onClick={handleMeasureVisualSimilarity}
-                disabled={loading || visualSimilarityMeasuring || !crossValidationReady}
-                title={crossValidationReady ? undefined : '텍스트 추출 완료 이후에 활성화됩니다.'}
-              >
-                {visualSimilarityMeasuring ? `교차 검증 ${visualSimilarityProgress.percent}%` : '교차 검증'}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-emerald-200 bg-emerald-50/60">
-        <CardHeader className="gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="green">보장 조합</Badge>
-            <CardTitle>PDF 보장 추출 조합</CardTitle>
-          </div>
-          <CardDescription>
-            현재 서비스에서 확정 성공값으로 운영 중인 PDF 추출 조합입니다. 아래 버튼은 상단 선택값과 무관하게{' '}
-            <code>fv1.11</code>, <code>niv1.12</code> 고정값으로 실행됩니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-emerald-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">1차 보장 조합: 프레임 그룹 생성</p>
-                <p className="text-xs text-slate-500">
-                  기능 조합: PDF 업로드 + 프레임 그룹 버전 <code>fv1.11</code>
-                </p>
-              </div>
-              <Badge variant="green">fv1.11</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-slate-700">
-              원본 PDF에서 문서 구조를 먼저 고정해야 할 때 사용합니다. 확정 성과는 <code>fv1.11</code> 기준
-              프레임 그룹 초안을 안정적으로 생성하는 것입니다.
-            </p>
-            <Button
-              className="mt-4 w-full"
-              variant="outline"
-              onClick={() => {
-                setFrameGroupVersion(GUARANTEED_FRAME_GROUP_VERSION);
-                void handleCreateDraft('frames', {
-                  frameGroupVersionOverride: GUARANTEED_FRAME_GROUP_VERSION,
-                  requestedFrameGroupVersionOverride: GUARANTEED_FRAME_GROUP_VERSION,
-                });
-              }}
-              disabled={loading || visualSimilarityMeasuring || !selectedFile}
-              title={selectedFile ? undefined : 'PDF 파일을 먼저 선택하세요.'}
-            >
-              fv1.11 보장 조합으로 프레임 그룹 생성
-            </Button>
-          </div>
-
-          <div className="rounded-xl border border-emerald-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">2차 보장 조합: 프레임 텍스트 추출</p>
-                <p className="text-xs text-slate-500">
-                  기능 조합: <code>fv1.11</code> 프레임 그룹 + 비 이미지 텍스트 추출 <code>niv1.12</code>
-                </p>
-              </div>
-              <Badge variant="green">fv1.11 + niv1.12</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-slate-700">
-              <code>fv1.11</code> 프레임 그룹이 이미 만들어진 PDF에서 텍스트 레이어 기준 값을 채워야 할 때
-              사용합니다. 확정 성과는 비 이미지 <code>niv1.12</code> 기준 프레임 텍스트 자동 채움입니다.
-            </p>
-            <Button
-              className="mt-4 w-full"
-              variant="outline"
-              onClick={() => {
-                setFrameGroupVersion(GUARANTEED_FRAME_GROUP_VERSION);
-                setFrameTextExtractionMode('non_image');
-                setFrameTextExtractionVersion(GUARANTEED_NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION);
-                void handleExtractFrameText({
-                  frameTextExtractionMode: 'non_image',
-                  frameTextExtractionVersion: GUARANTEED_NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION,
-                });
-              }}
-              disabled={loading || visualSimilarityMeasuring || !guaranteedFrameTextExtractionReady}
-              title={
-                guaranteedFrameTextExtractionReady
-                  ? undefined
-                  : '먼저 fv1.11 보장 조합으로 프레임 그룹 생성을 완료하세요.'
-              }
-            >
-              fv1.11 + niv1.12 보장 조합으로 텍스트 추출
-            </Button>
           </div>
         </CardContent>
       </Card>
@@ -8332,19 +9390,6 @@ export default function TemplateExtractPage() {
                 </Button>
 	                {activePreviewPaneMode === 'draft' ? (
 	                  <>
-	                    <Button
-	                      variant="outline"
-	                      size="sm"
-	                      onClick={() => setTransparentFrameGuideVisible((previous) => !previous)}
-	                      title={
-	                        transparentFrameGuideVisible
-	                          ? '투명 상자 시각화를 끄고 실제 출력 상태로 봅니다.'
-	                          : '투명 상자 시각화를 켭니다.'
-	                      }
-	                      aria-label={transparentFrameGuideVisible ? '투명 상자 시각화 끄기' : '투명 상자 시각화 켜기'}
-	                    >
-	                      {transparentFrameGuideVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-	                    </Button>
 	                    <label className="ml-2 text-xs font-medium text-slate-500">편집 권한</label>
                     <select
                       value={draftPreviewEditRole}
@@ -8358,11 +9403,23 @@ export default function TemplateExtractPage() {
                 ) : null}
               </div>
             </CardHeader>
+            {activePreviewPaneMode === 'draft' && hasGeneratedDraftHtml ? (
+              <PreviewPipelineInspector
+                title="추출 preview DOM"
+                summary="원본 수신 -> preview clone -> 텍스트 재적용 -> preview text fit 순서로 직접 넘기며 어느 단계에서 DOM이 깨지는지 확인합니다. 검사 중에는 화면 표시만 단계별로 바뀌고, 저장/후속 계산은 최종 DOM 기준으로 유지합니다."
+                enabled={extractPreviewPipelineInspectorEnabled}
+                stages={EXTRACT_PREVIEW_PIPELINE_STAGES}
+                activeStageIndex={extractPreviewPipelineActiveStageIndex}
+                approvedStageIndex={extractPreviewPipelineApprovedStageIndex}
+                onToggleEnabled={handleToggleExtractPreviewPipelineInspector}
+                onSelectStage={handleSelectExtractPreviewPipelineStage}
+                onApproveNextStage={handleApproveNextExtractPreviewPipelineStage}
+              />
+            ) : null}
             {activePreviewPaneMode === 'source' ? (
               previewSourceKind === 'html' ? (
 	                <CardContent
 	                  className="template-extract-preview-surface template-extract-html-preview !p-0"
-	                  data-transparent-frame-guide-visible={transparentFrameGuideVisible ? 'true' : undefined}
 	                  dangerouslySetInnerHTML={{ __html: previewSourceContent }}
 	                />
               ) : (
@@ -8372,18 +9429,30 @@ export default function TemplateExtractPage() {
               )
             ) : hasGeneratedDraftHtml ? (
               <CardContent
+                key={
+                  extractPreviewPipelineInspectorEnabled
+                    ? `extract-preview-stage:${extractPreviewPipelineActiveStageKey}`
+                    : 'extract-preview-stage:final'
+                }
                 ref={draftPreviewRef}
                 className={`template-extract-draft-preview template-extract-preview-surface !p-0${
-                  flattenedFramePreview ? ' template-clone template-clone--raster-first-v2-structured' : ''
+                  !extractPreviewPipelineInspectorEnabled || extractPreviewPipelineActiveStageIndex > 0
+                    ? flattenedFramePreview
+                      ? ' template-clone template-clone--raster-first-v2-structured'
+                      : ''
+                    : ''
                 }`}
-                data-template-extraction-stage={flattenedFramePreview?.extractionStage || undefined}
+	                data-template-extraction-stage={
+                  !extractPreviewPipelineInspectorEnabled || extractPreviewPipelineActiveStageIndex > 0
+                    ? flattenedFramePreview?.extractionStage || undefined
+                    : undefined
+                }
 	                data-template-frame-group-version={flattenedFramePreview?.frameGroupVersion || undefined}
 	                data-template-clone-id={flattenedFramePreview?.cloneId || undefined}
-	                data-transparent-frame-guide-visible={transparentFrameGuideVisible ? 'true' : undefined}
 	                data-cross-validation-reference-visible={crossValidationReferenceVisible && activeCrossValidationPdfPageUrl ? 'true' : undefined}
-                onFocusCapture={handleDraftPreviewSelect}
-                onInput={(event) => syncPreviewEditTarget(event.target)}
-                onPasteCapture={handleDraftPreviewPaste}
+                onFocusCapture={extractPreviewPipelineInspectorEnabled ? undefined : handleDraftPreviewSelect}
+                onInput={extractPreviewPipelineInspectorEnabled ? undefined : (event) => syncPreviewEditTarget(event.target)}
+                onPasteCapture={extractPreviewPipelineInspectorEnabled ? undefined : handleDraftPreviewPaste}
                 style={
                   crossValidationReferenceVisible && activeCrossValidationPdfPageUrl
                     ? ({
@@ -8391,7 +9460,7 @@ export default function TemplateExtractPage() {
                       } as React.CSSProperties)
                     : undefined
                 }
-                dangerouslySetInnerHTML={{ __html: renderedDraftHtml }}
+                dangerouslySetInnerHTML={{ __html: extractPreviewDisplayHtml }}
               />
             ) : (
               <CardContent className="template-extract-preview-surface flex items-center justify-center !p-0 text-sm text-slate-500">
@@ -8399,168 +9468,6 @@ export default function TemplateExtractPage() {
               </CardContent>
             )}
           </Card>
-
-          {crossValidationReady || crossValidationPreview ? (
-            <Card className="border-slate-200">
-              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-1">
-                  <CardTitle>교차 검증</CardTitle>
-                  <CardDescription>
-                    원본 PDF 렌더와 현재 텍스트 추출 결과를 병치하거나 겹쳐서 점검합니다.
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant={crossValidationViewMode === 'side_by_side' ? 'default' : 'outline'}
-                    onClick={() => setCrossValidationViewMode('side_by_side')}
-                    disabled={!crossValidationPreview}
-                  >
-                    병치
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={crossValidationViewMode === 'overlay' ? 'default' : 'outline'}
-                    onClick={() => setCrossValidationViewMode('overlay')}
-                    disabled={!crossValidationPreview}
-                  >
-                    겹쳐보기
-                  </Button>
-                  <select
-                    value={String(activeCrossValidationPageIndex)}
-                    onChange={(event) => setCrossValidationPageIndex(Number.parseInt(event.target.value, 10) || 0)}
-                    disabled={!crossValidationPreview || crossValidationPageCount <= 1}
-                    className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    {Array.from({ length: crossValidationPageCount }, (_, index) => (
-                      <option key={index} value={index}>
-                        페이지 {index + 1}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {crossValidationPreview ? (
-                  <>
-                    {activeCrossValidationPageReport ? (
-                      <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 md:grid-cols-4">
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">페이지</p>
-                          <p className="font-semibold text-slate-950">{activeCrossValidationPageReport.pageNumber}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">프레임 일치율</p>
-                          <p className="font-semibold text-slate-950">
-                            {formatPercent(activeCrossValidationPageReport.frameLayerReport?.overlapRatio ?? activeCrossValidationPageReport.overlapRatio)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">텍스트 일치율</p>
-                          <p className="font-semibold text-slate-950">
-                            {formatPercent(activeCrossValidationPageReport.textLayerReport?.overlapRatio ?? 0)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-slate-500">오염 비율</p>
-                          <p className="font-semibold text-slate-950">
-                            {formatPercent(activeCrossValidationPageReport.mismatchRatio)}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {crossValidationViewMode === 'overlay' ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-3">
-                          <label className="text-sm font-medium text-slate-800">겹침 강도</label>
-                          <input
-                            type="range"
-                            min={15}
-                            max={100}
-                            step={1}
-                            value={crossValidationOverlayOpacity}
-                            onChange={(event) => setCrossValidationOverlayOpacity(Number.parseInt(event.target.value, 10) || 55)}
-                            className="w-48"
-                          />
-                          <span className="text-xs text-slate-500">{crossValidationOverlayOpacity}%</span>
-                        </div>
-                        <div
-                          className="relative overflow-hidden rounded-lg border border-slate-200 bg-white"
-                          style={{ aspectRatio: crossValidationAspectRatio }}
-                        >
-                          {activeCrossValidationPdfPageUrl ? (
-                            <img
-                              src={activeCrossValidationPdfPageUrl}
-                              alt={`원본 PDF 페이지 ${activeCrossValidationPageIndex + 1}`}
-                              className="absolute inset-0 h-full w-full object-contain"
-                            />
-                          ) : null}
-                          {activeCrossValidationReplicaPageUrl ? (
-                            <img
-                              src={activeCrossValidationReplicaPageUrl}
-                              alt={`추출 결과 페이지 ${activeCrossValidationPageIndex + 1}`}
-                              className="absolute inset-0 h-full w-full object-contain"
-                              style={{ opacity: crossValidationOverlayOpacity / 100 }}
-                            />
-                          ) : null}
-                        </div>
-                        <div className="flex flex-wrap gap-3 text-xs text-slate-500">
-                          <span>배경: 원본 PDF</span>
-                          <span>상단: 현재 추출 결과</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <div className="space-y-2">
-                          <p className="text-sm font-medium text-slate-800">원본 PDF</p>
-                          <div
-                            className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                            style={{ aspectRatio: crossValidationAspectRatio }}
-                          >
-                            {activeCrossValidationPdfPageUrl ? (
-                              <img
-                                src={activeCrossValidationPdfPageUrl}
-                                alt={`원본 PDF 페이지 ${activeCrossValidationPageIndex + 1}`}
-                                className="h-full w-full object-contain"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                                원본 PDF 페이지가 없습니다.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-sm font-medium text-slate-800">현재 추출 결과</p>
-                          <div
-                            className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                            style={{ aspectRatio: crossValidationAspectRatio }}
-                          >
-                            {activeCrossValidationReplicaPageUrl ? (
-                              <img
-                                src={activeCrossValidationReplicaPageUrl}
-                                alt={`추출 결과 페이지 ${activeCrossValidationPageIndex + 1}`}
-                                className="h-full w-full object-contain"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                                추출 결과 페이지가 없습니다.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-                    텍스트 추출이 끝난 뒤 `교차 검증`을 실행하면, 원본 PDF와 현재 출력 결과를 이 영역에서 병치하거나 겹쳐서 확인할 수 있습니다.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : null}
 
         </div>
 
@@ -8825,23 +9732,17 @@ export default function TemplateExtractPage() {
 
           <Card className="border-slate-200">
             <CardHeader>
-              <CardTitle>원본 PDF 입력 및 1차 저장</CardTitle>
+              <CardTitle>파일 업로드 및 템플릿 저장</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">원본 제목</label>
-                  <DeferredReviewedFieldInput value={sourceTitle} onCommit={setSourceTitle} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">원본 PDF 업로드</label>
-                  <input
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                  />
-                </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-800">원본 PDF 업로드</label>
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                />
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -8850,41 +9751,6 @@ export default function TemplateExtractPage() {
               </div>
 
               <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="text-sm font-medium text-slate-800">템플릿 관리</label>
-                  {viewingRegisteredTemplate ? <Badge variant="green">불러온 템플릿</Badge> : null}
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-500">기존 템플릿 불러오기</label>
-                  <div className="flex flex-col gap-2 md:flex-row">
-                    <EntityPicker
-                      value={selectedRegisteredTemplateId}
-                      options={registeredTemplateOptions}
-                      onChange={setSelectedRegisteredTemplateId}
-                      placeholder="정식 템플릿을 선택하세요"
-                      emptyMessage="저장된 템플릿이 없습니다."
-                      className="flex-1"
-                      triggerClassName="h-9 min-h-9 items-center rounded-md py-1"
-                      optionLayout="inline"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void loadRegisteredTemplate(selectedRegisteredTemplateId)}
-                      disabled={loading || !selectedRegisteredTemplateId.trim()}
-                    >
-                      정식 템플릿 불러오기
-                    </Button>
-                  </div>
-                </div>
-
-                {viewingRegisteredTemplate ? (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                    현재 불러온 템플릿 ID: {loadedTemplateId}
-                  </div>
-                ) : null}
-
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-slate-500">템플릿 관리 저장 이름</label>
@@ -8907,18 +9773,9 @@ export default function TemplateExtractPage() {
                   </div>
                 </div>
 
-                {viewingRegisteredTemplate ? (
-                  <a
-                    href={`/templates/edit?templateId=${loadedTemplateId}`}
-                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                  >
-                    템플릿 편집 페이지로 이동
-                  </a>
-                ) : (
-                  <Button variant="outline" onClick={handleApprove} disabled={loading || !draftDetail}>
-                    템플릿 관리로 1차 저장
-                  </Button>
-                )}
+                <Button variant="outline" onClick={handleApprove} disabled={loading || !draftDetail}>
+                  템플릿 관리로 1차 저장
+                </Button>
 
                 {approveResult ? (
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -9125,129 +9982,6 @@ export default function TemplateExtractPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle>항목 검토</CardTitle>
-              <CardDescription>필요한 항목만 승인하고, 불필요한 항목은 제외합니다.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {reviewedFields.length > 0 ? (
-                reviewedFields.map((field) => {
-                  const candidate = candidateMap.get(field.candidateKey || '');
-                  const pendingFieldPatch = pendingReviewedFieldPatchesRef.current.get(
-                    reviewedFieldCommitKey(field)
-                  );
-                  const displayField = pendingFieldPatch ? { ...field, ...pendingFieldPatch } : field;
-                  const isSelected = selectedCandidateKey === field.candidateKey;
-                  const fieldValueText = reviewedFieldValueText(displayField, candidate);
-
-                  return (
-	                    <div
-	                      key={field.candidateKey || field.fieldKey}
-	                      tabIndex={0}
-	                      data-template-reviewed-field-card="true"
-	                      onClick={(event) => {
-	                        const targetElement = event.target instanceof HTMLElement ? event.target : null;
-	                        if (targetElement?.closest('input, textarea, select, button')) {
-	                          return;
-	                        }
-	                        selectReviewedField(field);
-	                      }}
-	                      onFocusCapture={(event) => {
-	                        if (event.target === event.currentTarget) {
-	                          selectReviewedField(field);
-	                        }
-	                      }}
-                      onKeyDown={(event) => {
-                        if (event.target !== event.currentTarget) {
-                          return;
-                        }
-
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          selectReviewedField(field);
-                        }
-                      }}
-                      className={`rounded-lg border p-3 text-sm text-slate-700 transition ${
-                        isSelected
-                          ? 'border-blue-500 bg-blue-50/70 ring-2 ring-blue-100'
-                          : 'border-slate-200 bg-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={
-                            field.reviewStatus === 'accepted'
-                              ? 'green'
-                              : field.reviewStatus === 'rejected'
-                                ? 'slate'
-                                : 'slate'
-                          }
-                        >
-                          {field.reviewStatus}
-                        </Badge>
-	                        <DeferredReviewedFieldInput
-	                          value={displayField.fieldLabel}
-	                          onCommit={(nextValue) =>
-	                            scheduleReviewedFieldPatch(field, { fieldLabel: nextValue })
-	                          }
-	                        />
-                      </div>
-                      <div className="mt-3 grid gap-3">
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-slate-500">감지된 값</p>
-                            <p className="text-sm text-slate-700">{candidate?.detectedValue || '-'}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-slate-500">필드 타입</p>
-                            <p className="text-sm text-slate-700">{field.fieldType}</p>
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-slate-500">선택 항목 수정값</label>
-                          {field.fieldType === 'textarea' ? (
-	                            <DeferredReviewedFieldTextarea
-	                              value={fieldValueText}
-	                              onCommit={(nextValue) => handleReviewedFieldValueCommit(field, nextValue)}
-	                              className="flex min-h-[96px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-	                            />
-	                          ) : (
-	                            <DeferredReviewedFieldInput
-	                              value={fieldValueText}
-	                              onCommit={(nextValue) => handleReviewedFieldValueCommit(field, nextValue)}
-	                            />
-                          )}
-                          <p className="text-xs text-slate-500">
-                            이 값은 입력을 마치면 왼쪽 초안의 선택된 텍스트와 승인될 HTML에 반영됩니다.
-                          </p>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-xs font-medium text-slate-500">이 항목 처리</label>
-                          <select
-                            value={field.reviewStatus || 'review_needed'}
-                            onChange={(event) =>
-                              updateReviewedField(field.candidateKey, {
-                                reviewStatus: event.target.value as TemplateExtractReviewedFieldInput['reviewStatus'],
-                              })
-                            }
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          >
-                            <option value="accepted">템플릿 항목으로 저장</option>
-                            <option value="review_needed">조금 더 검토</option>
-                            <option value="rejected">이번 템플릿에서 제외</option>
-                          </select>
-                        </div>
-                        <p className="text-xs text-slate-500">추출 근거: {candidate?.extractionReason || '-'}</p>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-slate-500">생성된 초안이 있으면 검토 항목이 나타납니다.</p>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </div>
       <iframe

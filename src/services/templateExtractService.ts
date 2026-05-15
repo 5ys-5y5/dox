@@ -75,6 +75,11 @@ const EXTRACT_POSITION_ATTR_NAMES = [
   'data-template-frame-relative-offset-x',
   'data-template-frame-relative-offset-y',
 ];
+const TEMPLATE_EXTRACT_SLATE_900 = '#0f172a';
+const TEMPLATE_EXTRACT_BLACKISH_COLOR_PATTERN =
+  /#(?:000000|020617|111827|18181b|27272a|334155|cbd5e1|d4d4d8|e4e4e7)\b/gi;
+const TEMPLATE_EXTRACT_BLACKISH_RGB_PATTERN =
+  /rgba?\(\s*(?:(?:0\s*,\s*0\s*,\s*0)|(?:2\s*,\s*6\s*,\s*23)|(?:15\s*,\s*23\s*,\s*42)|(?:17\s*,\s*24\s*,\s*39)|(?:24\s*,\s*24\s*,\s*27)|(?:39\s*,\s*39\s*,\s*42)|(?:51\s*,\s*65\s*,\s*85)|(?:203\s*,\s*213\s*,\s*225)|(?:212\s*,\s*212\s*,\s*216)|(?:228\s*,\s*228\s*,\s*231))(?:\s*,\s*(?:1|1\.0|0?\.\d+))?\s*\)/gi;
 
 const stripExtractRelativePositionAttrs = (content: string) => {
   let nextContent = String(content || '');
@@ -89,6 +94,14 @@ const stripExtractRelativePositionAttrs = (content: string) => {
 
   return nextContent;
 };
+
+const normalizeExtractOutputInkColors = (content: string) =>
+  String(content || '')
+    .replace(TEMPLATE_EXTRACT_BLACKISH_COLOR_PATTERN, TEMPLATE_EXTRACT_SLATE_900)
+    .replace(TEMPLATE_EXTRACT_BLACKISH_RGB_PATTERN, (matched) => {
+      const alpha = matched.match(/rgba\([^,]+,[^,]+,[^,]+,\s*([^)]+)\)/i)?.[1]?.trim();
+      return alpha ? `rgba(15, 23, 42, ${alpha})` : 'rgb(15, 23, 42)';
+    });
 
 // TEMPLATE_EXTRACT_SCHEMA_BOUNDARY
 // 템플릿 추출 도메인은 template_extracts 스키마만 사용합니다.
@@ -180,7 +193,7 @@ export const TemplateExtractService = {
     const sourceTitle = resolvedSource.sourceTitle?.trim() || null;
     const sourceContent =
       resolvedSource.sourceKind === 'html'
-        ? stripExtractRelativePositionAttrs(resolvedSource.sourceContent.trim())
+        ? normalizeExtractOutputInkColors(stripExtractRelativePositionAttrs(resolvedSource.sourceContent.trim()))
         : resolvedSource.sourceContent.trim();
 
     if (!sourceContent) {
@@ -198,7 +211,7 @@ export const TemplateExtractService = {
     );
     const generatedDraftHtml =
       resolvedSource.sourceKind === 'html'
-        ? stripExtractRelativePositionAttrs(analysis.generatedDraftHtml)
+        ? normalizeExtractOutputInkColors(stripExtractRelativePositionAttrs(analysis.generatedDraftHtml))
         : analysis.generatedDraftHtml;
     const pipelineTrace =
       resolvedSource.pipelineTrace ||
@@ -354,6 +367,7 @@ export const TemplateExtractService = {
         ? params.generatedDraftHtml.trim()
         : draft.generated_draft_html
     );
+    const normalizedApprovedDraftHtml = normalizeExtractOutputInkColors(approvedDraftHtml);
 
     const reviewedFields =
       params.reviewedFields && params.reviewedFields.length > 0
@@ -405,7 +419,7 @@ export const TemplateExtractService = {
       templateName,
       sourceDocumentName: draft.source_title,
       sourceDocumentId: null,
-      draftHtml: approvedDraftHtml,
+      draftHtml: normalizedApprovedDraftHtml,
       layoutResizeMode: params.layoutResizeMode || DEFAULT_LAYOUT_MODE,
     });
 
@@ -427,7 +441,7 @@ export const TemplateExtractService = {
       .update({
         status: 'approved',
         approved_template_id: template.id,
-        generated_draft_html: approvedDraftHtml,
+        generated_draft_html: normalizedApprovedDraftHtml,
         confidence_summary: nextSummary,
       })
       .eq('id', normalizedDraftId);

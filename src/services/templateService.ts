@@ -252,7 +252,9 @@ const getTemplateById = async (templateId: string) => {
     .from('template_registry')
     .select('*')
     .eq('id', templateId)
-    .single();
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   return { template: data as TemplateRegistryRow | null, error };
 };

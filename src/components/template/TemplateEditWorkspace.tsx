@@ -17,6 +17,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  FileUp,
   GripHorizontal,
   Italic,
   KeyRound,
@@ -32,6 +33,7 @@ import {
   Trash2,
   Underline,
   Undo2,
+  Wand2,
 } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
@@ -39,9 +41,17 @@ import { renderToStaticMarkup } from 'react-dom/server.browser';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
+import PreviewPipelineInspector, { type PreviewPipelineStage } from './PreviewPipelineInspector';
 import { EntityPicker, type EntityPickerOption } from '../ui/EntityPicker';
 import { Input } from '../ui/Input';
 import { applyTemplateExtractEditableTextFit } from '../../lib/templateExtractEditableTextFit';
+import {
+  buildGuaranteedDraftHtmlFromFrameDraft,
+  createGuaranteedFrameDraftWithPdf,
+  GUARANTEED_TEMPLATE_EXTRACT_ENGINE_VERSION,
+  GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION,
+  GUARANTEED_TEMPLATE_EXTRACT_FRAME_TEXT_VERSION,
+} from '../../lib/templateGuaranteedExtractClient';
 import type {
   TemplateEdgeDescriptorDto,
   TemplateEdgeFrameDto,
@@ -129,6 +139,8 @@ type SelectionSaveProgressState = {
   stage: string;
   detail: string;
 };
+
+type TemplatePreviewPipelineStageKey = 'raw' | 'normalize' | 'layout' | 'fit';
 
 type StyleFieldKey = keyof SelectionStyleDraft;
 type StyleFieldApplyState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -596,8 +608,21 @@ type NormalizedBandGeometry = {
   sourceKey: string;
 };
 
+export type TemplateEditWorkspaceInitialDraft = {
+  draftKey: string;
+  templateName: string;
+  sourceDocumentName?: string | null;
+  draftHtml: string;
+  layoutResizeMode?: TemplateLayoutResizeMode;
+};
+
 type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
+  initialDraft?: TemplateEditWorkspaceInitialDraft | null;
+  hideHeader?: boolean;
+  templateListDisplay?: 'picker' | 'inline';
+  showGuaranteedExtractControls?: boolean;
+  onTemplateSaved?: (template: TemplateRecordDto) => void;
 };
 
 type TemplateFloatingOverlayContent = React.ReactNode | (() => React.ReactNode);
@@ -2195,6 +2220,28 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 });
 const FRAME_RESIZE_DIRECTIONS: TemplateFrameResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const CANVAS_ICON_SCALE_OPTIONS: CanvasIconScale[] = ['s', 'm', 'l'];
+const TEMPLATE_PREVIEW_PIPELINE_STAGES: PreviewPipelineStage[] = [
+  {
+    key: 'raw',
+    label: '원본 Draft',
+    description: '불러온 draftHtml 그대로 표시합니다.',
+  },
+  {
+    key: 'normalize',
+    label: 'Frame Normalize',
+    description: 'frame band normalize, clone attr 동기화, 편집 권한 적용 단계입니다.',
+  },
+  {
+    key: 'layout',
+    label: '레이아웃 보정',
+    description: 'position group, relative anchor, autosize box 보정을 적용한 상태입니다.',
+  },
+  {
+    key: 'fit',
+    label: 'Preview Text Fit',
+    description: 'applyTemplateExtractEditableTextFit() 를 적용한 최종 편집 preview 상태입니다.',
+  },
+];
 const TEMPLATE_FRAME_BOX_KIND_OPTIONS: TemplateFrameBoxKind[] = ['text', 'attachment', 'signature'];
 const TEMPLATE_FRAME_ROLE_OPTIONS: TemplateFrameRole[] = ['key', 'value', 'key_value'];
 const TEXT_RUNTIME_MODE_OPTIONS: TemplateFrameRuntimeMode[] = ['static_label', 'editable_text'];
@@ -2638,6 +2685,7 @@ const TEMPLATE_FRAME_BORDER_ALIGN_ATTR = 'data-template-frame-border-align';
 const TEMPLATE_FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
 const TEMPLATE_FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
 const TEMPLATE_FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
+const TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR = 'data-template-transparent-frame-guide';
 const DEFAULT_TEMPLATE_FRAME_BORDER_ALIGN = 'center';
 const DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH = '0.1';
 const DEFAULT_TEMPLATE_FRAME_BORDER_STYLE = 'solid';
@@ -3634,6 +3682,114 @@ const readPreviewSourceRect = (root: HTMLElement) => {
 };
 
 const toFrameCssPx = (value: number) => `${Number(value.toFixed(3))}px`;
+
+const snapFrameBandAxisSizesToPixelBoundaries = (sizes: number[], minimumSize = 1) => {
+  if (sizes.length <= 0) {
+    return sizes;
+  }
+
+  const boundaries = [0];
+  let cursor = 0;
+  sizes.forEach((size) => {
+    cursor += Math.max(minimumSize, size);
+    boundaries.push(cursor);
+  });
+
+  const snappedBoundaries = boundaries.map((value) => Math.round(value));
+  for (let index = 1; index < snappedBoundaries.length; index += 1) {
+    snappedBoundaries[index] = Math.max(
+      snappedBoundaries[index] || 0,
+      (snappedBoundaries[index - 1] || 0) + minimumSize
+    );
+  }
+
+  return sizes.map((_, index) =>
+    Math.max(minimumSize, (snappedBoundaries[index + 1] || 0) - (snappedBoundaries[index] || 0))
+  );
+};
+
+const readFrameBandHtmlTableColumnWidths = (table: HTMLTableElement) =>
+  Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+    .map((col) => parseFramePx(col.style.width || col.getAttribute('width') || ''))
+    .filter((width) => width > 0);
+
+const readFrameBandHtmlTableRowHeights = (table: HTMLTableElement) =>
+  Array.from(table.rows)
+    .map((row) => parseFramePx(row.style.height || row.getAttribute('height') || ''))
+    .filter((height) => height > 0);
+
+const materializeFrameBandTableGeometryInContainer = (container: ParentNode) => {
+  container.querySelectorAll<HTMLElement>('.v102-frame-band').forEach((shell) => {
+    const table = shell.querySelector<HTMLTableElement>(':scope > table.v102-frame-band-table');
+
+    if (!table) {
+      return;
+    }
+
+    const shellLeft = parseFramePx(shell.style.left);
+    const shellTop = parseFramePx(shell.style.top);
+    if (shell.style.left.trim()) {
+      shell.style.left = toFrameCssPx(Math.round(shellLeft));
+    }
+    if (shell.style.top.trim()) {
+      shell.style.top = toFrameCssPx(Math.round(shellTop));
+    }
+
+    const colElements = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+    const colWidths = readFrameBandHtmlTableColumnWidths(table);
+    if (colElements.length > 0 && colWidths.length === colElements.length) {
+      const snappedColWidths = snapFrameBandAxisSizesToPixelBoundaries(colWidths, MIN_WRITABLE_TABLE_SIZE_PX);
+      snappedColWidths.forEach((width, index) => {
+        const col = colElements[index];
+        if (col) {
+          col.style.width = toFrameCssPx(width);
+          col.removeAttribute('width');
+        }
+      });
+      const tableWidth = snappedColWidths.reduce((sum, width) => sum + width, 0);
+      table.style.width = toFrameCssPx(tableWidth);
+      shell.style.width = toFrameCssPx(tableWidth);
+    } else {
+      const shellWidth = parseFramePx(shell.style.width);
+      if (shellWidth > 0) {
+        shell.style.width = toFrameCssPx(Math.round(shellWidth));
+        table.style.width = shell.style.width;
+      }
+    }
+
+    const rows = Array.from(table.rows);
+    const rowHeights = readFrameBandHtmlTableRowHeights(table);
+    if (rows.length > 0 && rowHeights.length === rows.length) {
+      const snappedRowHeights = snapFrameBandAxisSizesToPixelBoundaries(rowHeights, MIN_WRITABLE_TABLE_SIZE_PX);
+      snappedRowHeights.forEach((height, index) => {
+        const row = rows[index];
+        if (row) {
+          row.style.height = toFrameCssPx(height);
+        }
+      });
+      const tableHeight = snappedRowHeights.reduce((sum, height) => sum + height, 0);
+      table.style.height = toFrameCssPx(tableHeight);
+      shell.style.height = toFrameCssPx(tableHeight);
+    } else {
+      const shellHeight = parseFramePx(shell.style.height);
+      if (shellHeight > 0) {
+        shell.style.height = toFrameCssPx(Math.round(shellHeight));
+        table.style.height = shell.style.height;
+      }
+    }
+  });
+};
+
+const materializeFrameBandTableGeometryInHtml = (html: string) => {
+  if (!html.trim() || typeof document === 'undefined' || !html.includes('v102-frame-band-table')) {
+    return html;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  materializeFrameBandTableGeometryInContainer(container);
+  return container.innerHTML;
+};
 
 const resolveFrameLayoutShell = (node: HTMLElement) => node.closest<HTMLElement>('.v102-frame-band') || node;
 
@@ -7685,6 +7841,7 @@ const ensurePreviewFrameBandNormalization = (root: ParentNode) => {
       normalized = shellNormalized || normalized;
     });
     pageNormalized = snapFrameBandShellEdgesInPage(pageInner) || pageNormalized;
+    pageNormalized = snapFrameBandShellEdgesToPixelGridInPage(pageInner) || pageNormalized;
     pageNormalized = normalizeFrameBorderAppearanceLayersInPage(pageInner) || pageNormalized;
     normalized = pageNormalized || normalized;
 
@@ -11059,6 +11216,7 @@ const extractEditorHtml = (root: HTMLElement) => {
   container.innerHTML = root.innerHTML;
   container.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
     snapFrameBandShellEdgesInPage(pageInner);
+    snapFrameBandShellEdgesToPixelGridInPage(pageInner);
     normalizeFrameBorderAppearanceLayersInPage(pageInner);
   });
   syncFormControlMarkup(container);
@@ -11076,6 +11234,7 @@ const extractPreviewRenderHtml = (root: HTMLElement) => {
   container.innerHTML = root.innerHTML;
   container.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
     snapFrameBandShellEdgesInPage(pageInner);
+    snapFrameBandShellEdgesToPixelGridInPage(pageInner);
     normalizeFrameBorderAppearanceLayersInPage(pageInner);
   });
   syncFormControlMarkup(container);
@@ -12182,6 +12341,20 @@ const normalizeDefaultFrameBackgroundStyle = (element: HTMLElement) => {
   }
 };
 
+const syncTransparentFrameGuideAttr = (element: HTMLElement, hasVisibleBorder: boolean) => {
+  normalizeDefaultFrameBackgroundStyle(element);
+  const backgroundColor = colorToHex(element.style.backgroundColor || element.style.background || '');
+  const hasTransparentBackground =
+    !backgroundColor || backgroundColor === 'transparent' || backgroundColor === '#ffffff';
+
+  if (!hasVisibleBorder && hasTransparentBackground) {
+    element.setAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR, 'true');
+    return;
+  }
+
+  element.removeAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR);
+};
+
 const normalizeNumericStyleValue = (value: string) => {
   const parsed = Number.parseFloat(String(value || '').replace('px', '').trim());
   return Number.isFinite(parsed) ? String(Number(parsed.toFixed(2))) : '';
@@ -12195,6 +12368,27 @@ const formatFrameBorderWidthValue = (value: number) => {
   return String(Number(Math.max(0, value).toFixed(2)));
 };
 
+const hasVisibleStoredFrameBorderAppearance = (element: HTMLElement | null | undefined) => {
+  if (!element) {
+    return false;
+  }
+
+  const width = normalizeFrameBorderWidthValue(element.getAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR)) ?? 0;
+  const style = normalizeFrameBorderStyleValue(element.getAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR) || '', width);
+  const color = normalizeFrameBorderColorValue(element.getAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR) || '');
+  return width > 0 && style !== 'none' && Boolean(color) && color !== 'transparent';
+};
+
+const isLegacyTransparentFrameGuideCandidate = (candidate: HTMLElement | null | undefined) => {
+  if (!candidate || hasVisibleStoredFrameBorderAppearance(candidate)) {
+    return false;
+  }
+
+  const outlineStyle = candidate.getAttribute('data-template-frame-outline-style')?.trim().toLowerCase();
+  const inlineStyle = candidate.getAttribute('style') || '';
+  return outlineStyle === 'dashed' || /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(inlineStyle);
+};
+
 const hasLegacyTransparentFrameGuide = (element: HTMLElement) => {
   const shell = resolveFrameLayoutShell(element);
   const candidates = [
@@ -12202,11 +12396,7 @@ const hasLegacyTransparentFrameGuide = (element: HTMLElement) => {
     ...Array.from(shell.querySelectorAll<HTMLElement>('table.v102-frame-band-table, .v202-frame-group[data-template-frame-group]')),
   ];
 
-  return candidates.some((candidate) => {
-    const outlineStyle = candidate.getAttribute('data-template-frame-outline-style')?.trim().toLowerCase();
-    const inlineStyle = candidate.getAttribute('style') || '';
-    return outlineStyle === 'dashed' || /\bborder(?:-[a-z]+)?:[^;"']*\bdashed\b/i.test(inlineStyle);
-  });
+  return candidates.some((candidate) => isLegacyTransparentFrameGuideCandidate(candidate));
 };
 
 const readNestedFrameBorderAppearance = (element: HTMLElement) => {
@@ -12214,6 +12404,10 @@ const readNestedFrameBorderAppearance = (element: HTMLElement) => {
     element.querySelectorAll<HTMLElement>('table.v102-frame-band-table, table.v102-frame-band-table td, .v202-frame-group[data-template-frame-group]')
   )
     .map((candidate) => {
+      if (isLegacyTransparentFrameGuideCandidate(candidate)) {
+        return null;
+      }
+
       const candidateStyle = getComputedStyle(candidate);
       const sides = [
         {
@@ -12459,6 +12653,7 @@ const applyElementBorderAppearanceStylePatch = (element: HTMLElement, patch: Fra
   element.setAttribute(TEMPLATE_FRAME_BORDER_ALIGN_ATTR, nextAlign);
   element.setAttribute(TEMPLATE_FRAME_BORDER_WIDTH_ATTR, formatFrameBorderWidthValue(hasVisibleBorder ? nextWidth : 0));
   element.setAttribute(TEMPLATE_FRAME_BORDER_STYLE_ATTR, hasVisibleBorder ? nextStyle : 'none');
+  syncTransparentFrameGuideAttr(element, hasVisibleBorder);
 
   if (nextColor) {
     element.setAttribute(TEMPLATE_FRAME_BORDER_COLOR_ATTR, nextColor);
@@ -12612,6 +12807,7 @@ const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
         element.removeAttribute(TEMPLATE_FRAME_BORDER_SIDE_COLOR_ATTR[side]);
       });
       element.removeAttribute('data-template-frame-outline-style');
+      element.removeAttribute(TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR);
     });
 };
 
@@ -12620,6 +12816,14 @@ const normalizeFrameBorderAppearanceLayersInPage = (pageInner: HTMLElement) => {
 
   Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
     normalizeDefaultFrameBackgroundStyle(shell);
+    const nestedFrameGroupCount = shell.querySelectorAll<HTMLElement>('.v202-frame-group[data-template-frame-group]').length;
+
+    if (nestedFrameGroupCount > 1) {
+      shell.setAttribute('data-template-frame-container-guide-skip', 'true');
+    } else {
+      shell.removeAttribute('data-template-frame-container-guide-skip');
+    }
+
     const nestedAppearance = readNestedFrameBorderAppearance(shell);
 
     const hasSideBorderAppearance = (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).some(
@@ -12697,13 +12901,20 @@ const normalizeFrameBorderAppearanceLayersInPage = (pageInner: HTMLElement) => {
             : '0',
       });
     } else {
+      let hasVisibleSideBorderAppearance = false;
+
       (['top', 'right', 'bottom', 'left'] as TemplateEdgeSide[]).forEach((side) => {
         const sideAppearance = readElementBorderSideAppearance(shell, side);
+        if (sideAppearance.width > 0 && sideAppearance.style !== 'none' && sideAppearance.color !== 'transparent') {
+          hasVisibleSideBorderAppearance = true;
+        }
         persistElementBorderSideAppearance(shell, side, {
           ...sideAppearance,
           color: normalizeFrameBorderColorValue(sideAppearance.color) || DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
         });
       });
+
+      syncTransparentFrameGuideAttr(shell, hasVisibleSideBorderAppearance);
     }
 
     if (shellAppearance.width > 0 && shellAppearance.style !== 'none') {
@@ -13358,6 +13569,7 @@ const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | und
   container.innerHTML = typeof source === 'string' ? source : source.innerHTML;
   container.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
     snapFrameBandShellEdgesInPage(pageInner);
+    snapFrameBandShellEdgesToPixelGridInPage(pageInner);
     normalizeFrameBorderAppearanceLayersInPage(pageInner);
   });
   syncFormControlMarkup(container);
@@ -16777,7 +16989,14 @@ const frameStylePatchCanChangeContentMeasurement = (patch: FrameStylePatch) =>
   patch.borderStyle !== undefined ||
   patch.borderAlign !== undefined;
 
-export default function TemplateEditWorkspace({ initialTemplateId = '' }: TemplateEditWorkspaceProps) {
+export default function TemplateEditWorkspace({
+  initialTemplateId = '',
+  initialDraft = null,
+  hideHeader = false,
+  templateListDisplay = 'picker',
+  showGuaranteedExtractControls = false,
+  onTemplateSaved,
+}: TemplateEditWorkspaceProps) {
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
   const [previewHtml, setPreviewHtml] = React.useState('');
@@ -16850,6 +17069,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [showCanvasLegend, setShowCanvasLegend] = React.useState(false);
   const [templateUsagePreviewMode, setTemplateUsagePreviewMode] = React.useState(false);
   const [templateUsagePreviewHtml, setTemplateUsagePreviewHtml] = React.useState('');
+  const [previewPipelineInspectorEnabled, setPreviewPipelineInspectorEnabled] = React.useState(false);
+  const [previewPipelineStageIndex, setPreviewPipelineStageIndex] = React.useState(0);
+  const [previewPipelineApprovedStageIndex, setPreviewPipelineApprovedStageIndex] = React.useState(0);
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   React.useEffect(() => {
     textCanvasEditModeActiveRef.current = isTextCanvasEditModeActive;
@@ -16877,6 +17099,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [previewDomVersion, setPreviewDomVersion] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [guaranteedExtractFile, setGuaranteedExtractFile] = React.useState<File | null>(null);
+  const [guaranteedExtractLoading, setGuaranteedExtractLoading] = React.useState(false);
+  const [workspaceDraft, setWorkspaceDraft] = React.useState<TemplateEditWorkspaceInitialDraft | null>(null);
   const [canvasHistoryRevision, setCanvasHistoryRevision] = React.useState(0);
   const [textAutoSizeUiOverride, setTextAutoSizeUiOverride] = React.useState<{
     selectionSignature: string;
@@ -16885,6 +17110,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const [positionSelectionClickChainSnapshot, setPositionSelectionClickChainSnapshot] =
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
+  const guaranteedExtractFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const selectionAppearanceToolbarRef = React.useRef<HTMLDivElement | null>(null);
   const previousSelectionPanelTabRef = React.useRef<SelectionPanelTab>('position');
@@ -16901,6 +17127,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const edgePressStateRef = React.useRef<EdgePressState | null>(null);
   const marqueeSelectionStateRef = React.useRef<MarqueeSelectionState | null>(null);
   const routeTemplateAutoloadedRef = React.useRef('');
+  const initialDraftAppliedKeyRef = React.useRef('');
   const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
   const deferredTextAutoSizeSyncTimeoutRef = React.useRef<number | null>(null);
@@ -16972,7 +17199,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const surfaceRenderedPreviewHtml = templateUsagePreviewMode ? templateUsagePreviewHtml : renderedPreviewHtml;
+  const previewPipelineActiveStageIndex = previewPipelineInspectorEnabled
+    ? previewPipelineStageIndex
+    : TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1;
+  const previewPipelineActiveStageKey =
+    (TEMPLATE_PREVIEW_PIPELINE_STAGES[previewPipelineActiveStageIndex]?.key as TemplatePreviewPipelineStageKey | undefined) ||
+    'fit';
+  const surfaceRenderedPreviewHtml = previewPipelineInspectorEnabled
+    ? renderedPreviewHtml
+    : templateUsagePreviewMode
+      ? templateUsagePreviewHtml
+      : renderedPreviewHtml;
   const selectedEdgeMemberCount = React.useMemo(
     () => new Set(edgeSelectionState.tokens.flatMap((token) => token.memberEdgeIds)).size,
     [edgeSelectionState]
@@ -16981,6 +17218,47 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const selectedEdgeAnchorIds = edgeSelectionState.tokens.map((token) => token.anchorEdgeId);
   const selectedEdgeClickedCount = edgeRoleDiagnostics.selectedEdgeClickedIds.length;
   const selectedEdgeAutoMultiCount = edgeRoleDiagnostics.selectedEdgeAutoMultiIds.length;
+
+  React.useEffect(() => {
+    if (!previewPipelineInspectorEnabled) {
+      return;
+    }
+
+    setPreviewPipelineStageIndex(0);
+    setPreviewPipelineApprovedStageIndex(0);
+  }, [previewPipelineInspectorEnabled, renderedPreviewHtml, templateDetail?.template.id, workspaceDraft?.draftKey]);
+
+  const handleTogglePreviewPipelineInspector = React.useCallback(() => {
+    setPreviewPipelineInspectorEnabled((previous) => {
+      const nextEnabled = !previous;
+
+      if (nextEnabled) {
+        if (templateUsagePreviewMode) {
+          setTemplateUsagePreviewMode(false);
+          setTemplateUsagePreviewHtml('');
+        }
+        setPreviewPipelineStageIndex(0);
+        setPreviewPipelineApprovedStageIndex(0);
+        return true;
+      }
+
+      setPreviewPipelineStageIndex(TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1);
+      setPreviewPipelineApprovedStageIndex(TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1);
+      return false;
+    });
+  }, [templateUsagePreviewMode]);
+
+  const handleSelectPreviewPipelineStage = React.useCallback((stageIndex: number) => {
+    setPreviewPipelineStageIndex(stageIndex);
+  }, []);
+
+  const handleApproveNextPreviewPipelineStage = React.useCallback(() => {
+    setPreviewPipelineApprovedStageIndex((previous) => {
+      const nextApprovedStageIndex = Math.min(TEMPLATE_PREVIEW_PIPELINE_STAGES.length - 1, previous + 1);
+      setPreviewPipelineStageIndex(nextApprovedStageIndex);
+      return nextApprovedStageIndex;
+    });
+  }, []);
   const peerEdgeCount = edgeRoleDiagnostics.peerEdgeIds.length;
   const primarySelectedFrameGroupId = readSingleFrameGroupId(selectedFrameGroupIds) || null;
   const canEditSingleSelection = selectedFrameGroupIds.length === 1;
@@ -17222,6 +17500,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 
     return new URLSearchParams(window.location.search).get('templateId')?.trim() || '';
   }, [initialTemplateId]);
+  const activeInitialDraft = workspaceDraft || initialDraft;
   const runtimeModeOptions = React.useMemo(
     () => (frameMetadataDraft.boxKind ? getCompatibleRuntimeModes(frameMetadataDraft.boxKind) : getAllRuntimeModes()),
     [frameMetadataDraft.boxKind]
@@ -17776,13 +18055,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
     ) => {
       const normalizedTemplateId = selectedTemplateId.trim() || templateDetail?.template.id || '';
+      const persistedDraftHtml = materializeFrameBandTableGeometryInHtml(currentHtml).trim();
 
-      if (!normalizedTemplateId) {
-        setMessage('저장할 템플릿을 먼저 선택하세요.');
-        return false;
-      }
-
-      if (!currentHtml.trim()) {
+      if (!persistedDraftHtml) {
         setMessage('저장할 템플릿 HTML이 없습니다.');
         return false;
       }
@@ -17791,14 +18066,14 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setMessage(null);
 
       try {
-        const response = await fetch(`/api/templates/${normalizedTemplateId}`, {
-          method: 'PATCH',
+        const response = await fetch(normalizedTemplateId ? `/api/templates/${normalizedTemplateId}` : '/api/templates', {
+          method: normalizedTemplateId ? 'PATCH' : 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             templateName,
             sourceDocumentName,
             layoutResizeMode,
-            draftHtml: currentHtml,
+            draftHtml: persistedDraftHtml,
           }),
         });
         const result = await response.json();
@@ -17807,32 +18082,56 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           throw new Error(result.message || '템플릿 저장에 실패했습니다.');
         }
 
-        const updatedTemplate = result.data?.template as TemplateRecordDto | undefined;
+        const updatedTemplate = (
+          normalizedTemplateId ? result.data?.template : result.data
+        ) as TemplateRecordDto | undefined;
 
         if (updatedTemplate) {
           setTemplates((previous) =>
             [updatedTemplate, ...previous.filter((item) => item.id !== updatedTemplate.id)].slice(0, 64)
           );
+          setSelectedTemplateId(updatedTemplate.id);
+          setWorkspaceDraft(null);
+          syncTemplateQuery(updatedTemplate.id);
+          onTemplateSaved?.(updatedTemplate);
         }
 
         setTemplateDetail((previous) =>
-          previous
+          previous && updatedTemplate
             ? {
                 ...previous,
                 template: {
                   ...previous.template,
+                  id: updatedTemplate.id,
                   templateName,
                   sourceDocumentName,
                   layoutResizeMode,
-                  draftHtml: currentHtml,
+                  draftHtml: persistedDraftHtml,
                 },
               }
-            : previous
+            : updatedTemplate
+              ? {
+                  template: {
+                    ...updatedTemplate,
+                    templateName,
+                    sourceDocumentName,
+                    layoutResizeMode,
+                    draftHtml: persistedDraftHtml,
+                  },
+                  fields: [],
+                  labelBindings: [],
+                  signatureAreas: [],
+                  labelMap: [],
+                }
+              : previous
         );
-        lastPersistedDraftHtmlRef.current = currentHtml.trim();
+        lastPersistedDraftHtmlRef.current = persistedDraftHtml;
         queuedAutoPersistDraftHtmlRef.current = '';
         cancelScheduledAutoPersistDraft();
-        setMessage(options?.successMessage || `템플릿 ${normalizedTemplateId} 저장을 완료했습니다.`);
+        setMessage(
+          options?.successMessage ||
+            `템플릿 ${updatedTemplate?.id || normalizedTemplateId} 저장을 완료했습니다.`
+        );
         return true;
       } catch (error) {
         const nextMessage = error instanceof Error ? error.message : '템플릿 저장에 실패했습니다.';
@@ -17845,14 +18144,20 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [
       cancelScheduledAutoPersistDraft,
       layoutResizeMode,
+      onTemplateSaved,
       selectedTemplateId,
       sourceDocumentName,
+      syncTemplateQuery,
       templateDetail?.template.id,
       templateName,
     ]
   );
 
   const requestPreviewTextFit = React.useCallback(() => {
+    if (previewPipelineInspectorEnabled) {
+      return;
+    }
+
     const root = previewRef.current;
 
     if (!root || typeof window === 'undefined') {
@@ -17862,9 +18167,13 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     window.requestAnimationFrame(() => {
       applyTemplateExtractEditableTextFit(root);
     });
-  }, []);
+  }, [previewPipelineInspectorEnabled]);
 
   const applyPreviewTextFitImmediately = React.useCallback(() => {
+    if (previewPipelineInspectorEnabled) {
+      return;
+    }
+
     const root = previewRef.current;
 
     if (!root) {
@@ -17872,7 +18181,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     }
 
     applyTemplateExtractEditableTextFit(root);
-  }, []);
+  }, [previewPipelineInspectorEnabled]);
 
   const syncPreviewSurfaceScale = React.useCallback((rootArg?: HTMLElement | null) => {
     const root = rootArg || previewRef.current;
@@ -22859,8 +23168,57 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [buildLiveEdgeTopologySnapshot]
   );
 
+  const runPreviewPipelineInspectorStage = React.useCallback(
+    async (root: HTMLElement, stageIndex: number) => {
+      syncPreviewSurfaceCloneAttrs(root);
+      syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
+      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
+        root,
+        selectionPanelTab === 'position' && positionOrderLockSelectionMode
+      );
+      applyPreviewEditPermissions(root, selectionPanelTab, false);
+
+      if (stageIndex >= 1) {
+        ensurePreviewFrameBandNormalization(root);
+        syncPreviewSurfaceCloneAttrs(root);
+      }
+
+      if (stageIndex >= 2) {
+        if (selectionPanelTab === 'position') {
+          materializePositionGroupWrappers(root);
+          ensureRelativeAnchorConfigs(root);
+          normalizePositionGroupRelativeAnchors(root);
+          applyRelativeAnchoredFrameRectsInRoot(root);
+        }
+
+        applyEditorAutoSizeBoxesWithPreservedLayout(root);
+      }
+
+      syncPreviewSurfaceScale(root);
+
+      if (stageIndex >= 3) {
+        await document.fonts?.ready?.catch(() => undefined);
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+        });
+        applyTemplateExtractEditableTextFit(root);
+        syncPreviewSurfaceScale(root);
+      }
+    },
+    [
+      applyEditorAutoSizeBoxesWithPreservedLayout,
+      positionOrderLockSelectionMode,
+      selectionPanelTab,
+      syncPreviewSurfaceScale,
+    ]
+  );
+
 	  const schedulePreviewEditorState = React.useCallback(() => {
 	    if (typeof window === 'undefined') {
+	      return;
+	    }
+
+	    if (previewPipelineInspectorEnabled) {
 	      return;
 	    }
 
@@ -23014,6 +23372,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
       visibleMetadataReviewIssues,
+      previewPipelineInspectorEnabled,
 	    syncPreviewSurfaceScale,
 	    templateUsagePreviewMode,
 	  ]);
@@ -23022,6 +23381,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      previewRef.current = node;
 
 	      if (node && renderedPreviewHtml) {
+          if (previewPipelineInspectorEnabled) {
+            void runPreviewPipelineInspectorStage(node, previewPipelineActiveStageIndex);
+            return;
+          }
+
 	        syncPreviewSurfaceCloneAttrs(node);
 	        if (templateUsagePreviewMode) {
 	          enableTemplateUsagePreviewTextControls(node);
@@ -23086,9 +23450,12 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       }
     },
 	    [
+        previewPipelineActiveStageIndex,
+        previewPipelineInspectorEnabled,
 	      positionOrderLockSelectionMode,
 	      applyEditorAutoSizeBoxesWithPreservedLayout,
 	      renderedPreviewHtml,
+        runPreviewPipelineInspectorStage,
 	      schedulePreviewEditorState,
 	      selectionPanelTab,
 	      syncDraftPreviewHtmlRef,
@@ -23096,6 +23463,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	      templateUsagePreviewMode,
 	    ]
 	  );
+
+  React.useEffect(() => {
+    if (!previewPipelineInspectorEnabled || !previewRef.current || !surfaceRenderedPreviewHtml.trim()) {
+      return;
+    }
+
+    void runPreviewPipelineInspectorStage(previewRef.current, previewPipelineActiveStageIndex);
+  }, [
+    previewPipelineActiveStageIndex,
+    previewPipelineInspectorEnabled,
+    runPreviewPipelineInspectorStage,
+    surfaceRenderedPreviewHtml,
+  ]);
 
   const applyRuntimeSelectionUi = React.useCallback(
     (
@@ -24011,6 +24391,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
   const handleSelectedTemplateChange = React.useCallback(
     (nextTemplateId: string) => {
       const normalizedTemplateId = nextTemplateId.trim();
+      setWorkspaceDraft(null);
       setSelectedTemplateId(normalizedTemplateId);
 
       if (!normalizedTemplateId) {
@@ -24023,14 +24404,121 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
     [loadTemplate, syncTemplateQuery]
   );
 
+  const handleGuaranteedExtractFileChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const nextFile = event.target.files?.[0] || null;
+    setGuaranteedExtractFile(nextFile);
+    setMessage(nextFile ? `${nextFile.name} 파일을 선택했습니다.` : null);
+  }, []);
+
+  const handleGuaranteedExtract = React.useCallback(async () => {
+    if (!guaranteedExtractFile) {
+      setMessage('추출할 PDF 파일을 먼저 선택하세요.');
+      return;
+    }
+
+    setGuaranteedExtractLoading(true);
+    setMessage(null);
+
+    try {
+      const detail = await createGuaranteedFrameDraftWithPdf({
+        file: guaranteedExtractFile,
+        sourceTitle: guaranteedExtractFile.name,
+        engineVersion: GUARANTEED_TEMPLATE_EXTRACT_ENGINE_VERSION,
+        frameGroupVersion: GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION,
+      });
+      const generatedDraftHtml = detail.draft.generatedDraftHtml?.trim() || '';
+
+      if (!generatedDraftHtml) {
+        throw new Error('템플릿 추출 결과 HTML이 비어 있습니다.');
+      }
+
+      const { draftHtml } = await buildGuaranteedDraftHtmlFromFrameDraft({
+        generatedDraftHtml,
+        renderModelSourceHtml: detail.draft.generatedDraftHtml || detail.draft.sourceContent || '',
+      });
+
+      const sourceBaseName = guaranteedExtractFile.name.replace(/\.[^.]+$/u, '').trim();
+      setWorkspaceDraft({
+        draftKey: `${detail.draft.id}:${Date.now()}`,
+        templateName: sourceBaseName ? `${sourceBaseName} 템플릿` : '새 템플릿 초안',
+        sourceDocumentName: detail.draft.sourceTitle || guaranteedExtractFile.name,
+        draftHtml,
+        layoutResizeMode: 'grow_height',
+      });
+      setMessage(
+        `${GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION} + ${GUARANTEED_TEMPLATE_EXTRACT_FRAME_TEXT_VERSION} 조합으로 추출한 초안을 불러왔습니다. 저장 전까지 템플릿 리스트에는 추가되지 않습니다.`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '템플릿 추출에 실패했습니다.');
+    } finally {
+      setGuaranteedExtractLoading(false);
+    }
+  }, [guaranteedExtractFile]);
+
   React.useEffect(() => {
     void loadTemplates();
   }, [loadTemplates]);
 
   React.useEffect(() => {
+    const normalizedDraftHtml = activeInitialDraft?.draftHtml?.trim() || '';
+
+    if (!normalizedDraftHtml) {
+      return;
+    }
+
+    const draftKey = activeInitialDraft?.draftKey?.trim() || normalizedDraftHtml;
+
+    if (initialDraftAppliedKeyRef.current === draftKey) {
+      return;
+    }
+
+    initialDraftAppliedKeyRef.current = draftKey;
+    routeTemplateAutoloadedRef.current = '';
+    const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+    setTemplateDetail(null);
+    setSelectedTemplateId('');
+    setTemplateName(activeInitialDraft?.templateName?.trim() || '새 템플릿 초안');
+    setSourceDocumentName(activeInitialDraft?.sourceDocumentName?.trim() || '');
+    setLayoutResizeMode(activeInitialDraft?.layoutResizeMode || 'grow_height');
+    setPreviewHtml(normalizedDraftHtml);
+    setTemplateUsagePreviewMode(false);
+    setTemplateUsagePreviewHtml('');
+    selectedFrameGroupIdsRef.current = [];
+    edgeSelectionStateRef.current = emptyEdgeSelection;
+    setSelectedFrameGroupIds([]);
+    setEdgeSelectionState(emptyEdgeSelection);
+    setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+    setSelectionValidationIssues([]);
+    setSelectionReviewIssues([]);
+    setSelectionSaveProgress(defaultSelectionSaveProgressState);
+    draftPreviewHtmlRef.current = normalizedDraftHtml;
+    lastPersistedDraftHtmlRef.current = '';
+    queuedAutoPersistDraftHtmlRef.current = '';
+    cancelScheduledAutoPersistDraft();
+    resetCanvasHistory({
+      renderHtml: normalizedDraftHtml,
+      draftHtml: normalizedDraftHtml,
+      selectedFrameGroupIds: [],
+      positionGroupProxySelectionGroupId: '',
+      showAllGroupProxySelections: false,
+    });
+    syncTemplateQuery('');
+    setMessage('추출 초안을 저장 전 상태로 상자 편집 캔버스에 불러왔습니다. 저장하면 템플릿 리스트에 추가됩니다.');
+  }, [
+    cancelScheduledAutoPersistDraft,
+    activeInitialDraft?.draftHtml,
+    activeInitialDraft?.draftKey,
+    activeInitialDraft?.layoutResizeMode,
+    activeInitialDraft?.sourceDocumentName,
+    activeInitialDraft?.templateName,
+    resetCanvasHistory,
+    syncTemplateQuery,
+  ]);
+
+  React.useEffect(() => {
     const normalizedRouteTemplateId = routeTemplateId.trim();
 
-    if (!normalizedRouteTemplateId || loading) {
+    if (activeInitialDraft?.draftHtml?.trim() || !normalizedRouteTemplateId || loading) {
       return;
     }
 
@@ -24051,7 +24539,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
       setSelectedTemplateId(normalizedRouteTemplateId);
     }
     void loadTemplate(normalizedRouteTemplateId);
-  }, [loadTemplate, loading, routeTemplateId, selectedTemplateId, templateDetail?.template.id]);
+  }, [activeInitialDraft?.draftHtml, loadTemplate, loading, routeTemplateId, selectedTemplateId, templateDetail?.template.id]);
 
   React.useEffect(() => {
     selectedFrameGroupIdsRef.current = selectedFrameGroupIds;
@@ -34921,9 +35409,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
         .template-edit-preview[data-frame-create-mode="true"] [data-template-edit-scope][data-template-edit-enabled="true"] {
           cursor: crosshair;
         }
-	        .template-edit-preview .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]):not([style*="background-color"]):not([style*="background:"]),
-	        .template-edit-preview .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"]:not([data-template-selected="true"]):not([style*="background-color"]):not([style*="background:"]) {
-	          outline: 1px dashed rgba(15, 23, 42, .34) !important;
+        .template-edit-preview .v102-frame-band[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-frame-container-guide-skip="true"]):not([data-template-selected="true"]),
+        .template-edit-preview .v202-cell-box[${TEMPLATE_TRANSPARENT_FRAME_GUIDE_ATTR}="true"]:not([data-template-selected="true"]) {
+          outline: 1px dashed rgba(15, 23, 42, .34) !important;
           outline-offset: -1px !important;
           background-image: repeating-linear-gradient(
             135deg,
@@ -34931,20 +35419,24 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
             rgba(15, 23, 42, .08) 4px,
             transparent 4px,
             transparent 9px
-	          ) !important;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"],
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"] {
-	          outline: none !important;
-	          background-image: none !important;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [data-frame-editor-ui="true"],
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .${FRAME_KIND_MARKER_CLASS},
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .${FRAME_DELETE_BUTTON_CLASS},
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] ${FRAME_EDGE_BUTTON_SELECTOR},
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] ${FRAME_RESIZE_HANDLE_SELECTOR} {
-	          display: none !important;
-	        }
+          ) !important;
+        }
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v102-frame-band[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"],
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v202-cell-box[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"],
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v202-frame-group[data-template-frame-border-style="none"][data-template-frame-border-color="transparent"],
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v102-frame-band[style*="border-style: none"][style*="border-color: transparent"],
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v202-cell-box[style*="border-style: none"][style*="border-color: transparent"],
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v202-frame-group[style*="border-style: none"][style*="border-color: transparent"] {
+          outline: none !important;
+          background-image: none !important;
+        }
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] [data-frame-editor-ui="true"],
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .${FRAME_KIND_MARKER_CLASS},
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .${FRAME_DELETE_BUTTON_CLASS},
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] ${FRAME_EDGE_BUTTON_SELECTOR},
+        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] ${FRAME_RESIZE_HANDLE_SELECTOR} {
+          display: none !important;
+        }
         .template-edit-preview [data-template-selected="true"] {
           --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(37, 99, 235, .96));
           position: relative;
@@ -35832,6 +36324,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	        }
 	      `}</style>
 
+      {hideHeader ? null : (
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <Badge variant="slate">TPL-EDIT-01</Badge>
@@ -35856,11 +36349,15 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           >
             템플릿 관리
           </Link>
-	          <Button onClick={() => void saveTemplate()} disabled={saving || loading || !templateDetail || templateUsagePreviewMode}>
-	            {saving ? '저장 중...' : '현재 템플릿 저장'}
+	          <Button
+              onClick={() => void saveTemplate()}
+              disabled={saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode || previewPipelineInspectorEnabled}
+            >
+	            {saving ? '저장 중...' : templateDetail ? '현재 템플릿 저장' : renderedPreviewHtml.trim() ? '초안 저장' : '현재 템플릿 저장'}
 	          </Button>
         </div>
       </div>
+      )}
 
       {message ? (
         <Card className="border-slate-200 bg-slate-50">
@@ -35876,21 +36373,119 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-[1.2fr_auto]">
+          {showGuaranteedExtractControls ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="green">PDF 추출</Badge>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {GUARANTEED_TEMPLATE_EXTRACT_FRAME_GROUP_VERSION} + {GUARANTEED_TEMPLATE_EXTRACT_FRAME_TEXT_VERSION}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    추출 결과는 저장 전 초안으로 바로 캔버스에 표시되고, 저장하면 템플릿 리스트에 추가됩니다.
+                  </p>
+                </div>
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    ref={guaranteedExtractFileInputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    onChange={handleGuaranteedExtractFileChange}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 min-w-0 justify-start gap-2 sm:w-72"
+                    onClick={() => guaranteedExtractFileInputRef.current?.click()}
+                  >
+                    <FileUp className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{guaranteedExtractFile ? guaranteedExtractFile.name : 'PDF 파일 업로드'}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    className="h-10 gap-2"
+                    onClick={() => void handleGuaranteedExtract()}
+                    disabled={guaranteedExtractLoading || !guaranteedExtractFile}
+                  >
+                    {guaranteedExtractLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                    {guaranteedExtractLoading ? '추출 중...' : '보장 조합 추출'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className={`grid gap-4 ${hideHeader ? 'xl:grid-cols-[1.2fr_auto_auto]' : 'xl:grid-cols-[1.2fr_auto]'}`}>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-800">저장된 템플릿</label>
-              <EntityPicker
-                value={selectedTemplateId}
-                options={templateOptions}
-                onChange={handleSelectedTemplateChange}
-                placeholder="편집할 템플릿을 선택하세요"
-                emptyMessage="저장된 템플릿이 없습니다."
-                optionLayout="inline"
-                onDeleteOption={handleDeleteTemplateOption}
-                deleteOptionLabel="템플릿 삭제"
-                className="w-full"
-                triggerClassName="h-11 min-h-11 items-center rounded-md py-2"
-              />
+              <label className="text-sm font-medium text-slate-800">
+                {templateListDisplay === 'inline' ? '템플릿 리스트' : '저장된 템플릿'}
+              </label>
+              {templateListDisplay === 'inline' ? (
+                <div className="max-h-72 overflow-auto rounded-md border border-slate-200 bg-white p-2">
+                  {templates.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {templates.map((template) => {
+                        const isActiveTemplate = selectedTemplateId === template.id || templateDetail?.template.id === template.id;
+                        return (
+                          <div
+                            key={template.id}
+                            className={`grid min-w-0 grid-cols-[minmax(0,1fr)_2.25rem] items-stretch overflow-hidden rounded-md border ${
+                              isActiveTemplate ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className="min-w-0 px-3 py-2 text-left transition hover:bg-slate-50"
+                              onClick={() => handleSelectedTemplateChange(template.id)}
+                            >
+                              <span className="block truncate text-sm font-semibold text-slate-900">{template.templateName}</span>
+                              <span className="block truncate text-xs text-slate-500">
+                                {template.sourceDocumentName || template.id}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center justify-center border-l border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                              aria-label={`${template.templateName} 삭제`}
+                              title="템플릿 삭제"
+                              onClick={() =>
+                                void handleDeleteTemplateOption({
+                                  id: template.id,
+                                  label: template.templateName,
+                                  meta: template.sourceDocumentName || template.id,
+                                  keywords: [template.sourceDocumentName || '', template.layoutResizeMode],
+                                })
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+                      저장된 템플릿이 없습니다.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <EntityPicker
+                  value={selectedTemplateId}
+                  options={templateOptions}
+                  onChange={handleSelectedTemplateChange}
+                  placeholder="편집할 템플릿을 선택하세요"
+                  emptyMessage="저장된 템플릿이 없습니다."
+                  optionLayout="inline"
+                  onDeleteOption={handleDeleteTemplateOption}
+                  deleteOptionLabel="템플릿 삭제"
+                  className="w-full"
+                  triggerClassName="h-11 min-h-11 items-center rounded-md py-2"
+                />
+              )}
             </div>
             <div className="flex items-end">
               <Button
@@ -35902,6 +36497,17 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 {loading ? '불러오는 중...' : '템플릿 불러오기'}
               </Button>
             </div>
+            {hideHeader ? (
+              <div className="flex items-end">
+                <Button
+                  className="h-11 min-h-11"
+                  onClick={() => void saveTemplate()}
+                  disabled={saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode}
+                >
+                  {saving ? '저장 중...' : templateDetail ? '현재 템플릿 저장' : '초안 저장'}
+                </Button>
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
@@ -35972,7 +36578,7 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(templateUsagePreviewMode, !renderedPreviewHtml.trim())}`}
                   onClick={toggleTemplateUsagePreviewMode}
-                  disabled={!renderedPreviewHtml.trim()}
+                  disabled={!renderedPreviewHtml.trim() || previewPipelineInspectorEnabled}
                   aria-pressed={templateUsagePreviewMode}
                   aria-label={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
                   title={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
@@ -35985,9 +36591,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <div className={`col-span-2 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
                   onClick={() => setCanvasInteractionMode('select')}
-                  disabled={templateUsagePreviewMode}
+                  disabled={templateUsagePreviewMode || previewPipelineInspectorEnabled}
                   aria-label="선택 모드"
                   title="선택 모드"
                 >
@@ -35996,9 +36602,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 </button>
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
                   onClick={() => setCanvasInteractionMode('move')}
-                  disabled={templateUsagePreviewMode}
+                  disabled={templateUsagePreviewMode || previewPipelineInspectorEnabled}
                   aria-label="이동 모드"
                   title="이동 모드"
                 >
@@ -36010,9 +36616,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
               <div className={`col-span-2 grid grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !canUndoCanvasHistory || templateUsagePreviewMode)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !canUndoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
                   onClick={handleUndoCanvasHistory}
-                  disabled={!canUndoCanvasHistory || templateUsagePreviewMode}
+                  disabled={!canUndoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled}
                   aria-label="되돌리기"
                   title="되돌리기"
                 >
@@ -36021,9 +36627,9 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 </button>
                 <button
                   type="button"
-                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !canRedoCanvasHistory || templateUsagePreviewMode)}`}
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !canRedoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled)}`}
                   onClick={handleRedoCanvasHistory}
-                  disabled={!canRedoCanvasHistory || templateUsagePreviewMode}
+                  disabled={!canRedoCanvasHistory || templateUsagePreviewMode || previewPipelineInspectorEnabled}
                   aria-label="다시 실행하기"
                   title="다시 실행하기"
                 >
@@ -36071,6 +36677,19 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
                 ))}
               </div>
             </div>
+          </CardContent>
+          <CardContent className="px-6 pb-3 pt-0">
+            <PreviewPipelineInspector
+              title="편집 preview DOM"
+              summary="불러온 draftHtml을 원본 -> frame normalize -> 레이아웃 보정 -> preview text fit 순서로 직접 넘기며 어느 단계에서 편집 preview DOM이 깨지는지 확인합니다. 검사 중에는 캔버스 편집과 저장을 잠급니다."
+              enabled={previewPipelineInspectorEnabled}
+              stages={TEMPLATE_PREVIEW_PIPELINE_STAGES}
+              activeStageIndex={previewPipelineActiveStageIndex}
+              approvedStageIndex={previewPipelineApprovedStageIndex}
+              onToggleEnabled={handleTogglePreviewPipelineInspector}
+              onSelectStage={handleSelectPreviewPipelineStage}
+              onApproveNextStage={handleApproveNextPreviewPipelineStage}
+            />
           </CardContent>
           {showCanvasLegend ? (
             <CardContent className="p-6 pt-0">
@@ -36344,6 +36963,11 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 		            </CardContent>
 		          ) : null}
 	          <TemplateEditPreviewSurface
+              key={
+                previewPipelineInspectorEnabled
+                  ? `template-preview-stage:${previewPipelineActiveStageKey}:${selectionPanelTab}`
+                  : 'template-preview-stage:live'
+              }
 	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
 	            boxCreationMode={templateUsagePreviewMode ? false : boxCreationMode}
 	            canvasIconScale={canvasIconScale}
@@ -36351,38 +36975,47 @@ export default function TemplateEditWorkspace({ initialTemplateId = '' }: Templa
 	            templateUsagePreviewMode={templateUsagePreviewMode}
 	            selectionPanelTab={selectionPanelTab}
 	            showMetadataIcons={templateUsagePreviewMode ? false : showMetadataIcons}
-	            actionOverlay={templateUsagePreviewMode ? null : resolveCanvasActionOverlay()}
+	            actionOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : resolveCanvasActionOverlay()}
 	            actionOverlayLabel={canvasActionOverlayLabel}
 	            actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
 	            metadataNameOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' && selectedFrameGroupIds.length <= 1
+	              !templateUsagePreviewMode &&
+                !previewPipelineInspectorEnabled &&
+                selectionPanelTab === 'metadata' &&
+                selectedFrameGroupIds.length <= 1
 	                ? renderMetadataNameOverlay
 	                : null
 	            }
 	            metadataRolePrimaryOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRolePrimaryOverlay : null
+	              !templateUsagePreviewMode && !previewPipelineInspectorEnabled && selectionPanelTab === 'metadata'
+                  ? renderMetadataRolePrimaryOverlay
+                  : null
 	            }
 	            metadataRoleSecondaryOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleSecondaryOverlay : null
+	              !templateUsagePreviewMode && !previewPipelineInspectorEnabled && selectionPanelTab === 'metadata'
+                  ? renderMetadataRoleSecondaryOverlay
+                  : null
 	            }
 	            metadataRoleTertiaryOverlay={
-	              !templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleTertiaryOverlay : null
+	              !templateUsagePreviewMode && !previewPipelineInspectorEnabled && selectionPanelTab === 'metadata'
+                  ? renderMetadataRoleTertiaryOverlay
+                  : null
 	            }
-	            styleOverlay={templateUsagePreviewMode ? null : renderPositionBoxStyleOverlay()}
+	            styleOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderPositionBoxStyleOverlay()}
 	            styleOverlayLabel="상자 스타일"
-	            sizeTypeOverlay={templateUsagePreviewMode ? null : renderPositionBoxSizeTypeOverlay()}
-	            textStyleOverlay={templateUsagePreviewMode ? null : renderPositionTextStyleOverlay()}
+	            sizeTypeOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderPositionBoxSizeTypeOverlay()}
+	            textStyleOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderPositionTextStyleOverlay()}
 	            textStyleOverlayCollapsed={positionTextStyleOverlayCollapsed}
 	            setTextStyleOverlayCollapsed={setPositionTextStyleOverlayCollapsed}
 	            textStyleOverlayExpandedWidthClassName="w-fit max-w-[250px]"
-	            summaryOverlay={templateUsagePreviewMode ? null : renderSelectionSummaryBox()}
+	            summaryOverlay={templateUsagePreviewMode || previewPipelineInspectorEnabled ? null : renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}
-            handlePreviewPointerDown={handlePreviewPointerDown}
-            handlePreviewPointerMove={handlePreviewPointerMove}
-            handlePreviewPointerUp={handlePreviewPointerUp}
-            handlePreviewPointerCancel={handlePreviewPointerCancel}
-            handlePreviewClickCapture={handlePreviewClickCapture}
-            handlePreviewInput={handlePreviewInput}
+            handlePreviewPointerDown={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerDown}
+            handlePreviewPointerMove={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerMove}
+            handlePreviewPointerUp={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerUp}
+            handlePreviewPointerCancel={previewPipelineInspectorEnabled ? () => undefined : handlePreviewPointerCancel}
+            handlePreviewClickCapture={previewPipelineInspectorEnabled ? () => undefined : handlePreviewClickCapture}
+            handlePreviewInput={previewPipelineInspectorEnabled ? () => undefined : handlePreviewInput}
           />
         </Card>
       </div>
