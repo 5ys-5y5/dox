@@ -24,6 +24,7 @@ import {
   Maximize2,
   Minimize2,
   Minus,
+  Plus,
   MousePointer2,
   Move,
   Paperclip,
@@ -638,6 +639,7 @@ type TemplateFloatingOverlayContent = React.ReactNode | (() => React.ReactNode);
 
 type TemplateEditPreviewSurfaceProps = {
   renderedPreviewHtml: string;
+  canvasFullscreen: boolean;
   boxCreationMode: boolean;
   canvasIconScale: CanvasIconScale;
   spacePanArmed: boolean;
@@ -1188,6 +1190,7 @@ const buildStablePositionGroupProxySelection = (
 
 const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
   renderedPreviewHtml,
+  canvasFullscreen,
   boxCreationMode,
   canvasIconScale,
   spacePanArmed,
@@ -2131,7 +2134,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
 
   if (!renderedPreviewHtml) {
     return (
-      <CardContent className="flex-1 min-h-0 bg-slate-200 p-6">
+      <CardContent className={`min-h-0 bg-slate-200 p-6 ${canvasFullscreen ? 'flex-1' : 'h-[70vh] max-h-[70vh]'}`}>
         <div className="flex min-h-[560px] items-center justify-center text-sm text-slate-500">
           편집할 템플릿을 먼저 불러오세요.
         </div>
@@ -2140,10 +2143,13 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   }
 
   return (
-    <CardContent ref={surfaceShellRef} className="relative flex-1 min-h-0 overflow-hidden bg-slate-200 p-0">
+    <CardContent
+      ref={surfaceShellRef}
+      className={`relative min-h-0 overflow-hidden bg-slate-200 p-0 ${canvasFullscreen ? 'flex-1' : 'h-[70vh] max-h-[70vh]'}`}
+    >
       <div
         ref={setPreviewSurfaceNode}
-        className="template-edit-preview template-extract-draft-preview template-extract-preview-surface bg-slate-200 template-clone template-clone--raster-first-v2-structured"
+        className="template-edit-preview template-extract-draft-preview template-extract-preview-surface h-full max-h-full bg-slate-200 template-clone template-clone--raster-first-v2-structured"
         data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
         data-canvas-icon-scale={canvasIconScale}
         data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
@@ -7716,11 +7722,13 @@ const syncTemplatePreviewScaledSourceBounds = (pageInner: HTMLElement, bounds: {
 
   const sourceWidth = Math.max(MIN_FRAME_SIZE_PX, Math.ceil(bounds.width));
   const sourceHeight = Math.max(MIN_FRAME_SIZE_PX, Math.ceil(bounds.height));
+  const existingScale = Number.parseFloat(previewRoot.style.getPropertyValue('--template-preview-scale') || '1');
+  const resolvedScale = Number.isFinite(existingScale) && existingScale > 0 ? existingScale : 1;
 
-  previewRoot.style.setProperty('--template-preview-scale', '1');
+  previewRoot.style.setProperty('--template-preview-scale', String(resolvedScale));
   previewRoot.style.setProperty('--template-preview-source-width', `${sourceWidth}px`);
   previewRoot.style.setProperty('--template-preview-source-height', `${sourceHeight}px`);
-  previewRoot.style.setProperty('--template-preview-scaled-height', `${sourceHeight}px`);
+  previewRoot.style.setProperty('--template-preview-scaled-height', `${sourceHeight * resolvedScale}px`);
 };
 
 const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
@@ -17527,6 +17535,22 @@ export default function TemplateEditWorkspace({
   const toggleCanvasFullscreen = React.useCallback(() => {
     setCanvasFullscreen((previous) => !previous);
   }, []);
+  const clampPreviewZoomPercent = React.useCallback((value: number) => {
+    if (!Number.isFinite(value)) {
+      return 100;
+    }
+
+    return Math.min(200, Math.max(25, Math.round(value)));
+  }, []);
+  const updatePreviewZoom = React.useCallback(
+    (nextValue: number | ((previous: number) => number)) => {
+      setPreviewZoom((previous) => {
+        const resolvedValue = typeof nextValue === 'function' ? nextValue(previous) : nextValue;
+        return clampPreviewZoomPercent(resolvedValue);
+      });
+    },
+    [clampPreviewZoomPercent]
+  );
   React.useEffect(() => {
     if (typeof document === 'undefined') {
       return undefined;
@@ -18719,22 +18743,15 @@ export default function TemplateEditWorkspace({
       root.style.removeProperty('--template-preview-source-width');
       root.style.removeProperty('--template-preview-source-height');
       root.style.removeProperty('--template-preview-scaled-height');
-      if (Math.abs(previewZoomRef.current - 100) > 0.25) {
-        previewZoomRef.current = 100;
-        setPreviewZoom(100);
-      }
       return;
     }
 
+    const nextScale = Math.max(0.1, previewZoomRef.current / 100);
     root.setAttribute('data-template-preview-scaled', 'true');
-    root.style.setProperty('--template-preview-scale', '1');
+    root.style.setProperty('--template-preview-scale', String(nextScale));
     root.style.setProperty('--template-preview-source-width', `${sourceRect.width}px`);
     root.style.setProperty('--template-preview-source-height', `${sourceRect.height}px`);
-    root.style.setProperty('--template-preview-scaled-height', `${sourceRect.height}px`);
-    if (Math.abs(previewZoomRef.current - 100) > 0.25) {
-      previewZoomRef.current = 100;
-      setPreviewZoom(100);
-    }
+    root.style.setProperty('--template-preview-scaled-height', `${sourceRect.height * nextScale}px`);
   }, []);
 
   const getFrameNodes = React.useCallback(
@@ -31682,6 +31699,9 @@ export default function TemplateEditWorkspace({
   React.useEffect(() => {
     previewZoomRef.current = previewZoom;
   }, [previewZoom]);
+  React.useEffect(() => {
+    syncPreviewSurfaceScale(previewRef.current);
+  }, [previewZoom, syncPreviewSurfaceScale]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -36738,6 +36758,8 @@ export default function TemplateEditWorkspace({
   const canvasActionOverlayWidthClassName =
     selectionPanelTab === 'metadata' ? 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' : 'w-44 max-w-[calc(100%_-_1.5rem)]';
   const canvasToolbarGroupClassName = 'min-w-0 rounded-md bg-white';
+  const canvasZoomButtonClassName =
+    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900';
   const canvasToolbarButtonBaseClassName =
     'v106-canvas-toolbar-button relative inline-flex h-9 w-full min-w-0 items-center justify-center gap-1.5 whitespace-nowrap border border-slate-300 px-2 text-xs font-semibold transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900 disabled:pointer-events-none disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100';
   const getCanvasToolbarButtonStateClassName = (active: boolean, disabled = false) => {
@@ -36785,12 +36807,14 @@ export default function TemplateEditWorkspace({
           justify-content: center;
           align-items: flex-start;
           box-sizing: border-box;
-          width: 100%;
-          max-width: none;
+          width: 100% !important;
+          max-width: 100% !important;
           min-height: 0;
+          height: 100%;
+          max-height: 100%;
           overflow: auto;
-          scrollbar-width: none;
-          -ms-overflow-style: none;
+          margin: 0 !important;
+          scrollbar-width: thin;
           border-top: 1px solid rgb(226 232 240);
           border-radius: 0;
           background: rgb(226 232 240) !important;
@@ -36799,15 +36823,25 @@ export default function TemplateEditWorkspace({
           overscroll-behavior: contain;
         }
         .template-edit-preview::-webkit-scrollbar {
-          display: none;
+          width: 10px;
+          height: 10px;
+        }
+        .template-edit-preview::-webkit-scrollbar-thumb {
+          border-radius: 9999px;
+          background: rgba(148, 163, 184, 0.7);
+        }
+        .template-edit-preview::-webkit-scrollbar-track {
+          background: rgba(226, 232, 240, 0.7);
         }
         .template-edit-preview[data-template-preview-scaled="true"] {
-          min-height: var(--template-preview-scaled-height, auto);
-          height: auto;
+          min-height: 100%;
+          height: 100%;
+          max-height: 100%;
         }
         .template-edit-preview > section[data-template-extraction-stage] {
           display: flex;
-          width: 100%;
+          width: max-content;
+          min-width: 100%;
           flex-direction: column;
           align-items: center;
           background: transparent !important;
@@ -38040,6 +38074,43 @@ export default function TemplateEditWorkspace({
 		            <div className="flex items-center justify-between gap-3">
 		              <CardTitle>상자 편집 캔버스</CardTitle>
                   <div className="flex min-w-0 items-center gap-5">
+                    <div className="flex min-w-[240px] items-center gap-2 rounded-md border border-slate-300 bg-white px-2 py-1.5">
+                      <button
+                        type="button"
+                        className={canvasZoomButtonClassName}
+                        onClick={() => updatePreviewZoom((previous) => previous - 10)}
+                        aria-label="문서 축소"
+                        title="문서 축소"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </button>
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <input
+                          min={25}
+                          max={200}
+                          step={5}
+                          title="문서 확대 축소"
+                          className="h-2 min-w-0 flex-1 cursor-pointer accent-slate-900"
+                          aria-label="문서 확대 비율"
+                          aria-valuetext={`줌 ${previewZoom}%`}
+                          type="range"
+                          value={previewZoom}
+                          onChange={(event) => updatePreviewZoom(Number.parseInt(event.currentTarget.value, 10) || 100)}
+                        />
+                        <span className="w-12 shrink-0 text-center text-xs font-semibold tabular-nums text-slate-700">
+                          {previewZoom}%
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className={canvasZoomButtonClassName}
+                        onClick={() => updatePreviewZoom((previous) => previous + 10)}
+                        aria-label="문서 확대"
+                        title="문서 확대"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
 		                <div className={canvasToolbarGroupClassName}>
                       <button
                         type="button"
@@ -38466,6 +38537,7 @@ export default function TemplateEditWorkspace({
 	          <TemplateEditPreviewSurface
               key="template-preview-stage:live"
 	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
+              canvasFullscreen={canvasFullscreen}
 	            boxCreationMode={templateUsagePreviewMode ? false : boxCreationMode}
 	            canvasIconScale={canvasIconScale}
               spacePanArmed={spacePanArmed}
