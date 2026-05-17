@@ -41,6 +41,8 @@
 | P-18 | 오버레이 열기 | 상자 크기 타입 | 100ms 이하 | 33.4ms | 33.4ms | 완료 | `/templates` 33.4ms, `/templates/edit` 33.4ms |
 | P-19 | 오버레이 열기 | 텍스트 스타일 | 100ms 이하 | 33.4ms | 33.4ms | 완료 | 기존 `/templates` 162.2ms -> 개선 후 `/templates` 33.4ms, `/templates/edit` 33.4ms |
 | P-20 | 오버레이 열기 | 기능 버튼 | 100ms 이하 | 33.3ms | 33.3ms | 완료 | `/templates` 33.3ms, `/templates/edit` 33.3ms |
+| P-21 | 그룹 동작 | 복수 상자 그룹 만들기 | 100ms 이하 | 미측정 | 미측정 | 진행 중 | 기존 증상: 그룹 생성 직후 즉시 반영되지 않고 저장/정규화 작업이 앞에서 막음 |
+| P-22 | 오버레이 열기 | 그룹 생성 직후 기능 버튼 | 100ms 이하 | 미측정 | 미측정 | 진행 중 | 기존 증상: 그룹 생성 이후 `기능 버튼` overlay 파생 상태가 늦게 갱신됨 |
 
 병목 후보:
 - `syncDraftPreviewHtmlRef`
@@ -59,6 +61,31 @@
 - 자동 높이/너비 상자 타입 전환은 즉시 DOM 반영 후, 600ms 뒤에 같은 auto-size 레이아웃 계산을 다시 돌리던 중복 경로를 제거
 - 최소 높이/너비 입력은 blur 시 즉시 auto-size 재계산과 spacing 보정을 수행하고, 뒤에서는 저장/패널/텍스트 fit 동기화만 수행하도록 변경
 - `텍스트 스타일` 오버레이의 collapsed state를 부모 `TemplateEditWorkspace`에서 공유 preview surface 내부 local state로 내리고, 부모에는 편집 권한 on/off만 전달하도록 분리
+- 그룹 구조 파생값(`positionBoxGroups`, `positionBoxGroupById`, 물리 정렬 정보)은 deferred render HTML만 기다리지 않고 현재 live DOM + `positionStructureRevision` 기준으로 즉시 재계산하도록 분리
+- 그룹 만들기/해제/포함/제외 후에는 `syncDraftPreviewHtmlRef + requestPreviewTextFit + schedulePreviewEditorState`를 동기 실행하지 않고, 화면 DOM은 즉시 유지한 채 저장용 sync/정규화만 지연 실행하도록 변경
+- 그룹 구조 변경 직후 `positionSelectionLayoutCacheRef` 를 즉시 비워 stale selectableGroups 캐시가 다음 클릭/마키 선택에 재사용되지 않도록 변경
+- 마키 그룹 hit-entry 와 proxy selection 해석은 항상 큰 rect(최상위 그룹) 우선으로 정렬해 child group/frame 우선 선택을 방지
+
+현재 브라우저 상태 메모:
+- 이번 세션에서는 `chrome-devtools` transport 가 다시 `Transport closed` 상태라 `P-21`, `P-22` 재측정은 아직 못 했다.
+- 코드 수정은 공유 캔버스에만 반영했고, 브라우저 재접속이 가능해지면 `position-box-mp94u6e2` 기준으로 `/templates`, `/templates/edit` 모두 다시 측정해야 한다.
+
+2026-05-17 `/templates?templateId=c782b232-7db6-49c2-a301-9b575144def4` 재측정:
+- 측정 방식: synthetic click 이후 `data-template-selected`, `data-v106-position-group-proxy-overlay`, `data-template-position-impact-focus` 의 첫 DOM mutation 시점을 완료로 본다.
+- 대표 타깃: `제 목` (`band-9-cell-1`, `position-box-mp94u6e2` click-chain 소속)
+- 결과:
+  - 1차 클릭: `2.8ms` (`position-box-mp94u6e2` 그룹 proxy)
+  - 2차 클릭: `1.4ms` (`position-box-mp94u2y4` 그룹 proxy)
+  - 3차 클릭: `1.5ms` (단일 상자 선택)
+  - 4차 클릭: `1.6ms` (`position-box-mp94u6e2` 그룹 proxy)
+- 즉 현재 체감 선택 지연은 `1.4ms ~ 2.8ms` 범위로 즉시 수준이다.
+
+2026-05-17 적용한 추가 최적화:
+- position 탭 선택에서 React selection state 는 강제 동기 커밋하지 않고, visible control DOM 동기화 뒤 transition 으로 넘기도록 조정
+- 선택 톤다운은 per-frame DOM overlay 생성/삭제 대신 CSS-only 표현으로 전환
+- `selectedMetadataValues` 는 metadata 탭에서만 계산
+- `selectedTextAutoSizeState` 는 `상자 크기 타입` 오버레이가 열려 있을 때만 계산
+- 단일 선택 fast-path 는 전체 frame map scan 대신 frame id 직접 query 를 우선 사용
 
 재측정 기준 추가:
 - P-15 `상자 타입`은 `band-3-cell-1` 단일 선택 상태에서 `fixed -> height -> width -> fixed` 체인을 반복 측정한다.

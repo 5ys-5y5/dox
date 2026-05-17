@@ -473,6 +473,8 @@ type MarqueeSelectionState = {
   positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
   baseSelectionIds: string[];
   baseProxySelections?: PositionGroupProxySelection[];
+  clickSelectionIds?: string[];
+  clickProxySelections?: PositionGroupProxySelection[];
   lastSelectionIds: string[];
   lastProxySelections?: PositionGroupProxySelection[];
   hitEntriesReady: boolean;
@@ -647,11 +649,14 @@ type TemplateEditPreviewSurfaceProps = {
   metadataRoleTertiaryOverlay?: TemplateFloatingOverlayContent;
   styleOverlay?: TemplateFloatingOverlayContent;
   styleOverlayLabel?: string;
+  onStyleOverlayCollapsedChange?: (collapsed: boolean) => void;
   sizeTypeOverlay?: TemplateFloatingOverlayContent;
+  onSizeTypeOverlayCollapsedChange?: (collapsed: boolean) => void;
   textStyleOverlay?: TemplateFloatingOverlayContent;
   onTextStyleOverlayCollapsedChange?: (collapsed: boolean) => void;
   textStyleOverlayExpandedWidthClassName?: string;
   summaryOverlay?: TemplateFloatingOverlayContent;
+  onSummaryOverlayCollapsedChange?: (collapsed: boolean) => void;
   setPreviewNode: (node: HTMLDivElement | null) => void;
   handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   handlePreviewPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -1194,11 +1199,14 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   metadataRoleTertiaryOverlay,
   styleOverlay,
   styleOverlayLabel = '스타일',
+  onStyleOverlayCollapsedChange,
   sizeTypeOverlay,
+  onSizeTypeOverlayCollapsedChange,
   textStyleOverlay,
   onTextStyleOverlayCollapsedChange,
   textStyleOverlayExpandedWidthClassName,
   summaryOverlay,
+  onSummaryOverlayCollapsedChange,
   setPreviewNode,
   handlePreviewPointerDown,
   handlePreviewPointerMove,
@@ -1275,6 +1283,17 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       !hasTextStyleOverlay || selectionPanelTab !== 'position' ? true : textStyleOverlayCollapsed
     );
   }, [hasTextStyleOverlay, onTextStyleOverlayCollapsedChange, selectionPanelTab, textStyleOverlayCollapsed]);
+  React.useEffect(() => {
+    onStyleOverlayCollapsedChange?.(!hasStyleOverlay || selectionPanelTab !== 'position' ? true : styleOverlayCollapsed);
+  }, [hasStyleOverlay, onStyleOverlayCollapsedChange, selectionPanelTab, styleOverlayCollapsed]);
+  React.useEffect(() => {
+    onSizeTypeOverlayCollapsedChange?.(
+      !hasSizeTypeOverlay || selectionPanelTab !== 'position' ? true : sizeTypeOverlayCollapsed
+    );
+  }, [hasSizeTypeOverlay, onSizeTypeOverlayCollapsedChange, selectionPanelTab, sizeTypeOverlayCollapsed]);
+  React.useEffect(() => {
+    onSummaryOverlayCollapsedChange?.(!hasSummaryOverlay || selectionPanelTab !== 'position' ? true : summaryOverlayCollapsed);
+  }, [hasSummaryOverlay, onSummaryOverlayCollapsedChange, selectionPanelTab, summaryOverlayCollapsed]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3891,26 +3910,34 @@ const readPositionedAncestorOffset = (
 
 const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | null): FrameNodeRect => {
   const resolvedPageInner = pageInner || element.closest<HTMLElement>('.page-inner');
-  const pageRect = resolvedPageInner?.getBoundingClientRect() || null;
-  const elementRect = element.getBoundingClientRect();
-  const computedStyle = getComputedStyle(element);
   const hasInlineLeft = element.style.left.trim() !== '';
   const hasInlineTop = element.style.top.trim() !== '';
   const hasInlineWidth = element.style.width.trim() !== '';
   const hasInlineHeight = element.style.height.trim() !== '';
   const ancestorOffset = readPositionedAncestorOffset(element, resolvedPageInner);
+  const requiresPageRect = !hasInlineLeft || !hasInlineTop;
+  const requiresElementRect = !hasInlineLeft || !hasInlineTop || !hasInlineWidth || !hasInlineHeight;
+  const requiresComputedStyle = !hasInlineWidth || !hasInlineHeight;
+  const pageRect = requiresPageRect ? resolvedPageInner?.getBoundingClientRect() || null : null;
+  const elementRect = requiresElementRect ? element.getBoundingClientRect() : null;
+  const computedStyle = requiresComputedStyle ? getComputedStyle(element) : null;
 
   return {
     left: hasInlineLeft
       ? parseFramePx(element.style.left) + ancestorOffset.left
-      : Math.max(0, elementRect.left - (pageRect?.left || 0)),
+      : Math.max(0, (elementRect?.left || 0) - (pageRect?.left || 0)),
     top: hasInlineTop
       ? parseFramePx(element.style.top) + ancestorOffset.top
-      : Math.max(0, elementRect.top - (pageRect?.top || 0)),
-    width: Math.max(1, hasInlineWidth ? parseFramePx(element.style.width) : parseFramePx(computedStyle.width) || elementRect.width),
+      : Math.max(0, (elementRect?.top || 0) - (pageRect?.top || 0)),
+    width: Math.max(
+      1,
+      hasInlineWidth ? parseFramePx(element.style.width) : parseFramePx(computedStyle?.width || '') || elementRect?.width || 0
+    ),
     height: Math.max(
       1,
-      hasInlineHeight ? parseFramePx(element.style.height) : parseFramePx(computedStyle.height) || elementRect.height
+      hasInlineHeight
+        ? parseFramePx(element.style.height)
+        : parseFramePx(computedStyle?.height || '') || elementRect?.height || 0
     ),
   };
 };
@@ -4222,9 +4249,30 @@ const resolveMarqueeSelectionIdsFromHitEntries = ({
     return Array.from(new Set([...baseSelectionIds, ...hits]));
   }
 
-  const matchedGroups = positionGroupHitEntries.filter((entry) =>
-    mode === 'contained' ? rectContainsRect(selectionRect, entry.rect) : rectIntersectsRect(selectionRect, entry.rect)
-  );
+  const compareMarqueePositionGroupHitEntryPriority = (
+    left: MarqueePositionGroupHitEntry,
+    right: MarqueePositionGroupHitEntry
+  ) => {
+    const leftArea = left.rect.width * left.rect.height;
+    const rightArea = right.rect.width * right.rect.height;
+
+    if (Math.abs(leftArea - rightArea) > 0.1) {
+      return rightArea - leftArea;
+    }
+
+    if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+      return right.frameGroupIds.length - left.frameGroupIds.length;
+    }
+
+    return left.groupId.localeCompare(right.groupId, 'ko');
+  };
+
+  const matchedGroups = positionGroupHitEntries
+    .filter((entry) =>
+      mode === 'contained' ? rectContainsRect(selectionRect, entry.rect) : rectIntersectsRect(selectionRect, entry.rect)
+    )
+    .slice()
+    .sort(compareMarqueePositionGroupHitEntryPriority);
   const selectedGroups: MarqueePositionGroupHitEntry[] = [];
 
   matchedGroups.forEach((candidate) => {
@@ -4290,6 +4338,21 @@ const resolvePositionMarqueeProxySelectionsFromHitEntries = (
   const selectedProxyMemberIds = new Set<string>();
 
   positionGroupHitEntries
+    .slice()
+    .sort((left, right) => {
+      const leftArea = left.rect.width * left.rect.height;
+      const rightArea = right.rect.width * right.rect.height;
+
+      if (Math.abs(leftArea - rightArea) > 0.1) {
+        return rightArea - leftArea;
+      }
+
+      if (left.frameGroupIds.length !== right.frameGroupIds.length) {
+        return right.frameGroupIds.length - left.frameGroupIds.length;
+      }
+
+      return left.groupId.localeCompare(right.groupId, 'ko');
+    })
     .filter((group) => group.frameGroupIds.every((frameGroupId) => selectedFrameGroupIdSet.has(frameGroupId)))
     .forEach((group) => {
       const frameGroupIds = group.frameGroupIds
@@ -4566,10 +4629,14 @@ const getRelativeAnchorAttributeTargets = (frameNode: HTMLElement | null | undef
 
   const shell = resolveFrameLayoutShell(frameNode);
   const frameGroupId = getFrameGroupId(frameNode);
+  const escapedFrameGroupId =
+    frameGroupId && typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(frameGroupId)
+      : frameGroupId.replace(/["\\]/g, '\\$&');
   const persistedFrameNode = frameNode.matches(RAW_FRAME_NODE_SELECTOR)
     ? frameNode
-    : Array.from(shell.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR)).find(
-        (candidate) => candidate.getAttribute('data-template-frame-group')?.trim() === frameGroupId
+    : shell.querySelector<HTMLElement>(
+        `${RAW_FRAME_NODE_SELECTOR}[data-template-frame-group="${escapedFrameGroupId}"]`
       ) || null;
   const textarea = shell.querySelector<HTMLElement>('[data-template-frame-input="true"]');
 
@@ -6613,12 +6680,29 @@ const clearInvalidPositionSpacingAnchors = (root: ParentNode | null | undefined)
   };
 };
 
+const hasRelativePositionFrames = (scope: ParentNode | null | undefined) => {
+  if (!scope) {
+    return false;
+  }
+
+  return Boolean(scope.querySelector(`[${TEMPLATE_FRAME_POSITION_MODE_ATTR}="relative"]`));
+};
+
 const collectPositionSpacingDependenciesForGroupMutation = (
   root: ParentNode | null | undefined,
   groupIds: string[],
   frameGroupIds: string[]
 ) => {
   if (!root) {
+    return {
+      dependencyCount: 0,
+      targetFrameGroupIds: [] as string[],
+      anchorFrameGroupIds: [] as string[],
+      anchorIds: [] as string[],
+    };
+  }
+
+  if (!hasRelativePositionFrames(root)) {
     return {
       dependencyCount: 0,
       targetFrameGroupIds: [] as string[],
@@ -16091,25 +16175,6 @@ const syncSelectionTonedownOverlays = (
   activeFilterAttrName: string
 ) => {
   clearSelectionTonedownOverlays(root, mode);
-
-  if (root.getAttribute(activeFilterAttrName) !== 'true') {
-    return;
-  }
-
-  collectFrameSelectionAnchors(root).forEach((node) => {
-    if (node.getAttribute(focusAttrName) !== 'inactive') {
-      return;
-    }
-
-    const shell = resolveFrameLayoutShell(node);
-    const pageInner = shell.closest<HTMLElement>('.page-inner');
-
-    if (!pageInner) {
-      return;
-    }
-
-    appendSelectionTonedownOverlay(pageInner, node, mode);
-  });
 };
 
 const clearFastSelectionEditorUi = (root: HTMLElement) => {
@@ -17199,6 +17264,7 @@ export default function TemplateEditWorkspace({
   const [selectedPositionSpacingSettingRelationKey, setSelectedPositionSpacingSettingRelationKey] = React.useState('');
   const templateUsagePreviewAutoSizeLayoutChangeRef = React.useRef<((root: HTMLElement) => void) | null>(null);
   const [positionSelectionStateRevision, setPositionSelectionStateRevision] = React.useState(0);
+  const [positionStructureRevision, setPositionStructureRevision] = React.useState(0);
   const [definedPositionRelationGapDraftByKey, setDefinedPositionRelationGapDraftByKey] = React.useState<
     Record<string, { gapY: string }>
   >({});
@@ -17242,10 +17308,17 @@ export default function TemplateEditWorkspace({
     selectionSignature: string;
     state: SelectedTextAutoSizeState;
   } | null>(null);
+  const [styleOverlayCollapsedState, setStyleOverlayCollapsedState] = React.useState(true);
+  const [sizeTypeOverlayCollapsedState, setSizeTypeOverlayCollapsedState] = React.useState(true);
+  const [textStyleOverlayCollapsedState, setTextStyleOverlayCollapsedState] = React.useState(true);
   const [positionSelectionClickChainSnapshot, setPositionSelectionClickChainSnapshot] =
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
+  const [previewSurfaceNodeVersion, setPreviewSurfaceNodeVersion] = React.useState(0);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
+  const bumpPositionStructureRevision = React.useCallback(() => {
+    setPositionStructureRevision((previous) => previous + 1);
+  }, []);
   const syncTextCanvasEditMode = React.useCallback(
     (nextActive: boolean) => {
       const applyNextMode = (nextMode: boolean) => {
@@ -17298,9 +17371,54 @@ export default function TemplateEditWorkspace({
   }, [selectionPanelTab, syncTextCanvasEditMode]);
   const handleTextStyleOverlayCollapsedChange = React.useCallback(
     (collapsed: boolean) => {
+      textStyleOverlayCollapsedRef.current = collapsed;
+      setTextStyleOverlayCollapsedState(collapsed);
+      if (selectionPanelTab === 'position' && !collapsed) {
+        syncSelectionStyleDraftFromIdsRef.current();
+      }
       syncTextCanvasEditMode(selectionPanelTab === 'position' && !collapsed);
     },
     [selectionPanelTab, syncTextCanvasEditMode]
+  );
+  const handleStyleOverlayCollapsedChange = React.useCallback((collapsed: boolean) => {
+    styleOverlayCollapsedRef.current = collapsed;
+    setStyleOverlayCollapsedState(collapsed);
+    if (selectionPanelTab === 'position' && !collapsed) {
+      syncSelectionStyleDraftFromIdsRef.current();
+    }
+  }, [selectionPanelTab]);
+  const handleSummaryOverlayCollapsedChange = React.useCallback((collapsed: boolean) => {
+    summaryOverlayCollapsedRef.current = collapsed;
+  }, []);
+  const handleSizeTypeOverlayCollapsedChange = React.useCallback(
+    (collapsed: boolean) => {
+      sizeTypeOverlayCollapsedRef.current = collapsed;
+      setSizeTypeOverlayCollapsedState(collapsed);
+      if (selectionPanelTab !== 'position' || collapsed) {
+        return;
+      }
+
+      syncSelectionStyleDraftFromIdsRef.current();
+
+      const selectionAutoSizeState = readSelectedTextAutoSizeState(
+        previewRef.current,
+        selectedFrameGroupIdsRef.current.length > 0 ? selectedFrameGroupIdsRef.current : selectedFrameGroupIds
+      );
+
+      if (selectionAutoSizeState.totalCount > 0) {
+        const selectionFrameGroupIds =
+          selectedFrameGroupIdsRef.current.length > 0 ? selectedFrameGroupIdsRef.current : selectedFrameGroupIds;
+        const selectionSignature = normalizeFrameSelectionIds(selectionFrameGroupIds).join('|');
+
+        if (selectionSignature) {
+          setTextAutoSizeUiOverride({
+            selectionSignature,
+            state: selectionAutoSizeState,
+          });
+        }
+      }
+    },
+    [selectedFrameGroupIds, selectionPanelTab]
   );
   const toggleCanvasFullscreen = React.useCallback(() => {
     setCanvasFullscreen((previous) => !previous);
@@ -17412,6 +17530,10 @@ export default function TemplateEditWorkspace({
   const immediateSelectionPanelSyncFrameRef = React.useRef<number | null>(null);
   const deferredTextAutoSizeSyncTimeoutRef = React.useRef<number | null>(null);
   const deferredStylePanelSyncTimeoutRef = React.useRef<number | null>(null);
+  const styleOverlayCollapsedRef = React.useRef(true);
+  const sizeTypeOverlayCollapsedRef = React.useRef(true);
+  const textStyleOverlayCollapsedRef = React.useRef(true);
+  const summaryOverlayCollapsedRef = React.useRef(true);
   const textAutoSizeCommandRevisionRef = React.useRef(0);
   const previewEditorStateRetryCountRef = React.useRef(0);
   const deferredPreviewEditorStateRef = React.useRef(false);
@@ -17448,6 +17570,16 @@ export default function TemplateEditWorkspace({
           rect: FrameNodeRect;
           resolvedFrameGroupIds: string[];
         }>;
+      }
+    >
+  >(new WeakMap());
+  const edgeTopologySnapshotCacheRef = React.useRef<
+    WeakMap<
+      HTMLElement,
+      {
+        previewDomVersion: number;
+        positionStructureRevision: number;
+        snapshot: TemplateEdgeTopologySnapshotDto;
       }
     >
   >(new WeakMap());
@@ -17537,8 +17669,11 @@ export default function TemplateEditWorkspace({
     [selectedFrameGroupIds]
   );
   const computedSelectedTextAutoSizeState = React.useMemo(
-    () => readSelectedTextAutoSizeState(previewRef.current, selectedFrameGroupIds),
-    [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds]
+    () =>
+      selectionPanelTab === 'position' && !sizeTypeOverlayCollapsedState
+        ? readSelectedTextAutoSizeState(previewRef.current, selectedFrameGroupIds)
+        : createEmptySelectedTextAutoSizeState(),
+    [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds, selectionPanelTab, sizeTypeOverlayCollapsedState]
   );
   const selectedTextAutoSizeState = React.useMemo(() => {
     if (textAutoSizeUiOverride && textAutoSizeUiOverride.selectionSignature === selectedFrameGroupIdsSignature) {
@@ -17867,7 +18002,7 @@ export default function TemplateEditWorkspace({
     return readRelativeAnchorTargetLabel(config, previewRef.current);
   }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
   const primaryRelativeImpactGroups = React.useMemo(() => {
-    if (!primarySelectedFrameGroupId || !previewRef.current) {
+    if (selectionPanelTab !== 'metadata' || !primarySelectedFrameGroupId || !previewRef.current) {
       return [];
     }
 
@@ -17878,7 +18013,7 @@ export default function TemplateEditWorkspace({
         includeSourceFrameGroupIds: false,
       }
     );
-  }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
+  }, [primarySelectedFrameGroupId, renderedPreviewHtml, selectionPanelTab]);
   const primaryRelativeAffectedFrameGroupIds = React.useMemo(
     () =>
       Array.from(new Set(primaryRelativeImpactGroups.flatMap((group) => group.frameGroupIds))).sort((left, right) =>
@@ -18489,7 +18624,7 @@ export default function TemplateEditWorkspace({
     const roles = new Set<TemplateFrameRole>();
     const runtimeModes = new Set<TemplateFrameRuntimeMode>();
 
-    if (!root || selectedFrameGroupIds.length === 0) {
+    if (selectionPanelTab !== 'metadata' || !root || selectedFrameGroupIds.length === 0) {
       return { boxKinds, roles, runtimeModes };
     }
 
@@ -18611,13 +18746,13 @@ export default function TemplateEditWorkspace({
     const container = document.createElement('div');
     container.innerHTML = deferredRenderedPreviewHtml;
     return container;
-  }, [deferredPreviewDomVersion, deferredRenderedPreviewHtml]);
+  }, [deferredPreviewDomVersion, deferredRenderedPreviewHtml, positionStructureRevision]);
   const positionBoxGroups = React.useMemo(
     () =>
       positionBoxGroupSource
         ? collectPositionBoxGroups(positionBoxGroupSource, { includeSingletons: false })
         : ([] as PositionImpactGroup[]),
-    [positionBoxGroupSource, deferredPreviewDomVersion, deferredRenderedPreviewHtml]
+    [positionBoxGroupSource, deferredPreviewDomVersion, deferredRenderedPreviewHtml, positionStructureRevision]
   );
   const explicitPositionBoxGroups = React.useMemo(
     () => positionBoxGroups.filter((group) => group.frameGroupIds.length > 0),
@@ -18629,7 +18764,7 @@ export default function TemplateEditWorkspace({
   );
   const positionFramePhysicalSortInfoById = React.useMemo(
     () => collectFramePhysicalSortInfoById(positionBoxGroupSource),
-    [positionBoxGroupSource, deferredPreviewDomVersion, deferredRenderedPreviewHtml]
+    [positionBoxGroupSource, deferredPreviewDomVersion, deferredRenderedPreviewHtml, positionStructureRevision]
   );
   const positionGroupPhysicalSortInfoById = React.useMemo(
     () => collectPositionGroupPhysicalSortInfoById(positionBoxGroupSource, positionBoxGroups, positionFramePhysicalSortInfoById),
@@ -18639,6 +18774,7 @@ export default function TemplateEditWorkspace({
       positionFramePhysicalSortInfoById,
       deferredPreviewDomVersion,
       deferredRenderedPreviewHtml,
+      positionStructureRevision,
     ]
   );
   const positionBoxGroupTreeRows = React.useMemo(() => {
@@ -18713,7 +18849,7 @@ export default function TemplateEditWorkspace({
     const container = document.createElement('div');
     container.innerHTML = deferredRenderedPreviewHtml;
     return collectPositionGroupStructureWarnings(container);
-  }, [deferredPreviewDomVersion, deferredRenderedPreviewHtml]);
+  }, [deferredPreviewDomVersion, deferredRenderedPreviewHtml, positionStructureRevision]);
   const positionGroupStructureWarningSignature = React.useMemo(
     () => positionGroupStructureWarnings.slice().sort((left, right) => left.localeCompare(right, 'ko')).join('|'),
     [positionGroupStructureWarnings]
@@ -18832,7 +18968,7 @@ export default function TemplateEditWorkspace({
   }, [positionBoxGroups]);
   React.useEffect(() => {
     positionSelectionLayoutCacheRef.current = new WeakMap();
-  }, [previewDomVersion, renderedPreviewHtml]);
+  }, [positionStructureRevision, previewDomVersion, renderedPreviewHtml]);
   const readPositionSelectionLayoutCache = React.useCallback((pageInner: HTMLElement) => {
     const cached = positionSelectionLayoutCacheRef.current.get(pageInner);
 
@@ -18911,7 +19047,21 @@ export default function TemplateEditWorkspace({
           rect: FrameNodeRect;
           resolvedFrameGroupIds: string[];
         } => Boolean(candidate)
-      );
+      )
+      .sort((left, right) => {
+        const leftArea = left.rect.width * left.rect.height;
+        const rightArea = right.rect.width * right.rect.height;
+
+        if (Math.abs(leftArea - rightArea) > 0.1) {
+          return rightArea - leftArea;
+        }
+
+        if (left.resolvedFrameGroupIds.length !== right.resolvedFrameGroupIds.length) {
+          return right.resolvedFrameGroupIds.length - left.resolvedFrameGroupIds.length;
+        }
+
+        return left.group.id.localeCompare(right.group.id, 'ko');
+      });
 
       const nextCache = {
         allFrameNodes,
@@ -18963,6 +19113,32 @@ export default function TemplateEditWorkspace({
     },
     [getFrameNodes, readPositionSelectionLayoutCache, selectionPanelTab]
   );
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'position' || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const root = previewRef.current;
+    if (!root) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const frameId = window.requestAnimationFrame(() => {
+      if (cancelled) {
+        return;
+      }
+
+      collectPageInnerElements(root).forEach((pageInner) => {
+        readPositionSelectionLayoutCache(pageInner);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [previewDomVersion, readPositionSelectionLayoutCache, renderedPreviewHtml, selectionPanelTab, positionStructureRevision]);
   const resolvePositionSelectionClickChain = React.useCallback(
     (
       pageInner: HTMLElement | null,
@@ -21184,51 +21360,6 @@ export default function TemplateEditWorkspace({
 
     return selectedPositionGroupingFrameGroupIds;
   }, [selectedPositionGroupingFrameGroupIds, selectedPositionResolvedBoxGroup, selectionPanelTab]);
-  const selectedPositionImpactSourceFrameGroupIds = React.useMemo(() => {
-    if (selectionPanelTab === 'position') {
-      if (selectedPositionResolvedFrameGroupIds.length > 0) {
-        return selectedPositionResolvedFrameGroupIds;
-      }
-    } else {
-      if (primarySelectedFrameGroupId) {
-        return [primarySelectedFrameGroupId];
-      }
-    }
-
-    const anchorFrameGroupId = positionRelationAnchorFrameGroupId.trim();
-    return anchorFrameGroupId ? [anchorFrameGroupId] : [];
-  }, [
-    primarySelectedFrameGroupId,
-    positionRelationAnchorFrameGroupId,
-    selectedPositionResolvedFrameGroupIds,
-    selectionPanelTab,
-  ]);
-  const selectedPositionImpactGroups = React.useMemo(() => {
-    if (!previewRef.current) {
-      return [];
-    }
-
-    return collectPositionImpactGroupsBySourceIds(
-      previewRef.current,
-      selectedPositionImpactSourceFrameGroupIds,
-      { includeSourceFrameGroupIds: false }
-    );
-  }, [previewDomVersion, renderedPreviewHtml, selectedPositionImpactSourceFrameGroupIds]);
-  const selectedPositionImpactFrameGroupIds = React.useMemo(() => {
-    const impactedFrameGroupIds = new Set<string>();
-
-    selectedPositionImpactGroups.forEach((group) => {
-      group.frameGroupIds.forEach((frameGroupId) => {
-        impactedFrameGroupIds.add(frameGroupId);
-      });
-    });
-
-    return Array.from(impactedFrameGroupIds).sort((left, right) => left.localeCompare(right, 'ko'));
-  }, [selectedPositionImpactGroups]);
-  const selectedPositionImpactGroupLabels = React.useMemo(
-    () => readPositionImpactGroupDisplayLabels(selectedPositionImpactGroups),
-    [selectedPositionImpactGroups]
-  );
   React.useEffect(() => {
     if (selectionPanelTab !== 'position' || selectedPositionGroupingFrameGroupIds.length !== 1) {
       setPositionSelectionClickChainSnapshot(null);
@@ -21296,25 +21427,7 @@ export default function TemplateEditWorkspace({
       const activeProxyGroup = positionBoxGroups.find((group) => group.id === activeProxyGroupId) || null;
 
       if (activeProxyGroup) {
-        const activeMemberIds = new Set(activeProxyGroup.frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
-        const containingGroups = positionBoxGroups
-          .filter((group) => {
-            if (group.frameGroupIds.length <= 1) {
-              return false;
-            }
-
-            return Array.from(activeMemberIds).every((frameGroupId) =>
-              group.frameGroupIds.some((memberFrameGroupId) => memberFrameGroupId.trim() === frameGroupId)
-            );
-          })
-          .sort((left, right) => {
-            if (left.frameGroupIds.length !== right.frameGroupIds.length) {
-              return right.frameGroupIds.length - left.frameGroupIds.length;
-            }
-            return left.id.localeCompare(right.id, 'ko');
-          });
-
-        return containingGroups.length > 0 ? containingGroups : [activeProxyGroup];
+        return [activeProxyGroup];
       }
     }
 
@@ -21527,11 +21640,20 @@ export default function TemplateEditWorkspace({
     () => selectedPositionCurrentBoxGroups.filter((group) => !group.inferred),
     [selectedPositionCurrentBoxGroups]
   );
+  const isUnsavedExtractFrameDraft = React.useMemo(() => {
+    const hasUnsavedInitialDraft = Boolean(activeInitialDraft?.draftHtml?.trim()) && !selectedTemplateId.trim() && !templateDetail?.template.id;
+
+    if (!hasUnsavedInitialDraft) {
+      return false;
+    }
+
+    return renderedPreviewHtml.includes('data-template-extraction-stage="frames"');
+  }, [activeInitialDraft?.draftHtml, renderedPreviewHtml, selectedTemplateId, templateDetail?.template.id]);
   const hasSelectedPositionBoxes = selectedFrameGroupIds.length > 0;
   const hasSelectedPositionGroups = selectedPositionEntitySelection.groupIds.length > 0;
   const canClearSelectedPositionGroups = hasSelectedPositionGroups;
   const canCreatePositionGroupFromSelection = selectedPositionEntitySelection.entityCount >= 2;
-  const canOpenPositionSpacingSettings = true;
+  const canOpenPositionSpacingSettings = !isUnsavedExtractFrameDraft;
   const canAssignSelectedItemsToGroup =
     explicitPositionBoxGroups.length > 0 && selectedPositionEntitySelection.entityCount > 0;
   const canRemoveSelectedItemsFromGroup = hasSelectedPositionGroups;
@@ -23009,6 +23131,32 @@ export default function TemplateEditWorkspace({
       tolerancePx: FRAME_RESIZE_TOLERANCE_PX,
     });
   }, [getFrameNodes]);
+  React.useEffect(() => {
+    edgeTopologySnapshotCacheRef.current = new WeakMap();
+  }, [previewDomVersion, positionStructureRevision, renderedPreviewHtml]);
+
+  const readCachedLiveEdgeTopologySnapshot = React.useCallback(
+    (root: HTMLElement): TemplateEdgeTopologySnapshotDto => {
+      const cached = edgeTopologySnapshotCacheRef.current.get(root);
+
+      if (
+        cached &&
+        cached.previewDomVersion === previewDomVersion &&
+        cached.positionStructureRevision === positionStructureRevision
+      ) {
+        return cached.snapshot;
+      }
+
+      const snapshot = buildLiveEdgeTopologySnapshot(root);
+      edgeTopologySnapshotCacheRef.current.set(root, {
+        previewDomVersion,
+        positionStructureRevision,
+        snapshot,
+      });
+      return snapshot;
+    },
+    [buildLiveEdgeTopologySnapshot, positionStructureRevision, previewDomVersion]
+  );
 
   const normalizeLiveVerticalCohorts = React.useCallback(
     (
@@ -23673,90 +23821,128 @@ export default function TemplateEditWorkspace({
 	    syncPreviewSurfaceScale,
 	    templateUsagePreviewMode,
 	  ]);
-  const setPreviewNode = React.useCallback(
-    (node: HTMLDivElement | null) => {
-	      previewRef.current = node;
+  const setPreviewNode = React.useCallback((node: HTMLDivElement | null) => {
+    if (previewRef.current === node) {
+      return;
+    }
 
-	      if (node && renderedPreviewHtml) {
-	        syncPreviewSurfaceCloneAttrs(node);
-	        if (templateUsagePreviewMode) {
-	          enableTemplateUsagePreviewTextControls(node);
-	          syncPreviewSurfaceScale(node);
-	          return;
-	        }
-	        syncPreviewSurfaceSelectionPanelTabAttr(node, selectionPanelTab);
-        syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-          node,
-          selectionPanelTab === 'position' && positionOrderLockSelectionMode
-        );
-        syncPreviewSurfaceScale(node);
-        const clearedLegacyInferredCount = clearLegacyInferredRelativeAnchors(node);
-        if (clearedLegacyInferredCount > 0) {
-          syncDraftPreviewHtmlRef();
-          setMessage(`허용되지 않는 추론 그룹 간격 ${clearedLegacyInferredCount}개를 제거했습니다.`);
-          return;
-        }
-        const normalizedExtractAutoGroupResult = normalizeExtractAutoPositionGroups(node);
-        if (normalizedExtractAutoGroupResult.clearedFrameCount > 0 || normalizedExtractAutoGroupResult.removedGroupCount > 0) {
-          syncDraftPreviewHtmlRef();
-          return;
-        }
-        schedulePreviewEditorState();
-        void (async () => {
-          await document.fonts?.ready?.catch(() => undefined);
+    previewRef.current = node;
+    setPreviewSurfaceNodeVersion((previous) => previous + 1);
+  }, []);
+  const previewInitSelectionPanelTabRef = React.useRef(selectionPanelTab);
+  const previewInitPositionOrderLockSelectionModeRef = React.useRef(positionOrderLockSelectionMode);
+  const previewInitSchedulePreviewEditorStateRef = React.useRef(schedulePreviewEditorState);
+  const previewInitSyncDraftPreviewHtmlRef = React.useRef(syncDraftPreviewHtmlRef);
+  const previewInitApplyEditorAutoSizeBoxesRef = React.useRef(applyEditorAutoSizeBoxesWithPreservedLayout);
 
-          if (previewRef.current !== node) {
-            return;
-          }
+  React.useLayoutEffect(() => {
+    previewInitSelectionPanelTabRef.current = selectionPanelTab;
+    previewInitPositionOrderLockSelectionModeRef.current = positionOrderLockSelectionMode;
+    previewInitSchedulePreviewEditorStateRef.current = schedulePreviewEditorState;
+    previewInitSyncDraftPreviewHtmlRef.current = syncDraftPreviewHtmlRef;
+    previewInitApplyEditorAutoSizeBoxesRef.current = applyEditorAutoSizeBoxesWithPreservedLayout;
+  }, [
+    applyEditorAutoSizeBoxesWithPreservedLayout,
+    positionOrderLockSelectionMode,
+    schedulePreviewEditorState,
+    selectionPanelTab,
+    syncDraftPreviewHtmlRef,
+  ]);
 
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
+  React.useLayoutEffect(() => {
+    const node = previewRef.current;
 
-          const liveNode = previewRef.current;
+    if (!node || !renderedPreviewHtml) {
+      return;
+    }
 
-          if (!liveNode || liveNode !== node) {
-            return;
-          }
+    let cancelled = false;
+    syncPreviewSurfaceCloneAttrs(node);
 
-          ensurePreviewFrameBandNormalization(liveNode);
-          syncPreviewSurfaceCloneAttrs(liveNode);
-          syncPreviewSurfaceSelectionPanelTabAttr(liveNode, selectionPanelTab);
-          syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-            liveNode,
-            selectionPanelTab === 'position' && positionOrderLockSelectionMode
-          );
-          applyPreviewEditPermissions(liveNode, selectionPanelTab, textCanvasEditModeActiveRef.current);
+    if (templateUsagePreviewMode) {
+      enableTemplateUsagePreviewTextControls(node);
+      syncPreviewSurfaceScale(node);
+      return;
+    }
 
-          if (selectionPanelTab === 'position') {
-            materializePositionGroupWrappers(liveNode);
-            ensureRelativeAnchorConfigs(liveNode);
-            normalizePositionGroupRelativeAnchors(liveNode);
-            applyRelativeAnchoredFrameRectsInRoot(liveNode);
-          }
+    syncPreviewSurfaceSelectionPanelTabAttr(node, previewInitSelectionPanelTabRef.current);
+    syncPreviewSurfacePositionSpacingSelectionVisualAttr(
+      node,
+      previewInitSelectionPanelTabRef.current === 'position' && previewInitPositionOrderLockSelectionModeRef.current
+    );
+    syncPreviewSurfaceScale(node);
+    const clearedLegacyInferredCount = clearLegacyInferredRelativeAnchors(node);
 
-          const autoSizeResult = applyEditorAutoSizeBoxesWithPreservedLayout(liveNode);
+    if (clearedLegacyInferredCount > 0) {
+      previewInitSyncDraftPreviewHtmlRef.current();
+      setMessage(`허용되지 않는 추론 그룹 간격 ${clearedLegacyInferredCount}개를 제거했습니다.`);
+      return;
+    }
 
-          if (autoSizeResult.changedCount > 0) {
-            syncDraftPreviewHtmlRef({ recordHistory: false });
-          }
-        })();
+    const normalizedExtractAutoGroupResult = normalizeExtractAutoPositionGroups(node);
+
+    if (
+      normalizedExtractAutoGroupResult.clearedFrameCount > 0 ||
+      normalizedExtractAutoGroupResult.removedGroupCount > 0
+    ) {
+      previewInitSyncDraftPreviewHtmlRef.current();
+      return;
+    }
+
+    previewInitSchedulePreviewEditorStateRef.current();
+    void (async () => {
+      await document.fonts?.ready?.catch(() => undefined);
+
+      if (cancelled || previewRef.current !== node) {
+        return;
       }
-    },
-	    [
-	      positionOrderLockSelectionMode,
-	      applyEditorAutoSizeBoxesWithPreservedLayout,
-	      renderedPreviewHtml,
-	      schedulePreviewEditorState,
-	      selectionPanelTab,
-	      syncDraftPreviewHtmlRef,
-	      syncPreviewSurfaceScale,
-	      templateUsagePreviewMode,
-	    ]
-	  );
+
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+
+      const liveNode = previewRef.current;
+
+      if (cancelled || !liveNode || liveNode !== node) {
+        return;
+      }
+
+      ensurePreviewFrameBandNormalization(liveNode);
+      syncPreviewSurfaceCloneAttrs(liveNode);
+      syncPreviewSurfaceSelectionPanelTabAttr(liveNode, previewInitSelectionPanelTabRef.current);
+      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
+        liveNode,
+        previewInitSelectionPanelTabRef.current === 'position' &&
+          previewInitPositionOrderLockSelectionModeRef.current
+      );
+      applyPreviewEditPermissions(liveNode, previewInitSelectionPanelTabRef.current, textCanvasEditModeActiveRef.current);
+
+      if (previewInitSelectionPanelTabRef.current === 'position') {
+        materializePositionGroupWrappers(liveNode);
+        ensureRelativeAnchorConfigs(liveNode);
+        normalizePositionGroupRelativeAnchors(liveNode);
+        applyRelativeAnchoredFrameRectsInRoot(liveNode);
+      }
+
+      const autoSizeResult = previewInitApplyEditorAutoSizeBoxesRef.current(liveNode);
+
+      if (autoSizeResult.changedCount > 0) {
+        previewInitSyncDraftPreviewHtmlRef.current({ recordHistory: false });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    previewSurfaceNodeVersion,
+    renderedPreviewHtml,
+    syncPreviewSurfaceScale,
+    templateUsagePreviewMode,
+  ]);
 
   const applyRuntimeSelectionUi = React.useCallback(
     (
@@ -23879,6 +24065,49 @@ export default function TemplateEditWorkspace({
         return;
       }
 
+      if (nextEdgeSelectionState.tokens.length === 0) {
+        const resolvedFrameNodeById = collectFrameSelectionAnchorByIdMap(root);
+        const resolvedPositionGroupProxySelections = restoreActivePositionGroupProxySelections(
+          nextSelectedFrameGroupIds,
+          resolvePositionGroupProxySelections(nextSelectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
+        );
+        applyFastFrameSelectionUi(
+          root,
+          nextSelectedFrameGroupIds,
+          resolvedPositionGroupProxySelections,
+          resolvedFrameNodeById,
+          { deferStaleSelectionCleanup: true }
+        );
+        applyPositionImpactGroupSelectionUiFast(
+          root,
+          selectionPanelTab,
+          nextSelectedFrameGroupIds,
+          positionRelationAnchorFrameGroupId,
+          positionBoxGroups,
+          resolvedFrameNodeById
+        );
+        const positionSelectionOrderState = resolvePositionSelectionOrderState(
+          nextSelectedFrameGroupIds,
+          resolvedPositionGroupProxySelections
+        );
+        cleanupStaleFrameSelectionChrome(
+          root,
+          positionSelectionOrderState.expectedDirectSelectedIds,
+          positionSelectionOrderState.directSelectionOrderByFrameGroupId
+        );
+        syncPositionSelectionVisualStyles(root);
+        applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
+        applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
+        applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+        applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+        setEdgeRoleDiagnostics((previous) =>
+          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
+            ? previous
+            : emptyEdgeRoleDiagnosticsState
+        );
+        return;
+      }
+
       materializePositionGroupWrappers(root);
       applyFrameCanvasVisualHints(root);
       const reconciledEdgeSelection = reconcileLiveEdgeSelection(root, nextEdgeSelectionState);
@@ -23903,7 +24132,7 @@ export default function TemplateEditWorkspace({
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     },
     [
-      buildLiveEdgeTopologySnapshot,
+      readCachedLiveEdgeTopologySnapshot,
       previewRelativeGuideFrameGroupId,
       reconcileLiveEdgeSelection,
       resolveEdgeRolePresentation,
@@ -23914,6 +24143,7 @@ export default function TemplateEditWorkspace({
       positionRelationAnchorFrameGroupId,
       highlightedDefinedPositionRelativeRelations,
       positionSpacingGuideRelations,
+      visibleMetadataReviewIssues,
     ]
   );
 
@@ -23991,8 +24221,9 @@ export default function TemplateEditWorkspace({
         root,
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
-      const resolvedFrameNodeById = frameNodeById || collectFrameSelectionAnchorByIdMap(root);
-      const nextNode = resolvedFrameNodeById.get(normalizedNextFrameGroupId) || null;
+      const resolveFrameNodeById = (frameGroupId: string) =>
+        frameNodeById?.get(frameGroupId) || queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId) || null;
+      const nextNode = resolveFrameNodeById(normalizedNextFrameGroupId);
 
       if (!nextNode) {
         return false;
@@ -24011,7 +24242,7 @@ export default function TemplateEditWorkspace({
           return;
         }
 
-        const node = resolvedFrameNodeById.get(frameGroupId) || null;
+        const node = resolveFrameNodeById(frameGroupId);
         const anchorNode = resolveFrameSelectionAnchor(node) || node;
 
         if (!anchorNode) {
@@ -24041,15 +24272,14 @@ export default function TemplateEditWorkspace({
         });
       });
 
-      appendPositionGroupProxyOverlayFast(root, [], resolvedFrameNodeById);
+      appendPositionGroupProxyOverlayFast(root, []);
       ensureFrameSelectionChrome(nextNode, normalizedNextFrameGroupId, 0, root.getAttribute('data-selection-panel-tab') === 'position');
       applyPositionImpactGroupSelectionUiFast(
         root,
         selectionPanelTab,
         [normalizedNextFrameGroupId],
         positionRelationAnchorFrameGroupId,
-        positionBoxGroups,
-        resolvedFrameNodeById
+        positionBoxGroups
       );
       syncPositionSelectionVisualStyles(root);
       return true;
@@ -24079,6 +24309,7 @@ export default function TemplateEditWorkspace({
         overridePositionGroupProxySelections?: PositionGroupProxySelection[];
         fastFrameNodeById?: Map<string, HTMLElement>;
         positionSelectionEntity?: PositionActiveSelectionEntity;
+        forceImmediateReactState?: boolean;
       }
     ) => {
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
@@ -24191,7 +24422,11 @@ export default function TemplateEditWorkspace({
       };
       selectedFrameGroupIdsRef.current = normalizedSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
-      const selectionAutoSizeState = readSelectedTextAutoSizeState(previewRef.current, normalizedSelectionIds);
+      const shouldPreviewSelectedTextAutoSizeImmediately =
+        selectionPanelTab === 'position' && !sizeTypeOverlayCollapsedRef.current;
+      const selectionAutoSizeState = shouldPreviewSelectedTextAutoSizeImmediately
+        ? readSelectedTextAutoSizeState(previewRef.current, normalizedSelectionIds)
+        : createEmptySelectedTextAutoSizeState();
       if (selectionAutoSizeState.totalCount > 0) {
         previewSelectedTextAutoSizeDomState(selectionAutoSizeState);
       }
@@ -24201,7 +24436,12 @@ export default function TemplateEditWorkspace({
               (proxySelection) => proxySelection.groupId === nextPositionGroupProxySelectionGroupId
             )?.frameGroupIds.slice() || normalizedSelectionIds
           : normalizedSelectionIds;
-      const shouldSyncPositionStyleDraftImmediately = selectionPanelTab === 'position';
+      const shouldSyncPositionStyleDraftImmediately =
+        selectionPanelTab === 'position' &&
+        (!styleOverlayCollapsedRef.current ||
+          !sizeTypeOverlayCollapsedRef.current ||
+          !textStyleOverlayCollapsedRef.current ||
+          false);
       const resolveImmediateDraftNodes = (activeSelectionIds: string[]) => {
         const root = previewRef.current;
         if (!root || activeSelectionIds.length <= 0) {
@@ -24382,15 +24622,33 @@ export default function TemplateEditWorkspace({
       if (shouldSyncPositionStyleDraftImmediately) {
         syncSelectionStyleDraftControls(immediateSelectionStyleDraft, immediateResolvedSelectionIds);
       }
-      const canDeferPositionSelectionStateSync = selectionPanelTab === 'position' && typeof window !== 'undefined';
+      const canDeferPositionSelectionStateSync =
+        selectionPanelTab === 'position' &&
+        typeof window !== 'undefined' &&
+        !options?.forceImmediateReactState &&
+        selectionAutoSizeState.totalCount <= 0;
       if (canDeferPositionSelectionStateSync) {
         if (immediateSelectionPanelSyncFrameRef.current !== null) {
           window.cancelAnimationFrame(immediateSelectionPanelSyncFrameRef.current);
         }
         immediateSelectionPanelSyncFrameRef.current = window.requestAnimationFrame(() => {
           immediateSelectionPanelSyncFrameRef.current = null;
+          React.startTransition(() => {
+            commitImmediatePanelSync();
+            commitSelectionReactState();
+          });
+        });
+        return;
+      }
+
+      if (selectionPanelTab === 'position' && !options?.forceImmediateReactState) {
+        flushSync(commitImmediatePanelSync);
+        React.startTransition(commitSelectionReactState);
+        return;
+      } else if (options?.forceImmediateReactState) {
+        flushSync(() => {
           commitImmediatePanelSync();
-          React.startTransition(commitSelectionReactState);
+          commitSelectionReactState();
         });
       } else {
         flushSync(commitImmediatePanelSync);
@@ -25378,6 +25636,37 @@ export default function TemplateEditWorkspace({
       return;
     }
 
+    if (edgeSelectionState.tokens.length === 0) {
+      const resolvedFrameNodeById = collectFrameSelectionAnchorByIdMap(root);
+      applyFastFrameBoxSelectionVisuals(
+        selectedFrameGroupIds,
+        edgeSelectionState,
+        restoreActivePositionGroupProxySelections(
+          selectedFrameGroupIds,
+          resolvePositionGroupProxySelections(selectedFrameGroupIds, positionGroupProxySelectionGroupIdRef.current)
+        ),
+        resolvedFrameNodeById
+      );
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, selectedFrameGroupIds);
+      applyPositionImpactGroupSelectionUiFast(
+        root,
+        selectionPanelTab,
+        selectedFrameGroupIds,
+        positionRelationAnchorFrameGroupId,
+        positionBoxGroups,
+        resolvedFrameNodeById
+      );
+      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+      applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+      setEdgeRoleDiagnostics((previous) =>
+        edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
+          ? previous
+          : emptyEdgeRoleDiagnosticsState
+      );
+      return;
+    }
+
     if (!root.querySelector(FRAME_EDGE_BUTTON_SELECTOR)) {
       const liveSelectedFrameGroupIds =
         selectedFrameGroupIdsRef.current.length > 0
@@ -25400,7 +25689,7 @@ export default function TemplateEditWorkspace({
     applyFrameCanvasVisualHints(root);
     normalizeLiveVerticalCohorts(root);
     normalizeLiveVerticalPhysicalPeers(root);
-    const snapshot = buildLiveEdgeTopologySnapshot(root);
+    const snapshot = readCachedLiveEdgeTopologySnapshot(root);
     const nextEdgeSelection = TemplateEdgeSelectionService.reconcileSelectionState({
       snapshot,
       currentSelection: edgeSelectionState,
@@ -25435,7 +25724,7 @@ export default function TemplateEditWorkspace({
         : nextEdgeRolePresentation.diagnosticsState
     );
   }, [
-      buildLiveEdgeTopologySnapshot,
+      readCachedLiveEdgeTopologySnapshot,
       applyFastFrameBoxSelectionVisuals,
       edgeRoleDiagnostics.mismatchEdgeIds,
       edgeSelectionState,
@@ -25756,6 +26045,16 @@ export default function TemplateEditWorkspace({
       return selectedFrameGroupIds;
     })();
 
+    const shouldHydratePositionSelectionDraft =
+      selectionPanelTab !== 'position' ||
+      !styleOverlayCollapsedRef.current ||
+      !sizeTypeOverlayCollapsedRef.current ||
+      !textStyleOverlayCollapsedRef.current;
+
+    if (!shouldHydratePositionSelectionDraft) {
+      return;
+    }
+
     if (!root || activeSelectionIds.length === 0) {
       syncSelectionStyleDraftControls(defaultSelectionStyleDraft, []);
       setSelectionStyleDraft((previous) =>
@@ -25827,6 +26126,26 @@ export default function TemplateEditWorkspace({
       syncDraftPreviewHtmlRef,
       syncSelectionStyleDraft,
     ]
+  );
+
+  const scheduleDeferredPositionStructureSync = React.useCallback(
+    (options?: {
+      syncEditorState?: boolean;
+      syncSelectionDraft?: boolean;
+      textFit?: boolean;
+      delayMs?: number;
+    }) => {
+      positionSelectionLayoutCacheRef.current = new WeakMap();
+      bumpPositionStructureRevision();
+      scheduleDeferredStylePanelSync({
+        materializePositionGroups: true,
+        syncEditorState: options?.syncEditorState,
+        syncSelectionDraft: options?.syncSelectionDraft,
+        textFit: options?.textFit,
+        delayMs: options?.delayMs ?? 120,
+      });
+    },
+    [bumpPositionStructureRevision, scheduleDeferredStylePanelSync]
   );
 
   const beginTextAutoSizeCommand = React.useCallback(() => {
@@ -28236,21 +28555,37 @@ export default function TemplateEditWorkspace({
     }
 
     materializePositionGroupWrappers(root);
-    normalizePositionGroupRelativeAnchors(root, nextGroupId);
-    ensureRelativeAnchorConfigs(root);
-    applyRelativeAnchoredFrameRectsInRoot(root);
-    syncDraftPreviewHtmlRef();
-    requestPreviewTextFit();
+    if (hasRelativePositionFrames(root)) {
+      normalizePositionGroupRelativeAnchors(root, nextGroupId);
+      ensureRelativeAnchorConfigs(root);
+      applyRelativeAnchoredFrameRectsInRoot(root);
+    }
+    scheduleDeferredPositionStructureSync({
+      syncEditorState: true,
+      syncSelectionDraft: false,
+    });
+    applyFrameBoxSelection(regroupTargetFrameGroupIds, {
+      positionGroupProxySelectionGroupId: nextGroupId,
+      overridePositionGroupProxySelections: [
+        buildStablePositionGroupProxySelection(nextGroupId, nextGroupLabel || nextGroupId, regroupTargetFrameGroupIds),
+      ],
+      forceImmediateReactState: true,
+      positionSelectionEntity: {
+        kind: 'group',
+        groupId: nextGroupId,
+        frameGroupIds: regroupTargetFrameGroupIds,
+      },
+    });
     setMessage(
       `${POSITION_GROUP_LABEL_PREFIX} 만들기 완료: ${nextGroupLabel} (${appliedCount}개 상자)` +
         (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
     );
 	  }, [
-	    requestPreviewTextFit,
+	    applyFrameBoxSelection,
+	    scheduleDeferredPositionStructureSync,
 	    selectedPositionEntitySelection,
 	    selectedPositionExactMatchedBoxGroup,
 	    selectedPositionGroupingFrameGroupIds,
-	    syncDraftPreviewHtmlRef,
 	  ]);
   const applySelectedPositionGroupRelationFromCanvasSelection = React.useCallback(() => {
     if (selectedFrameGroupIdsRef.current.length < 2) {
@@ -28339,21 +28674,42 @@ export default function TemplateEditWorkspace({
       [...assignmentSourceFrameGroupIds, ...nextFrameGroupIds]
     );
     materializePositionGroupWrappers(root);
-    normalizePositionGroupRelativeAnchors(root, materializedTargetGroupId);
-    applyRelativeAnchoredFrameRectsInRoot(root);
-    syncDraftPreviewHtmlRef();
-    requestPreviewTextFit();
-    schedulePreviewEditorState();
+    if (hasRelativePositionFrames(root)) {
+      normalizePositionGroupRelativeAnchors(root, materializedTargetGroupId);
+      applyRelativeAnchoredFrameRectsInRoot(root);
+    }
+    scheduleDeferredPositionStructureSync({
+      syncEditorState: true,
+      syncSelectionDraft: false,
+    });
+    applyFrameBoxSelection(
+      Array.from(new Set([...targetGroup.frameGroupIds, ...assignmentSourceFrameGroupIds].filter(Boolean))),
+      {
+        positionGroupProxySelectionGroupId: materializedTargetGroupId,
+        overridePositionGroupProxySelections: [
+          buildStablePositionGroupProxySelection(
+            materializedTargetGroupId,
+            materializedTargetGroupLabel || materializedTargetGroupId,
+            Array.from(new Set([...targetGroup.frameGroupIds, ...assignmentSourceFrameGroupIds].filter(Boolean)))
+          ),
+        ],
+        forceImmediateReactState: true,
+        positionSelectionEntity: {
+          kind: 'group',
+          groupId: materializedTargetGroupId,
+          frameGroupIds: Array.from(new Set([...targetGroup.frameGroupIds, ...assignmentSourceFrameGroupIds].filter(Boolean))),
+        },
+      }
+    );
     setMessage(
       `그룹 귀속 완료: ${materializedTargetGroupLabel} (${appliedCount}개 상자)` +
         (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
     );
   }, [
+    applyFrameBoxSelection,
     moveGroupAssignmentTargetGroupId,
-    requestPreviewTextFit,
-    schedulePreviewEditorState,
+    scheduleDeferredPositionStructureSync,
     selectedPositionEntitySelection,
-    syncDraftPreviewHtmlRef,
   ]);
   const removeSelectedBoxesFromMoveGroupOnly = React.useCallback(() => {
     const root = previewRef.current;
@@ -28428,18 +28784,29 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    syncDraftPreviewHtmlRef();
-    requestPreviewTextFit();
-    schedulePreviewEditorState();
+    scheduleDeferredPositionStructureSync({
+      syncEditorState: true,
+      syncSelectionDraft: false,
+    });
+    applyFrameBoxSelection(selectedTargetFrameGroupIds, {
+      disableAutoPositionGroupProxySelection: true,
+      forceImmediateReactState: true,
+      positionSelectionEntity:
+        selectedTargetFrameGroupIds.length === 1
+          ? {
+              kind: 'frame',
+              frameGroupId: selectedTargetFrameGroupIds[0] || '',
+            }
+          : null,
+    });
     setMessage(
       `선택 항목 그룹 제외 완료: ${removedCount}개 상자` +
         (skippedCount > 0 ? `, ${skippedCount}개 제외` : '')
     );
   }, [
-    requestPreviewTextFit,
-    schedulePreviewEditorState,
+    applyFrameBoxSelection,
+    scheduleDeferredPositionStructureSync,
     selectedPositionGroupingFrameGroupIds,
-    syncDraftPreviewHtmlRef,
   ]);
 
   const clearSelectedPositionGroupRelation = React.useCallback(() => {
@@ -28509,8 +28876,10 @@ export default function TemplateEditWorkspace({
 
         materializePositionGroupWrappers(root);
         applyRelativeAnchoredFrameRectsInRoot(root);
-        syncDraftPreviewHtmlRef();
-        requestPreviewTextFit();
+        scheduleDeferredPositionStructureSync({
+          syncEditorState: true,
+          syncSelectionDraft: false,
+        });
         setMessage(
           `${POSITION_GROUP_LABEL_PREFIX} 레이어 해제 완료: ${targetGroupIds.join(', ')}. 기존 간격 설정은 유지했습니다.`
         );
@@ -28539,7 +28908,9 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      applyFramePositionMode(targetNode, 'absolute', targetPageInner);
+      if (readFramePositionMode(targetNode, targetPageInner) !== 'absolute') {
+        applyFramePositionMode(targetNode, 'absolute', targetPageInner);
+      }
 
       writeFramePositionGroupAttrs(targetNode, null);
       clearedCount += 1;
@@ -28556,11 +28927,26 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    applyRelativeAnchoredFrameRectsInRoot(root);
-    syncDraftPreviewHtmlRef();
-    requestPreviewTextFit();
+    if (hasRelativePositionFrames(root)) {
+      applyRelativeAnchoredFrameRectsInRoot(root);
+    }
+    scheduleDeferredPositionStructureSync({
+      syncEditorState: true,
+      syncSelectionDraft: false,
+    });
+    applyFrameBoxSelection(targetIds, {
+      disableAutoPositionGroupProxySelection: true,
+      forceImmediateReactState: true,
+      positionSelectionEntity:
+        targetIds.length === 1
+          ? {
+              kind: 'frame',
+              frameGroupId: targetIds[0] || '',
+            }
+          : null,
+    });
     setMessage(`선택 ${POSITION_GROUP_LABEL_PREFIX} 해제 완료: ${clearedCount}개 상자` + (skippedCount > 0 ? `, ${skippedCount}개 제외` : ''));
-  }, [requestPreviewTextFit, selectedPositionGroupingFrameGroupIds, syncDraftPreviewHtmlRef]);
+  }, [applyFrameBoxSelection, scheduleDeferredPositionStructureSync, selectedPositionGroupingFrameGroupIds]);
 
   const createPositionEntitySelectionSnapshot = React.useCallback((): PositionEntitySelectionSnapshot => {
     return {
@@ -28723,11 +29109,14 @@ export default function TemplateEditWorkspace({
         [...targetGroup.frameGroupIds, ...assignmentSourceFrameGroupIds]
       );
       materializePositionGroupWrappers(root);
-      normalizePositionGroupRelativeAnchors(root, normalizedTargetGroupId);
-      applyRelativeAnchoredFrameRectsInRoot(root);
-      syncDraftPreviewHtmlRef();
-      requestPreviewTextFit();
-      schedulePreviewEditorState();
+      if (hasRelativePositionFrames(root)) {
+        normalizePositionGroupRelativeAnchors(root, normalizedTargetGroupId);
+        applyRelativeAnchoredFrameRectsInRoot(root);
+      }
+      scheduleDeferredPositionStructureSync({
+        syncEditorState: true,
+        syncSelectionDraft: false,
+      });
 
       const nextSelectionIds = Array.from(new Set([...targetGroup.frameGroupIds, ...assignmentSourceFrameGroupIds].filter(Boolean)));
       applyFrameBoxSelection(nextSelectionIds, {
@@ -28735,6 +29124,7 @@ export default function TemplateEditWorkspace({
         overridePositionGroupProxySelections: [
           buildStablePositionGroupProxySelection(normalizedTargetGroupId, targetGroup.label || normalizedTargetGroupId, nextSelectionIds),
         ],
+        forceImmediateReactState: true,
         positionSelectionEntity: {
           kind: 'group',
           groupId: normalizedTargetGroupId,
@@ -28747,7 +29137,7 @@ export default function TemplateEditWorkspace({
           `(${assignmentSourceFrameGroupIds.length}개 상자)`
       );
     },
-    [applyFrameBoxSelection, requestPreviewTextFit, schedulePreviewEditorState, syncDraftPreviewHtmlRef]
+    [applyFrameBoxSelection, scheduleDeferredPositionStructureSync]
   );
 
   const applyPositionGroupExcludeModeTarget = React.useCallback(
@@ -28844,16 +29234,22 @@ export default function TemplateEditWorkspace({
       }
 
       materializePositionGroupWrappers(root);
-      parentGroupIds.forEach((parentGroupId) => normalizePositionGroupRelativeAnchors(root, parentGroupId));
-      applyRelativeAnchoredFrameRectsInRoot(root);
-      syncDraftPreviewHtmlRef();
-      requestPreviewTextFit();
-      schedulePreviewEditorState();
+      if (hasRelativePositionFrames(root)) {
+        parentGroupIds.forEach((parentGroupId) => normalizePositionGroupRelativeAnchors(root, parentGroupId));
+        applyRelativeAnchoredFrameRectsInRoot(root);
+      }
+      scheduleDeferredPositionStructureSync({
+        syncEditorState: true,
+        syncSelectionDraft: false,
+      });
       setPositionGroupEditMode({ kind: 'idle' });
-      restorePositionEntitySelectionSnapshot(sourceSelection);
+      applyFrameBoxSelection(sourceSelection.selectedFrameGroupIds, {
+        disableAutoPositionGroupProxySelection: true,
+        forceImmediateReactState: true,
+      });
       setMessage(`그룹에서 제외 완료: ${removedCount}개 항목`);
     },
-    [requestPreviewTextFit, restorePositionEntitySelectionSnapshot, schedulePreviewEditorState, syncDraftPreviewHtmlRef]
+    [applyFrameBoxSelection, scheduleDeferredPositionStructureSync]
   );
 
   const applyPositionGroupEditModeSelection = React.useCallback(
@@ -31284,6 +31680,8 @@ export default function TemplateEditWorkspace({
         positionShiftClickFallbackEntry = null,
         baseSelectionIds,
         baseProxySelections,
+        clickSelectionIds,
+        clickProxySelections,
         deferHitEntryCollection = false,
       }: {
         anchorFrameGroupId?: string;
@@ -31291,6 +31689,8 @@ export default function TemplateEditWorkspace({
         positionShiftClickFallbackEntry?: PositionSelectionClickChainEntry | null;
         baseSelectionIds?: string[];
         baseProxySelections?: PositionGroupProxySelection[];
+        clickSelectionIds?: string[];
+        clickProxySelections?: PositionGroupProxySelection[];
         deferHitEntryCollection?: boolean;
       } = {}) => {
         if (!pageInner || edgeButton || resizeHandle) {
@@ -31340,6 +31740,8 @@ export default function TemplateEditWorkspace({
           positionShiftClickFallbackEntry,
           baseSelectionIds: resolvedBaseSelectionIds.slice(),
           baseProxySelections: selectionPanelTab === 'position' ? baseProxySelections : undefined,
+          clickSelectionIds: clickSelectionIds?.slice(),
+          clickProxySelections: selectionPanelTab === 'position' ? clickProxySelections : undefined,
           lastSelectionIds: resolvedBaseSelectionIds.slice(),
           lastProxySelections:
             selectionPanelTab === 'position'
@@ -31369,8 +31771,10 @@ export default function TemplateEditWorkspace({
 
 	          return startMarqueeSelectionInteraction({
 	            anchorFrameGroupId: '',
-	            baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-	            baseProxySelections,
+	            baseSelectionIds: [],
+	            baseProxySelections: [],
+              clickSelectionIds: selectedFrameGroupIdsRef.current.slice(),
+              clickProxySelections: baseProxySelections,
               deferHitEntryCollection: true,
 	          });
 	        }
@@ -31381,8 +31785,10 @@ export default function TemplateEditWorkspace({
 
         return startMarqueeSelectionInteraction({
           anchorFrameGroupId: '',
-          baseSelectionIds: selectedFrameGroupIdsRef.current.slice(),
-          baseProxySelections,
+          baseSelectionIds: [],
+          baseProxySelections: [],
+          clickSelectionIds: selectedFrameGroupIdsRef.current.slice(),
+          clickProxySelections: baseProxySelections,
         });
       };
 
@@ -31806,13 +32212,13 @@ export default function TemplateEditWorkspace({
 	            return;
 	          }
 
-	          applyFrameBoxSelection([frameGroupId], {
-	            disableAutoPositionGroupProxySelection: true,
-	            positionSelectionEntity: {
-	              kind: 'frame',
-	              frameGroupId,
-	            },
-	          });
+          applyFrameBoxSelection([frameGroupId], {
+            disableAutoPositionGroupProxySelection: true,
+            positionSelectionEntity: {
+              kind: 'frame',
+              frameGroupId,
+            },
+          });
 	          if (startSelectionMarqueeAfterClickSelection([])) {
 	            return;
 	          }
@@ -32822,6 +33228,11 @@ export default function TemplateEditWorkspace({
         clearTransientCanvasOverlays();
         activePointerOwnerRef.current = null;
 
+        const restoredSelectionIds =
+          marqueeSelectionState.clickSelectionIds?.slice() || marqueeSelectionState.baseSelectionIds.slice();
+        const restoredProxySelections =
+          marqueeSelectionState.clickProxySelections || marqueeSelectionState.baseProxySelections || [];
+
         if (shouldTreatAsTextInputActivationClick) {
           selectedFrameGroupIdsRef.current = marqueeSelectionState.baseSelectionIds;
           edgeSelectionStateRef.current = emptyEdgeSelection;
@@ -32871,6 +33282,20 @@ export default function TemplateEditWorkspace({
             schedulePreviewEditorState();
           }
 
+          return;
+        }
+
+        const isPlainClickAfterImmediateSelection =
+          !marqueeSelectionState.active &&
+          finalRect.width < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
+          finalRect.height < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
+          !marqueeSelectionState.anchorFrameGroupId &&
+          !marqueeSelectionState.positionShiftClickFallbackEntry &&
+          ((marqueeSelectionState.clickSelectionIds?.length || 0) > 0 ||
+            (marqueeSelectionState.clickProxySelections?.length || 0) > 0);
+
+        if (isPlainClickAfterImmediateSelection) {
+          deferredPreviewEditorStateRef.current = false;
           return;
         }
 
@@ -32983,8 +33408,8 @@ export default function TemplateEditWorkspace({
         if (selectionPanelTab === 'position') {
           const retainedProxySelections = mergePositionProxySelections(
             retainPositionProxySelectionsForSelectedIds(
-              marqueeSelectionState.baseProxySelections,
-              marqueeSelectionState.baseSelectionIds
+              restoredProxySelections,
+              restoredSelectionIds
             ),
             marqueeSelectionState.lastProxySelections || []
           );
@@ -32999,21 +33424,34 @@ export default function TemplateEditWorkspace({
                 groupId: retainedProxySelections[0].groupId,
                 frameGroupIds: retainedProxySelections[0].frameGroupIds.slice(),
               }
-            : marqueeSelectionState.baseSelectionIds.length === 1
+            : restoredSelectionIds.length === 1
               ? {
                   kind: 'frame',
-                  frameGroupId: marqueeSelectionState.baseSelectionIds[0] || '',
+                  frameGroupId: restoredSelectionIds[0] || '',
                 }
               : previousActiveEntity?.kind === 'group'
                 ? previousActiveEntity
                 : null;
-          applyFastFrameBoxSelectionVisuals(
-            marqueeSelectionState.baseSelectionIds,
-            emptyEdgeSelection,
-            retainedProxySelections
-          );
+          applyFrameBoxSelection(restoredSelectionIds, {
+            positionGroupProxySelectionGroupId: retainedProxySelections[0]?.groupId || '',
+            overridePositionGroupProxySelections: retainedProxySelections,
+            disableAutoPositionGroupProxySelection: retainedProxySelections.length <= 0,
+            forceImmediateReactState: true,
+            positionSelectionEntity: retainedProxySelections[0]
+              ? {
+                  kind: 'group',
+                  groupId: retainedProxySelections[0].groupId,
+                  frameGroupIds: retainedProxySelections[0].frameGroupIds.slice(),
+                }
+              : restoredSelectionIds.length === 1
+                ? {
+                    kind: 'frame',
+                    frameGroupId: restoredSelectionIds[0] || '',
+                  }
+                : null,
+          });
         } else {
-          applyRuntimeSelectionUi(marqueeSelectionState.baseSelectionIds, emptyEdgeSelection);
+          applyRuntimeSelectionUi(restoredSelectionIds, emptyEdgeSelection);
         }
         if (deferredPreviewEditorStateRef.current) {
           deferredPreviewEditorStateRef.current = false;
@@ -33097,9 +33535,11 @@ export default function TemplateEditWorkspace({
         const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
         clearTransientCanvasOverlays();
         activePointerOwnerRef.current = null;
-        selectedFrameGroupIdsRef.current = marqueeSelectionState.baseSelectionIds;
+        const restoredSelectionIds =
+          marqueeSelectionState.clickSelectionIds?.slice() || marqueeSelectionState.baseSelectionIds.slice();
+        selectedFrameGroupIdsRef.current = restoredSelectionIds;
         edgeSelectionStateRef.current = emptyEdgeSelection;
-        applyRuntimeSelectionUi(marqueeSelectionState.baseSelectionIds, emptyEdgeSelection);
+        applyRuntimeSelectionUi(restoredSelectionIds, emptyEdgeSelection);
         if (deferredPreviewEditorStateRef.current) {
           deferredPreviewEditorStateRef.current = false;
           schedulePreviewEditorState();
@@ -33168,12 +33608,14 @@ export default function TemplateEditWorkspace({
         const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
         clearTransientCanvasOverlays();
         activePointerOwnerRef.current = null;
-        selectedFrameGroupIdsRef.current = marqueeSelectionState.baseSelectionIds;
+        const restoredSelectionIds =
+          marqueeSelectionState.clickSelectionIds?.slice() || marqueeSelectionState.baseSelectionIds.slice();
+        selectedFrameGroupIdsRef.current = restoredSelectionIds;
         edgeSelectionStateRef.current = emptyEdgeSelection;
-        setSelectedFrameGroupIds(marqueeSelectionState.baseSelectionIds.slice());
+        setSelectedFrameGroupIds(restoredSelectionIds.slice());
         setEdgeSelectionState(emptyEdgeSelection);
         setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
-        applyRuntimeSelectionUi(marqueeSelectionState.baseSelectionIds, emptyEdgeSelection);
+        applyRuntimeSelectionUi(restoredSelectionIds, emptyEdgeSelection);
         if (deferredPreviewEditorStateRef.current) {
           deferredPreviewEditorStateRef.current = false;
           schedulePreviewEditorState();
@@ -33457,6 +33899,7 @@ export default function TemplateEditWorkspace({
         positionGroupProxySelectionGroupId: group.id,
         showAllGroupProxySelections: true,
         overridePositionGroupProxySelections: [groupProxySelection],
+        forceImmediateReactState: true,
       });
     },
     [applyFrameBoxSelection, applyPositionOrderLockMarqueeSelection, positionOrderLockSelectionMode]
@@ -33485,6 +33928,7 @@ export default function TemplateEditWorkspace({
         disableAutoPositionGroupProxySelection: true,
         showAllGroupProxySelections: false,
         overridePositionGroupProxySelections: [],
+        forceImmediateReactState: true,
       });
     },
     [applyFrameBoxSelection, positionOrderLockSelectionMode]
@@ -35231,7 +35675,7 @@ export default function TemplateEditWorkspace({
       return null;
     }
 
-    return renderSelectionAppearanceControls();
+    return styleOverlayCollapsedState ? <div aria-hidden="true" /> : renderSelectionAppearanceControls();
   };
 
   const renderPositionBoxSizeTypeOverlay = () => {
@@ -35286,14 +35730,15 @@ export default function TemplateEditWorkspace({
                 그룹 만들기
               </button>
             ) : null}
-            <button
-              type="button"
-              className="inline-flex h-7 w-full items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100"
-              onClick={startPositionOrderLockSelectionFromCurrentCanvasSelection}
-              disabled={!canOpenPositionSpacingSettings}
-            >
-              간격 설정
-            </button>
+            {canOpenPositionSpacingSettings ? (
+              <button
+                type="button"
+                className="inline-flex h-7 w-full items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100"
+                onClick={startPositionOrderLockSelectionFromCurrentCanvasSelection}
+              >
+                간격 설정
+              </button>
+            ) : null}
             {canClearSelectedPositionGroups ? (
               <button
                 type="button"
@@ -35641,6 +36086,10 @@ export default function TemplateEditWorkspace({
       return null;
     }
 
+    if (textStyleOverlayCollapsedState) {
+      return <div aria-hidden="true" />;
+    }
+
     return renderTextCanvasActionControls();
   }, [
     selectedFrameGroupIds,
@@ -35648,6 +36097,7 @@ export default function TemplateEditWorkspace({
     selectionPanelTab,
     selectionStyleDraft,
     styleFieldApplyStatus,
+    textStyleOverlayCollapsedState,
     templateUsagePreviewMode,
   ]);
 
@@ -36733,6 +37183,15 @@ export default function TemplateEditWorkspace({
         .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"] {
           opacity: 1 !important;
         }
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]::after {
+          content: '';
+          position: absolute;
+          inset: -1px;
+          background: rgba(255, 255, 255, .5);
+          border-radius: inherit;
+          pointer-events: none;
+          z-index: 30;
+        }
         .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"] {
           opacity: 1 !important;
           z-index: 31 !important;
@@ -36768,6 +37227,15 @@ export default function TemplateEditWorkspace({
         }
         .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}="inactive"] {
           opacity: 1 !important;
+        }
+        .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}="inactive"]::after {
+          content: '';
+          position: absolute;
+          inset: -1px;
+          background: rgba(255, 255, 255, .5);
+          border-radius: inherit;
+          pointer-events: none;
+          z-index: 30;
         }
         .template-edit-preview[${TEMPLATE_POSITION_IMPACT_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_POSITION_IMPACT_FOCUS_ATTR}="active"] {
           opacity: 1 !important;
@@ -37769,11 +38237,14 @@ export default function TemplateEditWorkspace({
 	            metadataRoleTertiaryOverlay={!templateUsagePreviewMode && selectionPanelTab === 'metadata' ? renderMetadataRoleTertiaryOverlay : null}
 	            styleOverlay={templateUsagePreviewMode ? null : renderPositionBoxStyleOverlay()}
 	            styleOverlayLabel="상자 스타일"
+	            onStyleOverlayCollapsedChange={handleStyleOverlayCollapsedChange}
 	            sizeTypeOverlay={templateUsagePreviewMode ? null : renderPositionBoxSizeTypeOverlay()}
+	            onSizeTypeOverlayCollapsedChange={handleSizeTypeOverlayCollapsedChange}
 	            textStyleOverlay={positionTextStyleOverlayNode}
 	            onTextStyleOverlayCollapsedChange={handleTextStyleOverlayCollapsedChange}
 	            textStyleOverlayExpandedWidthClassName="w-fit max-w-[250px]"
 	            summaryOverlay={templateUsagePreviewMode ? null : renderSelectionSummaryBox()}
+	            onSummaryOverlayCollapsedChange={handleSummaryOverlayCollapsedChange}
             setPreviewNode={setPreviewNode}
             handlePreviewPointerDown={handlePreviewPointerDown}
             handlePreviewPointerMove={handlePreviewPointerMove}
