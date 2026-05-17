@@ -734,6 +734,8 @@ const FRAME_RESIZE_HANDLE_SELECTOR = '[data-v106-resize-handle="true"]';
 const FRAME_EDGE_BUTTON_SELECTOR = '[data-v106-edge-button="true"]';
 const FRAME_MARQUEE_GHOST_CLASS = 'v106-frame-marquee';
 const FRAME_CREATION_GHOST_CLASS = 'v106-frame-create-ghost';
+const FRAME_MARQUEE_AUTOSCROLL_HOT_ZONE_PX = 48;
+const FRAME_MARQUEE_AUTOSCROLL_MAX_SPEED_PX = 24;
 const FRAME_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-outline-overlay';
 const FRAME_CLUSTER_OUTLINE_OVERLAY_ATTR = 'data-v106-frame-cluster-outline-overlay';
 const FRAME_SELECTED_SIDE_INDICATOR_ATTR = 'data-v106-frame-selected-side-indicator';
@@ -4534,6 +4536,50 @@ const removeFrameEditorGhost = (ghost: HTMLElement | null | undefined) => {
   if (ghost?.parentElement) {
     ghost.parentElement.removeChild(ghost);
   }
+};
+
+const resolveMarqueeAutoScrollAxisDelta = (
+  pointerCoordinate: number,
+  viewportStart: number,
+  viewportSize: number
+) => {
+  const viewportEnd = viewportStart + viewportSize;
+  const distanceToLeadingEdge = pointerCoordinate - viewportStart;
+  const distanceToTrailingEdge = viewportEnd - pointerCoordinate;
+
+  if (distanceToLeadingEdge < FRAME_MARQUEE_AUTOSCROLL_HOT_ZONE_PX) {
+    const intensity =
+      (FRAME_MARQUEE_AUTOSCROLL_HOT_ZONE_PX - distanceToLeadingEdge) / FRAME_MARQUEE_AUTOSCROLL_HOT_ZONE_PX;
+    return -Math.min(
+      FRAME_MARQUEE_AUTOSCROLL_MAX_SPEED_PX,
+      Math.max(1, intensity * FRAME_MARQUEE_AUTOSCROLL_MAX_SPEED_PX)
+    );
+  }
+
+  if (distanceToTrailingEdge < FRAME_MARQUEE_AUTOSCROLL_HOT_ZONE_PX) {
+    const intensity =
+      (FRAME_MARQUEE_AUTOSCROLL_HOT_ZONE_PX - distanceToTrailingEdge) / FRAME_MARQUEE_AUTOSCROLL_HOT_ZONE_PX;
+    return Math.min(
+      FRAME_MARQUEE_AUTOSCROLL_MAX_SPEED_PX,
+      Math.max(1, intensity * FRAME_MARQUEE_AUTOSCROLL_MAX_SPEED_PX)
+    );
+  }
+
+  return 0;
+};
+
+const resolveMarqueeAutoScrollDelta = (scrollContainer: HTMLElement, clientX: number, clientY: number) => {
+  const rect = scrollContainer.getBoundingClientRect();
+  const deltaX =
+    scrollContainer.scrollWidth > scrollContainer.clientWidth
+      ? resolveMarqueeAutoScrollAxisDelta(clientX, rect.left, rect.width)
+      : 0;
+  const deltaY =
+    scrollContainer.scrollHeight > scrollContainer.clientHeight
+      ? resolveMarqueeAutoScrollAxisDelta(clientY, rect.top, rect.height)
+      : 0;
+
+  return { deltaX, deltaY };
 };
 
 const buildCreatedFrameGroupId = (root: ParentNode) => {
@@ -17659,6 +17705,12 @@ export default function TemplateEditWorkspace({
   const resizeStateRef = React.useRef<ResizeState | null>(null);
   const edgePressStateRef = React.useRef<EdgePressState | null>(null);
   const marqueeSelectionStateRef = React.useRef<MarqueeSelectionState | null>(null);
+  const marqueeAutoScrollFrameRef = React.useRef<number | null>(null);
+  const marqueeAutoScrollPointerRef = React.useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
   const routeTemplateAutoloadedRef = React.useRef('');
   const initialDraftAppliedKeyRef = React.useRef('');
   const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
@@ -17747,6 +17799,15 @@ export default function TemplateEditWorkspace({
         window.cancelAnimationFrame(immediateSelectionPanelSyncFrameRef.current);
         immediateSelectionPanelSyncFrameRef.current = null;
       }
+    };
+  }, []);
+  React.useEffect(() => {
+    return () => {
+      if (marqueeAutoScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(marqueeAutoScrollFrameRef.current);
+        marqueeAutoScrollFrameRef.current = null;
+      }
+      marqueeAutoScrollPointerRef.current = null;
     };
   }, []);
 
@@ -24428,12 +24489,22 @@ export default function TemplateEditWorkspace({
     ]
   );
 
+  const stopMarqueeAutoScroll = React.useCallback(() => {
+    if (marqueeAutoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(marqueeAutoScrollFrameRef.current);
+      marqueeAutoScrollFrameRef.current = null;
+    }
+
+    marqueeAutoScrollPointerRef.current = null;
+  }, []);
+
   const clearTransientCanvasOverlays = React.useCallback(() => {
+    stopMarqueeAutoScroll();
     removeFrameEditorGhost(marqueeSelectionStateRef.current?.ghost);
     marqueeSelectionStateRef.current = null;
     removeFrameEditorGhost(createBoxStateRef.current?.ghost);
     createBoxStateRef.current = null;
-  }, []);
+  }, [stopMarqueeAutoScroll]);
 
   const applyFrameBoxSelection = React.useCallback(
     (
@@ -31827,6 +31898,163 @@ export default function TemplateEditWorkspace({
     selectedPositionSpacingSettingRelationKey,
   ]);
 
+  const updateMarqueeSelectionFromClientPoint = React.useCallback(
+    (marqueeSelectionState: MarqueeSelectionState, clientX: number, clientY: number) => {
+      const currentPoint = readPageInnerPointerPoint(
+        marqueeSelectionState.pageInner,
+        clientX,
+        clientY,
+        marqueeSelectionState.scale
+      );
+      const nextRect = buildPointerDragRect(marqueeSelectionState.origin, currentPoint);
+
+      if (
+        !marqueeSelectionState.active &&
+        nextRect.width < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
+        nextRect.height < FRAME_MARQUEE_DRAG_THRESHOLD_PX
+      ) {
+        return;
+      }
+
+      if (!marqueeSelectionState.active) {
+        const nextGhost = createFrameEditorGhost(FRAME_MARQUEE_GHOST_CLASS, marqueeSelectionState.mode);
+        marqueeSelectionState.pageInner.appendChild(nextGhost);
+        marqueeSelectionState.ghost = nextGhost;
+        marqueeSelectionState.active = true;
+      }
+
+      if (!marqueeSelectionState.hitEntriesReady) {
+        const { frameHitEntries, positionGroupHitEntries } = buildMarqueeSelectionHitEntries(
+          marqueeSelectionState.pageInner
+        );
+        marqueeSelectionState.frameHitEntries = frameHitEntries;
+        marqueeSelectionState.positionGroupHitEntries = positionGroupHitEntries;
+        marqueeSelectionState.hitEntriesReady = true;
+      }
+
+      const nextMode: FrameMarqueeSelectionMode =
+        currentPoint.x >= marqueeSelectionState.origin.x ? 'contained' : 'intersected';
+      marqueeSelectionState.mode = nextMode;
+      marqueeSelectionState.ghost?.setAttribute('data-marquee-mode', nextMode);
+      if (marqueeSelectionState.ghost) {
+        writeFrameEditorGhostRect(marqueeSelectionState.ghost, nextRect);
+      }
+
+      const nextSelectionIds = resolveMarqueeSelectionIdsFromHitEntries({
+        selectionRect: nextRect,
+        mode: nextMode,
+        baseSelectionIds: marqueeSelectionState.baseSelectionIds,
+        frameHitEntries: marqueeSelectionState.frameHitEntries,
+        positionGroupHitEntries: marqueeSelectionState.positionGroupHitEntries,
+        usePositionGroups: selectionPanelTab === 'position',
+      });
+      const shouldShowMarqueeProxySelections = selectionPanelTab === 'position';
+      const computedMarqueeProxySelections = shouldShowMarqueeProxySelections
+        ? resolvePositionMarqueeProxySelectionsFromHitEntries(
+            marqueeSelectionState.positionGroupHitEntries,
+            nextSelectionIds
+          )
+        : undefined;
+      const retainedBaseProxySelections = shouldShowMarqueeProxySelections
+        ? retainPositionProxySelectionsForSelectedIds(marqueeSelectionState.baseProxySelections, nextSelectionIds)
+        : undefined;
+      const marqueeProxySelections = shouldShowMarqueeProxySelections
+        ? mergePositionProxySelections(retainedBaseProxySelections, computedMarqueeProxySelections)
+        : undefined;
+      if (
+        stringArraysEqual(marqueeSelectionState.lastSelectionIds, nextSelectionIds) &&
+        positionGroupProxySelectionsEqual(marqueeSelectionState.lastProxySelections, marqueeProxySelections)
+      ) {
+        return;
+      }
+
+      marqueeSelectionState.lastSelectionIds = nextSelectionIds;
+      marqueeSelectionState.lastProxySelections = marqueeProxySelections;
+      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+      selectedFrameGroupIdsRef.current = nextSelectionIds;
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      applyFastFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
+    },
+    [applyFastFrameBoxSelectionVisuals, buildMarqueeSelectionHitEntries, selectionPanelTab]
+  );
+
+  const stepMarqueeAutoScroll = React.useCallback(() => {
+    marqueeAutoScrollFrameRef.current = null;
+    const marqueeSelectionState = marqueeSelectionStateRef.current;
+    const pointer = marqueeAutoScrollPointerRef.current;
+    const scrollContainer = previewRef.current;
+
+    if (
+      !marqueeSelectionState ||
+      !pointer ||
+      !scrollContainer ||
+      marqueeSelectionState.pointerId !== pointer.pointerId ||
+      !marqueeSelectionState.active
+    ) {
+      stopMarqueeAutoScroll();
+      return;
+    }
+
+    const { deltaX, deltaY } = resolveMarqueeAutoScrollDelta(scrollContainer, pointer.clientX, pointer.clientY);
+    const maxScrollLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+    const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+    const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, scrollContainer.scrollLeft + deltaX));
+    const nextScrollTop = Math.max(0, Math.min(maxScrollTop, scrollContainer.scrollTop + deltaY));
+    const didScroll =
+      Math.abs(nextScrollLeft - scrollContainer.scrollLeft) > 0.1 ||
+      Math.abs(nextScrollTop - scrollContainer.scrollTop) > 0.1;
+
+    if (!didScroll) {
+      stopMarqueeAutoScroll();
+      return;
+    }
+
+    scrollContainer.scrollLeft = nextScrollLeft;
+    scrollContainer.scrollTop = nextScrollTop;
+    updateMarqueeSelectionFromClientPoint(marqueeSelectionState, pointer.clientX, pointer.clientY);
+
+    if (marqueeSelectionStateRef.current?.pointerId === pointer.pointerId) {
+      marqueeAutoScrollFrameRef.current = window.requestAnimationFrame(stepMarqueeAutoScroll);
+    }
+  }, [stopMarqueeAutoScroll, updateMarqueeSelectionFromClientPoint]);
+
+  const syncMarqueeAutoScrollFromClientPoint = React.useCallback(
+    (pointerId: number, clientX: number, clientY: number) => {
+      const marqueeSelectionState = marqueeSelectionStateRef.current;
+      const scrollContainer = previewRef.current;
+
+      if (
+        !marqueeSelectionState ||
+        !scrollContainer ||
+        marqueeSelectionState.pointerId !== pointerId ||
+        !marqueeSelectionState.active
+      ) {
+        stopMarqueeAutoScroll();
+        return;
+      }
+
+      marqueeAutoScrollPointerRef.current = {
+        pointerId,
+        clientX,
+        clientY,
+      };
+      const { deltaX, deltaY } = resolveMarqueeAutoScrollDelta(scrollContainer, clientX, clientY);
+
+      if (Math.abs(deltaX) < 0.1 && Math.abs(deltaY) < 0.1) {
+        if (marqueeAutoScrollFrameRef.current !== null) {
+          window.cancelAnimationFrame(marqueeAutoScrollFrameRef.current);
+          marqueeAutoScrollFrameRef.current = null;
+        }
+        return;
+      }
+
+      if (marqueeAutoScrollFrameRef.current === null) {
+        marqueeAutoScrollFrameRef.current = window.requestAnimationFrame(stepMarqueeAutoScroll);
+      }
+    },
+    [stepMarqueeAutoScroll, stopMarqueeAutoScroll]
+  );
+
   const handlePreviewPointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) {
@@ -32734,78 +32962,8 @@ export default function TemplateEditWorkspace({
 
     if (marqueeSelectionState && event.pointerId === marqueeSelectionState.pointerId) {
       event.preventDefault();
-      const currentPoint = readPageInnerPointerPoint(
-        marqueeSelectionState.pageInner,
-        event.clientX,
-        event.clientY,
-        marqueeSelectionState.scale
-      );
-      const nextRect = buildPointerDragRect(marqueeSelectionState.origin, currentPoint);
-
-      if (
-        !marqueeSelectionState.active &&
-        nextRect.width < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
-        nextRect.height < FRAME_MARQUEE_DRAG_THRESHOLD_PX
-      ) {
-        return;
-      }
-
-      if (!marqueeSelectionState.active) {
-        const nextGhost = createFrameEditorGhost(FRAME_MARQUEE_GHOST_CLASS, marqueeSelectionState.mode);
-        marqueeSelectionState.pageInner.appendChild(nextGhost);
-        marqueeSelectionState.ghost = nextGhost;
-        marqueeSelectionState.active = true;
-      }
-
-      if (!marqueeSelectionState.hitEntriesReady) {
-        const { frameHitEntries, positionGroupHitEntries } = buildMarqueeSelectionHitEntries(marqueeSelectionState.pageInner);
-        marqueeSelectionState.frameHitEntries = frameHitEntries;
-        marqueeSelectionState.positionGroupHitEntries = positionGroupHitEntries;
-        marqueeSelectionState.hitEntriesReady = true;
-      }
-
-      const nextMode: FrameMarqueeSelectionMode =
-        currentPoint.x >= marqueeSelectionState.origin.x ? 'contained' : 'intersected';
-      marqueeSelectionState.mode = nextMode;
-      marqueeSelectionState.ghost?.setAttribute('data-marquee-mode', nextMode);
-      if (marqueeSelectionState.ghost) {
-        writeFrameEditorGhostRect(marqueeSelectionState.ghost, nextRect);
-      }
-
-      const nextSelectionIds = resolveMarqueeSelectionIdsFromHitEntries({
-        selectionRect: nextRect,
-        mode: nextMode,
-        baseSelectionIds: marqueeSelectionState.baseSelectionIds,
-        frameHitEntries: marqueeSelectionState.frameHitEntries,
-        positionGroupHitEntries: marqueeSelectionState.positionGroupHitEntries,
-        usePositionGroups: selectionPanelTab === 'position',
-      });
-      const shouldShowMarqueeProxySelections = selectionPanelTab === 'position';
-      const computedMarqueeProxySelections = shouldShowMarqueeProxySelections
-        ? resolvePositionMarqueeProxySelectionsFromHitEntries(
-            marqueeSelectionState.positionGroupHitEntries,
-            nextSelectionIds
-          )
-        : undefined;
-      const retainedBaseProxySelections = shouldShowMarqueeProxySelections
-        ? retainPositionProxySelectionsForSelectedIds(marqueeSelectionState.baseProxySelections, nextSelectionIds)
-        : undefined;
-      const marqueeProxySelections = shouldShowMarqueeProxySelections
-        ? mergePositionProxySelections(retainedBaseProxySelections, computedMarqueeProxySelections)
-        : undefined;
-      if (
-        stringArraysEqual(marqueeSelectionState.lastSelectionIds, nextSelectionIds) &&
-        positionGroupProxySelectionsEqual(marqueeSelectionState.lastProxySelections, marqueeProxySelections)
-      ) {
-        return;
-      }
-
-      marqueeSelectionState.lastSelectionIds = nextSelectionIds;
-      marqueeSelectionState.lastProxySelections = marqueeProxySelections;
-      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-      selectedFrameGroupIdsRef.current = nextSelectionIds;
-      edgeSelectionStateRef.current = emptyEdgeSelection;
-      applyFastFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
+      updateMarqueeSelectionFromClientPoint(marqueeSelectionState, event.clientX, event.clientY);
+      syncMarqueeAutoScrollFromClientPoint(event.pointerId, event.clientX, event.clientY);
       return;
     }
 
@@ -33766,12 +33924,13 @@ export default function TemplateEditWorkspace({
     },
 	    [
 	      applyFrameBoxSelection,
-	      applyFastFrameBoxSelectionVisuals,
 	      applyPositionOrderLockMarqueeSelection,
 	      applyRuntimeSelectionUi,
 	      applyShiftMergedPositionEntitySelection,
 	      clearTransientCanvasOverlays,
 	      commitCreatedFrameShell,
+      syncMarqueeAutoScrollFromClientPoint,
+      updateMarqueeSelectionFromClientPoint,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
 	      selectionPanelTab,
