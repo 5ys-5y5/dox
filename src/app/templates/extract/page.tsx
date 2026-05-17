@@ -837,83 +837,6 @@ export function TemplateExtractWorkspace({
             ) : null}
           </div>
           <div className="space-y-3">
-            <div>
-              <Button
-                variant="outline"
-                disabled={loading}
-                onClick={() => setVersionOptionsVisible((previous) => !previous)}
-                className="w-full"
-              >
-                {versionOptionsVisible ? '버전 숨기기' : '버전 선택하기'}
-              </Button>
-            </div>
-            {versionOptionsVisible ? (
-              <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                <div className="space-y-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-800">프레임 그룹 버전</label>
-                    <select
-                      value={frameGroupVersion}
-                      onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
-                      disabled={loading}
-                      className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
-                    >
-                      {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <Button variant="outline" disabled={loading || !selectedFile} onClick={() => void handleCreateFrameGroups()}>
-                    프레임 그룹 생성
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-800">텍스트 추출 버전</label>
-                  <select
-                    value={currentTextVersion}
-                    onChange={(event) =>
-                      frameTextExtractionMode === 'image'
-                        ? setImageFrameTextExtractionVersion(event.target.value as TemplateExtractImageFrameTextVersion)
-                        : setFrameTextExtractionVersion(event.target.value as TemplateExtractNonImageFrameTextVersion)
-                    }
-                    disabled={loading}
-                    className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
-                  >
-                    {(frameTextExtractionMode === 'image'
-                      ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-                      : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
-                    ).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="grid gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() =>
-                        setFrameTextExtractionMode((previous) =>
-                          previous === 'image' ? 'non_image' : 'image'
-                        )
-                      }
-                    >
-                      {frameTextExtractionMode === 'image' ? '이미지' : '비 이미지'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      disabled={loading || !textExtractionReady}
-                      onClick={() => void handleExtractFrameText()}
-                    >
-                      프레임 텍스트 추출
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
             <div className="space-y-2">
               <div className="flex items-stretch gap-2">
                 <Button disabled={loading || !selectedFile} onClick={() => void handleRunFullExtract()} className="flex-1">
@@ -923,7 +846,15 @@ export function TemplateExtractWorkspace({
                   type="button"
                   variant="outline"
                   disabled={loading}
-                  onClick={() => setStageActionsVisible((previous) => !previous)}
+                  onClick={() =>
+                    setStageActionsVisible((previous) => {
+                      const nextVisible = !previous;
+                      if (!nextVisible) {
+                        setVersionOptionsVisible(false);
+                      }
+                      return nextVisible;
+                    })
+                  }
                   aria-label={stageActionsVisible ? '단계 실행 접기' : '단계 실행 펼치기'}
                   title={stageActionsVisible ? '단계 실행 접기' : '단계 실행 펼치기'}
                   className="w-10 shrink-0 px-0"
@@ -933,6 +864,81 @@ export function TemplateExtractWorkspace({
               </div>
               {stageActionsVisible ? (
                 <div className="grid grid-cols-1 gap-2 pl-4">
+                  <Button
+                    variant="outline"
+                    disabled={loading}
+                    onClick={() => setVersionOptionsVisible((previous) => !previous)}
+                    className="w-full"
+                  >
+                    {versionOptionsVisible ? '버전 숨기기' : '버전 선택하기'}
+                  </Button>
+                  {versionOptionsVisible ? (
+                    <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="space-y-2">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-slate-800">프레임 그룹 버전</label>
+                          <select
+                            value={frameGroupVersion}
+                            onChange={(event) => setFrameGroupVersion(event.target.value as TemplateExtractFrameGroupVersion)}
+                            disabled={loading}
+                            className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
+                          >
+                            {TEMPLATE_EXTRACT_FRAME_GROUP_VERSION_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <Button variant="outline" disabled={loading || !selectedFile} onClick={() => void handleCreateFrameGroups()}>
+                          프레임 그룹 생성
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-800">텍스트 추출 버전</label>
+                        <select
+                          value={currentTextVersion}
+                          onChange={(event) =>
+                            frameTextExtractionMode === 'image'
+                              ? setImageFrameTextExtractionVersion(event.target.value as TemplateExtractImageFrameTextVersion)
+                              : setFrameTextExtractionVersion(event.target.value as TemplateExtractNonImageFrameTextVersion)
+                          }
+                          disabled={loading}
+                          className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800"
+                        >
+                          {(frameTextExtractionMode === 'image'
+                            ? IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                            : NON_IMAGE_FRAME_TEXT_EXTRACTION_VERSION_OPTIONS
+                          ).map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="grid gap-2">
+                          <Button
+                            variant="outline"
+                            disabled={loading}
+                            onClick={() =>
+                              setFrameTextExtractionMode((previous) =>
+                                previous === 'image' ? 'non_image' : 'image'
+                              )
+                            }
+                          >
+                            {frameTextExtractionMode === 'image' ? '이미지' : '비 이미지'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            disabled={loading || !textExtractionReady}
+                            onClick={() => void handleExtractFrameText()}
+                          >
+                            프레임 텍스트 추출
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   <Button
                     variant="outline"
                     disabled={loading || !selectedFile}

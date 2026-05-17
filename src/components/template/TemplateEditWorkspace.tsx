@@ -649,8 +649,7 @@ type TemplateEditPreviewSurfaceProps = {
   styleOverlayLabel?: string;
   sizeTypeOverlay?: TemplateFloatingOverlayContent;
   textStyleOverlay?: TemplateFloatingOverlayContent;
-  textStyleOverlayCollapsed: boolean;
-  setTextStyleOverlayCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  onTextStyleOverlayCollapsedChange?: (collapsed: boolean) => void;
   textStyleOverlayExpandedWidthClassName?: string;
   summaryOverlay?: TemplateFloatingOverlayContent;
   setPreviewNode: (node: HTMLDivElement | null) => void;
@@ -1197,8 +1196,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   styleOverlayLabel = '스타일',
   sizeTypeOverlay,
   textStyleOverlay,
-  textStyleOverlayCollapsed,
-  setTextStyleOverlayCollapsed,
+  onTextStyleOverlayCollapsedChange,
   textStyleOverlayExpandedWidthClassName,
   summaryOverlay,
   setPreviewNode,
@@ -1254,6 +1252,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   }, [renderedPreviewHtml, templateUsagePreviewMode]);
   const [styleOverlayCollapsed, setStyleOverlayCollapsed] = React.useState(true);
   const [sizeTypeOverlayCollapsed, setSizeTypeOverlayCollapsed] = React.useState(true);
+  const [textStyleOverlayCollapsed, setTextStyleOverlayCollapsed] = React.useState(true);
   const [summaryOverlayCollapsed, setSummaryOverlayCollapsed] = React.useState(true);
   const [actionOverlayCollapsed, setActionOverlayCollapsed] = React.useState(false);
   const [metadataNameOverlayCollapsed, setMetadataNameOverlayCollapsed] = React.useState(true);
@@ -1270,6 +1269,12 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
   const hasMetadataRolePrimaryOverlay = Boolean(metadataRolePrimaryOverlay);
   const hasMetadataRoleSecondaryOverlay = Boolean(metadataRoleSecondaryOverlay);
   const hasMetadataRoleTertiaryOverlay = Boolean(metadataRoleTertiaryOverlay);
+
+  React.useEffect(() => {
+    onTextStyleOverlayCollapsedChange?.(
+      !hasTextStyleOverlay || selectionPanelTab !== 'position' ? true : textStyleOverlayCollapsed
+    );
+  }, [hasTextStyleOverlay, onTextStyleOverlayCollapsedChange, selectionPanelTab, textStyleOverlayCollapsed]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1968,6 +1973,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
     content: TemplateFloatingOverlayContent | null | undefined,
     options: {
       alwaysExpanded?: boolean;
+      keepMountedWhenCollapsed?: boolean;
       expandedWidthClassName?: string;
     } = {}
   ) => {
@@ -2073,15 +2079,18 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
               <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
             )}
           </button>
-          {isCollapsed ? null : (
+          {isCollapsed && !options.keepMountedWhenCollapsed ? null : (
             <div
               className={
-                overlayId === 'style'
-                  ? 'inline-flex w-fit max-w-full flex-col items-start gap-2.5 p-2'
-                  : overlayId === 'sizeType'
-                    ? 'max-w-full p-2'
-                  : 'max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2'
+                isCollapsed
+                  ? 'hidden'
+                  : overlayId === 'style'
+                    ? 'inline-flex w-fit max-w-full flex-col items-start gap-2.5 p-2'
+                    : overlayId === 'sizeType'
+                      ? 'max-w-full p-2'
+                      : 'max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2'
               }
+              aria-hidden={isCollapsed}
             >
               {contentRenderer ? contentRenderer() : content}
             </div>
@@ -2166,7 +2175,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         setStyleOverlayCollapsed,
         finishStyleOverlayDrag,
         styleOverlay,
-        { expandedWidthClassName: 'w-fit max-w-[250px]' }
+        { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
       )}
       {renderFloatingOverlaySection(
         'sizeType',
@@ -2184,7 +2193,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         setTextStyleOverlayCollapsed,
         finishTextStyleOverlayDrag,
         textStyleOverlay,
-        { expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]' }
+        {
+          expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]',
+          keepMountedWhenCollapsed: true,
+        }
       )}
       {renderFloatingOverlaySection(
         'metadataName',
@@ -6812,6 +6824,99 @@ const applyFramePositionMode = (
   );
 };
 
+const AUTO_POSITION_GROUP_LABEL_PATTERN = /^그룹\s+\d+$/u;
+
+type ExtractAutoPositionGroupCandidate = {
+  pageInner: HTMLElement;
+  groupIds: string[];
+  affectedFrameNodes: HTMLElement[];
+};
+
+const collectExtractAutoPositionGroupCandidates = (
+  scope: ParentNode | null | undefined
+): ExtractAutoPositionGroupCandidate[] => {
+  if (!scope) {
+    return [];
+  }
+
+  return collectPageInnerElements(scope)
+    .map((pageInner) => {
+      const treeEntries = readPositionGroupTreeEntries(pageInner).filter((entry) => !isLegacyInferredPositionGroupId(entry.id));
+
+      if (treeEntries.length <= 0) {
+        return null;
+      }
+
+      if (treeEntries.some((entry) => (entry.childGroupIds || []).length > 0)) {
+        return null;
+      }
+
+      if (
+        treeEntries.some(
+          (entry) => !AUTO_POSITION_GROUP_LABEL_PATTERN.test(normalizePositionGroupDisplayLabel(entry.label, entry.id))
+        )
+      ) {
+        return null;
+      }
+
+      const frameNodes = collectFrameSelectionAnchors(pageInner);
+
+      if (frameNodes.length <= 0) {
+        return null;
+      }
+
+      const hasExplicitMembership = frameNodes.some((node) => Boolean(readFramePositionGroupConfig(node)?.groupId));
+
+      if (hasExplicitMembership) {
+        return null;
+      }
+
+      const groupIdSet = new Set(treeEntries.map((entry) => entry.id.trim()).filter(Boolean));
+      const affectedFrameNodes = frameNodes.filter((node) => {
+        const config = readFrameRelativeAnchorConfig(node, pageInner);
+        return config?.anchorKind === 'group' && groupIdSet.has(String(config.anchorId || '').trim());
+      });
+
+      if (affectedFrameNodes.length <= 0) {
+        return null;
+      }
+
+      const minimumAffectedCount = Math.max(2, Math.ceil(frameNodes.length * 0.5));
+
+      if (affectedFrameNodes.length < minimumAffectedCount) {
+        return null;
+      }
+
+      return {
+        pageInner,
+        groupIds: Array.from(groupIdSet),
+        affectedFrameNodes,
+      } satisfies ExtractAutoPositionGroupCandidate;
+    })
+    .filter((candidate): candidate is ExtractAutoPositionGroupCandidate => Boolean(candidate));
+};
+
+const normalizeExtractAutoPositionGroups = (scope: ParentNode | null | undefined) => {
+  const candidates = collectExtractAutoPositionGroupCandidates(scope);
+  let clearedFrameCount = 0;
+  let removedGroupCount = 0;
+
+  candidates.forEach(({ pageInner, groupIds, affectedFrameNodes }) => {
+    affectedFrameNodes.forEach((frameNode) => {
+      applyFramePositionMode(frameNode, 'absolute', pageInner);
+      clearedFrameCount += 1;
+    });
+
+    removedGroupCount += removePositionGroupTreeEntriesByIds(pageInner, groupIds);
+    removePositionGroupWrappersByIds(pageInner, groupIds);
+  });
+
+  return {
+    clearedFrameCount,
+    removedGroupCount,
+  };
+};
+
 const normalizePositionGroupRelativeAnchors = (
   scope: ParentNode | null | undefined,
   targetPositionGroupId?: string
@@ -11361,6 +11466,10 @@ const restoreFrameTextInputFocus = (
 const applyFrameTextEditingMode = (root: HTMLElement, enabled: boolean) => {
   const usagePreviewMode = root.getAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR) === 'true';
 
+  if (enabled && !usagePreviewMode) {
+    return;
+  }
+
   root.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]').forEach((input) => {
     if (usagePreviewMode && input.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'text') {
       enableFrameTextInputForEditing(input);
@@ -11378,19 +11487,32 @@ const applyPreviewEditPermissions = (
   selectionPanelTab: SelectionPanelTab = 'position',
   textCanvasEditMode = false
 ) => {
-  const permissionSignature = `${selectionPanelTab}:${textCanvasEditMode ? 'text' : 'default'}`;
+  const usagePreviewMode = root.getAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR) === 'true';
+  const effectiveTextCanvasEditMode = usagePreviewMode ? textCanvasEditMode : false;
+  const permissionSignature = `${selectionPanelTab}:${effectiveTextCanvasEditMode ? 'text' : 'default'}`;
+  const previousPermissionSignature = root.getAttribute(TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR) || '';
+  const previousSelectionPanelTab = previousPermissionSignature.split(':')[0] || '';
+  const previousTextCanvasEditMode = root.getAttribute(TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR) === 'true';
 
-  if (root.getAttribute(TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR) === permissionSignature) {
+  if (previousPermissionSignature === permissionSignature) {
     return;
   }
 
   setElementAttributeIfChanged(root, TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR, permissionSignature);
-  setElementAttributeIfChanged(root, TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR, textCanvasEditMode ? 'true' : 'false');
-  root.querySelectorAll<HTMLElement>('[data-template-edit-scope]').forEach((element) => {
-    element.setAttribute('contenteditable', 'true');
-    element.setAttribute('data-template-edit-enabled', 'true');
-  });
-  applyFrameTextEditingMode(root, textCanvasEditMode);
+  setElementAttributeIfChanged(
+    root,
+    TEMPLATE_PREVIEW_TEXT_CANVAS_EDIT_MODE_ATTR,
+    effectiveTextCanvasEditMode ? 'true' : 'false'
+  );
+  if (previousSelectionPanelTab !== selectionPanelTab) {
+    root.querySelectorAll<HTMLElement>('[data-template-edit-scope]').forEach((element) => {
+      element.setAttribute('contenteditable', 'true');
+      element.setAttribute('data-template-edit-enabled', 'true');
+    });
+  }
+  if (previousTextCanvasEditMode !== effectiveTextCanvasEditMode) {
+    applyFrameTextEditingMode(root, effectiveTextCanvasEditMode);
+  }
   if (root.getAttribute(TEMPLATE_PREVIEW_CONTENT_STABILIZED_ATTR) !== 'true') {
     primeFrameContentScaleMetrics(root);
     collectFrameSelectionAnchors(root).forEach((node) => {
@@ -17043,7 +17165,6 @@ export default function TemplateEditWorkspace({
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
   const [canvasFullscreen, setCanvasFullscreen] = React.useState(false);
-  const [positionTextStyleOverlayCollapsed, setPositionTextStyleOverlayCollapsed] = React.useState(true);
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
   const [positionRelationTargetFrameGroupId, setPositionRelationTargetFrameGroupId] = React.useState('');
   const [positionOrderLockSelectionMode, setPositionOrderLockSelectionMode] = React.useState(false);
@@ -17061,8 +17182,8 @@ export default function TemplateEditWorkspace({
   >('');
   const [moveGroupAssignmentTargetGroupId, setMoveGroupAssignmentTargetGroupId] = React.useState('');
   const [positionGroupEditMode, setPositionGroupEditMode] = React.useState<PositionGroupEditMode>({ kind: 'idle' });
-  const isTextCanvasEditModeActive = selectionPanelTab === 'position' && !positionTextStyleOverlayCollapsed;
-  const textCanvasEditModeActiveRef = React.useRef(isTextCanvasEditModeActive);
+  const textCanvasEditModeActiveRef = React.useRef(false);
+  const textCanvasEditModeFrameRef = React.useRef<number | null>(null);
   const [expandedPositionBoxGroupIds, setExpandedPositionBoxGroupIds] = React.useState<Record<string, boolean>>({});
   const [expandedPositionSummarySections, setExpandedPositionSummarySections] = React.useState<Record<string, boolean>>({});
   const [expandedSelectionSummaryTabs, setExpandedSelectionSummaryTabs] = React.useState<
@@ -17089,9 +17210,6 @@ export default function TemplateEditWorkspace({
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [spacePanArmed, setSpacePanArmed] = React.useState(false);
   const [spacePanDragging, setSpacePanDragging] = React.useState(false);
-  React.useEffect(() => {
-    textCanvasEditModeActiveRef.current = isTextCanvasEditModeActive;
-  }, [isTextCanvasEditModeActive]);
   React.useEffect(() => {
     spacePanArmedRef.current = spacePanArmed;
   }, [spacePanArmed]);
@@ -17128,6 +17246,62 @@ export default function TemplateEditWorkspace({
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
+  const syncTextCanvasEditMode = React.useCallback(
+    (nextActive: boolean) => {
+      const applyNextMode = (nextMode: boolean) => {
+        textCanvasEditModeActiveRef.current = nextMode;
+        const root = previewRef.current;
+
+        if (root) {
+          applyPreviewEditPermissions(root, selectionPanelTab, nextMode);
+        }
+      };
+
+      if (typeof window === 'undefined') {
+        applyNextMode(nextActive);
+        return;
+      }
+
+      if (textCanvasEditModeFrameRef.current !== null) {
+        window.cancelAnimationFrame(textCanvasEditModeFrameRef.current);
+        textCanvasEditModeFrameRef.current = null;
+      }
+
+      if (!nextActive) {
+        applyNextMode(false);
+        return;
+      }
+
+      textCanvasEditModeFrameRef.current = window.requestAnimationFrame(() => {
+        textCanvasEditModeFrameRef.current = null;
+        applyNextMode(true);
+      });
+    },
+    [selectionPanelTab]
+  );
+  React.useEffect(() => {
+    return () => {
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      if (textCanvasEditModeFrameRef.current !== null) {
+        window.cancelAnimationFrame(textCanvasEditModeFrameRef.current);
+        textCanvasEditModeFrameRef.current = null;
+      }
+    };
+  }, []);
+  React.useEffect(() => {
+    if (selectionPanelTab !== 'position') {
+      syncTextCanvasEditMode(false);
+    }
+  }, [selectionPanelTab, syncTextCanvasEditMode]);
+  const handleTextStyleOverlayCollapsedChange = React.useCallback(
+    (collapsed: boolean) => {
+      syncTextCanvasEditMode(selectionPanelTab === 'position' && !collapsed);
+    },
+    [selectionPanelTab, syncTextCanvasEditMode]
+  );
   const toggleCanvasFullscreen = React.useCallback(() => {
     setCanvasFullscreen((previous) => !previous);
   }, []);
@@ -19926,6 +20100,10 @@ export default function TemplateEditWorkspace({
       return baseRelations;
     }
 
+    const extractAutoGroupPageInnerSet = new Set(
+      collectExtractAutoPositionGroupCandidates(root).map((candidate) => candidate.pageInner)
+    );
+
     const frameNodes = collectFrameSelectionAnchors(root);
     const frameNodeById = new Map<string, HTMLElement>();
     frameNodes.forEach((node) => {
@@ -20015,6 +20193,12 @@ export default function TemplateEditWorkspace({
 
     const fallbackRelations = frameNodes
       .map((targetNode) => {
+        const nodePageInner = targetNode.closest<HTMLElement>('.page-inner') || null;
+
+        if (nodePageInner && extractAutoGroupPageInnerSet.has(nodePageInner)) {
+          return null;
+        }
+
         const targetFrameGroupId = getFrameGroupId(targetNode).trim();
         const targetConfig = readNodeRelativeConfig(targetNode);
 
@@ -23512,6 +23696,11 @@ export default function TemplateEditWorkspace({
           setMessage(`허용되지 않는 추론 그룹 간격 ${clearedLegacyInferredCount}개를 제거했습니다.`);
           return;
         }
+        const normalizedExtractAutoGroupResult = normalizeExtractAutoPositionGroups(node);
+        if (normalizedExtractAutoGroupResult.clearedFrameCount > 0 || normalizedExtractAutoGroupResult.removedGroupCount > 0) {
+          syncDraftPreviewHtmlRef();
+          return;
+        }
         schedulePreviewEditorState();
         void (async () => {
           await document.fonts?.ready?.catch(() => undefined);
@@ -25140,8 +25329,8 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    applyPreviewEditPermissions(root, selectionPanelTab, isTextCanvasEditModeActive);
-  }, [renderedPreviewHtml, selectionPanelTab, isTextCanvasEditModeActive]);
+    applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
+  }, [renderedPreviewHtml, selectionPanelTab]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -31197,7 +31386,7 @@ export default function TemplateEditWorkspace({
         });
       };
 
-      if (isTextCanvasEditModeActive && frameNode && !edgeButton && !resizeHandle && !event.shiftKey) {
+      if (textCanvasEditModeActiveRef.current && frameNode && !edgeButton && !resizeHandle && !event.shiftKey) {
         const clickedTextInput = resolveFrameTextInputElement(target);
         const isActiveTextInput =
           Boolean(clickedTextInput) &&
@@ -31448,11 +31637,12 @@ export default function TemplateEditWorkspace({
       }
 
 	      if (selectionPanelTab === 'position' && !edgeButton && !resizeHandle) {
+        const pointerPoint = pageInner
+          ? readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100)
+          : null;
+
         if (positionOrderLockSelectionMode) {
           event.preventDefault();
-          const pointerPoint = pageInner
-            ? readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100)
-            : null;
           const clickChain = resolvePositionSelectionClickChain(pageInner, frameGroupId, pointerPoint);
           const currentChainIndex = resolvePositionOrderLockClickChainCurrentIndex(clickChain.entries);
           const nextChainIndex =
@@ -31528,7 +31718,39 @@ export default function TemplateEditWorkspace({
           currentSelectionIds.length === 1 &&
           currentSelectionIds[0] === frameGroupId &&
           !positionGroupProxySelectionGroupIdRef.current.trim();
-        if (!event.shiftKey && positionGroupEditModeRef.current.kind === 'idle' && !isSameSingleFrameSelection) {
+        const directSelectionGroup = positionBoxGroupByFrameGroupId.get(frameGroupId) || null;
+        const liveDirectSelectionGroupFrameCount = (() => {
+          if (!frameNode) {
+            return 0;
+          }
+
+          const groupWrapper = frameNode.closest<HTMLElement>('[data-template-position-group-node="true"]');
+
+          if (!groupWrapper) {
+            return 0;
+          }
+
+          return Array.from(
+            new Set(
+              Array.from(groupWrapper.querySelectorAll<HTMLElement>('[data-template-frame-group]'))
+                .map((node) => node.getAttribute('data-template-frame-group')?.trim() || '')
+                .filter((candidateFrameGroupId) => Boolean(candidateFrameGroupId))
+            )
+          ).length;
+        })();
+        const directSelectionClickChain =
+          positionGroupEditModeRef.current.kind === 'idle'
+            ? resolvePositionSelectionClickChain(pageInner, frameGroupId, pointerPoint)
+            : { entries: [] as PositionSelectionClickChainEntry[] };
+        const hasDirectSelectionGroupEntry = directSelectionClickChain.entries.some((entry) => entry.kind === 'group');
+        const canUseDirectFrameSelection =
+          !event.shiftKey &&
+          positionGroupEditModeRef.current.kind === 'idle' &&
+          !isSameSingleFrameSelection &&
+          (!directSelectionGroup || directSelectionGroup.frameGroupIds.length <= 1) &&
+          liveDirectSelectionGroupFrameCount <= 1 &&
+          !hasDirectSelectionGroupEntry;
+        if (canUseDirectFrameSelection) {
           applyFrameBoxSelection([frameGroupId], {
             disableAutoPositionGroupProxySelection: true,
             positionSelectionEntity: {
@@ -31542,10 +31764,7 @@ export default function TemplateEditWorkspace({
           startFrameDragInteraction(frameNode, [frameGroupId]);
           return;
         }
-        const pointerPoint = pageInner
-          ? readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, previewZoom / 100)
-          : null;
-        const clickChain = resolvePositionSelectionClickChain(pageInner, frameGroupId, pointerPoint);
+        const clickChain = directSelectionClickChain;
         React.startTransition(() => {
           setPositionSelectionClickChainSnapshot({
             sourceFrameGroupId: frameGroupId,
@@ -32842,7 +33061,6 @@ export default function TemplateEditWorkspace({
 	      applyShiftMergedPositionEntitySelection,
 	      clearTransientCanvasOverlays,
 	      commitCreatedFrameShell,
-      isTextCanvasEditModeActive,
       resolveEdgeRolePresentation,
       schedulePreviewEditorState,
 	      selectionPanelTab,
@@ -33053,7 +33271,7 @@ export default function TemplateEditWorkspace({
 
     const target = event.target instanceof HTMLElement ? event.target : null;
 
-    if (isTextCanvasEditModeActive && target && previewRef.current) {
+    if (textCanvasEditModeActiveRef.current && target && previewRef.current) {
       const clickedTextInput = resolveFrameTextInputElement(target);
 
       if (clickedTextInput && previewRef.current.contains(clickedTextInput)) {
@@ -33094,7 +33312,7 @@ export default function TemplateEditWorkspace({
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-	  }, [deleteCanvasSelectionEntity, isTextCanvasEditModeActive, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+	  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
 
 	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
 	    const target = event.target instanceof HTMLElement ? event.target : null;
@@ -33169,7 +33387,7 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    if (isTextCanvasEditModeActive) {
+    if (textCanvasEditModeActiveRef.current) {
       return;
     }
 
@@ -33184,7 +33402,6 @@ export default function TemplateEditWorkspace({
 	  }, [
     applyTemplateAutoSizeBoxesWithPreservedLayout,
     cancelDeferredTextAutoSizeSync,
-    isTextCanvasEditModeActive,
     scheduleDeferredStylePanelSync,
     templateUsagePreviewMode,
   ]);
@@ -35031,14 +35248,6 @@ export default function TemplateEditWorkspace({
     );
   };
 
-  const renderPositionTextStyleOverlay = () => {
-    if (selectionPanelTab !== 'position') {
-      return null;
-    }
-
-    return renderTextCanvasActionControls();
-  };
-
   const renderPositionActionOverlay = () => {
     if (selectionPanelTab !== 'position') {
       return null;
@@ -35427,6 +35636,20 @@ export default function TemplateEditWorkspace({
       </div>
     );
   };
+  const positionTextStyleOverlayNode = React.useMemo(() => {
+    if (templateUsagePreviewMode || selectionPanelTab !== 'position') {
+      return null;
+    }
+
+    return renderTextCanvasActionControls();
+  }, [
+    selectedFrameGroupIds,
+    selectedPositionResolvedFrameGroupIds,
+    selectionPanelTab,
+    selectionStyleDraft,
+    styleFieldApplyStatus,
+    templateUsagePreviewMode,
+  ]);
 
   const renderMetadataNameOverlay = () => (
     <div className="space-y-3">
@@ -37547,9 +37770,8 @@ export default function TemplateEditWorkspace({
 	            styleOverlay={templateUsagePreviewMode ? null : renderPositionBoxStyleOverlay()}
 	            styleOverlayLabel="상자 스타일"
 	            sizeTypeOverlay={templateUsagePreviewMode ? null : renderPositionBoxSizeTypeOverlay()}
-	            textStyleOverlay={templateUsagePreviewMode ? null : renderPositionTextStyleOverlay()}
-	            textStyleOverlayCollapsed={positionTextStyleOverlayCollapsed}
-	            setTextStyleOverlayCollapsed={setPositionTextStyleOverlayCollapsed}
+	            textStyleOverlay={positionTextStyleOverlayNode}
+	            onTextStyleOverlayCollapsedChange={handleTextStyleOverlayCollapsedChange}
 	            textStyleOverlayExpandedWidthClassName="w-fit max-w-[250px]"
 	            summaryOverlay={templateUsagePreviewMode ? null : renderSelectionSummaryBox()}
             setPreviewNode={setPreviewNode}

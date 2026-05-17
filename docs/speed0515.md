@@ -35,6 +35,12 @@
 | P-12 | 자동 너비 | 버튼 클릭 | 100ms 이하 | 29.6ms | 29.6ms | 완료 | `band-3-cell-1` 단일 선택 기준, `auto-height -> auto-width` 전환 완료 시점 |
 | P-13 | 텍스트 스타일 | 글자 크기/색상 변경 | 100ms 이하 | 8.2ms / 0.4ms | 8.2ms / 0.4ms | 완료 | 글자 크기 8.2ms, 글자 색 0.4ms |
 | P-14 | 여백 | 상/하/좌/우 변경 | 100ms 이하 | 4.3ms / 3.5ms / 3.2ms / 2.9ms | 4.3ms / 3.5ms / 3.2ms / 2.9ms | 완료 | 상/하/좌/우 각각 측정, 최악값 4.3ms |
+| P-15 | 상자 타입 | 자동 높이/자동 너비/고정 전환 | 100ms 이하 | 16.8ms | 16.8ms | 완료 | `band-3-cell-1` 단일 선택 기준. `height -> width -> fixed` 전환을 각 5회 측정했고, 최악값은 `width` 전환 16.8ms |
+| P-16 | 오버레이 열기 | 요약 | 100ms 이하 | 33.5ms | 33.5ms | 완료 | `/templates` 33.5ms, `/templates/edit` 33.4ms |
+| P-17 | 오버레이 열기 | 상자 스타일 | 100ms 이하 | 35.5ms | 35.5ms | 완료 | `/templates` 33.5ms, `/templates/edit` 35.5ms |
+| P-18 | 오버레이 열기 | 상자 크기 타입 | 100ms 이하 | 33.4ms | 33.4ms | 완료 | `/templates` 33.4ms, `/templates/edit` 33.4ms |
+| P-19 | 오버레이 열기 | 텍스트 스타일 | 100ms 이하 | 33.4ms | 33.4ms | 완료 | 기존 `/templates` 162.2ms -> 개선 후 `/templates` 33.4ms, `/templates/edit` 33.4ms |
+| P-20 | 오버레이 열기 | 기능 버튼 | 100ms 이하 | 33.3ms | 33.3ms | 완료 | `/templates` 33.3ms, `/templates/edit` 33.3ms |
 
 병목 후보:
 - `syncDraftPreviewHtmlRef`
@@ -52,11 +58,22 @@
 - `syncPreviewSurfaceScale` 의 ref-callback 상태 갱신을 guard 처리해 nested update 루프 차단
 - 자동 높이/너비 상자 타입 전환은 즉시 DOM 반영 후, 600ms 뒤에 같은 auto-size 레이아웃 계산을 다시 돌리던 중복 경로를 제거
 - 최소 높이/너비 입력은 blur 시 즉시 auto-size 재계산과 spacing 보정을 수행하고, 뒤에서는 저장/패널/텍스트 fit 동기화만 수행하도록 변경
+- `텍스트 스타일` 오버레이의 collapsed state를 부모 `TemplateEditWorkspace`에서 공유 preview surface 내부 local state로 내리고, 부모에는 편집 권한 on/off만 전달하도록 분리
+
+재측정 기준 추가:
+- P-15 `상자 타입`은 `band-3-cell-1` 단일 선택 상태에서 `fixed -> height -> width -> fixed` 체인을 반복 측정한다.
+- 완료 시점은 선택 상자 DOM의 `data-template-frame-auto-height` / `data-template-frame-auto-width` 와 상자 타입 버튼 활성 상태가 함께 목표 상태에 도달한 시점으로 본다.
+- 2026-05-15 재측정 결과:
+  - `height`: 7.2~8.4ms, 평균 7.6ms
+  - `width`: 12.8~16.8ms, 평균 14.3ms
+  - `fixed`: 0.9~1.1ms, 평균 1.0ms
 
 공유 검증 메모:
 - 모든 수정은 `src/components/template/TemplateEditWorkspace.tsx` 공유 코드에만 적용했다.
 - `/templates`, `/templates/edit` 는 같은 캔버스를 사용한다.
 - `/templates` 대표 smoke check에서는 `Space + Drag` 와 단일 선택 경로가 같은 방식으로 동작하는 것을 확인했다.
+- P-15 재측정 후 `/templates` 에서도 `band-3-cell-1` 기준 상자 타입 전환 smoke check를 수행했고, `height 5.8ms / width 25.6ms / fixed 1.0ms` 로 100ms 이내임을 확인했다.
+- P-16 ~ P-20 재측정 후 `/templates`, `/templates/edit` 모두 5개 오버레이 열기 반응이 `33.3ms ~ 35.5ms` 범위로 들어왔음을 확인했다.
 
 원칙:
 - 선택 시각 효과는 즉시 적용
