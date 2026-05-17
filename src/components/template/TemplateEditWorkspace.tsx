@@ -17711,6 +17711,7 @@ export default function TemplateEditWorkspace({
     clientX: number;
     clientY: number;
   } | null>(null);
+  const pendingPreviewViewportResetRef = React.useRef(false);
   const routeTemplateAutoloadedRef = React.useRef('');
   const initialDraftAppliedKeyRef = React.useRef('');
   const createBoxStateRef = React.useRef<CreateBoxState | null>(null);
@@ -18605,6 +18606,7 @@ export default function TemplateEditWorkspace({
 
   const toggleTemplateUsagePreviewMode = React.useCallback(() => {
     if (templateUsagePreviewMode) {
+      pendingPreviewViewportResetRef.current = true;
       if (templateUsagePreviewRenderSnapshotRef.current.trim()) {
         setPreviewHtml(templateUsagePreviewRenderSnapshotRef.current);
       }
@@ -18636,6 +18638,7 @@ export default function TemplateEditWorkspace({
     }
 
     setBoxCreationMode(false);
+    pendingPreviewViewportResetRef.current = true;
     setTemplateUsagePreviewHtml(runtimeHtml);
     setTemplateUsagePreviewMode(true);
     setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
@@ -24061,7 +24064,7 @@ export default function TemplateEditWorkspace({
   React.useLayoutEffect(() => {
     const node = previewRef.current;
 
-    if (!node || !renderedPreviewHtml) {
+    if (!node || !surfaceRenderedPreviewHtml) {
       return;
     }
 
@@ -24148,7 +24151,7 @@ export default function TemplateEditWorkspace({
     };
   }, [
     previewSurfaceNodeVersion,
-    renderedPreviewHtml,
+    surfaceRenderedPreviewHtml,
     syncPreviewSurfaceScale,
     templateUsagePreviewMode,
   ]);
@@ -25120,6 +25123,7 @@ export default function TemplateEditWorkspace({
       const normalizedTemplateId = templateId.trim();
 
 	      if (!normalizedTemplateId) {
+	        pendingPreviewViewportResetRef.current = true;
 	        setTemplateDetail(null);
 	        setPreviewHtml('');
 	        setTemplateUsagePreviewMode(false);
@@ -25156,6 +25160,7 @@ export default function TemplateEditWorkspace({
         }
 
         const detail = result.data as TemplateDetailResult;
+        pendingPreviewViewportResetRef.current = true;
         setTemplateDetail(detail);
         setSelectedTemplateId(normalizedTemplateId);
         setTemplateName(detail.template.templateName);
@@ -25294,6 +25299,7 @@ export default function TemplateEditWorkspace({
 
     initialDraftAppliedKeyRef.current = draftKey;
     routeTemplateAutoloadedRef.current = '';
+    pendingPreviewViewportResetRef.current = true;
     const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
     setTemplateDetail(null);
     setSelectedTemplateId('');
@@ -25403,6 +25409,8 @@ export default function TemplateEditWorkspace({
       syncDraftPreviewHtmlRef({
         materializePositionGroups: false,
         recordHistory: false,
+        updatePreviewDomVersion: false,
+        updateRenderedHtml: false,
       });
       requestPreviewTextFit();
     };
@@ -25512,6 +25520,11 @@ export default function TemplateEditWorkspace({
       return;
     }
 
+    if (pendingPreviewViewportResetRef.current) {
+      root.scrollTop = 0;
+      root.scrollLeft = 0;
+      pendingPreviewViewportResetRef.current = false;
+    }
     syncPreviewSurfaceScale(root);
     const frameId = window.requestAnimationFrame(() => {
       syncPreviewSurfaceScale(previewRef.current);
@@ -25526,7 +25539,7 @@ export default function TemplateEditWorkspace({
       window.cancelAnimationFrame(frameId);
       window.removeEventListener('resize', handleWindowResize);
     };
-  }, [renderedPreviewHtml, syncPreviewSurfaceScale]);
+  }, [surfaceRenderedPreviewHtml, syncPreviewSurfaceScale, templateUsagePreviewMode]);
 
   const rehydratePreviewEditorStateNow = React.useCallback(
     (root: HTMLElement) => {
