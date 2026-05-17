@@ -87,6 +87,38 @@
 - `selectedTextAutoSizeState` 는 `상자 크기 타입` 오버레이가 열려 있을 때만 계산
 - 단일 선택 fast-path 는 전체 frame map scan 대신 frame id 직접 query 를 우선 사용
 
+2026-05-17 오버레이 캐시 리팩토링:
+- 오버레이 값 집계 source of truth 를 `live DOM 전체 재수집`에서 `frame id별 브라우저 메모리 캐시`로 변경
+- 캐시 항목:
+  - `SelectionStyleDraft`
+  - `FrameMetadataDraft`
+- 선택 시:
+  - 선택된 frame id 들에 대해 cache miss 인 항목만 계산
+  - overlay open 시 전체 computed style scan 을 다시 수행하지 않음
+- 변경 시:
+  - 스타일 patch, 메타데이터 patch, auto-size, 최소 높이/너비 변경 뒤 해당 frame 만 force refresh
+  - 열린 overlay 는 cache 기반으로 즉시 다시 그려짐
+- 로드/초안 전환 시:
+  - 템플릿/초안 교체 경로에서만 cache clear
+
+브라우저 확인:
+- `/templates/edit?templateId=c782b232-7db6-49c2-a301-9b575144def4`
+- 그룹 선택 상태에서 `상자 스타일`을 닫았다가 다시 열었을 때
+  - immediate: `width=\"혼합\"`, `borderWidth=\"0.1\"`
+  - frame+1: 동일
+  - frame+2: 동일
+- 즉 `상자 스타일` 값은 open 직후 첫 프레임 이전 상태에서 이미 채워져 있고, 뒤늦게 DOM 재수집으로 값이 들어오는 경로는 제거됨
+
+2026-05-17 오버레이 open 지연 후속 정리:
+- `keepMountedWhenCollapsed` 를 쓰는 오버레이가 collapsed 상태에서 실제 content 대신 빈 placeholder (`<div aria-hidden=\"true\" />`)를 렌더링하고 있었다.
+- 해당 구조 때문에 `상자 스타일`, `텍스트 스타일`은 클릭 시점에 실제 패널 subtree 를 새로 mount 했고, `상자 크기 타입`, `기능 버튼`은 collapsed 상태에서 아예 unmount 되어 있었다.
+- 수정:
+  - `상자 스타일`, `텍스트 스타일`은 collapsed 상태에서도 실제 content 를 유지
+  - `상자 크기 타입`, `기능 버튼`도 keep-mounted 로 전환
+  - selection React state 는 더 이상 `requestAnimationFrame + transition` 으로 지연 커밋하지 않고 즉시 커밋
+- 목적:
+  - 박스 선택 직후 overlay open 시 stale selection state 와 mount 지연이 겹쳐 값이 비었다가 채워지는 현상을 제거
+
 재측정 기준 추가:
 - P-15 `상자 타입`은 `band-3-cell-1` 단일 선택 상태에서 `fixed -> height -> width -> fixed` 체인을 반복 측정한다.
 - 완료 시점은 선택 상자 DOM의 `data-template-frame-auto-height` / `data-template-frame-auto-width` 와 상자 타입 버튼 활성 상태가 함께 목표 상태에 도달한 시점으로 본다.

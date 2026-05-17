@@ -112,6 +112,11 @@ type FrameMetadataDraft = {
   runtimeMode: TemplateFrameRuntimeMode | '';
 };
 
+type FrameOverlayCacheEntry = {
+  style?: SelectionStyleDraft;
+  metadata?: FrameMetadataDraft;
+};
+
 type FrameMetadataValidationIssue = {
   frameGroupId: string;
   message: string;
@@ -1526,6 +1531,10 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       return 176;
     }
 
+    if (overlayId === 'style') {
+      return 250;
+    }
+
     if (overlayId === 'textStyle') {
       return 672;
     }
@@ -2104,7 +2113,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
                 isCollapsed
                   ? 'hidden'
                   : overlayId === 'style'
-                    ? 'inline-flex w-fit max-w-full flex-col items-start gap-2.5 p-2'
+                    ? 'flex w-full max-w-full flex-col items-stretch gap-2.5 p-2'
                     : overlayId === 'sizeType'
                       ? 'max-w-full p-2'
                       : 'max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2'
@@ -2194,7 +2203,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         setStyleOverlayCollapsed,
         finishStyleOverlayDrag,
         styleOverlay,
-        { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
+        { expandedWidthClassName: 'w-[250px] max-w-[250px]', keepMountedWhenCollapsed: true }
       )}
       {renderFloatingOverlaySection(
         'sizeType',
@@ -2203,7 +2212,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
         setSizeTypeOverlayCollapsed,
         finishSizeTypeOverlayDrag,
         sizeTypeOverlay,
-        { expandedWidthClassName: 'w-fit max-w-[250px]' }
+        { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
       )}
       {renderFloatingOverlaySection(
         'textStyle',
@@ -2255,6 +2264,7 @@ const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurfac
       )}
       {renderFloatingOverlaySection('action', actionOverlayLabel, actionOverlayCollapsed, setActionOverlayCollapsed, finishActionOverlayDrag, actionOverlay, {
         expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
+        keepMountedWhenCollapsed: true,
       })}
     </CardContent>
   );
@@ -2804,6 +2814,16 @@ const defaultFrameMetadataDraft: FrameMetadataDraft = {
   parentGroupId: '',
   runtimeMode: '',
 };
+const FRAME_METADATA_DRAFT_FIELD_KEYS: Array<keyof FrameMetadataDraft> = [
+  'label',
+  'boxKind',
+  'role',
+  'valueKey',
+  'parentGroupId',
+  'runtimeMode',
+];
+const areFrameMetadataDraftsEqual = (left: FrameMetadataDraft, right: FrameMetadataDraft) =>
+  FRAME_METADATA_DRAFT_FIELD_KEYS.every((field) => left[field] === right[field]);
 
 const defaultMetadataVirtualConnectionDraft: MetadataVirtualConnectionDraft = {
   mode: 'idle',
@@ -11550,19 +11570,18 @@ const restoreFrameTextInputFocus = (
 const applyFrameTextEditingMode = (root: HTMLElement, enabled: boolean) => {
   const usagePreviewMode = root.getAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR) === 'true';
 
-  if (enabled && !usagePreviewMode) {
-    return;
-  }
-
   root.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]').forEach((input) => {
     if (usagePreviewMode && input.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'text') {
       enableFrameTextInputForEditing(input);
       return;
     }
 
-    if (!enabled) {
-      disableFrameTextInputEditing(input);
+    if (enabled) {
+      enableFrameTextInputForEditing(input);
+      return;
     }
+
+    disableFrameTextInputEditing(input);
   });
 };
 
@@ -11571,8 +11590,7 @@ const applyPreviewEditPermissions = (
   selectionPanelTab: SelectionPanelTab = 'position',
   textCanvasEditMode = false
 ) => {
-  const usagePreviewMode = root.getAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR) === 'true';
-  const effectiveTextCanvasEditMode = usagePreviewMode ? textCanvasEditMode : false;
+  const effectiveTextCanvasEditMode = textCanvasEditMode;
   const permissionSignature = `${selectionPanelTab}:${effectiveTextCanvasEditMode ? 'text' : 'default'}`;
   const previousPermissionSignature = root.getAttribute(TEMPLATE_PREVIEW_EDIT_PERMISSIONS_TAB_ATTR) || '';
   const previousSelectionPanelTab = previousPermissionSignature.split(':')[0] || '';
@@ -17373,9 +17391,6 @@ export default function TemplateEditWorkspace({
     (collapsed: boolean) => {
       textStyleOverlayCollapsedRef.current = collapsed;
       setTextStyleOverlayCollapsedState(collapsed);
-      if (selectionPanelTab === 'position' && !collapsed) {
-        syncSelectionStyleDraftFromIdsRef.current();
-      }
       syncTextCanvasEditMode(selectionPanelTab === 'position' && !collapsed);
     },
     [selectionPanelTab, syncTextCanvasEditMode]
@@ -17383,9 +17398,6 @@ export default function TemplateEditWorkspace({
   const handleStyleOverlayCollapsedChange = React.useCallback((collapsed: boolean) => {
     styleOverlayCollapsedRef.current = collapsed;
     setStyleOverlayCollapsedState(collapsed);
-    if (selectionPanelTab === 'position' && !collapsed) {
-      syncSelectionStyleDraftFromIdsRef.current();
-    }
   }, [selectionPanelTab]);
   const handleSummaryOverlayCollapsedChange = React.useCallback((collapsed: boolean) => {
     summaryOverlayCollapsedRef.current = collapsed;
@@ -17396,26 +17408,6 @@ export default function TemplateEditWorkspace({
       setSizeTypeOverlayCollapsedState(collapsed);
       if (selectionPanelTab !== 'position' || collapsed) {
         return;
-      }
-
-      syncSelectionStyleDraftFromIdsRef.current();
-
-      const selectionAutoSizeState = readSelectedTextAutoSizeState(
-        previewRef.current,
-        selectedFrameGroupIdsRef.current.length > 0 ? selectedFrameGroupIdsRef.current : selectedFrameGroupIds
-      );
-
-      if (selectionAutoSizeState.totalCount > 0) {
-        const selectionFrameGroupIds =
-          selectedFrameGroupIdsRef.current.length > 0 ? selectedFrameGroupIdsRef.current : selectedFrameGroupIds;
-        const selectionSignature = normalizeFrameSelectionIds(selectionFrameGroupIds).join('|');
-
-        if (selectionSignature) {
-          setTextAutoSizeUiOverride({
-            selectionSignature,
-            state: selectionAutoSizeState,
-          });
-        }
       }
     },
     [selectedFrameGroupIds, selectionPanelTab]
@@ -17514,6 +17506,8 @@ export default function TemplateEditWorkspace({
   const edgeSelectionStateRef = React.useRef<TemplateEdgeSelectionStateDto>(TemplateEdgeSelectionService.createEmptyState());
   const edgeRoleDiagnosticsRef = React.useRef<EdgeRoleDiagnosticsState>(emptyEdgeRoleDiagnosticsState);
   const syncedFrameMetadataDraftRef = React.useRef<FrameMetadataDraft>(defaultFrameMetadataDraft);
+  const frameOverlayCacheRef = React.useRef<Map<string, FrameOverlayCacheEntry>>(new Map());
+  const overlayCachePrewarmTimerRef = React.useRef<number | null>(null);
   const metadataRelationSelectionModeRef = React.useRef<MetadataRelationSelectionMode>({ kind: 'idle' });
   const frameRelationPreviewModeRef = React.useRef<FrameRelationPreviewMode>({ kind: 'idle' });
   const activePointerOwnerRef = React.useRef<HTMLDivElement | null>(null);
@@ -17668,20 +17662,30 @@ export default function TemplateEditWorkspace({
     () => normalizeFrameSelectionIds(selectedFrameGroupIds).join('|'),
     [selectedFrameGroupIds]
   );
+  const hasSelectedTextAutoSizeOverride = Boolean(
+    textAutoSizeUiOverride && textAutoSizeUiOverride.selectionSignature === selectedFrameGroupIdsSignature
+  );
   const computedSelectedTextAutoSizeState = React.useMemo(
     () =>
-      selectionPanelTab === 'position' && !sizeTypeOverlayCollapsedState
+      selectionPanelTab === 'position' && !sizeTypeOverlayCollapsedState && !hasSelectedTextAutoSizeOverride
         ? readSelectedTextAutoSizeState(previewRef.current, selectedFrameGroupIds)
         : createEmptySelectedTextAutoSizeState(),
-    [previewDomVersion, renderedPreviewHtml, selectedFrameGroupIds, selectionPanelTab, sizeTypeOverlayCollapsedState]
+    [
+      hasSelectedTextAutoSizeOverride,
+      previewDomVersion,
+      renderedPreviewHtml,
+      selectedFrameGroupIds,
+      selectionPanelTab,
+      sizeTypeOverlayCollapsedState,
+    ]
   );
   const selectedTextAutoSizeState = React.useMemo(() => {
-    if (textAutoSizeUiOverride && textAutoSizeUiOverride.selectionSignature === selectedFrameGroupIdsSignature) {
+    if (hasSelectedTextAutoSizeOverride && textAutoSizeUiOverride) {
       return textAutoSizeUiOverride.state;
     }
 
     return computedSelectedTextAutoSizeState;
-  }, [computedSelectedTextAutoSizeState, selectedFrameGroupIdsSignature, textAutoSizeUiOverride]);
+  }, [computedSelectedTextAutoSizeState, hasSelectedTextAutoSizeOverride, textAutoSizeUiOverride]);
   React.useEffect(() => {
     setTextAutoSizeUiOverride((previous) => {
       if (!previous) {
@@ -24438,147 +24442,23 @@ export default function TemplateEditWorkspace({
           : normalizedSelectionIds;
       const shouldSyncPositionStyleDraftImmediately =
         selectionPanelTab === 'position' &&
-        (!styleOverlayCollapsedRef.current ||
-          !sizeTypeOverlayCollapsedRef.current ||
-          !textStyleOverlayCollapsedRef.current ||
-          false);
-      const resolveImmediateDraftNodes = (activeSelectionIds: string[]) => {
-        const root = previewRef.current;
-        if (!root || activeSelectionIds.length <= 0) {
-          return [] as HTMLElement[];
-        }
-
-        if (options?.fastFrameNodeById && options.fastFrameNodeById.size > 0) {
-          const fastNodes = activeSelectionIds
-            .map((frameGroupId) => options.fastFrameNodeById?.get(frameGroupId) || null)
-            .filter((node): node is HTMLElement => Boolean(node));
-
-          if (fastNodes.length === activeSelectionIds.length) {
-            return fastNodes;
-          }
-        }
-
-        const selectedIdSet = new Set(activeSelectionIds);
-        return getFrameNodes(root).filter((node) => selectedIdSet.has(getFrameGroupId(node)));
-      };
+        (!styleOverlayCollapsedRef.current || !sizeTypeOverlayCollapsedRef.current || !textStyleOverlayCollapsedRef.current);
       const immediateSelectionStyleDraft =
-        !shouldSyncPositionStyleDraftImmediately
+        selectionPanelTab !== 'position'
           ? defaultSelectionStyleDraft
-          : (() => {
-              const root = previewRef.current;
-              const nodes = resolveImmediateDraftNodes(immediateResolvedSelectionIds);
-
-              if (!root || nodes.length <= 0) {
-                return defaultSelectionStyleDraft;
-              }
-
-              const frameRects = nodes.map((node) => readFrameMoveRect(node));
-              const widths = frameRects.map((rect) => String(Math.round(rect.width)));
-              const heights = frameRects.map((rect) => String(Math.round(rect.height)));
-              const getSharedStyleFieldValue = (values: string[]) => {
-                const normalizedValues = values.map((value) => String(value || ''));
-                const [first] = normalizedValues;
-                if (normalizedValues.every((value) => value === first)) {
-                  return first;
-                }
-                return MIXED_STYLE_VALUE_LABEL;
-              };
-              const fontSizes = nodes.map((node) =>
-                normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).fontSize)
-              );
-              const lineHeights = nodes.map((node) =>
-                normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).lineHeight)
-              );
-              const paddingTops = nodes.map((node) =>
-                normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).paddingTop)
-              );
-              const paddingBottoms = nodes.map((node) =>
-                normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).paddingBottom)
-              );
-              const paddingLefts = nodes.map((node) =>
-                normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).paddingLeft)
-              );
-              const paddingRights = nodes.map((node) =>
-                normalizeNumericStyleValue(getComputedStyle(resolveFrameContentTarget(node)).paddingRight)
-              );
-              const borderRadii = nodes.map((node) =>
-                normalizeNumericStyleValue(getComputedStyle(resolveFrameLayoutShell(node)).borderRadius)
-              );
-              const fontFamilies = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).fontFamily || '');
-              const fontWeights = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).fontWeight || '');
-              const fontStyles = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).fontStyle || '');
-              const textDecorationLines = nodes.map((node) =>
-                normalizeTextDecorationLineValue(getComputedStyle(resolveFrameContentTarget(node)).textDecorationLine)
-              );
-              const textAligns = nodes.map((node) => getComputedStyle(resolveFrameContentTarget(node)).textAlign || 'left');
-              const colors = nodes.map((node) => colorToHex(getComputedStyle(resolveFrameContentTarget(node)).color || ''));
-              const backgroundColors = nodes.map((node) =>
-                colorToHex(getComputedStyle(resolveFrameLayoutShell(node)).backgroundColor || '')
-              );
-              const borderAppearances = nodes.map((node) => readElementBorderAppearance(resolveFrameLayoutShell(node)));
-              const borderColors = borderAppearances.map((appearance) => appearance.color);
-              const borderWidths = borderAppearances.map((appearance) => formatFrameBorderWidthValue(appearance.width));
-              const borderStyles = borderAppearances.map((appearance) => appearance.style);
-              const borderAligns = borderAppearances.map((appearance) => appearance.align);
-              const sharedTextAlign = getSharedStyleFieldValue(textAligns);
-
-              return {
-                width: getSharedStyleFieldValue(widths),
-                height: getSharedStyleFieldValue(heights),
-                fontSize: getSharedStyleFieldValue(fontSizes),
-                lineHeight: getSharedStyleFieldValue(lineHeights),
-                paddingTop: getSharedStyleFieldValue(paddingTops),
-                paddingBottom: getSharedStyleFieldValue(paddingBottoms),
-                paddingLeft: getSharedStyleFieldValue(paddingLefts),
-                paddingRight: getSharedStyleFieldValue(paddingRights),
-                borderRadius: getSharedStyleFieldValue(borderRadii),
-                fontFamily: getSharedStyleFieldValue(fontFamilies),
-                fontWeight: getSharedStyleFieldValue(fontWeights),
-                fontStyle: getSharedStyleFieldValue(fontStyles),
-                textDecorationLine: getSharedStyleFieldValue(textDecorationLines),
-                textAlign:
-                  sharedTextAlign === MIXED_STYLE_VALUE_LABEL
-                    ? MIXED_STYLE_VALUE_LABEL
-                    : sharedTextAlign === 'center' || sharedTextAlign === 'right' || sharedTextAlign === 'justify'
-                      ? sharedTextAlign
-                      : 'left',
-                color: getSharedStyleFieldValue(colors) || '#0f172a',
-                backgroundColor: getSharedStyleFieldValue(backgroundColors) || 'transparent',
-                borderColor: getSharedStyleFieldValue(borderColors),
-                borderWidth: getSharedStyleFieldValue(borderWidths),
-                borderStyle: getSharedStyleFieldValue(borderStyles),
-                borderAlign: getSharedStyleFieldValue(borderAligns),
-              };
-            })();
+          : buildSelectionStyleDraftFromIds(
+              previewRef.current,
+              immediateResolvedSelectionIds,
+              options?.fastFrameNodeById
+            );
       const immediateFrameMetadataDraft =
         selectionPanelTab !== 'metadata'
           ? defaultFrameMetadataDraft
-          : (() => {
-              const nodes = resolveImmediateDraftNodes(normalizedSelectionIds);
-
-              if (nodes.length <= 0) {
-                return defaultFrameMetadataDraft;
-              }
-
-              const sharedLabel = getSharedValue(nodes.map((node) => readFrameBoxLabel(node)));
-              const sharedBoxKind = getSharedValue(nodes.map((node) => readFrameBoxKind(node)));
-              const sharedRole = getSharedValue(nodes.map((node) => readFrameRole(node)));
-              const sharedValueKey = getSharedValue(nodes.map((node) => readFrameValueKey(node)));
-              const sharedParentGroupId = getSharedValue(nodes.map((node) => readFrameParentGroupId(node)));
-              const sharedRuntimeMode = getSharedValue(nodes.map((node) => readFrameRuntimeMode(node)));
-
-              return {
-                label: sharedLabel,
-                boxKind: isTemplateFrameBoxKind(sharedBoxKind) ? sharedBoxKind : '',
-                role:
-                  sharedRole === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(sharedRole as TemplateFrameRole)
-                    ? (sharedRole as TemplateFrameRole | '')
-                    : '',
-                valueKey: sharedValueKey,
-                parentGroupId: sharedParentGroupId,
-                runtimeMode: isTemplateFrameRuntimeMode(sharedRuntimeMode) ? sharedRuntimeMode : '',
-              };
-            })();
+          : buildFrameMetadataDraftFromIds(
+              previewRef.current,
+              normalizedSelectionIds,
+              options?.fastFrameNodeById
+            );
       const commitSelectionReactState = () => {
         setSelectedFrameGroupIds(normalizedSelectionIds);
         setEdgeSelectionState(emptyEdgeSelection);
@@ -24619,41 +24499,19 @@ export default function TemplateEditWorkspace({
         }
         setStyleFieldApplyStatus(defaultStyleFieldApplyStatus);
       };
-      if (shouldSyncPositionStyleDraftImmediately) {
+      if (selectionPanelTab === 'position') {
         syncSelectionStyleDraftControls(immediateSelectionStyleDraft, immediateResolvedSelectionIds);
+        syncTextAutoSizeUiOverrideFromSelection(previewRef.current, normalizedSelectionIds);
       }
-      const canDeferPositionSelectionStateSync =
-        selectionPanelTab === 'position' &&
-        typeof window !== 'undefined' &&
-        !options?.forceImmediateReactState &&
-        selectionAutoSizeState.totalCount <= 0;
-      if (canDeferPositionSelectionStateSync) {
-        if (immediateSelectionPanelSyncFrameRef.current !== null) {
-          window.cancelAnimationFrame(immediateSelectionPanelSyncFrameRef.current);
-        }
-        immediateSelectionPanelSyncFrameRef.current = window.requestAnimationFrame(() => {
-          immediateSelectionPanelSyncFrameRef.current = null;
-          React.startTransition(() => {
-            commitImmediatePanelSync();
-            commitSelectionReactState();
-          });
-        });
-        return;
+      if (immediateSelectionPanelSyncFrameRef.current !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(immediateSelectionPanelSyncFrameRef.current);
+        immediateSelectionPanelSyncFrameRef.current = null;
       }
 
-      if (selectionPanelTab === 'position' && !options?.forceImmediateReactState) {
-        flushSync(commitImmediatePanelSync);
-        React.startTransition(commitSelectionReactState);
-        return;
-      } else if (options?.forceImmediateReactState) {
-        flushSync(() => {
-          commitImmediatePanelSync();
-          commitSelectionReactState();
-        });
-      } else {
-        flushSync(commitImmediatePanelSync);
-        React.startTransition(commitSelectionReactState);
-      }
+      flushSync(() => {
+        commitImmediatePanelSync();
+        commitSelectionReactState();
+      });
     },
     [
       applyFastFrameBoxSelectionVisuals,
@@ -24667,6 +24525,7 @@ export default function TemplateEditWorkspace({
       resolvePositionGroupProxySelections,
       selectionPanelTab,
       syncSelectionStyleDraftControls,
+      syncTextAutoSizeUiOverrideFromSelection,
     ]
   );
   const resolvePositionClickChainCurrentIndex = React.useCallback((entries: PositionSelectionClickChainEntry[]) => {
@@ -25063,6 +24922,7 @@ export default function TemplateEditWorkspace({
 	        setTemplateUsagePreviewMode(false);
 	        setTemplateUsagePreviewHtml('');
 	        selectedFrameGroupIdsRef.current = [];
+        frameOverlayCacheRef.current.clear();
         edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
@@ -25097,11 +24957,12 @@ export default function TemplateEditWorkspace({
         setSelectedTemplateId(normalizedTemplateId);
         setTemplateName(detail.template.templateName);
         setSourceDocumentName(detail.template.sourceDocumentName || '');
-	        setLayoutResizeMode(detail.template.layoutResizeMode);
+        setLayoutResizeMode(detail.template.layoutResizeMode);
 	        setPreviewHtml(detail.template.draftHtml);
 	        setTemplateUsagePreviewMode(false);
 	        setTemplateUsagePreviewHtml('');
 	        selectedFrameGroupIdsRef.current = [];
+        frameOverlayCacheRef.current.clear();
         edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
@@ -25161,8 +25022,8 @@ export default function TemplateEditWorkspace({
 
         setTemplates((previous) => previous.filter((item) => item.id !== templateId));
 
-        if (selectedTemplateId.trim() === templateId || templateDetail?.template.id === templateId) {
-          setSelectedTemplateId('');
+	        if (selectedTemplateId.trim() === templateId || templateDetail?.template.id === templateId) {
+	          setSelectedTemplateId('');
 	          setTemplateDetail(null);
 	          setPreviewHtml('');
 	          setTemplateUsagePreviewMode(false);
@@ -25170,6 +25031,7 @@ export default function TemplateEditWorkspace({
 	          setTemplateName('');
           setSourceDocumentName('');
           selectedFrameGroupIdsRef.current = [];
+          frameOverlayCacheRef.current.clear();
           edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
           setSelectedFrameGroupIds([]);
           setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
@@ -25239,6 +25101,7 @@ export default function TemplateEditWorkspace({
     setTemplateUsagePreviewMode(false);
     setTemplateUsagePreviewHtml('');
     selectedFrameGroupIdsRef.current = [];
+    frameOverlayCacheRef.current.clear();
     edgeSelectionStateRef.current = emptyEdgeSelection;
     setSelectedFrameGroupIds([]);
     setEdgeSelectionState(emptyEdgeSelection);
@@ -25907,6 +25770,188 @@ export default function TemplateEditWorkspace({
     [getFrameNodes]
   );
 
+  const buildFrameStyleDraftFromNode = React.useCallback((node: HTMLElement): SelectionStyleDraft => {
+    const contentTarget = resolveFrameContentTarget(node);
+    const shellTarget = resolveFrameLayoutShell(node);
+    const contentStyle = getComputedStyle(contentTarget);
+    const shellStyle = getComputedStyle(shellTarget);
+    const frameRect = readFrameMoveRect(node);
+    const borderAppearance = readElementBorderAppearance(shellTarget);
+    const textAlign = contentStyle.textAlign || 'left';
+
+    return {
+      width: String(Math.round(frameRect.width)),
+      height: String(Math.round(frameRect.height)),
+      fontSize: normalizeNumericStyleValue(contentStyle.fontSize),
+      lineHeight: normalizeNumericStyleValue(contentStyle.lineHeight),
+      paddingTop: normalizeNumericStyleValue(contentStyle.paddingTop),
+      paddingBottom: normalizeNumericStyleValue(contentStyle.paddingBottom),
+      paddingLeft: normalizeNumericStyleValue(contentStyle.paddingLeft),
+      paddingRight: normalizeNumericStyleValue(contentStyle.paddingRight),
+      borderRadius: normalizeNumericStyleValue(shellStyle.borderRadius),
+      fontFamily: contentStyle.fontFamily || '',
+      fontWeight: contentStyle.fontWeight || '',
+      fontStyle: contentStyle.fontStyle || '',
+      textDecorationLine: normalizeTextDecorationLineValue(contentStyle.textDecorationLine),
+      textAlign:
+        textAlign === 'center' || textAlign === 'right' || textAlign === 'justify'
+          ? textAlign
+          : 'left',
+      color: colorToHex(contentStyle.color || '') || '#0f172a',
+      backgroundColor: colorToHex(shellStyle.backgroundColor || '') || 'transparent',
+      borderColor: borderAppearance.color,
+      borderWidth: formatFrameBorderWidthValue(borderAppearance.width),
+      borderStyle: borderAppearance.style,
+      borderAlign: borderAppearance.align,
+    };
+  }, []);
+
+  const buildFrameMetadataDraftFromNode = React.useCallback((node: HTMLElement): FrameMetadataDraft => {
+    const boxKind = readFrameBoxKind(node);
+    const role = readFrameRole(node);
+    const runtimeMode = readFrameRuntimeMode(node);
+
+    return {
+      label: readFrameBoxLabel(node),
+      boxKind: isTemplateFrameBoxKind(boxKind) ? boxKind : '',
+      role: role === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(role as TemplateFrameRole)
+        ? (role as TemplateFrameRole | '')
+        : '',
+      valueKey: readFrameValueKey(node),
+      parentGroupId: readFrameParentGroupId(node),
+      runtimeMode: isTemplateFrameRuntimeMode(runtimeMode) ? runtimeMode : '',
+    };
+  }, []);
+
+  const ensureFrameOverlayCacheFromNodes = React.useCallback(
+    (
+      nodes: HTMLElement[],
+      options?: {
+        style?: boolean;
+        metadata?: boolean;
+        force?: boolean;
+      }
+    ) => {
+      const cache = frameOverlayCacheRef.current;
+      const shouldCacheStyle = options?.style ?? false;
+      const shouldCacheMetadata = options?.metadata ?? false;
+      const forceRefresh = options?.force ?? false;
+
+      if ((!shouldCacheStyle && !shouldCacheMetadata) || nodes.length <= 0) {
+        return;
+      }
+
+      nodes.forEach((node) => {
+        const frameGroupId = getFrameGroupId(node).trim();
+
+        if (!frameGroupId) {
+          return;
+        }
+
+        const previousEntry = cache.get(frameGroupId) || {};
+        let nextEntry = previousEntry;
+
+        if (shouldCacheStyle && (forceRefresh || !previousEntry.style)) {
+          const nextStyleDraft = buildFrameStyleDraftFromNode(node);
+          nextEntry =
+            previousEntry.style && areSelectionStyleDraftsEqual(previousEntry.style, nextStyleDraft)
+              ? nextEntry
+              : { ...nextEntry, style: nextStyleDraft };
+          if (!previousEntry.style) {
+            nextEntry = { ...nextEntry, style: nextStyleDraft };
+          }
+        }
+
+        if (shouldCacheMetadata && (forceRefresh || !previousEntry.metadata)) {
+          const nextMetadataDraft = buildFrameMetadataDraftFromNode(node);
+          nextEntry =
+            previousEntry.metadata && areFrameMetadataDraftsEqual(previousEntry.metadata, nextMetadataDraft)
+              ? nextEntry
+              : { ...nextEntry, metadata: nextMetadataDraft };
+          if (!previousEntry.metadata) {
+            nextEntry = { ...nextEntry, metadata: nextMetadataDraft };
+          }
+        }
+
+        if (nextEntry !== previousEntry || !cache.has(frameGroupId)) {
+          cache.set(frameGroupId, nextEntry);
+        }
+      });
+    },
+    [buildFrameMetadataDraftFromNode, buildFrameStyleDraftFromNode]
+  );
+
+  const buildSelectionStyleDraftFromCacheEntries = React.useCallback((entries: SelectionStyleDraft[]) => {
+    if (entries.length <= 0) {
+      return defaultSelectionStyleDraft;
+    }
+
+    const getSharedStyleFieldValue = (values: string[]) => {
+      const normalizedValues = values.map((value) => String(value || ''));
+      const [first] = normalizedValues;
+
+      if (normalizedValues.every((value) => value === first)) {
+        return first;
+      }
+
+      return MIXED_STYLE_VALUE_LABEL;
+    };
+    const sharedTextAlign = getSharedStyleFieldValue(entries.map((entry) => entry.textAlign || 'left'));
+
+    return {
+      width: getSharedStyleFieldValue(entries.map((entry) => entry.width)),
+      height: getSharedStyleFieldValue(entries.map((entry) => entry.height)),
+      fontSize: getSharedStyleFieldValue(entries.map((entry) => entry.fontSize)),
+      lineHeight: getSharedStyleFieldValue(entries.map((entry) => entry.lineHeight)),
+      paddingTop: getSharedStyleFieldValue(entries.map((entry) => entry.paddingTop)),
+      paddingBottom: getSharedStyleFieldValue(entries.map((entry) => entry.paddingBottom)),
+      paddingLeft: getSharedStyleFieldValue(entries.map((entry) => entry.paddingLeft)),
+      paddingRight: getSharedStyleFieldValue(entries.map((entry) => entry.paddingRight)),
+      borderRadius: getSharedStyleFieldValue(entries.map((entry) => entry.borderRadius)),
+      fontFamily: getSharedStyleFieldValue(entries.map((entry) => entry.fontFamily)),
+      fontWeight: getSharedStyleFieldValue(entries.map((entry) => entry.fontWeight)),
+      fontStyle: getSharedStyleFieldValue(entries.map((entry) => entry.fontStyle)),
+      textDecorationLine: getSharedStyleFieldValue(entries.map((entry) => entry.textDecorationLine)),
+      textAlign:
+        sharedTextAlign === MIXED_STYLE_VALUE_LABEL
+          ? MIXED_STYLE_VALUE_LABEL
+          : sharedTextAlign === 'center' || sharedTextAlign === 'right' || sharedTextAlign === 'justify'
+            ? sharedTextAlign
+            : 'left',
+      color: getSharedStyleFieldValue(entries.map((entry) => entry.color)) || '#0f172a',
+      backgroundColor: getSharedStyleFieldValue(entries.map((entry) => entry.backgroundColor)) || 'transparent',
+      borderColor: getSharedStyleFieldValue(entries.map((entry) => entry.borderColor)),
+      borderWidth: getSharedStyleFieldValue(entries.map((entry) => entry.borderWidth)),
+      borderStyle: getSharedStyleFieldValue(entries.map((entry) => entry.borderStyle)),
+      borderAlign: getSharedStyleFieldValue(entries.map((entry) => entry.borderAlign)),
+    };
+  }, []);
+
+  const buildFrameMetadataDraftFromCacheEntries = React.useCallback((entries: FrameMetadataDraft[]) => {
+    if (entries.length <= 0) {
+      return defaultFrameMetadataDraft;
+    }
+
+    const sharedLabel = getSharedValue(entries.map((entry) => entry.label));
+    const sharedBoxKind = getSharedValue(entries.map((entry) => entry.boxKind));
+    const sharedRole = getSharedValue(entries.map((entry) => entry.role));
+    const sharedValueKey = getSharedValue(entries.map((entry) => entry.valueKey));
+    const sharedParentGroupId = getSharedValue(entries.map((entry) => entry.parentGroupId));
+    const sharedRuntimeMode = getSharedValue(entries.map((entry) => entry.runtimeMode));
+
+    return {
+      label: sharedLabel,
+      boxKind: isTemplateFrameBoxKind(sharedBoxKind) ? sharedBoxKind : '',
+      role:
+        sharedRole === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(sharedRole as TemplateFrameRole)
+          ? (sharedRole as TemplateFrameRole | '')
+          : '',
+      valueKey: sharedValueKey,
+      parentGroupId: sharedParentGroupId,
+      runtimeMode: isTemplateFrameRuntimeMode(sharedRuntimeMode) ? sharedRuntimeMode : '',
+    };
+  }, []);
+
   const buildSelectionStyleDraftFromIds = React.useCallback(
     (
       root: HTMLElement | null,
@@ -25917,104 +25962,24 @@ export default function TemplateEditWorkspace({
         return defaultSelectionStyleDraft;
       }
 
-      const styleTargets = resolveSelectionAppearanceStyleTargets(root, activeSelectionIds);
-      const nodes =
-        styleTargets.kind === 'frame'
-          ? resolveSelectionDraftFrameNodes(root, activeSelectionIds, fastFrameNodeById)
-          : styleTargets.elements;
+      const nodes = resolveSelectionDraftFrameNodes(root, activeSelectionIds, fastFrameNodeById);
 
       if (!nodes.length) {
         return defaultSelectionStyleDraft;
       }
 
-      const resolveStyleTargetContent = (node: HTMLElement) =>
-        styleTargets.kind === 'frame' ? resolveFrameContentTarget(node) : node;
-      const resolveStyleTargetShell = (node: HTMLElement) =>
-        styleTargets.kind === 'frame' ? resolveFrameLayoutShell(node) : node;
+      ensureFrameOverlayCacheFromNodes(nodes, { style: true });
+      const cachedEntries = nodes
+        .map((node) => frameOverlayCacheRef.current.get(getFrameGroupId(node).trim())?.style || null)
+        .filter((entry): entry is SelectionStyleDraft => Boolean(entry));
 
-      const frameRects = nodes.map((node) => {
-        if (styleTargets.kind === 'frame') {
-          return readFrameMoveRect(node);
-        }
-        return readFrameElementRect(resolveStyleTargetShell(node));
-      });
-      const widths = frameRects.map((rect) => String(Math.round(rect.width)));
-      const heights = frameRects.map((rect) => String(Math.round(rect.height)));
-      const getSharedStyleFieldValue = (values: string[]) => {
-        const normalizedValues = values.map((value) => String(value || ''));
-        const [first] = normalizedValues;
-        if (normalizedValues.every((value) => value === first)) {
-          return first;
-        }
-        return MIXED_STYLE_VALUE_LABEL;
-      };
-      const fontSizes = nodes.map((node) => normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).fontSize));
-      const lineHeights = nodes.map((node) =>
-        normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).lineHeight)
-      );
-      const paddingTops = nodes.map((node) =>
-        normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingTop)
-      );
-      const paddingBottoms = nodes.map((node) =>
-        normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingBottom)
-      );
-      const paddingLefts = nodes.map((node) =>
-        normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingLeft)
-      );
-      const paddingRights = nodes.map((node) =>
-        normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetContent(node)).paddingRight)
-      );
-      const borderRadii = nodes.map((node) =>
-        normalizeNumericStyleValue(getComputedStyle(resolveStyleTargetShell(node)).borderRadius)
-      );
-      const fontFamilies = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).fontFamily || '');
-      const fontWeights = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).fontWeight || '');
-      const fontStyles = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).fontStyle || '');
-      const textDecorationLines = nodes.map((node) =>
-        normalizeTextDecorationLineValue(getComputedStyle(resolveStyleTargetContent(node)).textDecorationLine)
-      );
-      const textAligns = nodes.map((node) => getComputedStyle(resolveStyleTargetContent(node)).textAlign || 'left');
-      const colors = nodes.map((node) => colorToHex(getComputedStyle(resolveStyleTargetContent(node)).color || ''));
-      const backgroundColors = nodes.map((node) =>
-        colorToHex(getComputedStyle(resolveStyleTargetShell(node)).backgroundColor || '')
-      );
-      const borderAppearances = nodes.map((node) => readElementBorderAppearance(resolveStyleTargetShell(node)));
-      const borderColors = borderAppearances.map((appearance) => appearance.color);
-      const borderWidths = borderAppearances.map((appearance) => formatFrameBorderWidthValue(appearance.width));
-      const borderStyles = borderAppearances.map((appearance) => appearance.style);
-      const borderAligns = borderAppearances.map((appearance) => appearance.align);
-
-      const sharedTextAlign = getSharedStyleFieldValue(textAligns);
-
-      return {
-        width: getSharedStyleFieldValue(widths),
-        height: getSharedStyleFieldValue(heights),
-        fontSize: getSharedStyleFieldValue(fontSizes),
-        lineHeight: getSharedStyleFieldValue(lineHeights),
-        paddingTop: getSharedStyleFieldValue(paddingTops),
-        paddingBottom: getSharedStyleFieldValue(paddingBottoms),
-        paddingLeft: getSharedStyleFieldValue(paddingLefts),
-        paddingRight: getSharedStyleFieldValue(paddingRights),
-        borderRadius: getSharedStyleFieldValue(borderRadii),
-        fontFamily: getSharedStyleFieldValue(fontFamilies),
-        fontWeight: getSharedStyleFieldValue(fontWeights),
-        fontStyle: getSharedStyleFieldValue(fontStyles),
-        textDecorationLine: getSharedStyleFieldValue(textDecorationLines),
-        textAlign:
-          sharedTextAlign === MIXED_STYLE_VALUE_LABEL
-            ? MIXED_STYLE_VALUE_LABEL
-            : sharedTextAlign === 'center' || sharedTextAlign === 'right' || sharedTextAlign === 'justify'
-              ? sharedTextAlign
-              : 'left',
-        color: getSharedStyleFieldValue(colors) || '#0f172a',
-        backgroundColor: getSharedStyleFieldValue(backgroundColors) || 'transparent',
-        borderColor: getSharedStyleFieldValue(borderColors),
-        borderWidth: getSharedStyleFieldValue(borderWidths),
-        borderStyle: getSharedStyleFieldValue(borderStyles),
-        borderAlign: getSharedStyleFieldValue(borderAligns),
-      };
+      return buildSelectionStyleDraftFromCacheEntries(cachedEntries);
     },
-    [resolveSelectionAppearanceStyleTargets, resolveSelectionDraftFrameNodes]
+    [
+      buildSelectionStyleDraftFromCacheEntries,
+      ensureFrameOverlayCacheFromNodes,
+      resolveSelectionDraftFrameNodes,
+    ]
   );
 
   const syncSelectionStyleDraftFromIds = React.useCallback((activeSelectionIdsOverride?: string[], fastFrameNodeById?: Map<string, HTMLElement>) => {
@@ -26052,6 +26017,10 @@ export default function TemplateEditWorkspace({
       !textStyleOverlayCollapsedRef.current;
 
     if (!shouldHydratePositionSelectionDraft) {
+      if (root && activeSelectionIds.length > 0) {
+        const nodes = resolveSelectionDraftFrameNodes(root, activeSelectionIds, fastFrameNodeById);
+        ensureFrameOverlayCacheFromNodes(nodes, { style: true });
+      }
       return;
     }
 
@@ -26068,6 +26037,8 @@ export default function TemplateEditWorkspace({
     setSelectionStyleDraft((previous) => (areSelectionStyleDraftsEqual(previous, nextDraft) ? previous : nextDraft));
   }, [
     buildSelectionStyleDraftFromIds,
+    ensureFrameOverlayCacheFromNodes,
+    resolveSelectionDraftFrameNodes,
     selectedFrameGroupIds,
     selectedPositionResolvedFrameGroupIds,
     selectionPanelTab,
@@ -26212,26 +26183,18 @@ export default function TemplateEditWorkspace({
         return defaultFrameMetadataDraft;
       }
 
-      const sharedLabel = getSharedValue(nodes.map((node) => readFrameBoxLabel(node)));
-      const sharedBoxKind = getSharedValue(nodes.map((node) => readFrameBoxKind(node)));
-      const sharedRole = getSharedValue(nodes.map((node) => readFrameRole(node)));
-      const sharedValueKey = getSharedValue(nodes.map((node) => readFrameValueKey(node)));
-      const sharedParentGroupId = getSharedValue(nodes.map((node) => readFrameParentGroupId(node)));
-      const sharedRuntimeMode = getSharedValue(nodes.map((node) => readFrameRuntimeMode(node)));
+      ensureFrameOverlayCacheFromNodes(nodes, { metadata: true });
+      const cachedEntries = nodes
+        .map((node) => frameOverlayCacheRef.current.get(getFrameGroupId(node).trim())?.metadata || null)
+        .filter((entry): entry is FrameMetadataDraft => Boolean(entry));
 
-      return {
-        label: sharedLabel,
-        boxKind: isTemplateFrameBoxKind(sharedBoxKind) ? sharedBoxKind : '',
-        role:
-          sharedRole === 'group' || TEMPLATE_FRAME_ROLE_OPTIONS.includes(sharedRole as TemplateFrameRole)
-            ? (sharedRole as TemplateFrameRole | '')
-            : '',
-        valueKey: sharedValueKey,
-        parentGroupId: sharedParentGroupId,
-        runtimeMode: isTemplateFrameRuntimeMode(sharedRuntimeMode) ? sharedRuntimeMode : '',
-      };
+      return buildFrameMetadataDraftFromCacheEntries(cachedEntries);
     },
-    [resolveSelectionDraftFrameNodes]
+    [
+      buildFrameMetadataDraftFromCacheEntries,
+      ensureFrameOverlayCacheFromNodes,
+      resolveSelectionDraftFrameNodes,
+    ]
   );
 
   const syncFrameMetadataDraftFromIds = React.useCallback((activeSelectionIdsOverride?: string[], fastFrameNodeById?: Map<string, HTMLElement>) => {
@@ -26248,19 +26211,105 @@ export default function TemplateEditWorkspace({
 
     if (!root || activeSelectionIds.length === 0) {
       syncedFrameMetadataDraftRef.current = defaultFrameMetadataDraft;
-      setFrameMetadataDraft(defaultFrameMetadataDraft);
+      setFrameMetadataDraft((previous) =>
+        areFrameMetadataDraftsEqual(previous, defaultFrameMetadataDraft) ? previous : defaultFrameMetadataDraft
+      );
       return;
     }
 
     const nextDraft = buildFrameMetadataDraftFromIds(root, activeSelectionIds, fastFrameNodeById);
 
     syncedFrameMetadataDraftRef.current = nextDraft;
-    setFrameMetadataDraft(nextDraft);
+    setFrameMetadataDraft((previous) => (areFrameMetadataDraftsEqual(previous, nextDraft) ? previous : nextDraft));
   }, [buildFrameMetadataDraftFromIds, selectedFrameGroupIds]);
   const syncFrameMetadataDraft = React.useCallback(() => {
     syncFrameMetadataDraftFromIds();
   }, [syncFrameMetadataDraftFromIds]);
   syncFrameMetadataDraftFromIdsRef.current = syncFrameMetadataDraftFromIds;
+
+  const syncOpenSelectionOverlayDraftsFromCache = React.useCallback(
+    (root: HTMLElement, fastFrameNodeById?: Map<string, HTMLElement>) => {
+      const activeSelectionIds =
+        selectionPanelTab === 'position' && selectedPositionResolvedFrameGroupIds.length > 0
+          ? selectedPositionResolvedFrameGroupIds
+          : selectedFrameGroupIdsRef.current.length > 0
+            ? selectedFrameGroupIdsRef.current
+            : selectedFrameGroupIds;
+
+      if (activeSelectionIds.length <= 0) {
+        return;
+      }
+
+      if (
+        selectionPanelTab !== 'position' ||
+        !styleOverlayCollapsedRef.current ||
+        !sizeTypeOverlayCollapsedRef.current ||
+        !textStyleOverlayCollapsedRef.current
+      ) {
+        const nextStyleDraft = buildSelectionStyleDraftFromIds(root, activeSelectionIds, fastFrameNodeById);
+        syncSelectionStyleDraftControls(nextStyleDraft, activeSelectionIds);
+        setSelectionStyleDraft((previous) =>
+          areSelectionStyleDraftsEqual(previous, nextStyleDraft) ? previous : nextStyleDraft
+        );
+      }
+
+      if (selectionPanelTab === 'metadata') {
+        const nextMetadataDraft = buildFrameMetadataDraftFromIds(root, activeSelectionIds, fastFrameNodeById);
+        syncedFrameMetadataDraftRef.current = nextMetadataDraft;
+        setFrameMetadataDraft((previous) =>
+          areFrameMetadataDraftsEqual(previous, nextMetadataDraft) ? previous : nextMetadataDraft
+        );
+      }
+    },
+    [
+      buildFrameMetadataDraftFromIds,
+      buildSelectionStyleDraftFromIds,
+      selectedFrameGroupIds,
+      selectedPositionResolvedFrameGroupIds,
+      selectionPanelTab,
+      syncSelectionStyleDraftControls,
+    ]
+  );
+
+  React.useEffect(() => {
+    const root = previewRef.current;
+
+    if (!root || !renderedPreviewHtml || templateUsagePreviewMode || typeof window === 'undefined') {
+      return;
+    }
+
+    const allFrameNodes = collectFrameSelectionAnchors(root);
+
+    if (allFrameNodes.length <= 0) {
+      return;
+    }
+
+    const missingNodes = allFrameNodes.filter((node) => {
+      const entry = frameOverlayCacheRef.current.get(getFrameGroupId(node).trim());
+      return !entry?.style || !entry?.metadata;
+    });
+
+    if (missingNodes.length <= 0) {
+      return;
+    }
+
+    if (overlayCachePrewarmTimerRef.current !== null) {
+      window.clearTimeout(overlayCachePrewarmTimerRef.current);
+      overlayCachePrewarmTimerRef.current = null;
+    }
+
+    overlayCachePrewarmTimerRef.current = window.setTimeout(() => {
+      overlayCachePrewarmTimerRef.current = null;
+      ensureFrameOverlayCacheFromNodes(missingNodes, { style: true, metadata: true });
+    }, 48);
+
+    return () => {
+      if (overlayCachePrewarmTimerRef.current !== null) {
+        window.clearTimeout(overlayCachePrewarmTimerRef.current);
+        overlayCachePrewarmTimerRef.current = null;
+      }
+    };
+  }, [ensureFrameOverlayCacheFromNodes, renderedPreviewHtml, templateUsagePreviewMode]);
 
   React.useEffect(() => {
     syncFrameMetadataDraft();
@@ -27201,6 +27250,8 @@ export default function TemplateEditWorkspace({
       if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0 && !spacingChanged) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
+      ensureFrameOverlayCacheFromNodes(nodes, { style: true, force: true });
+      syncOpenSelectionOverlayDraftsFromCache(root);
       scheduleDeferredStylePanelSync({
         materializePositionGroups: shouldUpdateGeometry || spacingChanged,
         syncEditorState: shouldUpdateGeometry || spacingChanged || shouldRecalculateAutoSize,
@@ -27209,8 +27260,10 @@ export default function TemplateEditWorkspace({
     },
     [
       applyPreservedPositionSpacingRelations,
+      ensureFrameOverlayCacheFromNodes,
       resolveSelectionAppearanceStyleTargets,
       scheduleDeferredStylePanelSync,
+      syncOpenSelectionOverlayDraftsFromCache,
     ]
   );
 
@@ -27244,6 +27297,8 @@ export default function TemplateEditWorkspace({
     }
 
     syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
+    ensureFrameOverlayCacheFromNodes(nodes, { style: true, force: true });
+    syncOpenSelectionOverlayDraftsFromCache(root);
 
     scheduleDeferredTextAutoSizeSync(commandRevision);
     const modeLabel =
@@ -27252,7 +27307,9 @@ export default function TemplateEditWorkspace({
   }, [
     applyTemplateAutoSizeBoxesWithPreservedLayout,
     beginTextAutoSizeCommand,
+    ensureFrameOverlayCacheFromNodes,
     scheduleDeferredTextAutoSizeSync,
+    syncOpenSelectionOverlayDraftsFromCache,
     syncTextAutoSizeUiOverrideFromSelection,
   ]);
 
@@ -27292,6 +27349,8 @@ export default function TemplateEditWorkspace({
       applyModeAndAnchor(nodes);
       applyTemplateAutoSizeBoxesWithPreservedLayout(root, activeSelectionIds);
       syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
+      ensureFrameOverlayCacheFromNodes(nodes, { style: true, force: true });
+      syncOpenSelectionOverlayDraftsFromCache(root);
 
       scheduleDeferredTextAutoSizeSync(commandRevision);
 
@@ -27309,7 +27368,9 @@ export default function TemplateEditWorkspace({
     [
       applyTemplateAutoSizeBoxesWithPreservedLayout,
       beginTextAutoSizeCommand,
+      ensureFrameOverlayCacheFromNodes,
       scheduleDeferredTextAutoSizeSync,
+      syncOpenSelectionOverlayDraftsFromCache,
       syncTextAutoSizeUiOverrideFromSelection,
     ]
   );
@@ -27341,11 +27402,15 @@ export default function TemplateEditWorkspace({
       applyPreservedPositionSpacingRelations(root);
     }
     syncTextAutoSizeUiOverrideFromSelection(root, activeSelectionIds);
+    ensureFrameOverlayCacheFromNodes(nodes, { style: true, force: true });
+    syncOpenSelectionOverlayDraftsFromCache(root);
     scheduleDeferredTextAutoSizeSync();
     setMessage(`${axis === 'width' ? '너비' : '높이'} 내용 맞춤: ${nodes.length}개 상자`);
   }, [
     applyPreservedPositionSpacingRelations,
+    ensureFrameOverlayCacheFromNodes,
     scheduleDeferredTextAutoSizeSync,
+    syncOpenSelectionOverlayDraftsFromCache,
     syncTextAutoSizeUiOverrideFromSelection,
   ]);
 
@@ -27398,6 +27463,8 @@ export default function TemplateEditWorkspace({
       const commandRevision = beginTextAutoSizeCommand();
 
       applyTemplateAutoSizeBoxesWithPreservedLayout(root, targetFrameGroupIds);
+      ensureFrameOverlayCacheFromNodes(targetNodes, { style: true, force: true });
+      syncOpenSelectionOverlayDraftsFromCache(root);
 
       scheduleDeferredTextAutoSizeSync(commandRevision);
       setMessage(
@@ -27407,8 +27474,10 @@ export default function TemplateEditWorkspace({
     [
       applyTemplateAutoSizeBoxesWithPreservedLayout,
       beginTextAutoSizeCommand,
+      ensureFrameOverlayCacheFromNodes,
       resolveSelectionAppearanceStyleTargets,
       scheduleDeferredTextAutoSizeSync,
+      syncOpenSelectionOverlayDraftsFromCache,
       syncTextAutoSizeUiOverrideFromSelection,
     ]
   );
@@ -29777,6 +29846,8 @@ export default function TemplateEditWorkspace({
       });
     });
 
+    ensureFrameOverlayCacheFromNodes(affectedNodes, { metadata: true, force: true });
+    syncOpenSelectionOverlayDraftsFromCache(root, frameNodeById);
     syncFrameRelationshipValueKeys(root, resolvedMetadataById, virtualFrameDefinitions);
     syncDraftPreviewHtmlRef();
     syncFrameMetadataDraft();
@@ -29792,9 +29863,11 @@ export default function TemplateEditWorkspace({
     };
   }, [
     availableFrameGroupIds,
+    ensureFrameOverlayCacheFromNodes,
     getFrameNodes,
     readFrameMetadataDraftFromControls,
     requestPreviewTextFit,
+    syncOpenSelectionOverlayDraftsFromCache,
     syncDraftPreviewHtmlRef,
     syncFrameMetadataDraft,
     virtualFrameDefinitions,
@@ -33816,6 +33889,8 @@ export default function TemplateEditWorkspace({
         frameTextInput.setAttribute('value', frameTextInput.value);
       }
       applyTemplateAutoSizeBoxesWithPreservedLayout(root, [frameGroupId]);
+      ensureFrameOverlayCacheFromNodes([frameNode], { style: true, force: true });
+      syncOpenSelectionOverlayDraftsFromCache(root);
 
       if (shouldRestoreTextInputFocus) {
         restoreFrameTextInputFocus(root, frameGroupId, selectionStart, selectionEnd);
@@ -33841,10 +33916,12 @@ export default function TemplateEditWorkspace({
       syncSelectionDraft: false,
       textFit: true,
     });
-	  }, [
+  }, [
     applyTemplateAutoSizeBoxesWithPreservedLayout,
     cancelDeferredTextAutoSizeSync,
+    ensureFrameOverlayCacheFromNodes,
     scheduleDeferredStylePanelSync,
+    syncOpenSelectionOverlayDraftsFromCache,
     templateUsagePreviewMode,
   ]);
 
@@ -35675,7 +35752,7 @@ export default function TemplateEditWorkspace({
       return null;
     }
 
-    return styleOverlayCollapsedState ? <div aria-hidden="true" /> : renderSelectionAppearanceControls();
+    return renderSelectionAppearanceControls();
   };
 
   const renderPositionBoxSizeTypeOverlay = () => {
@@ -36086,10 +36163,6 @@ export default function TemplateEditWorkspace({
       return null;
     }
 
-    if (textStyleOverlayCollapsedState) {
-      return <div aria-hidden="true" />;
-    }
-
     return renderTextCanvasActionControls();
   }, [
     selectedFrameGroupIds,
@@ -36097,7 +36170,6 @@ export default function TemplateEditWorkspace({
     selectionPanelTab,
     selectionStyleDraft,
     styleFieldApplyStatus,
-    textStyleOverlayCollapsedState,
     templateUsagePreviewMode,
   ]);
 
