@@ -100,6 +100,24 @@ const buildSnapCandidates = (
   return { horizontalCandidates, verticalCandidates };
 };
 
+const buildMoveSnapCandidates = (
+  rect: Rect,
+  frameRects: Rect[],
+  bounds: PageBounds,
+  includePageBounds: boolean,
+  _threshold: number
+) => {
+  const horizontalCandidates = includePageBounds ? [0, bounds.width] : [];
+  const verticalCandidates = includePageBounds ? [0, bounds.height] : [];
+
+  frameRects.forEach((candidateRect) => {
+    horizontalCandidates.push(candidateRect.left, right(candidateRect));
+    verticalCandidates.push(candidateRect.top, bottom(candidateRect));
+  });
+
+  return { horizontalCandidates, verticalCandidates };
+};
+
 const hasSharedFace = (
   first: TemplateFrameNodeDto,
   second: TemplateFrameNodeDto,
@@ -190,11 +208,12 @@ export const TemplateFrameEditGeometryService = {
   }): TemplateFrameEditResult<Rect> {
     const options = mergeOptions(input.options);
     const clamped = clampRect(input.rect, input.bounds, options.minSizePx);
-    const { horizontalCandidates, verticalCandidates } = buildSnapCandidates(
+    const { horizontalCandidates, verticalCandidates } = buildMoveSnapCandidates(
       clamped,
       input.siblingRects,
       input.bounds,
-      options.snapToPageBounds
+      options.snapToPageBounds,
+      options.thresholdPx
     );
 
     let snapDx = 0;

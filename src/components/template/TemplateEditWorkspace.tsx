@@ -430,6 +430,7 @@ type DragState = {
   active: boolean;
   pageInner: HTMLElement;
   anchorRect: FrameNodeRect;
+  moveRect: FrameNodeRect;
   nodes: Array<{
     node: HTMLElement;
     rect: FrameNodeRect;
@@ -3970,6 +3971,24 @@ const readFrameElementRect = (element: HTMLElement, pageInner?: HTMLElement | nu
 };
 
 const readFrameMoveRect = (node: HTMLElement): FrameNodeRect => readFrameElementRect(resolveFrameLayoutShell(node));
+
+const buildFrameRectUnion = (rects: FrameNodeRect[]): FrameNodeRect => {
+  if (rects.length <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+
+  const minLeft = Math.min(...rects.map((rect) => rect.left));
+  const minTop = Math.min(...rects.map((rect) => rect.top));
+  const maxRight = Math.max(...rects.map((rect) => rect.left + rect.width));
+  const maxBottom = Math.max(...rects.map((rect) => rect.top + rect.height));
+
+  return {
+    left: minLeft,
+    top: minTop,
+    width: Math.max(0, maxRight - minLeft),
+    height: Math.max(0, maxBottom - minTop),
+  };
+};
 
 const FRAME_EDGE_SNAP_TOLERANCE_PX = 0.75;
 
@@ -14354,20 +14373,17 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   const computedStyle = getComputedStyle(target);
   const verticalBorderPx = readComputedVerticalBorderPx(computedStyle);
   const liveScrollHeight = target.scrollHeight || 0;
-
-  if (target instanceof HTMLTextAreaElement && liveScrollHeight > 0) {
-    return Math.ceil(Math.max(liveScrollHeight + verticalBorderPx, targetRect.height || 0));
-  }
+  const paddingTop = parseFramePx(computedStyle.paddingTop);
+  const paddingBottom = parseFramePx(computedStyle.paddingBottom);
+  const fontSize = parseFramePx(computedStyle.fontSize);
+  const lineHeight = parseFramePx(computedStyle.lineHeight);
+  const naturalSingleLineHeight =
+    paddingTop + paddingBottom + verticalBorderPx + Math.max(lineHeight, fontSize, 0);
 
   if (target instanceof HTMLInputElement) {
-    const paddingTop = parseFramePx(computedStyle.paddingTop);
-    const paddingBottom = parseFramePx(computedStyle.paddingBottom);
-    const fontSize = parseFramePx(computedStyle.fontSize);
-    const lineHeight = parseFramePx(computedStyle.lineHeight);
     const liveInputHeight = Math.max(
       liveScrollHeight + verticalBorderPx,
-      paddingTop + paddingBottom + verticalBorderPx + Math.max(lineHeight, fontSize, 0),
-      targetRect.height || 0
+      naturalSingleLineHeight
     );
 
     if (liveInputHeight > 0) {
@@ -14409,7 +14425,7 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   const measuredHeight =
     measureNode.scrollHeight || measureNode.getBoundingClientRect().height || target.scrollHeight || 0;
 
-  return Math.ceil(measuredHeight + verticalBorderPx);
+  return Math.ceil(Math.max(measuredHeight + verticalBorderPx, naturalSingleLineHeight, targetRect.height > 0 && target instanceof HTMLInputElement ? targetRect.height : 0));
 };
 
 const measureNaturalElementContentHeight = (target: HTMLElement) => {
@@ -14460,9 +14476,10 @@ const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputE
   const computedStyle = getComputedStyle(target);
   const horizontalBorderPx = parseFramePx(computedStyle.borderLeftWidth) + parseFramePx(computedStyle.borderRightWidth);
   const liveScrollWidth = target.scrollWidth || 0;
+  const targetRectWidth = target.getBoundingClientRect().width || 0;
 
-  if (liveScrollWidth > 0) {
-    return Math.ceil(Math.max(liveScrollWidth + horizontalBorderPx, target.getBoundingClientRect().width || 0));
+  if (liveScrollWidth > 0 && liveScrollWidth + horizontalBorderPx > targetRectWidth + 0.5) {
+    return Math.ceil(liveScrollWidth + horizontalBorderPx);
   }
 
   const clone = document.createElement('div');
@@ -17600,6 +17617,14 @@ export default function TemplateEditWorkspace({
   const selectedFrameGroupIdsRef = React.useRef<string[]>([]);
   const edgeSelectionStateRef = React.useRef<TemplateEdgeSelectionStateDto>(TemplateEdgeSelectionService.createEmptyState());
   const edgeRoleDiagnosticsRef = React.useRef<EdgeRoleDiagnosticsState>(emptyEdgeRoleDiagnosticsState);
+  const syncEdgeRoleDiagnosticsState = React.useCallback((nextState: EdgeRoleDiagnosticsState) => {
+    if (edgeRoleDiagnosticsStatesEqual(edgeRoleDiagnosticsRef.current, nextState)) {
+      return;
+    }
+
+    edgeRoleDiagnosticsRef.current = nextState;
+    setEdgeRoleDiagnostics(nextState);
+  }, []);
   const syncedFrameMetadataDraftRef = React.useRef<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const frameOverlayCacheRef = React.useRef<Map<string, FrameOverlayCacheEntry>>(new Map());
   const overlayCachePrewarmTimerRef = React.useRef<number | null>(null);
@@ -18394,7 +18419,7 @@ export default function TemplateEditWorkspace({
       edgeSelectionStateRef.current = emptyEdgeSelection;
       setSelectedFrameGroupIds(nextEntry.selectedFrameGroupIds.slice());
       setEdgeSelectionState(emptyEdgeSelection);
-      setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+      syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
     setSelectionValidationIssues([]);
     setSelectionReviewIssues([]);
       setSelectionSaveProgress(defaultSelectionSaveProgressState);
@@ -23848,11 +23873,7 @@ export default function TemplateEditWorkspace({
         applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
         applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
         applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-        setEdgeRoleDiagnostics((previous) =>
-          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-            ? previous
-            : emptyEdgeRoleDiagnosticsState
-        );
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         requestPreviewTextFit();
         return;
       }
@@ -23902,11 +23923,7 @@ export default function TemplateEditWorkspace({
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-      setEdgeRoleDiagnostics((previous) =>
-        edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
-          ? previous
-          : nextEdgeRolePresentation.diagnosticsState
-      );
+      syncEdgeRoleDiagnosticsState(nextEdgeRolePresentation.diagnosticsState);
 
       if (edgeSelectionChanged) {
         setEdgeSelectionState(nextEdgeSelection);
@@ -24091,11 +24108,7 @@ export default function TemplateEditWorkspace({
         applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
         applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
         applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-        setEdgeRoleDiagnostics((previous) =>
-          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-            ? previous
-            : emptyEdgeRoleDiagnosticsState
-        );
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         return;
       }
 
@@ -24126,11 +24139,7 @@ export default function TemplateEditWorkspace({
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-      setEdgeRoleDiagnostics((previous) =>
-        edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
-          ? previous
-          : nextEdgeRolePresentation.diagnosticsState
-      );
+      syncEdgeRoleDiagnosticsState(nextEdgeRolePresentation.diagnosticsState);
     },
     [
       buildLiveEdgeTopologySnapshot,
@@ -24214,11 +24223,7 @@ export default function TemplateEditWorkspace({
         applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
         applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
         applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-        setEdgeRoleDiagnostics((previous) =>
-          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-            ? previous
-            : emptyEdgeRoleDiagnosticsState
-        );
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         return;
       }
 
@@ -24572,7 +24577,7 @@ export default function TemplateEditWorkspace({
       const commitSelectionReactState = () => {
         setSelectedFrameGroupIds(normalizedSelectionIds);
         setEdgeSelectionState(emptyEdgeSelection);
-        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         setSelectionValidationIssues([]);
         setSelectionReviewIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
@@ -25036,7 +25041,7 @@ export default function TemplateEditWorkspace({
         edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
-        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         setSelectionValidationIssues([]);
         setSelectionReviewIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
@@ -25076,7 +25081,7 @@ export default function TemplateEditWorkspace({
         edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
-        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         setSelectionValidationIssues([]);
         setSelectionReviewIssues([]);
         setSelectionSaveProgress(defaultSelectionSaveProgressState);
@@ -25145,7 +25150,7 @@ export default function TemplateEditWorkspace({
           edgeSelectionStateRef.current = TemplateEdgeSelectionService.createEmptyState();
           setSelectedFrameGroupIds([]);
           setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
-          setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+          syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
           setSelectionValidationIssues([]);
           setSelectionReviewIssues([]);
           setSelectionSaveProgress(defaultSelectionSaveProgressState);
@@ -25215,7 +25220,7 @@ export default function TemplateEditWorkspace({
     edgeSelectionStateRef.current = emptyEdgeSelection;
     setSelectedFrameGroupIds([]);
     setEdgeSelectionState(emptyEdgeSelection);
-    setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+    syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
     setSelectionValidationIssues([]);
     setSelectionReviewIssues([]);
     setSelectionSaveProgress(defaultSelectionSaveProgressState);
@@ -25470,11 +25475,7 @@ export default function TemplateEditWorkspace({
         applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
         applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
         applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-        setEdgeRoleDiagnostics((previous) =>
-          edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-            ? previous
-            : emptyEdgeRoleDiagnosticsState
-        );
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         requestPreviewTextFit();
         return true;
       }
@@ -25524,11 +25525,7 @@ export default function TemplateEditWorkspace({
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-      setEdgeRoleDiagnostics((previous) =>
-        edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
-          ? previous
-          : nextEdgeRolePresentation.diagnosticsState
-      );
+      syncEdgeRoleDiagnosticsState(nextEdgeRolePresentation.diagnosticsState);
       requestPreviewTextFit();
       return true;
     },
@@ -25602,8 +25599,7 @@ export default function TemplateEditWorkspace({
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
       if (!edgeRoleDiagnosticsStatesEqual(edgeRoleDiagnosticsRef.current, emptyEdgeRoleDiagnosticsState)) {
-        edgeRoleDiagnosticsRef.current = emptyEdgeRoleDiagnosticsState;
-        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
       }
       return;
     }
@@ -25632,8 +25628,7 @@ export default function TemplateEditWorkspace({
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
       if (!edgeRoleDiagnosticsStatesEqual(edgeRoleDiagnosticsRef.current, emptyEdgeRoleDiagnosticsState)) {
-        edgeRoleDiagnosticsRef.current = emptyEdgeRoleDiagnosticsState;
-        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
       }
       return;
     }
@@ -25690,8 +25685,7 @@ export default function TemplateEditWorkspace({
     applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
     if (!edgeRoleDiagnosticsStatesEqual(edgeRoleDiagnosticsRef.current, nextEdgeRolePresentation.diagnosticsState)) {
-      edgeRoleDiagnosticsRef.current = nextEdgeRolePresentation.diagnosticsState;
-      setEdgeRoleDiagnostics(nextEdgeRolePresentation.diagnosticsState);
+      syncEdgeRoleDiagnosticsState(nextEdgeRolePresentation.diagnosticsState);
     }
   }, [
       readCachedLiveEdgeTopologySnapshot,
@@ -31461,11 +31455,7 @@ export default function TemplateEditWorkspace({
         applyDefinedPositionRelativeRelationUi(previewRef.current, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
         applyPositionSpacingGuideUi(previewRef.current, selectionPanelTab, positionSpacingGuideRelations);
       }
-      setEdgeRoleDiagnostics((previous) =>
-        edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
-          ? previous
-          : nextEdgeRolePresentation.diagnosticsState
-      );
+      syncEdgeRoleDiagnosticsState(nextEdgeRolePresentation.diagnosticsState);
       if (hasCommittedGeometryInteraction) {
         syncSelectionStyleDraft();
         requestPreviewTextFit();
@@ -31538,7 +31528,7 @@ export default function TemplateEditWorkspace({
     setPositionSelectionStateRevision((previous) => previous + 1);
     setSelectedFrameGroupIds([]);
     setEdgeSelectionState(emptyEdgeSelection);
-    setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+    syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
     applyRuntimeSelectionUi([], emptyEdgeSelection, []);
   }, [applyRuntimeSelectionUi, stopPointerInteraction]);
 
@@ -31609,7 +31599,7 @@ export default function TemplateEditWorkspace({
       setPositionSelectionStateRevision((previous) => previous + 1);
       setSelectedFrameGroupIds([]);
       setEdgeSelectionState(emptyEdgeSelection);
-      setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+      syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
 
       const removedFrameCount = normalizedKind === 'frame' ? removeFrameShellsByFrameGroupIds(root, targetFrameGroupIds) : 0;
 
@@ -31921,6 +31911,7 @@ export default function TemplateEditWorkspace({
         lockPreviewEditorStateDuringInteraction();
         safeSetPointerCapture(event.currentTarget, event.pointerId);
         activePointerOwnerRef.current = event.currentTarget;
+        const dragNodeRects = dragNodes.map((node) => readFrameMoveRect(node));
         dragStateRef.current = {
           pointerId: event.pointerId,
           startX: event.clientX,
@@ -31929,7 +31920,8 @@ export default function TemplateEditWorkspace({
           active: false,
           pageInner,
           anchorRect: readFrameMoveRect(anchorNode),
-          nodes: dragNodes.map((node) => ({ node, rect: readFrameMoveRect(node) })),
+          moveRect: buildFrameRectUnion(dragNodeRects),
+          nodes: dragNodes.map((node, index) => ({ node, rect: dragNodeRects[index] || readFrameMoveRect(node) })),
           snapSiblingRects: pageFrameNodes
             .filter((node) => !dragNodeSet.has(node))
             .map((node) => readFrameMoveRect(node)),
@@ -32653,6 +32645,7 @@ export default function TemplateEditWorkspace({
       );
       const dragNodes = selectionOnPage.length ? selectionOnPage : [frameNode];
       const dragNodeSet = new Set(dragNodes);
+      const dragNodeRects = dragNodes.map((node) => readFrameMoveRect(node));
 
       dragStateRef.current = {
         pointerId: event.pointerId,
@@ -32662,7 +32655,8 @@ export default function TemplateEditWorkspace({
         active: false,
         pageInner,
         anchorRect: readFrameMoveRect(frameNode),
-        nodes: dragNodes.map((node) => ({ node, rect: readFrameMoveRect(node) })),
+        moveRect: buildFrameRectUnion(dragNodeRects),
+        nodes: dragNodes.map((node, index) => ({ node, rect: dragNodeRects[index] || readFrameMoveRect(node) })),
         snapSiblingRects: pageFrameNodes
           .filter((node) => !dragNodeSet.has(node))
           .map((node) => readFrameMoveRect(node)),
@@ -32851,12 +32845,13 @@ export default function TemplateEditWorkspace({
         },
         dragState.scale
       );
+      const requestedMoveRect = {
+        ...dragState.moveRect,
+        left: dragState.moveRect.left + delta.x,
+        top: dragState.moveRect.top + delta.y,
+      };
       const snapResult = TemplateFrameEditGeometryService.snapMovedRect({
-        rect: {
-          ...dragState.anchorRect,
-          left: dragState.anchorRect.left + delta.x,
-          top: dragState.anchorRect.top + delta.y,
-        },
+        rect: requestedMoveRect,
         siblingRects: dragState.snapSiblingRects,
         bounds: pageBounds,
       });
@@ -32864,15 +32859,11 @@ export default function TemplateEditWorkspace({
         snapResult.ok && snapResult.value
           ? snapResult.value
           : clampFrameNodeRect(
-              {
-                ...dragState.anchorRect,
-                left: dragState.anchorRect.left + delta.x,
-                top: dragState.anchorRect.top + delta.y,
-              },
+              requestedMoveRect,
               pageBounds
             );
-      const moveDx = resolvedRect.left - dragState.anchorRect.left;
-      const moveDy = resolvedRect.top - dragState.anchorRect.top;
+      const moveDx = resolvedRect.left - dragState.moveRect.left;
+      const moveDy = resolvedRect.top - dragState.moveRect.top;
 
       dragState.nodes.forEach(({ node, rect }) => {
         writeFrameMoveRect(
@@ -33736,7 +33727,7 @@ export default function TemplateEditWorkspace({
         edgeSelectionStateRef.current = edgePressState.clickSelection;
         setSelectedFrameGroupIds([]);
         setEdgeSelectionState(edgePressState.clickSelection);
-        setEdgeRoleDiagnostics(
+        syncEdgeRoleDiagnosticsState(
           resolveEdgeRolePresentation(edgePressState.snapshot, edgePressState.clickSelection).diagnosticsState
         );
         if (deferredPreviewEditorStateRef.current) {
@@ -33876,7 +33867,7 @@ export default function TemplateEditWorkspace({
         edgeSelectionStateRef.current = emptyEdgeSelection;
         setSelectedFrameGroupIds(restoredSelectionIds.slice());
         setEdgeSelectionState(emptyEdgeSelection);
-        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+        syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
         applyRuntimeSelectionUi(restoredSelectionIds, emptyEdgeSelection);
         if (deferredPreviewEditorStateRef.current) {
           deferredPreviewEditorStateRef.current = false;
