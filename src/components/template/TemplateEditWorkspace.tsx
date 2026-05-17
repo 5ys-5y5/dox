@@ -3330,6 +3330,9 @@ const writeFrameAutoSizeAnchorAttrs = (node: HTMLElement, side: TextAutoSizeAnch
 
 const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) => {
   const targets = collectFrameAutoSizeAttrTargets(node);
+  const hadAutoHeight = readFrameAutoHeightBox(node);
+  const hadAutoWidth = readFrameAutoWidthBox(node);
+  const storedAnchorSide = readStoredFrameAutoSizeAnchorSide(node);
   const currentAnchorSide = readFrameAutoSizeAnchorSide(node, mode === 'width' ? 'right' : 'bottom');
   const nextAnchorSide =
     mode === 'width'
@@ -3371,6 +3374,10 @@ const writeFrameAutoSizeModeAttrs = (node: HTMLElement, mode: TextAutoSizeMode) 
     target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_ATTR);
     target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_ATTR);
     target.removeAttribute(TEMPLATE_FRAME_AUTO_WIDTH_BASE_EXPLICIT_ATTR);
+    if (storedAnchorSide && (hadAutoHeight || hadAutoWidth)) {
+      target.setAttribute(TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR, storedAnchorSide);
+      return;
+    }
     target.removeAttribute(TEMPLATE_FRAME_AUTO_SIZE_ANCHOR_ATTR);
   });
 };
@@ -9052,15 +9059,24 @@ const resolveNormalizedBandAxisBoundaries = (
   return boundaries;
 };
 
-const syncTemplateUsagePreviewNormalizedBandPeerBounds = (root: ParentNode) => {
+const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
+  root: ParentNode,
+  options?: {
+    sourceKeys?: Iterable<string>;
+  }
+) => {
   let changed = false;
+  const sourceKeyFilter = options?.sourceKeys ? new Set(Array.from(options.sourceKeys).map((value) => value.trim()).filter(Boolean)) : null;
 
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     const geometriesBySourceKey = new Map<string, NormalizedBandGeometry[]>();
 
     Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
       .map((shell) => readNormalizedBandGeometry(shell))
-      .filter((geometry): geometry is NormalizedBandGeometry => Boolean(geometry))
+      .filter(
+        (geometry): geometry is NormalizedBandGeometry =>
+          Boolean(geometry) && (!sourceKeyFilter || sourceKeyFilter.has(geometry.sourceKey))
+      )
       .forEach((geometry) => {
         const entries = geometriesBySourceKey.get(geometry.sourceKey) || [];
         entries.push(geometry);
@@ -9428,9 +9444,9 @@ const applyFrameAutoHeightFromTopDeltaLocal = (node: HTMLElement, delta: number)
 const collectAutoSizeSameSidePeerNodes = (
   root: HTMLElement,
   frameGroupId: string,
-  side: Extract<TemplateEdgeSide, 'bottom' | 'right'>
+  side: Extract<TemplateEdgeSide, 'bottom' | 'right'>,
+  snapshot: TemplateEdgeTopologySnapshotDto = buildTemplateEdgeTopologySnapshotFromRoot(root)
 ) => {
-  const snapshot = buildTemplateEdgeTopologySnapshotFromRoot(root);
   const clickedEdgeId = `${frameGroupId}:${side}`;
   const clickedEdge = TemplateEdgeTopologyService.getEdgeById(snapshot, clickedEdgeId);
 
@@ -13003,24 +13019,26 @@ const applyElementCornerRadiusStylePatch = (
 };
 
 const applyElementPaddingStylePatch = (element: HTMLElement, patch: FrameStylePatch) => {
-  const computedStyle = getComputedStyle(element);
-  const nextPaddingTop =
-    patch.paddingTop !== undefined ? Number.parseFloat(patch.paddingTop || '0') : parseFramePx(computedStyle.paddingTop || '0');
-  const nextPaddingBottom =
-    patch.paddingBottom !== undefined
-      ? Number.parseFloat(patch.paddingBottom || '0')
-      : parseFramePx(computedStyle.paddingBottom || '0');
-  const nextPaddingLeft =
-    patch.paddingLeft !== undefined ? Number.parseFloat(patch.paddingLeft || '0') : parseFramePx(computedStyle.paddingLeft || '0');
-  const nextPaddingRight =
-    patch.paddingRight !== undefined
-      ? Number.parseFloat(patch.paddingRight || '0')
-      : parseFramePx(computedStyle.paddingRight || '0');
+  const writePaddingValue = (cssPropertyName: 'paddingTop' | 'paddingBottom' | 'paddingLeft' | 'paddingRight', nextValue: string) => {
+    const parsedValue = Number.parseFloat(nextValue || '0');
+    element.style[cssPropertyName] = `${Number.isFinite(parsedValue) ? parsedValue : 0}px`;
+  };
 
-  element.style.paddingTop = `${Number.isFinite(nextPaddingTop) ? nextPaddingTop : 0}px`;
-  element.style.paddingBottom = `${Number.isFinite(nextPaddingBottom) ? nextPaddingBottom : 0}px`;
-  element.style.paddingLeft = `${Number.isFinite(nextPaddingLeft) ? nextPaddingLeft : 0}px`;
-  element.style.paddingRight = `${Number.isFinite(nextPaddingRight) ? nextPaddingRight : 0}px`;
+  if (patch.paddingTop !== undefined) {
+    writePaddingValue('paddingTop', patch.paddingTop);
+  }
+
+  if (patch.paddingBottom !== undefined) {
+    writePaddingValue('paddingBottom', patch.paddingBottom);
+  }
+
+  if (patch.paddingLeft !== undefined) {
+    writePaddingValue('paddingLeft', patch.paddingLeft);
+  }
+
+  if (patch.paddingRight !== undefined) {
+    writePaddingValue('paddingRight', patch.paddingRight);
+  }
 };
 
 const clearNestedFrameBorderAppearanceStyles = (shell: HTMLElement) => {
@@ -14294,43 +14312,102 @@ const copyComputedTextMeasurementStyles = (
   });
 };
 
+let sharedTextareaHeightMeasureNode: HTMLTextAreaElement | null = null;
+let sharedInputHeightMeasureNode: HTMLInputElement | null = null;
+
+const ensureSharedTextHeightMeasureNode = (kind: 'textarea' | 'input') => {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  if (kind === 'textarea') {
+    if (!sharedTextareaHeightMeasureNode) {
+      sharedTextareaHeightMeasureNode = document.createElement('textarea');
+      sharedTextareaHeightMeasureNode.setAttribute('rows', '1');
+      sharedTextareaHeightMeasureNode.setAttribute('aria-hidden', 'true');
+      sharedTextareaHeightMeasureNode.tabIndex = -1;
+    }
+
+    if (!sharedTextareaHeightMeasureNode.isConnected) {
+      document.body.appendChild(sharedTextareaHeightMeasureNode);
+    }
+
+    return sharedTextareaHeightMeasureNode;
+  }
+
+  if (!sharedInputHeightMeasureNode) {
+    sharedInputHeightMeasureNode = document.createElement('input');
+    sharedInputHeightMeasureNode.type = 'text';
+    sharedInputHeightMeasureNode.setAttribute('aria-hidden', 'true');
+    sharedInputHeightMeasureNode.tabIndex = -1;
+  }
+
+  if (!sharedInputHeightMeasureNode.isConnected) {
+    document.body.appendChild(sharedInputHeightMeasureNode);
+  }
+
+  return sharedInputHeightMeasureNode;
+};
+
 const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const targetRect = target.getBoundingClientRect();
   const computedStyle = getComputedStyle(target);
-  const clone = target.cloneNode(false) as HTMLTextAreaElement | HTMLInputElement;
   const verticalBorderPx = readComputedVerticalBorderPx(computedStyle);
+  const liveScrollHeight = target.scrollHeight || 0;
 
-  clone.value = target.value;
-  if (clone instanceof HTMLTextAreaElement) {
-    clone.rows = 1;
-    clone.setAttribute('rows', '1');
+  if (target instanceof HTMLTextAreaElement && liveScrollHeight > 0) {
+    return Math.ceil(Math.max(liveScrollHeight + verticalBorderPx, targetRect.height || 0));
   }
-  clone.removeAttribute('id');
-  clone.removeAttribute('name');
-  clone.removeAttribute('readonly');
-  clone.removeAttribute('disabled');
-  clone.style.position = 'fixed';
-  clone.style.left = '-10000px';
-  clone.style.top = '0';
-  clone.style.display = 'block';
-  clone.style.width = toFrameCssPx(targetRect.width || parseFramePx(computedStyle.width));
-  clone.style.height = '0px';
-  clone.style.minHeight = '0px';
-  clone.style.maxHeight = 'none';
-  clone.style.visibility = 'hidden';
-  clone.style.overflow = 'hidden';
-  clone.style.pointerEvents = 'none';
-  clone.style.boxSizing = computedStyle.boxSizing;
-  copyComputedTextMeasurementStyles(computedStyle, clone.style);
-  clone.style.padding = computedStyle.padding;
-  clone.style.border = computedStyle.border;
-  clone.style.whiteSpace = computedStyle.whiteSpace;
-  clone.style.wordBreak = computedStyle.wordBreak;
-  clone.style.overflowWrap = computedStyle.overflowWrap;
-  document.body.appendChild(clone);
 
-  const measuredHeight = clone.scrollHeight || clone.getBoundingClientRect().height || target.scrollHeight || 0;
-  clone.remove();
+  if (target instanceof HTMLInputElement) {
+    const paddingTop = parseFramePx(computedStyle.paddingTop);
+    const paddingBottom = parseFramePx(computedStyle.paddingBottom);
+    const fontSize = parseFramePx(computedStyle.fontSize);
+    const lineHeight = parseFramePx(computedStyle.lineHeight);
+    const liveInputHeight = Math.max(
+      liveScrollHeight + verticalBorderPx,
+      paddingTop + paddingBottom + verticalBorderPx + Math.max(lineHeight, fontSize, 0),
+      targetRect.height || 0
+    );
+
+    if (liveInputHeight > 0) {
+      return Math.ceil(liveInputHeight);
+    }
+  }
+
+  const measureNode = ensureSharedTextHeightMeasureNode(target instanceof HTMLTextAreaElement ? 'textarea' : 'input');
+
+  if (!measureNode) {
+    return Math.ceil((target.scrollHeight || target.getBoundingClientRect().height || 0) + verticalBorderPx);
+  }
+
+  measureNode.value = target.value;
+  measureNode.style.position = 'fixed';
+  measureNode.style.left = '-10000px';
+  measureNode.style.top = '0';
+  measureNode.style.display = 'block';
+  measureNode.style.width = toFrameCssPx(targetRect.width || parseFramePx(computedStyle.width));
+  measureNode.style.height = '0px';
+  measureNode.style.minHeight = '0px';
+  measureNode.style.maxHeight = 'none';
+  measureNode.style.visibility = 'hidden';
+  measureNode.style.overflow = 'hidden';
+  measureNode.style.pointerEvents = 'none';
+  measureNode.style.boxSizing = computedStyle.boxSizing;
+  copyComputedTextMeasurementStyles(computedStyle, measureNode.style);
+  measureNode.style.padding = computedStyle.padding;
+  measureNode.style.border = computedStyle.border;
+  measureNode.style.whiteSpace = computedStyle.whiteSpace;
+  measureNode.style.wordBreak = computedStyle.wordBreak;
+  measureNode.style.overflowWrap = computedStyle.overflowWrap;
+
+  if (measureNode instanceof HTMLTextAreaElement) {
+    measureNode.rows = 1;
+    measureNode.setAttribute('rows', '1');
+  }
+
+  const measuredHeight =
+    measureNode.scrollHeight || measureNode.getBoundingClientRect().height || target.scrollHeight || 0;
 
   return Math.ceil(measuredHeight + verticalBorderPx);
 };
@@ -14381,6 +14458,13 @@ const measureNaturalElementContentHeight = (target: HTMLElement) => {
 
 const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const computedStyle = getComputedStyle(target);
+  const horizontalBorderPx = parseFramePx(computedStyle.borderLeftWidth) + parseFramePx(computedStyle.borderRightWidth);
+  const liveScrollWidth = target.scrollWidth || 0;
+
+  if (liveScrollWidth > 0) {
+    return Math.ceil(Math.max(liveScrollWidth + horizontalBorderPx, target.getBoundingClientRect().width || 0));
+  }
+
   const clone = document.createElement('div');
   const text = target.value;
 
@@ -14585,6 +14669,11 @@ const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
 
   const baseHeight = readFrameAutoHeightBaseHeight(node);
 
+  if (textInput instanceof HTMLTextAreaElement || textInput instanceof HTMLInputElement) {
+    const naturalTextHeight = measureNaturalTextControlHeight(textInput);
+    return Math.ceil(Math.max(baseHeight, Number.isFinite(naturalTextHeight) ? naturalTextHeight : 0));
+  }
+
   const measureTargets = textInput ? [textInput] : [contentTarget].filter(Boolean) as HTMLElement[];
   const requiredFrameHeight = measureRequiredFrameHeightFromTargets(node, measureTargets);
 
@@ -14656,6 +14745,7 @@ const applyTemplateAutoHeightBoxes = (
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
   const processedFrameGroupIdSet = new Set<string>();
+  const edgeTopologySnapshot = buildTemplateEdgeTopologySnapshotFromRoot(root);
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -14667,7 +14757,9 @@ const applyTemplateAutoHeightBoxes = (
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
       const anchorSide = normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom')] : [node];
+      const clusterNodes = frameGroupId
+        ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom', edgeTopologySnapshot)]
+        : [node];
       const uniqueClusterNodes = Array.from(
         new Map(
           clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
@@ -14739,6 +14831,7 @@ const applyTemplateAutoWidthBoxes = (
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
   const processedFrameGroupIdSet = new Set<string>();
+  const edgeTopologySnapshot = buildTemplateEdgeTopologySnapshotFromRoot(root);
 
   collectFrameSelectionAnchors(root)
     .filter((node) => {
@@ -14750,7 +14843,9 @@ const applyTemplateAutoWidthBoxes = (
     .forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
       const anchorSide = normalizeTextAutoWidthAnchorSide(readFrameAutoSizeAnchorSide(node, 'right'));
-      const clusterNodes = frameGroupId ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right')] : [node];
+      const clusterNodes = frameGroupId
+        ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right', edgeTopologySnapshot)]
+        : [node];
       const uniqueClusterNodes = Array.from(
         new Map(
           clusterNodes.map((clusterNode) => [getFrameGroupId(clusterNode).trim(), clusterNode] as const).filter(([clusterFrameGroupId]) =>
@@ -21095,7 +21190,22 @@ export default function TemplateEditWorkspace({
       }
 
       const spacingChanged = applyPreservedPositionSpacingRelations(root);
-      syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
+      const changedFrameGroupIdSet = new Set(
+        autoSizeResult.changedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+      );
+      const affectedSourceKeys = new Set(
+        collectFrameSelectionAnchors(root)
+          .filter((node) => changedFrameGroupIdSet.has(getFrameGroupId(node).trim()))
+          .map(
+            (node) =>
+              node.closest<HTMLElement>('.v102-frame-band')?.getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR)?.trim() || ''
+          )
+          .filter(Boolean)
+      );
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(
+        root,
+        affectedSourceKeys.size > 0 ? { sourceKeys: affectedSourceKeys } : undefined
+      );
       if (!spacingChanged) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
@@ -25491,11 +25601,10 @@ export default function TemplateEditWorkspace({
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-      setEdgeRoleDiagnostics((previous) =>
-        edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-          ? previous
-          : emptyEdgeRoleDiagnosticsState
-      );
+      if (!edgeRoleDiagnosticsStatesEqual(edgeRoleDiagnosticsRef.current, emptyEdgeRoleDiagnosticsState)) {
+        edgeRoleDiagnosticsRef.current = emptyEdgeRoleDiagnosticsState;
+        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+      }
       return;
     }
 
@@ -25522,11 +25631,10 @@ export default function TemplateEditWorkspace({
       applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
       applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
       applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-      setEdgeRoleDiagnostics((previous) =>
-        edgeRoleDiagnosticsStatesEqual(previous, emptyEdgeRoleDiagnosticsState)
-          ? previous
-          : emptyEdgeRoleDiagnosticsState
-      );
+      if (!edgeRoleDiagnosticsStatesEqual(edgeRoleDiagnosticsRef.current, emptyEdgeRoleDiagnosticsState)) {
+        edgeRoleDiagnosticsRef.current = emptyEdgeRoleDiagnosticsState;
+        setEdgeRoleDiagnostics(emptyEdgeRoleDiagnosticsState);
+      }
       return;
     }
 
@@ -25561,7 +25669,7 @@ export default function TemplateEditWorkspace({
     const nextEdgeRolePresentation = resolveEdgeRolePresentation(
       snapshot,
       nextEdgeSelection,
-      edgeRoleDiagnostics.mismatchEdgeIds
+      edgeRoleDiagnosticsRef.current.mismatchEdgeIds
     );
     applyFrameSelectionUi(
       root,
@@ -25581,15 +25689,13 @@ export default function TemplateEditWorkspace({
     applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
     applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
     applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-    setEdgeRoleDiagnostics((previous) =>
-      edgeRoleDiagnosticsStatesEqual(previous, nextEdgeRolePresentation.diagnosticsState)
-        ? previous
-        : nextEdgeRolePresentation.diagnosticsState
-    );
+    if (!edgeRoleDiagnosticsStatesEqual(edgeRoleDiagnosticsRef.current, nextEdgeRolePresentation.diagnosticsState)) {
+      edgeRoleDiagnosticsRef.current = nextEdgeRolePresentation.diagnosticsState;
+      setEdgeRoleDiagnostics(nextEdgeRolePresentation.diagnosticsState);
+    }
   }, [
       readCachedLiveEdgeTopologySnapshot,
       applyFastFrameBoxSelectionVisuals,
-      edgeRoleDiagnostics.mismatchEdgeIds,
       edgeSelectionState,
       normalizeLiveVerticalCohorts,
       normalizeLiveVerticalPhysicalPeers,
@@ -25879,6 +25985,69 @@ export default function TemplateEditWorkspace({
       });
     },
     [buildFrameMetadataDraftFromNode, buildFrameStyleDraftFromNode]
+  );
+
+  const syncFramePaddingStyleCacheFromNodes = React.useCallback(
+    (
+      nodes: HTMLElement[],
+      patch: Pick<FrameStylePatch, 'paddingTop' | 'paddingBottom' | 'paddingLeft' | 'paddingRight'>,
+      options?: {
+        refreshSize?: boolean;
+      }
+    ) => {
+      const cache = frameOverlayCacheRef.current;
+
+      nodes.forEach((node) => {
+        const frameGroupId = getFrameGroupId(node).trim();
+
+        if (!frameGroupId) {
+          return;
+        }
+
+        const previousEntry = cache.get(frameGroupId) || {};
+        const previousStyle = previousEntry.style || buildFrameStyleDraftFromNode(node);
+        let nextStyle = previousStyle;
+
+        const assignStyleField = (field: keyof SelectionStyleDraft, value: string) => {
+          if (nextStyle[field] === value) {
+            return;
+          }
+
+          if (nextStyle === previousStyle) {
+            nextStyle = { ...previousStyle };
+          }
+
+          nextStyle[field] = value;
+        };
+
+        if (patch.paddingTop !== undefined) {
+          assignStyleField('paddingTop', normalizeNumericStyleValue(patch.paddingTop));
+        }
+
+        if (patch.paddingBottom !== undefined) {
+          assignStyleField('paddingBottom', normalizeNumericStyleValue(patch.paddingBottom));
+        }
+
+        if (patch.paddingLeft !== undefined) {
+          assignStyleField('paddingLeft', normalizeNumericStyleValue(patch.paddingLeft));
+        }
+
+        if (patch.paddingRight !== undefined) {
+          assignStyleField('paddingRight', normalizeNumericStyleValue(patch.paddingRight));
+        }
+
+        if (options?.refreshSize) {
+          const frameRect = readFrameMoveRect(node);
+          assignStyleField('width', String(Math.round(frameRect.width)));
+          assignStyleField('height', String(Math.round(frameRect.height)));
+        }
+
+        if (nextStyle !== previousStyle || !previousEntry.style) {
+          cache.set(frameGroupId, { ...previousEntry, style: nextStyle });
+        }
+      });
+    },
+    [buildFrameStyleDraftFromNode]
   );
 
   const buildSelectionStyleDraftFromCacheEntries = React.useCallback((entries: SelectionStyleDraft[]) => {
@@ -27234,9 +27403,11 @@ export default function TemplateEditWorkspace({
       });
       const hasExplicitWidthPatch = typeof patch.width === 'number' && Number.isFinite(patch.width);
       const hasExplicitHeightPatch = typeof patch.height === 'number' && Number.isFinite(patch.height);
-      const shouldRecalculateAutoSize = frameStylePatchCanChangeContentMeasurement(patch);
+      const hasAutoSizeSelection = nodes.some((node) => readFrameAutoHeightBox(node) || readFrameAutoWidthBox(node));
+      const shouldRecalculateAutoSize =
+        frameStylePatchCanChangeContentMeasurement(patch) && hasAutoSizeSelection;
       const autoSizeResult = shouldRecalculateAutoSize
-        ? applyTemplateAutoSizeBoxes(root, styleTargetFrameGroupIds, {
+        ? applyTemplateAutoSizeBoxesWithPreservedLayout(root, styleTargetFrameGroupIds, {
             skipWidth: hasExplicitWidthPatch,
             skipHeight: hasExplicitHeightPatch,
           })
@@ -27250,7 +27421,23 @@ export default function TemplateEditWorkspace({
       if (shouldUpdateGeometry && autoSizeResult.changedCount <= 0 && !spacingChanged) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
-      ensureFrameOverlayCacheFromNodes(nodes, { style: true, force: true });
+      const patchKeys = Object.keys(patch) as (keyof FrameStylePatch)[];
+      const isPaddingOnlyPatch =
+        patchKeys.length > 0 &&
+        patchKeys.every(
+          (field) =>
+            field === 'paddingTop' ||
+            field === 'paddingBottom' ||
+            field === 'paddingLeft' ||
+            field === 'paddingRight'
+        );
+      if (isPaddingOnlyPatch) {
+        syncFramePaddingStyleCacheFromNodes(nodes, patch, {
+          refreshSize: shouldUpdateGeometry,
+        });
+      } else {
+        ensureFrameOverlayCacheFromNodes(nodes, { style: true, force: true });
+      }
       syncOpenSelectionOverlayDraftsFromCache(root);
       scheduleDeferredStylePanelSync({
         materializePositionGroups: shouldUpdateGeometry || spacingChanged,
@@ -27259,10 +27446,12 @@ export default function TemplateEditWorkspace({
       });
     },
     [
+      applyTemplateAutoSizeBoxesWithPreservedLayout,
       applyPreservedPositionSpacingRelations,
       ensureFrameOverlayCacheFromNodes,
       resolveSelectionAppearanceStyleTargets,
       scheduleDeferredStylePanelSync,
+      syncFramePaddingStyleCacheFromNodes,
       syncOpenSelectionOverlayDraftsFromCache,
     ]
   );

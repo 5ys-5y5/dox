@@ -43,6 +43,7 @@
 | P-20 | 오버레이 열기 | 기능 버튼 | 100ms 이하 | 33.3ms | 33.3ms | 완료 | `/templates` 33.3ms, `/templates/edit` 33.3ms |
 | P-21 | 그룹 동작 | 복수 상자 그룹 만들기 | 100ms 이하 | 미측정 | 미측정 | 진행 중 | 기존 증상: 그룹 생성 직후 즉시 반영되지 않고 저장/정규화 작업이 앞에서 막음 |
 | P-22 | 오버레이 열기 | 그룹 생성 직후 기능 버튼 | 100ms 이하 | 미측정 | 미측정 | 진행 중 | 기존 증상: 그룹 생성 이후 `기능 버튼` overlay 파생 상태가 늦게 갱신됨 |
+| P-23 | 여백 | 그룹 선택 상태 패딩 blur | 100ms 이하 | 43.4ms / 45.6ms | 45.6ms | 완료 | `position-box-mp94u6e2` 그룹 선택 기준. `paddingTop` 43.4ms, `paddingLeft` 45.6ms |
 
 병목 후보:
 - `syncDraftPreviewHtmlRef`
@@ -67,8 +68,8 @@
 - 마키 그룹 hit-entry 와 proxy selection 해석은 항상 큰 rect(최상위 그룹) 우선으로 정렬해 child group/frame 우선 선택을 방지
 
 현재 브라우저 상태 메모:
-- 이번 세션에서는 `chrome-devtools` transport 가 다시 `Transport closed` 상태라 `P-21`, `P-22` 재측정은 아직 못 했다.
-- 코드 수정은 공유 캔버스에만 반영했고, 브라우저 재접속이 가능해지면 `position-box-mp94u6e2` 기준으로 `/templates`, `/templates/edit` 모두 다시 측정해야 한다.
+- `P-21`, `P-22` 는 여전히 별도 재측정이 남아 있다.
+- 이번 패딩 최적화는 상태 구조나 레이아웃 규칙을 바꾸지 않고, live text control 측정 경로와 autosize peer snapshot 재사용만 줄인 변경이다.
 
 2026-05-17 `/templates?templateId=c782b232-7db6-49c2-a301-9b575144def4` 재측정:
 - 측정 방식: synthetic click 이후 `data-template-selected`, `data-v106-position-group-proxy-overlay`, `data-template-position-impact-focus` 의 첫 DOM mutation 시점을 완료로 본다.
@@ -118,6 +119,30 @@
   - selection React state 는 더 이상 `requestAnimationFrame + transition` 으로 지연 커밋하지 않고 즉시 커밋
 - 목적:
   - 박스 선택 직후 overlay open 시 stale selection state 와 mount 지연이 겹쳐 값이 비었다가 채워지는 현상을 제거
+
+2026-05-17 패딩 입력 지연 정리:
+- `applySelectionStylePatch(...)`가 패딩 변경에도 모든 선택 상자에 대해 autosize 재계산을 시도하고 있었다.
+- 고정 상자는 패딩만 바뀌어도 outer rect 가 즉시 변하지 않으므로, 이 경로는 불필요하게 무거웠다.
+- 수정:
+  - `padding/font/line-height` 계열 변경은 `선택된 상자 중 auto-height/auto-width 가 있는 경우`에만 autosize 재계산
+  - autosize 가 필요한 경우에도 일반 `applyTemplateAutoSizeBoxes(...)` 대신 `applyTemplateAutoSizeBoxesWithPreservedLayout(...)` 사용
+- 목적:
+  - 여백 변경 blur 시 고정 상자에서 즉시 DOM patch 만 반영되고, 필요 없는 layout 재계산으로 UI가 멎지 않게 함
+
+2026-05-17 패딩 입력 지연 추가 최적화:
+- `collectAutoSizeSameSidePeerNodes(...)` 가 같은 autosize 실행 안에서 edge topology snapshot 을 매번 다시 만들고 있었다.
+- `measureNaturalTextControlHeight/Width(...)` 가 live textarea/input 의 `scrollHeight/scrollWidth` 를 바로 쓸 수 있는 경우에도 clone 기반 측정을 수행하고 있었다.
+- 수정:
+  - `applyTemplateAutoHeightBoxes(...)`, `applyTemplateAutoWidthBoxes(...)` 에서 edge topology snapshot 을 1회만 만들고 peer 조회에 재사용
+  - textarea 는 live `scrollHeight`, input 은 live `scrollHeight` + computed padding/line-height 를 우선 사용
+  - text width 도 live `scrollWidth` 를 우선 사용하고, 불가능할 때만 기존 clone 측정으로 fallback
+- 재측정:
+  - `/templates/edit?templateId=c782b232-7db6-49c2-a301-9b575144def4`
+  - `position-box-mp94u6e2` 그룹 선택 + `상자 크기 타입 > 여백`
+  - `paddingTop` blur: `121.8ms -> 43.4ms`
+  - `paddingLeft` blur: `45.6ms`
+- 구조 안전성:
+  - frame/group/relative anchor/spacing 규칙은 건드리지 않았고, autosize 측정 함수 내부에서만 비용을 줄였다.
 
 재측정 기준 추가:
 - P-15 `상자 타입`은 `band-3-cell-1` 단일 선택 상태에서 `fixed -> height -> width -> fixed` 체인을 반복 측정한다.
