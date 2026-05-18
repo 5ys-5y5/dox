@@ -74,6 +74,11 @@ const PHOTO_STORAGE_BUCKET = 'site-photo-labels';
 // suggestion_status 로 review_needed / accepted / rejected 상태를 남깁니다.
 const photosSchema = (client = getSupabase()) => client.schema(PHOTO_LABELS_DB_SCHEMA);
 
+const describePhotoLabelsSchemaError = (message: string) =>
+  message.includes('Invalid schema: photo_labels')
+    ? 'photo_labels 스키마가 현재 Supabase Data API(PostgREST)에 노출되지 않았습니다. Exposed schemas / pgrst.db_schemas 에 photo_labels 를 추가해야 합니다.'
+    : message;
+
 const toPhotoRecordDto = (row: PhotoRegistryRow): PhotoRecordDto => ({
   id: row.id,
   siteId: row.site_id,
@@ -421,7 +426,7 @@ export const PhotoLabelService = {
     const { data: photoRows, error: photoError } = await photoQuery;
 
     if (photoError) {
-      throw new Error(`사진 목록 조회 실패: ${photoError.message}`);
+      throw new Error(`사진 목록 조회 실패: ${describePhotoLabelsSchemaError(photoError.message)}`);
     }
 
     const photos = (photoRows || []) as PhotoRegistryRow[];
@@ -437,12 +442,14 @@ export const PhotoLabelService = {
     ]);
 
     if (manualResponse.error) {
-      throw new Error(`사진 목록 조회 실패: 수동 라벨 조회 중 오류가 발생했습니다. (${manualResponse.error.message})`);
+      throw new Error(
+        `사진 목록 조회 실패: 수동 라벨 조회 중 오류가 발생했습니다. (${describePhotoLabelsSchemaError(manualResponse.error.message)})`
+      );
     }
 
     if (suggestedResponse.error) {
       throw new Error(
-        `사진 목록 조회 실패: 추천 라벨 조회 중 오류가 발생했습니다. (${suggestedResponse.error.message})`
+        `사진 목록 조회 실패: 추천 라벨 조회 중 오류가 발생했습니다. (${describePhotoLabelsSchemaError(suggestedResponse.error.message)})`
       );
     }
 

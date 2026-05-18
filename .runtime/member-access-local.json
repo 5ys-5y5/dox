@@ -1,0 +1,94 @@
+{
+  "members": [
+    {
+      "id": "07e9a688-5497-431e-880c-79ba4756ce73",
+      "phone_number": "01093107159",
+      "display_name": "성지용",
+      "verification_status": "verified",
+      "active_access_code_hash": "9e3cfdb1e3b575526745da8dbc3f2833f8a995c4820372137c7b8b35c1cdc413",
+      "active_access_code_last_sent_at": "2026-05-18T12:25:41.719Z",
+      "last_verified_at": "2026-05-18T12:40:52.165Z",
+      "created_at": "2026-05-18T12:25:07.269Z",
+      "updated_at": "2026-05-18T12:54:49.894Z"
+    }
+  ],
+  "invites": [
+    {
+      "id": "054d809f-3b31-4c0b-9c17-712f09c9eea0",
+      "member_id": "07e9a688-5497-431e-880c-79ba4756ce73",
+      "invite_status": "active",
+      "invited_by_member_id": null,
+      "invite_note": null,
+      "revoked_at": null,
+      "created_at": "2026-05-18T12:25:07.269Z",
+      "updated_at": "2026-05-18T12:54:49.894Z"
+    }
+  ],
+  "verificationEvents": [
+    {
+      "id": "e684b684-e434-46e4-b103-e9a93acee621",
+      "member_id": "07e9a688-5497-431e-880c-79ba4756ce73",
+      "phone_number": "01093107159",
+      "verification_source": "sms_code",
+      "verification_status": "verified",
+      "request_payload": {
+        "reason": "code_match",
+        "localFallback": true
+      },
+      "verified_at": "2026-05-18T12:40:52.165Z",
+      "created_at": "2026-05-18T12:40:52.166Z"
+    },
+    {
+      "id": "c64a43c0-eb76-490f-9149-ff09fc32aad7",
+      "member_id": "07e9a688-5497-431e-880c-79ba4756ce73",
+      "phone_number": "01093107159",
+      "verification_source": "sms_code",
+      "verification_status": "sent",
+      "request_payload": {
+        "scopeType": "document",
+        "scopeId": "cd66596b-47b7-43e1-a2c8-b11ebc34d2ce",
+        "dispatchStatus": "sent",
+        "localFallback": true
+      },
+      "verified_at": null,
+      "created_at": "2026-05-18T12:25:42.059Z"
+    },
+    {
+      "id": "37f2cf5d-aba7-4acb-8687-bc854f2f76df",
+      "member_id": "07e9a688-5497-431e-880c-79ba4756ce73",
+      "phone_number": "01093107159",
+      "verification_source": "sms_code",
+      "verification_status": "sent",
+      "request_payload": {
+        "scopeType": "site",
+        "scopeId": "264cfc03-f9cf-4728-a68d-03e597ce44c5",
+        "dispatchStatus": "sent",
+        "localFallback": true
+      },
+      "verified_at": null,
+      "created_at": "2026-05-18T12:25:08.515Z"
+    }
+  ],
+  "siteMemberships": [
+    {
+      "id": "8b95d85c-7f51-4ff3-b947-dc826a7ab34f",
+      "member_id": "07e9a688-5497-431e-880c-79ba4756ce73",
+      "site_id": "264cfc03-f9cf-4728-a68d-03e597ce44c5",
+      "access_role": "manager",
+      "created_by_member_id": null,
+      "created_at": "2026-05-18T12:25:07.269Z",
+      "updated_at": "2026-05-18T12:54:49.894Z"
+    }
+  ],
+  "documentMemberships": [
+    {
+      "id": "2232e9af-d252-4490-8eee-8d2239d707ce",
+      "member_id": "07e9a688-5497-431e-880c-79ba4756ce73",
+      "document_id": "cd66596b-47b7-43e1-a2c8-b11ebc34d2ce",
+      "access_role": "viewer",
+      "created_by_member_id": null,
+      "created_at": "2026-05-18T12:25:41.719Z",
+      "updated_at": "2026-05-18T12:32:59.762Z"
+    }
+  ]
+}

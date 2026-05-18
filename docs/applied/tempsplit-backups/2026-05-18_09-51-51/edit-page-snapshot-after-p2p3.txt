@@ -1,0 +1,44 @@
+uid=8_0 RootWebArea url="http://localhost:3001/templates/edit"
+  uid=8_1 main
+    uid=8_2 main
+      uid=8_3 heading "템플릿 편집" level="1"
+      uid=8_4 StaticText "저장된 템플릿을 불러와 상자 편집 캔버스에서 수정하고 다시 저장합니다."
+      uid=8_5 StaticText "템플릿 이름:"
+      uid=8_6 textbox "템플릿 이름"
+      uid=8_7 button "저장" disableable disabled
+      uid=8_8 heading "불러오기 및 저장" level="3"
+      uid=8_9 StaticText "저장된 템플릿을 불러오고 원본 문서명과 레이아웃 정책을 조정합니다."
+      uid=8_10 StaticText "템플릿 리스트"
+      uid=8_11 button "작업지시서_사일동 주상복합 작업지시서_사일동 주상복합.pdf"
+      uid=8_12 button "작업지시서_사일동 주상복합 삭제" description="템플릿 삭제"
+      uid=8_13 button "작업지시서_사일동 주상복합 작업지시서_사일동 주상복합.pdf"
+      uid=8_14 button "작업지시서_사일동 주상복합 삭제" description="템플릿 삭제"
+      uid=8_15 StaticText "원본 문서명"
+      uid=8_16 textbox
+      uid=8_17 StaticText "레이아웃 확장 정책"
+      uid=8_18 combobox expandable haspopup="menu" value="grow_height"
+        uid=8_19 option "fixed" selectable value="fixed"
+        uid=8_20 option "grow_height" selectable selected value="grow_height"
+        uid=8_21 option "grow_width" selectable value="grow_width"
+      uid=8_22 heading "상자 편집 캔버스" level="3"
+      uid=8_23 button "문서 축소" description="문서 축소"
+      uid=8_24 slider "문서 확대 비율" description="문서 확대 축소" orientation="horizontal" value="100" valuemax="200" valuemin="25" valuetext="ì¤ 100%"
+      uid=8_25 StaticText "100"
+      uid=8_26 StaticText "%"
+      uid=8_27 button "문서 확대" description="문서 확대"
+      uid=8_28 button "전체 화면"
+      uid=8_29 button "크기 및 위치" pressed
+      uid=8_30 button "속성"
+      uid=8_31 button "실제 사용 미리보기" description="실제 사용 미리보기" disableable disabled
+      uid=8_32 button "선택 모드" description="선택 모드"
+      uid=8_33 button "이동 모드" description="이동 모드"
+      uid=8_34 button "되돌리기" description="되돌리기" disableable disabled
+      uid=8_35 button "다시 실행하기" description="다시 실행하기" disableable disabled
+      uid=8_36 button
+      uid=8_37 button
+      uid=8_38 button "캔버스 아이콘 크기 S" description="캔버스 아이콘 크기 S"
+      uid=8_39 button "캔버스 아이콘 크기 M" description="캔버스 아이콘 크기 M" pressed
+      uid=8_40 button "캔버스 아이콘 크기 L" description="캔버스 아이콘 크기 L"
+      uid=8_41 StaticText "편집할 템플릿을 먼저 불러오세요."
+  uid=8_42 button "Open Next.js Dev Tools" expandable haspopup="menu"
+  uid=8_43 alert atomic live="assertive" relevant="additions text"

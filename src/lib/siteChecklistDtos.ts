@@ -12,7 +12,7 @@ export type RequiredDocumentRuleInput = {
 
 export type SiteCreateInput = {
   siteName: string;
-  tradeKeys: string[];
+  tradeKeys?: string[];
   openDate: string;
   requiredDocumentRules?: RequiredDocumentRuleInput[];
 };
@@ -82,6 +82,23 @@ export type SiteCreateResult = {
   site: SiteRecordDto;
   checklistVersion: number;
   generatedChecklistCount: number;
+};
+
+export type SiteDeleteImpactItemDto = {
+  key: string;
+  label: string;
+  count: number;
+  description: string | null;
+};
+
+export type SiteDeleteImpactDto = {
+  site: SiteRecordDto;
+  items: SiteDeleteImpactItemDto[];
+};
+
+export type SiteDeleteResult = {
+  site: SiteRecordDto;
+  items: SiteDeleteImpactItemDto[];
 };
 
 export type SiteListResult = {

@@ -1,4 +1,5 @@
 import type { SitePhotoLabelGapItemDto, SitePhotoLabelGapStatus } from './photoLabelDtos';
+import type { TemplateSchemaSnapshotInput } from './templateDtos';
 
 export type DocumentLifecycleStatus = 'draft' | 'active' | 'archived' | 'deleted';
 
@@ -45,6 +46,7 @@ export type DocumentCreateInput = {
   labelValues: DocumentLabelValues;
   valueFiles?: DocumentValueFileInput[];
   createdBy?: string | null;
+  templateSnapshot?: TemplateSchemaSnapshotInput | null;
 };
 
 export type DocumentVersionCreateInput = {
@@ -53,6 +55,7 @@ export type DocumentVersionCreateInput = {
   valueFiles?: DocumentValueFileInput[];
   changeReason?: string | null;
   createdBy?: string | null;
+  templateSnapshot?: TemplateSchemaSnapshotInput | null;
 };
 
 export type DocumentListQuery = {
@@ -116,6 +119,41 @@ export type DocumentPhotoEvidenceSummaryDto = {
   requirements: SitePhotoLabelGapItemDto[];
 };
 
+export type DocumentDetailQueryDebugDto = Partial<
+  Record<'versions' | 'artifacts' | 'valueFiles' | 'photoEvidence' | 'templateLink' | 'valueEntries', string>
+>;
+
+export type DocumentValueEntryDto = {
+  id: string;
+  documentId: string;
+  valueKey: string;
+  valuePayload: Record<string, unknown>;
+  displayText: string | null;
+  updatedBy: string | null;
+  updatedAt: string;
+};
+
+export type DocumentTemplateLinkDto = {
+  documentId: string;
+  templateId: string;
+  templateRevisionId: string | null;
+  syncMode: 'follow_latest' | 'freeze_revision';
+  autoSync: boolean;
+  lastSyncedRevisionId: string | null;
+  linkedAt: string;
+  lastSyncedAt: string | null;
+  updatedAt: string;
+};
+
+export type DocumentLinkedTemplateDto = {
+  templateId: string;
+  templateName: string;
+  currentRevisionId: string | null;
+  resolvedRevisionId: string | null;
+  resolvedRevisionNumber: number | null;
+  renderSnapshotHtml: string | null;
+};
+
 export type DocumentCreateResult = {
   document: DocumentRecordDto;
   latestVersion: DocumentVersionDto;
@@ -129,7 +167,11 @@ export type DocumentDetailResult = {
   versions: DocumentVersionDto[];
   artifacts: DocumentArtifactDto[];
   valueFiles: DocumentValueFileDto[];
+  valueEntries: DocumentValueEntryDto[];
+  templateLink: DocumentTemplateLinkDto | null;
+  linkedTemplate: DocumentLinkedTemplateDto | null;
   photoEvidence: DocumentPhotoEvidenceSummaryDto;
+  queryDebug: DocumentDetailQueryDebugDto;
 };
 
 export type DocumentVersionCreateResult = {
@@ -144,6 +186,7 @@ export type DocumentListItem = {
     DocumentVersionDto,
     | 'id'
     | 'versionNumber'
+    | 'htmlCanonical'
     | 'htmlSha256'
     | 'htmlHashAlgorithm'
     | 'htmlHashEncoding'
@@ -153,4 +196,8 @@ export type DocumentListItem = {
     | 'createdAt'
   > | null;
   artifactCount: number;
+};
+
+export type DocumentDeleteResult = {
+  document: DocumentRecordDto;
 };

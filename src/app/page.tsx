@@ -3,6 +3,18 @@ import { Badge } from '../components/ui/Badge';
 
 const pageGroups = [
   {
+    title: '현장 관리',
+    description: '현장별 템플릿 문서, 원본 파일, 사진, 서명, 구성원 운영을 통합해서 확인하는 화면입니다.',
+    pages: [
+      {
+        href: '/project',
+        title: '현장 관리',
+        summary: '현장별 템플릿 문서, 원본 파일(PDF/HWP 등), 사진, 서명, 구성원을 한 화면에서 관리합니다.',
+        status: '구현중',
+      },
+    ],
+  },
+  {
     title: '전자 서명',
     description: '무결성 검증과 본인확인 흐름을 확인하는 페이지입니다.',
     pages: [

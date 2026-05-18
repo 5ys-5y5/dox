@@ -10,6 +10,10 @@ import type {
   TemplateLabelMapEntry,
   TemplateLayoutResizeMode,
   TemplateRecordDto,
+  TemplateSchemaBindingInput,
+  TemplateSchemaFrameInput,
+  TemplateSchemaPositionRelationInput,
+  TemplateSchemaSnapshotInput,
   TemplateSignatureAreaDto,
   TemplateSignatureAreaInput,
   TemplateDeleteResult,
@@ -25,8 +29,22 @@ type TemplateRegistryRow = {
   draft_html: string;
   layout_resize_mode: TemplateLayoutResizeMode;
   status: 'draft' | 'active';
+  current_revision_id: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type TemplateRevisionRow = {
+  id: string;
+  template_id: string;
+  revision_number: number;
+  draft_html: string;
+  layout_resize_mode: TemplateLayoutResizeMode;
+  render_snapshot_html: string;
+  frame_schema_json: unknown[] | null;
+  relation_schema_json: unknown[] | null;
+  created_by: string | null;
+  created_at: string;
 };
 
 type TemplateFieldRow = {
@@ -100,6 +118,7 @@ const toTemplateRecordDto = (row: TemplateRegistryRow): TemplateRecordDto => ({
   draftHtml: row.draft_html,
   layoutResizeMode: row.layout_resize_mode,
   status: row.status,
+  currentRevisionId: row.current_revision_id,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -259,6 +278,295 @@ const getTemplateById = async (templateId: string) => {
   return { template: data as TemplateRegistryRow | null, error };
 };
 
+const sanitizeTemplateSchemaFrames = (frames?: TemplateSchemaFrameInput[] | null) => {
+  if (!frames) {
+    return [];
+  }
+
+  if (!Array.isArray(frames)) {
+    throw new Error('템플릿 저장 실패: revisionSnapshot.frames는 배열 형식이어야 합니다.');
+  }
+
+  return frames.map((frame, index) => {
+    const frameGroupId = String(frame.frameGroupId || '').trim();
+    const label = String(frame.label || '').trim() || frameGroupId;
+    const role = String(frame.role || '').trim();
+    const boxKind = String(frame.boxKind || '').trim() || null;
+    const valueKey = String(frame.valueKey || '').trim() || null;
+    const parentGroupId = String(frame.parentGroupId || '').trim() || null;
+    const runtimeMode = String(frame.runtimeMode || '').trim() || null;
+    const fieldType = String(frame.fieldType || '').trim() || null;
+    const pageNumber = Number.parseInt(String(frame.pageNumber ?? 1), 10);
+    const sortOrder = Number.parseInt(String(frame.sortOrder ?? index), 10);
+
+    if (!frameGroupId) {
+      throw new Error(`템플릿 저장 실패: revisionSnapshot.frames[${index}].frameGroupId가 필요합니다.`);
+    }
+
+    if (!role) {
+      throw new Error(`템플릿 저장 실패: revisionSnapshot.frames[${index}].role이 필요합니다.`);
+    }
+
+    return {
+      frameGroupId,
+      label,
+      role,
+      boxKind,
+      valueKey,
+      parentGroupId,
+      runtimeMode,
+      fieldType,
+      pageNumber: Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : 1,
+      sortOrder: Number.isFinite(sortOrder) && sortOrder >= 0 ? sortOrder : index,
+      frameSnapshot:
+        frame.frameSnapshot && !Array.isArray(frame.frameSnapshot) && typeof frame.frameSnapshot === 'object'
+          ? frame.frameSnapshot
+          : {},
+      styleSnapshot:
+        frame.styleSnapshot && !Array.isArray(frame.styleSnapshot) && typeof frame.styleSnapshot === 'object'
+          ? frame.styleSnapshot
+          : {},
+      positionSnapshot:
+        frame.positionSnapshot && !Array.isArray(frame.positionSnapshot) && typeof frame.positionSnapshot === 'object'
+          ? frame.positionSnapshot
+          : {},
+      relationSnapshot:
+        frame.relationSnapshot && !Array.isArray(frame.relationSnapshot) && typeof frame.relationSnapshot === 'object'
+          ? frame.relationSnapshot
+          : {},
+    };
+  });
+};
+
+const sanitizeTemplateSchemaBindings = (bindings?: TemplateSchemaBindingInput[] | null) => {
+  if (!bindings) {
+    return [];
+  }
+
+  if (!Array.isArray(bindings)) {
+    throw new Error('템플릿 저장 실패: revisionSnapshot.bindings는 배열 형식이어야 합니다.');
+  }
+
+  return bindings.map((binding, index) => {
+    const bindingType = String(binding.bindingType || '').trim();
+    const sourceFrameGroupId = String(binding.sourceFrameGroupId || '').trim();
+    const targetFrameGroupId = String(binding.targetFrameGroupId || '').trim();
+    const sharedValueKey = String(binding.sharedValueKey || '').trim() || null;
+    const sortOrder = Number.parseInt(String(binding.sortOrder ?? index), 10);
+
+    if (!bindingType || !sourceFrameGroupId || !targetFrameGroupId) {
+      throw new Error(`템플릿 저장 실패: revisionSnapshot.bindings[${index}] 필수값이 누락되었습니다.`);
+    }
+
+    return {
+      bindingType,
+      sourceFrameGroupId,
+      targetFrameGroupId,
+      sharedValueKey,
+      sortOrder: Number.isFinite(sortOrder) && sortOrder >= 0 ? sortOrder : index,
+      bindingSnapshot:
+        binding.bindingSnapshot &&
+        !Array.isArray(binding.bindingSnapshot) &&
+        typeof binding.bindingSnapshot === 'object'
+          ? binding.bindingSnapshot
+          : {},
+    };
+  });
+};
+
+const sanitizeTemplatePositionRelations = (relations?: TemplateSchemaPositionRelationInput[] | null) => {
+  if (!relations) {
+    return [];
+  }
+
+  if (!Array.isArray(relations)) {
+    throw new Error('템플릿 저장 실패: revisionSnapshot.positionRelations는 배열 형식이어야 합니다.');
+  }
+
+  return relations.map((relation, index) => {
+    const relationKey = String(relation.relationKey || '').trim();
+    const targetKind = String(relation.targetKind || '').trim();
+    const anchorKind = String(relation.anchorKind || '').trim();
+    const targetGroupId = String(relation.targetGroupId || '').trim() || null;
+    const targetFrameGroupIds = Array.isArray(relation.targetFrameGroupIds)
+      ? relation.targetFrameGroupIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    const anchorGroupId = String(relation.anchorGroupId || '').trim() || null;
+    const anchorFrameGroupId = String(relation.anchorFrameGroupId || '').trim() || null;
+    const anchorPageCornerId = String(relation.anchorPageCornerId || '').trim() || null;
+    const gapYPx =
+      relation.gapYPx == null ? null : Number.isFinite(Number(relation.gapYPx)) ? Number(relation.gapYPx) : null;
+    const sortOrder = Number.parseInt(String(relation.sortOrder ?? index), 10);
+
+    if (!relationKey || !targetKind || !anchorKind) {
+      throw new Error(`템플릿 저장 실패: revisionSnapshot.positionRelations[${index}] 필수값이 누락되었습니다.`);
+    }
+
+    return {
+      relationKey,
+      targetKind,
+      targetGroupId,
+      targetFrameGroupIds,
+      anchorKind,
+      anchorGroupId,
+      anchorFrameGroupId,
+      anchorPageCornerId,
+      gapYPx,
+      sortOrder: Number.isFinite(sortOrder) && sortOrder >= 0 ? sortOrder : index,
+      relationSnapshot:
+        relation.relationSnapshot &&
+        !Array.isArray(relation.relationSnapshot) &&
+        typeof relation.relationSnapshot === 'object'
+          ? relation.relationSnapshot
+          : {},
+    };
+  });
+};
+
+const sanitizeTemplateSchemaSnapshot = (
+  snapshot: TemplateSchemaSnapshotInput | null | undefined,
+  fallbackDraftHtml: string
+) => {
+  const renderSnapshotHtml = snapshot?.renderSnapshotHtml?.trim() || fallbackDraftHtml;
+  const frames = sanitizeTemplateSchemaFrames(snapshot?.frames);
+  const bindings = sanitizeTemplateSchemaBindings(snapshot?.bindings);
+  const positionRelations = sanitizeTemplatePositionRelations(snapshot?.positionRelations);
+
+  return {
+    renderSnapshotHtml,
+    frames,
+    bindings,
+    positionRelations,
+  };
+};
+
+const createTemplateRevisionSnapshot = async (params: {
+  templateId: string;
+  draftHtml: string;
+  layoutResizeMode: TemplateLayoutResizeMode;
+  revisionSnapshot?: TemplateSchemaSnapshotInput | null;
+}) => {
+  const client = getSupabase();
+  const templatesClient = templatesSchema(client);
+  const normalizedSnapshot = sanitizeTemplateSchemaSnapshot(params.revisionSnapshot, params.draftHtml);
+  const { data: revisionRows, error: revisionLookupError } = await templatesClient
+    .from('template_revisions')
+    .select('revision_number')
+    .eq('template_id', params.templateId)
+    .order('revision_number', { ascending: false })
+    .limit(1);
+
+  if (revisionLookupError) {
+    throw new Error(`템플릿 저장 실패: 기존 리비전 조회 중 오류가 발생했습니다. (${revisionLookupError.message})`);
+  }
+
+  const nextRevisionNumber = (((revisionRows || []) as Array<{ revision_number: number }>)[0]?.revision_number || 0) + 1;
+  const { data: revisionData, error: revisionInsertError } = await templatesClient
+    .from('template_revisions')
+    .insert([
+      {
+        template_id: params.templateId,
+        revision_number: nextRevisionNumber,
+        draft_html: params.draftHtml,
+        layout_resize_mode: params.layoutResizeMode,
+        render_snapshot_html: normalizedSnapshot.renderSnapshotHtml,
+        frame_schema_json: normalizedSnapshot.frames,
+        relation_schema_json: normalizedSnapshot.positionRelations,
+      },
+    ])
+    .select('*')
+    .single();
+
+  const revision = revisionData as TemplateRevisionRow | null;
+
+  if (revisionInsertError || !revision) {
+    throw new Error(`템플릿 저장 실패: 리비전 생성 중 오류가 발생했습니다. (${revisionInsertError?.message})`);
+  }
+
+  try {
+    if (normalizedSnapshot.frames.length > 0) {
+      const { error } = await templatesClient.from('template_revision_frames').insert(
+        normalizedSnapshot.frames.map((frame) => ({
+          template_revision_id: revision.id,
+          frame_group_id: frame.frameGroupId,
+          label: frame.label,
+          role: frame.role,
+          box_kind: frame.boxKind,
+          value_key: frame.valueKey,
+          parent_group_id: frame.parentGroupId,
+          runtime_mode: frame.runtimeMode,
+          field_type: frame.fieldType,
+          page_number: frame.pageNumber,
+          sort_order: frame.sortOrder,
+          frame_snapshot: frame.frameSnapshot || {},
+          style_snapshot: frame.styleSnapshot || {},
+          position_snapshot: frame.positionSnapshot || {},
+          relation_snapshot: frame.relationSnapshot || {},
+        }))
+      );
+
+      if (error) {
+        throw new Error(`템플릿 저장 실패: 프레임 스냅샷 저장 중 오류가 발생했습니다. (${error.message})`);
+      }
+    }
+
+    if (normalizedSnapshot.bindings.length > 0) {
+      const { error } = await templatesClient.from('template_revision_bindings').insert(
+        normalizedSnapshot.bindings.map((binding) => ({
+          template_revision_id: revision.id,
+          binding_type: binding.bindingType,
+          source_frame_group_id: binding.sourceFrameGroupId,
+          target_frame_group_id: binding.targetFrameGroupId,
+          shared_value_key: binding.sharedValueKey,
+          sort_order: binding.sortOrder,
+          binding_snapshot: binding.bindingSnapshot || {},
+        }))
+      );
+
+      if (error) {
+        throw new Error(`템플릿 저장 실패: 프레임 연결 저장 중 오류가 발생했습니다. (${error.message})`);
+      }
+    }
+
+    if (normalizedSnapshot.positionRelations.length > 0) {
+      const { error } = await templatesClient.from('template_revision_position_relations').insert(
+        normalizedSnapshot.positionRelations.map((relation) => ({
+          template_revision_id: revision.id,
+          relation_key: relation.relationKey,
+          target_kind: relation.targetKind,
+          target_group_id: relation.targetGroupId,
+          target_frame_group_ids: relation.targetFrameGroupIds || [],
+          anchor_kind: relation.anchorKind,
+          anchor_group_id: relation.anchorGroupId,
+          anchor_frame_group_id: relation.anchorFrameGroupId,
+          anchor_page_corner_id: relation.anchorPageCornerId,
+          gap_y_px: relation.gapYPx,
+          sort_order: relation.sortOrder,
+          relation_snapshot: relation.relationSnapshot || {},
+        }))
+      );
+
+      if (error) {
+        throw new Error(`템플릿 저장 실패: 위치 관계 저장 중 오류가 발생했습니다. (${error.message})`);
+      }
+    }
+
+    const { error: registryUpdateError } = await templatesClient
+      .from('template_registry')
+      .update({ current_revision_id: revision.id })
+      .eq('id', params.templateId);
+
+    if (registryUpdateError) {
+      throw new Error(`템플릿 저장 실패: 현재 리비전 포인터 갱신 중 오류가 발생했습니다. (${registryUpdateError.message})`);
+    }
+
+    return revision;
+  } catch (error) {
+    await templatesClient.from('template_revisions').delete().eq('id', revision.id);
+    throw error;
+  }
+};
+
 export const TemplateService = {
   async listTemplates(limit = 12): Promise<TemplateRecordDto[]> {
     const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 50) : 12;
@@ -311,7 +619,27 @@ export const TemplateService = {
       throw new Error(`템플릿 저장 실패: ${error?.message || '템플릿을 저장할 수 없습니다.'}`);
     }
 
-    return toTemplateRecordDto(template);
+    try {
+      await createTemplateRevisionSnapshot({
+        templateId: template.id,
+        draftHtml,
+        layoutResizeMode: normalizeLayoutResizeMode(params.layoutResizeMode),
+        revisionSnapshot: params.revisionSnapshot,
+      });
+    } catch (revisionError) {
+      await templatesSchema().from('template_registry').delete().eq('id', template.id);
+      throw revisionError;
+    }
+
+    const { template: refreshedTemplate, error: refreshedTemplateError } = await getTemplateById(template.id);
+
+    if (refreshedTemplateError || !refreshedTemplate) {
+      throw new Error(
+        `템플릿 저장 실패: 리비전 생성 후 템플릿을 다시 확인할 수 없습니다. (${refreshedTemplateError?.message || 'unknown'})`
+      );
+    }
+
+    return toTemplateRecordDto(refreshedTemplate);
   },
 
   async getTemplate(templateId: string): Promise<TemplateDetailResult> {
@@ -428,8 +756,37 @@ export const TemplateService = {
       throw new Error(`템플릿 수정 실패: ${error?.message || '템플릿을 수정할 수 없습니다.'}`);
     }
 
+    try {
+      await createTemplateRevisionSnapshot({
+        templateId: normalizedTemplateId,
+        draftHtml: nextDraftHtml,
+        layoutResizeMode: nextLayoutResizeMode,
+        revisionSnapshot: params.revisionSnapshot,
+      });
+    } catch (revisionError) {
+      await templatesSchema()
+        .from('template_registry')
+        .update({
+          template_name: template.template_name,
+          source_document_name: template.source_document_name,
+          draft_html: template.draft_html,
+          layout_resize_mode: template.layout_resize_mode,
+          current_revision_id: template.current_revision_id,
+        })
+        .eq('id', normalizedTemplateId);
+      throw revisionError;
+    }
+
+    const { template: refreshedTemplate, error: refreshedTemplateError } = await getTemplateById(normalizedTemplateId);
+
+    if (refreshedTemplateError || !refreshedTemplate) {
+      throw new Error(
+        `템플릿 수정 실패: 리비전 생성 후 템플릿을 다시 확인할 수 없습니다. (${refreshedTemplateError?.message || 'unknown'})`
+      );
+    }
+
     return {
-      template: toTemplateRecordDto(updatedTemplate),
+      template: toTemplateRecordDto(refreshedTemplate),
     };
   },
 

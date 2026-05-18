@@ -343,6 +343,7 @@ export function EntityPicker({
                             onClick={(event) => {
                               event.stopPropagation();
                               onDeleteOption(option);
+                              setOpen(false);
                             }}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-200"
                           >

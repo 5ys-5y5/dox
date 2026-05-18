@@ -56,6 +56,11 @@ const PHOTO_LABELS_DB_SCHEMA = 'photo_labels';
 // sites 나 documents 테이블을 직접 수정하지 않고, siteId 와 documentTypeKey 계약만 참조합니다.
 const photosSchema = (client = getSupabase()) => client.schema(PHOTO_LABELS_DB_SCHEMA);
 
+const describePhotoLabelsSchemaError = (message: string) =>
+  message.includes('Invalid schema: photo_labels')
+    ? 'photo_labels 스키마가 현재 Supabase Data API(PostgREST)에 노출되지 않았습니다. Exposed schemas / pgrst.db_schemas 에 photo_labels 를 추가해야 합니다.'
+    : message;
+
 const toRequirementDto = (row: PhotoLabelRequirementRow): PhotoLabelRequirementDto => ({
   id: row.id,
   siteId: row.site_id,
@@ -193,7 +198,9 @@ export const PhotoLabelRequirementService = {
       .order('label_key', { ascending: true });
 
     if (requirementError) {
-      throw new Error(`사진 라벨 누락 경고 조회 실패: 요구 라벨 조회 중 오류가 발생했습니다. (${requirementError.message})`);
+      throw new Error(
+        `사진 라벨 누락 경고 조회 실패: 요구 라벨 조회 중 오류가 발생했습니다. (${describePhotoLabelsSchemaError(requirementError.message)})`
+      );
     }
 
     const requirements = (requirementRows || []) as PhotoLabelRequirementRow[];
@@ -216,7 +223,9 @@ export const PhotoLabelRequirementService = {
       .eq('status', 'active');
 
     if (photoError) {
-      throw new Error(`사진 라벨 누락 경고 조회 실패: 사진 조회 중 오류가 발생했습니다. (${photoError.message})`);
+      throw new Error(
+        `사진 라벨 누락 경고 조회 실패: 사진 조회 중 오류가 발생했습니다. (${describePhotoLabelsSchemaError(photoError.message)})`
+      );
     }
 
     const photoIds = ((photoRows || []) as PhotoRegistryRow[]).map((photo) => photo.id);
