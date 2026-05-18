@@ -387,6 +387,7 @@ export default function MemberAccessDocumentPage() {
         <TemplateEditWorkspace
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
+          workspaceMode="document"
           hidePersistencePanel
           headerTitle="구성원 문서 접근"
           headerDescription="초대된 권한 범위 안에서 현장 문서를 열람하거나 수정합니다."

@@ -3032,6 +3032,7 @@ export default function ProjectPage() {
           <TemplateEditWorkspace
             key={selectedDocumentInitialDraft.draftKey}
             initialDraft={selectedDocumentInitialDraft}
+            workspaceMode="document"
             hideHeader
             hidePersistencePanel
             nameFieldLabel="문서 이름:"

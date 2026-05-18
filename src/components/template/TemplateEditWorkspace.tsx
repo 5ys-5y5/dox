@@ -1624,10 +1624,60 @@ const syncFrameBandShellTableRowsToShellSize = (shell: HTMLElement) => {
     return;
   }
 
-  setTableRowHeights(
-    table,
-    Array.from({ length: rowCount }, () => getWritableTableSize(shellHeight / rowCount))
-  );
+  const currentRowHeights = readTableRowHeights(table);
+
+  if (currentRowHeights.length !== rowCount || currentRowHeights.some((value) => !Number.isFinite(value) || value <= 0)) {
+    setTableRowHeights(
+      table,
+      Array.from({ length: rowCount }, () => getWritableTableSize(shellHeight / rowCount))
+    );
+    return;
+  }
+
+  const rowMinimums = readTableRowMinimums(table, currentRowHeights);
+  const frameNode = resolveFrameSelectionAnchor(shell);
+  const anchorSide = frameNode
+    ? normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(frameNode, 'bottom'))
+    : 'bottom';
+  const nextRowHeights = [...currentRowHeights];
+  const currentTotalHeight = nextRowHeights.reduce((sum, value) => sum + value, 0);
+  let remainingDelta = shellHeight - currentTotalHeight;
+
+  if (Math.abs(remainingDelta) <= 0.01) {
+    return;
+  }
+
+  const targetRowIndex = anchorSide === 'top' ? 0 : nextRowHeights.length - 1;
+
+  if (remainingDelta > 0) {
+    nextRowHeights[targetRowIndex] += remainingDelta;
+    setTableRowHeights(table, nextRowHeights);
+    return;
+  }
+
+  const shrinkOrder =
+    anchorSide === 'top'
+      ? Array.from({ length: nextRowHeights.length }, (_, index) => index)
+      : Array.from({ length: nextRowHeights.length }, (_, index) => nextRowHeights.length - 1 - index);
+
+  shrinkOrder.forEach((rowIndex) => {
+    if (remainingDelta >= -0.01) {
+      return;
+    }
+
+    const minimumHeight = getWritableTableSize(rowMinimums[rowIndex] || 0);
+    const shrinkCapacity = Math.max(0, nextRowHeights[rowIndex] - minimumHeight);
+    const appliedShrink = Math.min(shrinkCapacity, Math.abs(remainingDelta));
+
+    if (appliedShrink <= 0) {
+      return;
+    }
+
+    nextRowHeights[rowIndex] -= appliedShrink;
+    remainingDelta += appliedShrink;
+  });
+
+  setTableRowHeights(table, nextRowHeights);
 };
 
 const snapFrameBandShellEdgesInPage = (pageInner: HTMLElement) => {
@@ -5709,6 +5759,68 @@ const readNormalizedBandGeometry = (shell: HTMLElement): NormalizedBandGeometry 
   };
 };
 
+const readNormalizedBandAxisSegmentSizes = (
+  geometry: NormalizedBandGeometry,
+  pageInner: HTMLElement,
+  axis: 'row' | 'col'
+) => {
+  const shellRect = readFrameElementRect(geometry.shell, pageInner);
+  const span = axis === 'row' ? geometry.rowEnd - geometry.rowStart : geometry.colEnd - geometry.colStart;
+
+  if (span <= 1) {
+    return null;
+  }
+
+  const table =
+    geometry.shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') ||
+    geometry.shell.querySelector<HTMLTableElement>('table');
+
+  if (!table) {
+    return null;
+  }
+
+  const rawSegmentSizes =
+    axis === 'row'
+      ? Array.from(table.rows)
+          .slice(0, span)
+          .map((row) => {
+            const inlineHeight =
+              parseFramePx(row.style.height) ||
+              parseFramePx(row.getAttribute('height') || '') ||
+              readFirstFiniteFramePx(row.dataset.templateFrameRowHeight || '');
+
+            return inlineHeight > 0 ? inlineHeight : row.getBoundingClientRect().height;
+          })
+      : Array.from(table.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+          .slice(0, span)
+          .map((col) => {
+            const inlineWidth =
+              parseFramePx(col.style.width) ||
+              parseFramePx(col.getAttribute('width') || '') ||
+              readFirstFiniteFramePx(col.dataset.templateFrameColWidth || '');
+
+            return inlineWidth > 0 ? inlineWidth : col.getBoundingClientRect().width;
+          });
+
+  if (
+    rawSegmentSizes.length !== span ||
+    rawSegmentSizes.some((value) => !Number.isFinite(value) || value <= 0)
+  ) {
+    return null;
+  }
+
+  const shellAxisSize = axis === 'row' ? shellRect.height : shellRect.width;
+  const rawTotalSize = rawSegmentSizes.reduce((sum, value) => sum + value, 0);
+
+  if (!Number.isFinite(shellAxisSize) || shellAxisSize <= 0 || !Number.isFinite(rawTotalSize) || rawTotalSize <= 0) {
+    return null;
+  }
+
+  const normalizeScale = shellAxisSize / rawTotalSize;
+
+  return rawSegmentSizes.map((value) => value * normalizeScale);
+};
+
 const buildDenormalizedFrameBandShell = (sourceShells: HTMLElement[]) => {
   const geometries = sourceShells
     .map((shell) => readNormalizedBandGeometry(shell))
@@ -6601,7 +6713,10 @@ const resolveNormalizedBandAxisBoundaries = (
     0
   );
   const minimumSize = axis === 'row' ? MIN_TABLE_ROW_HEIGHT_PX : MIN_WRITABLE_TABLE_SIZE_PX;
-  const candidatesByBoundary = Array.from({ length: maxBoundaryIndex + 1 }, () => [] as number[]);
+  const candidatesByBoundary = Array.from({ length: maxBoundaryIndex + 1 }, () => ({
+    explicit: [] as number[],
+    inferred: [] as number[],
+  }));
 
   geometries.forEach((geometry) => {
     const shellRect = readFrameElementRect(geometry.shell, pageInner);
@@ -6610,24 +6725,37 @@ const resolveNormalizedBandAxisBoundaries = (
     const origin = axis === 'row' ? shellRect.top : shellRect.left;
     const size = axis === 'row' ? shellRect.height : shellRect.width;
     const span = Math.max(1, rangeEnd - rangeStart);
+    const segmentSizes = readNormalizedBandAxisSegmentSizes(geometry, pageInner, axis);
 
     if (candidatesByBoundary[rangeStart]) {
-      candidatesByBoundary[rangeStart].push(origin);
+      candidatesByBoundary[rangeStart].explicit.push(origin);
     }
     if (candidatesByBoundary[rangeEnd]) {
-      candidatesByBoundary[rangeEnd].push(origin + size);
+      candidatesByBoundary[rangeEnd].explicit.push(origin + size);
     }
 
     for (let boundaryOffset = 1; boundaryOffset < span; boundaryOffset += 1) {
       const boundaryIndex = rangeStart + boundaryOffset;
       if (candidatesByBoundary[boundaryIndex]) {
-        candidatesByBoundary[boundaryIndex].push(origin + (size * boundaryOffset) / span);
+        const explicitBoundaryOffset =
+          segmentSizes && segmentSizes.length >= boundaryOffset
+            ? segmentSizes.slice(0, boundaryOffset).reduce((sum, value) => sum + value, 0)
+            : null;
+
+        candidatesByBoundary[boundaryIndex].inferred.push(
+          origin + (typeof explicitBoundaryOffset === 'number' ? explicitBoundaryOffset : (size * boundaryOffset) / span)
+        );
       }
     }
   });
 
-  const firstBoundaryCandidates = candidatesByBoundary[0].filter((value) => Number.isFinite(value));
-  const allCandidates = candidatesByBoundary.flat().filter((value) => Number.isFinite(value));
+  const firstBoundaryCandidates = [
+    ...candidatesByBoundary[0].explicit,
+    ...candidatesByBoundary[0].inferred,
+  ].filter((value) => Number.isFinite(value));
+  const allCandidates = candidatesByBoundary
+    .flatMap((entry) => [...entry.explicit, ...entry.inferred])
+    .filter((value) => Number.isFinite(value));
   const firstBoundary =
     firstBoundaryCandidates.length > 0
       ? Math.min(...firstBoundaryCandidates)
@@ -6637,7 +6765,11 @@ const resolveNormalizedBandAxisBoundaries = (
   const boundaries = [firstBoundary];
 
   for (let boundaryIndex = 1; boundaryIndex <= maxBoundaryIndex; boundaryIndex += 1) {
-    const boundaryCandidates = candidatesByBoundary[boundaryIndex].filter((value) => Number.isFinite(value));
+    const boundaryCandidates = [
+      ...(candidatesByBoundary[boundaryIndex].explicit.length > 0
+        ? candidatesByBoundary[boundaryIndex].explicit
+        : candidatesByBoundary[boundaryIndex].inferred),
+    ].filter((value) => Number.isFinite(value));
     const candidateBoundary =
       boundaryCandidates.length > 0
         ? Math.max(...boundaryCandidates)
@@ -10864,20 +10996,37 @@ const resolveTemplateUsagePreviewValueSourceColor = (target: HTMLElement) => {
 
   const computedColor = getComputedStyle(target).color.trim();
 
-  if (!computedColor || computedColor === EDITOR_VALUE_PLACEHOLDER_TEXT_COLOR) {
-    return 'rgb(15, 23, 42)';
+  if (computedColor && computedColor !== EDITOR_VALUE_PLACEHOLDER_TEXT_COLOR) {
+    return computedColor;
   }
 
-  return computedColor;
+  let parent: HTMLElement | null = target.parentElement;
+
+  while (parent) {
+    const parentInlineColor = parent.style.color.trim();
+
+    if (parentInlineColor) {
+      return parentInlineColor;
+    }
+
+    const parentComputedColor = getComputedStyle(parent).color.trim();
+
+    if (parentComputedColor && parentComputedColor !== EDITOR_VALUE_PLACEHOLDER_TEXT_COLOR) {
+      return parentComputedColor;
+    }
+
+    parent = parent.parentElement;
+  }
+
+  return 'rgb(15, 23, 42)';
 };
 
 const applyTemplateUsagePreviewValueTextTone = (target: HTMLElement) => {
   const sourceColor = resolveTemplateUsagePreviewValueSourceColor(target);
-  const tonedColor = resolveTemplateUsagePreviewAlphaColor(sourceColor, 0.2) || 'rgba(15, 23, 42, 0.2)';
 
-  target.style.setProperty(TEMPLATE_USAGE_PREVIEW_VALUE_TEXT_COLOR_VAR, tonedColor);
-  target.style.setProperty('color', tonedColor);
-  target.style.setProperty('-webkit-text-fill-color', tonedColor);
+  target.style.setProperty(TEMPLATE_USAGE_PREVIEW_VALUE_TEXT_COLOR_VAR, sourceColor);
+  target.style.setProperty('color', sourceColor);
+  target.style.setProperty('-webkit-text-fill-color', sourceColor);
 };
 
 const enableTemplateUsagePreviewTextControl = (target: HTMLElement) => {
@@ -10965,20 +11114,29 @@ const replaceFrameContentTarget = (node: HTMLElement, replacement: HTMLElement) 
   return replacement;
 };
 
-const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
+const prepareTemplateUsageTextValueControl = (
+  node: HTMLElement,
+  options?: {
+    preserveValueText?: boolean;
+  }
+) => {
   const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '입력값';
   const input =
     node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
     node.querySelector<HTMLInputElement>('[data-template-frame-input="true"]');
 
   if (input) {
-    input.value = '';
-    input.defaultValue = '';
-    input.setAttribute('value', '');
-    input.removeAttribute('placeholder');
+    const preservedValue = options?.preserveValueText ? input.value || input.defaultValue || input.textContent || '' : '';
+
+    input.value = preservedValue;
+    input.defaultValue = preservedValue;
+    input.setAttribute('value', preservedValue);
+    if (!preservedValue) {
+      input.removeAttribute('placeholder');
+    }
     input.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
     if (input instanceof HTMLTextAreaElement) {
-      input.textContent = '';
+      input.textContent = preservedValue;
     }
     enableTemplateUsagePreviewTextControl(input);
     applyTemplateUsagePreviewValueTextTone(input);
@@ -10986,11 +11144,15 @@ const prepareTemplateUsageTextValueControl = (node: HTMLElement) => {
   }
 
   const target = resolveFrameContentTarget(node);
-  target.textContent = '';
+  const preservedValue = options?.preserveValueText ? target.textContent || '' : '';
+
+  target.textContent = preservedValue;
   target.setAttribute('contenteditable', 'true');
   target.setAttribute('role', 'textbox');
   target.setAttribute('aria-label', label);
-  target.removeAttribute('data-placeholder');
+  if (!preservedValue) {
+    target.removeAttribute('data-placeholder');
+  }
   target.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
   enableTemplateUsagePreviewTextControl(target);
   applyTemplateUsagePreviewValueTextTone(target);
@@ -11381,7 +11543,12 @@ const prepareTemplateUsageSignatureControl = (node: HTMLElement) => {
   replaceFrameContentTarget(node, control);
 };
 
-const prepareTemplateUsagePreviewValueBox = (node: HTMLElement) => {
+const prepareTemplateUsagePreviewValueBox = (
+  node: HTMLElement,
+  options?: {
+    preserveValueText?: boolean;
+  }
+) => {
   const boxKind = readFrameBoxKind(node);
   const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node);
 
@@ -11397,10 +11564,15 @@ const prepareTemplateUsagePreviewValueBox = (node: HTMLElement) => {
     return;
   }
 
-  prepareTemplateUsageTextValueControl(node);
+  prepareTemplateUsageTextValueControl(node, options);
 };
 
-const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | undefined) => {
+const buildTemplateUsagePreviewHtml = (
+  source: HTMLElement | string | null | undefined,
+  options?: {
+    preserveValueText?: boolean;
+  }
+) => {
   const container = document.createElement('div');
 
   if (!source) {
@@ -11424,7 +11596,7 @@ const buildTemplateUsagePreviewHtml = (source: HTMLElement | string | null | und
   collectFrameSelectionAnchors(container).forEach((node) => {
     const role = readFrameRole(node);
     if (isTemplateUsageValueRole(role)) {
-      prepareTemplateUsagePreviewValueBox(node);
+      prepareTemplateUsagePreviewValueBox(node, options);
     }
   });
   enableTemplateUsagePreviewTextControls(container);
@@ -14889,6 +15061,7 @@ const frameStylePatchCanChangeContentMeasurement = (patch: FrameStylePatch) =>
 export default function TemplateEditWorkspace({
   initialTemplateId = '',
   initialDraft = null,
+  workspaceMode = 'template',
   hideHeader = false,
   hidePersistencePanel = false,
   templateListDisplay = 'picker',
@@ -14904,6 +15077,7 @@ export default function TemplateEditWorkspace({
   templateNameReadOnly = false,
   saveDisabled = false,
 }: TemplateEditWorkspaceProps) {
+  const documentMode = workspaceMode === 'document';
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
   const [previewHtml, setPreviewHtml] = React.useState('');
@@ -15019,6 +15193,7 @@ export default function TemplateEditWorkspace({
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const [previewSurfaceNodeVersion, setPreviewSurfaceNodeVersion] = React.useState(0);
+  const documentPreviewSourceKeyRef = React.useRef('');
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const bumpPositionStructureRevision = React.useCallback(() => {
     setPositionStructureRevision((previous) => previous + 1);
@@ -15372,7 +15547,10 @@ export default function TemplateEditWorkspace({
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const surfaceRenderedPreviewHtml = templateUsagePreviewMode ? templateUsagePreviewHtml : renderedPreviewHtml;
+  const templateUsagePreviewActive = documentMode || templateUsagePreviewMode;
+  const surfaceRenderedPreviewHtml = templateUsagePreviewActive
+    ? templateUsagePreviewHtml || renderedPreviewHtml
+    : renderedPreviewHtml;
   const selectedEdgeMemberCount = React.useMemo(
     () => new Set(edgeSelectionState.tokens.flatMap((token) => token.memberEdgeIds)).size,
     [edgeSelectionState]
@@ -16061,6 +16239,38 @@ export default function TemplateEditWorkspace({
 
     restoreCanvasHistoryAtIndex(currentIndex + 1, '다시 실행하기');
   }, [restoreCanvasHistoryAtIndex]);
+  const runDocumentPreviewEditCommand = React.useCallback((command: 'undo' | 'redo') => {
+    if (!documentMode || typeof document === 'undefined') {
+      return false;
+    }
+
+    const root = previewRef.current;
+    const activeElement = document.activeElement;
+
+    if (!root || !(activeElement instanceof HTMLElement) || !root.contains(activeElement)) {
+      return false;
+    }
+
+    if (typeof document.execCommand !== 'function') {
+      return false;
+    }
+
+    return document.execCommand(command);
+  }, [documentMode]);
+  const handleDocumentModeUndo = React.useCallback(() => {
+    if (runDocumentPreviewEditCommand('undo')) {
+      return;
+    }
+
+    handleUndoCanvasHistory();
+  }, [handleUndoCanvasHistory, runDocumentPreviewEditCommand]);
+  const handleDocumentModeRedo = React.useCallback(() => {
+    if (runDocumentPreviewEditCommand('redo')) {
+      return;
+    }
+
+    handleRedoCanvasHistory();
+  }, [handleRedoCanvasHistory, runDocumentPreviewEditCommand]);
   const cancelScheduledAutoPersistDraft = React.useCallback(() => {
     queuedAutoPersistDraftHtmlRef.current = '';
   }, []);
@@ -16157,6 +16367,10 @@ export default function TemplateEditWorkspace({
 	  }, [pushCanvasHistoryEntry]);
 
   const toggleTemplateUsagePreviewMode = React.useCallback(() => {
+    if (documentMode) {
+      return;
+    }
+
     if (templateUsagePreviewMode) {
       pendingPreviewViewportResetRef.current = true;
       if (templateUsagePreviewRenderSnapshotRef.current.trim()) {
@@ -16194,10 +16408,45 @@ export default function TemplateEditWorkspace({
     setTemplateUsagePreviewHtml(runtimeHtml);
     setTemplateUsagePreviewMode(true);
     setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
-  }, [renderedPreviewHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+  }, [documentMode, renderedPreviewHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
 
   React.useEffect(() => {
-    if (!templateUsagePreviewMode || !previewRef.current) {
+    if (!documentMode) {
+      return;
+    }
+
+    const nextSourceKey = activeInitialDraft?.draftKey?.trim() || renderedPreviewHtml.trim() || '';
+
+    if (!nextSourceKey) {
+      documentPreviewSourceKeyRef.current = '';
+      setTemplateUsagePreviewHtml('');
+      return;
+    }
+
+    if (documentPreviewSourceKeyRef.current === nextSourceKey) {
+      return;
+    }
+
+    documentPreviewSourceKeyRef.current = nextSourceKey;
+    setTemplateUsagePreviewHtml('');
+  }, [activeInitialDraft?.draftKey, documentMode, renderedPreviewHtml]);
+
+  React.useLayoutEffect(() => {
+    if (!documentMode || !previewRef.current || !renderedPreviewHtml.trim() || templateUsagePreviewHtml.trim()) {
+      return;
+    }
+
+    const runtimeHtml = buildTemplateUsagePreviewHtml(previewRef.current, { preserveValueText: true });
+
+    if (!runtimeHtml.trim()) {
+      return;
+    }
+
+    setTemplateUsagePreviewHtml(runtimeHtml);
+  }, [documentMode, previewSurfaceNodeVersion, renderedPreviewHtml, templateUsagePreviewHtml]);
+
+  React.useEffect(() => {
+    if (!templateUsagePreviewActive || !previewRef.current) {
       return undefined;
     }
 
@@ -16206,15 +16455,15 @@ export default function TemplateEditWorkspace({
         templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root);
       },
     });
-  }, [surfaceRenderedPreviewHtml, templateUsagePreviewMode]);
+  }, [surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
 
   React.useLayoutEffect(() => {
-    if (!templateUsagePreviewMode || !previewRef.current) {
+    if (!templateUsagePreviewActive || !previewRef.current) {
       return;
     }
 
     enableTemplateUsagePreviewTextControls(previewRef.current);
-  }, [surfaceRenderedPreviewHtml, templateUsagePreviewMode]);
+  }, [surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
 
   const persistTemplateDraftHtml = React.useCallback(
     async (
@@ -18076,7 +18325,7 @@ export default function TemplateEditWorkspace({
   React.useLayoutEffect(() => {
     const root = previewRef.current;
 
-    if (!templateUsagePreviewMode || !root || typeof window === 'undefined') {
+    if (!templateUsagePreviewActive || !root || typeof window === 'undefined') {
       return;
     }
 
@@ -18085,7 +18334,7 @@ export default function TemplateEditWorkspace({
   }, [
     applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout,
     surfaceRenderedPreviewHtml,
-    templateUsagePreviewMode,
+    templateUsagePreviewActive,
   ]);
 	  const applyDefinedPositionRelationGapDraft = React.useCallback(
     (relation: DefinedPositionRelativeRelation, nextGapYRaw: string) => {
@@ -19908,7 +20157,7 @@ export default function TemplateEditWorkspace({
 	      return;
 	    }
 
-	    if (templateUsagePreviewMode) {
+	    if (templateUsagePreviewActive) {
 	      return;
 	    }
 
@@ -20051,7 +20300,7 @@ export default function TemplateEditWorkspace({
       positionSpacingGuideRelations,
       visibleMetadataReviewIssues,
 	    syncPreviewSurfaceScale,
-	    templateUsagePreviewMode,
+	    templateUsagePreviewActive,
 	  ]);
   const setPreviewNode = React.useCallback((node: HTMLDivElement | null) => {
     if (previewRef.current === node) {
@@ -20091,7 +20340,7 @@ export default function TemplateEditWorkspace({
     let cancelled = false;
     syncPreviewSurfaceCloneAttrs(node);
 
-    if (templateUsagePreviewMode) {
+    if (templateUsagePreviewActive) {
       enableTemplateUsagePreviewTextControls(node);
       syncPreviewSurfaceScale(node);
       return;
@@ -20173,7 +20422,7 @@ export default function TemplateEditWorkspace({
     previewSurfaceNodeVersion,
     surfaceRenderedPreviewHtml,
     syncPreviewSurfaceScale,
-    templateUsagePreviewMode,
+    templateUsagePreviewActive,
   ]);
 
   const applyRuntimeSelectionUi = React.useCallback(
@@ -21308,7 +21557,7 @@ export default function TemplateEditWorkspace({
     renderedPreviewHtml,
     surfaceRenderedPreviewHtml,
     selectionPanelTab,
-    templateUsagePreviewMode,
+    templateUsagePreviewActive,
     boxCreationMode,
     boxCreationPositionMode,
     frameEdgeButtonSelector: FRAME_EDGE_BUTTON_SELECTOR,
@@ -22321,7 +22570,7 @@ export default function TemplateEditWorkspace({
   React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!root || !renderedPreviewHtml || templateUsagePreviewMode || typeof window === 'undefined') {
+    if (!root || !renderedPreviewHtml || templateUsagePreviewActive || typeof window === 'undefined') {
       return;
     }
 
@@ -22356,7 +22605,7 @@ export default function TemplateEditWorkspace({
         overlayCachePrewarmTimerRef.current = null;
       }
     };
-  }, [ensureFrameOverlayCacheFromNodes, renderedPreviewHtml, templateUsagePreviewMode]);
+  }, [ensureFrameOverlayCacheFromNodes, renderedPreviewHtml, templateUsagePreviewActive]);
 
   React.useEffect(() => {
     syncFrameMetadataDraft();
@@ -26389,12 +26638,14 @@ export default function TemplateEditWorkspace({
 
 	  const saveTemplate = React.useCallback(async () => {
 	    const currentHtml =
-	      templateUsagePreviewMode || !previewRef.current
+	      templateUsagePreviewActive && !documentMode
 	        ? draftPreviewHtmlRef.current.trim()
-	        : syncDraftPreviewHtmlRef();
+	        : !previewRef.current
+	          ? draftPreviewHtmlRef.current.trim()
+	          : syncDraftPreviewHtmlRef({ recordHistory: false });
 
 	    await persistTemplateDraftHtml(currentHtml);
-	  }, [persistTemplateDraftHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+	  }, [documentMode, persistTemplateDraftHtml, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
 
   const stopPointerInteraction = React.useCallback(
     (pointerId?: number) => {
@@ -26656,7 +26907,7 @@ export default function TemplateEditWorkspace({
     previewZoom,
     selectionPanelTab,
     canvasInteractionMode,
-    templateUsagePreviewMode,
+    templateUsagePreviewMode: templateUsagePreviewActive,
     positionOrderLockSelectionMode,
     positionOrderLockFrameGroupIds,
     positionOrderLockSelectionKindByFrameGroupId,
@@ -26785,7 +27036,7 @@ export default function TemplateEditWorkspace({
     selectedFrameGroupIdsRef,
     edgeSelectionStateRef,
     deferredPreviewEditorStateRef,
-    templateUsagePreviewMode,
+    templateUsagePreviewMode: templateUsagePreviewActive,
     safeReleasePointerCapture,
     clearTransientCanvasOverlays,
     setSpacePanDragging,
@@ -26799,7 +27050,7 @@ export default function TemplateEditWorkspace({
   });
 
 	  const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-	    if (templateUsagePreviewMode) {
+    if (templateUsagePreviewActive) {
 	      return;
 	    }
 
@@ -26867,7 +27118,7 @@ export default function TemplateEditWorkspace({
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-	  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+	  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
 
 	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
 	    const target = event.target instanceof HTMLElement ? event.target : null;
@@ -26879,7 +27130,7 @@ export default function TemplateEditWorkspace({
     const frameTextInput = target.closest<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
     const frameEditableScope = target.closest<HTMLElement>('[data-template-edit-scope]');
 
-	    if (templateUsagePreviewMode) {
+	    if (templateUsagePreviewActive) {
       const root = previewRef.current;
       const frameNode = resolveFrameSelectionAnchor(target.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
       const shouldRestoreTextInputFocus = Boolean(frameTextInput && document.activeElement === frameTextInput);
@@ -26962,7 +27213,7 @@ export default function TemplateEditWorkspace({
     ensureFrameOverlayCacheFromNodes,
     scheduleDeferredStylePanelSync,
     syncOpenSelectionOverlayDraftsFromCache,
-    templateUsagePreviewMode,
+    templateUsagePreviewActive,
   ]);
 
   const toggleBoxCreationModeFromCanvasToolbar = React.useCallback(() => {
@@ -27175,7 +27426,7 @@ export default function TemplateEditWorkspace({
     ) : null;
 
   const positionTextStyleOverlayNode =
-    !templateUsagePreviewMode && selectionPanelTab === 'position' ? (
+    !templateUsagePreviewActive && selectionPanelTab === 'position' ? (
       <TemplatePositionTextStyleOverlay
         selectedFrameGroupIds={selectedFrameGroupIds}
         selectedPositionResolvedFrameGroupIds={selectedPositionResolvedFrameGroupIds}
@@ -28512,6 +28763,7 @@ export default function TemplateEditWorkspace({
           data-canvas-fullscreen={canvasFullscreen ? 'true' : 'false'}
         >
           <TemplateEditCanvasToolbar
+            documentMode={documentMode}
             nameFieldLabel={nameFieldLabel}
             saveButtonLabel={saveButtonLabel}
             templateNameReadOnly={templateNameReadOnly}
@@ -28522,7 +28774,7 @@ export default function TemplateEditWorkspace({
             canvasFullscreen={canvasFullscreen}
             previewZoom={previewZoom}
             selectionPanelTab={selectionPanelTab}
-            templateUsagePreviewMode={templateUsagePreviewMode}
+            templateUsagePreviewMode={templateUsagePreviewActive}
             renderedPreviewHtml={renderedPreviewHtml}
             canvasInteractionMode={canvasInteractionMode}
             canUndoCanvasHistory={canUndoCanvasHistory}
@@ -28532,8 +28784,8 @@ export default function TemplateEditWorkspace({
             onSelectionPanelTabChange={setSelectionPanelTab}
             onToggleTemplateUsagePreviewMode={toggleTemplateUsagePreviewMode}
             onCanvasInteractionModeChange={setCanvasInteractionMode}
-            onUndoCanvasHistory={handleUndoCanvasHistory}
-            onRedoCanvasHistory={handleRedoCanvasHistory}
+            onUndoCanvasHistory={handleDocumentModeUndo}
+            onRedoCanvasHistory={handleDocumentModeRedo}
             onTemplateNameChange={setTemplateName}
             onSave={() => {
               void saveTemplate();
@@ -28606,36 +28858,36 @@ export default function TemplateEditWorkspace({
               key="template-preview-stage:live"
 	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
               canvasFullscreen={canvasFullscreen}
-	            boxCreationMode={templateUsagePreviewMode ? false : boxCreationMode}
+	            boxCreationMode={templateUsagePreviewActive ? false : boxCreationMode}
 	            canvasIconScale={canvasIconScale}
               spacePanArmed={spacePanArmed}
               spacePanDragging={spacePanDragging}
-	            metadataVisualMode={templateUsagePreviewMode ? false : selectionPanelTab === 'metadata'}
-	            templateUsagePreviewMode={templateUsagePreviewMode}
+	            metadataVisualMode={templateUsagePreviewActive ? false : selectionPanelTab === 'metadata'}
+	            templateUsagePreviewMode={templateUsagePreviewActive}
 	            selectionPanelTab={selectionPanelTab}
-	            showMetadataIcons={templateUsagePreviewMode ? false : showMetadataIcons}
-	            actionOverlay={templateUsagePreviewMode ? null : positionActionOverlayNode}
+	            showMetadataIcons={templateUsagePreviewActive ? false : showMetadataIcons}
+	            actionOverlay={templateUsagePreviewActive ? null : positionActionOverlayNode}
 	            actionOverlayLabel={canvasActionOverlayLabel}
 	            actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
 	            metadataNameOverlay={
-	              !templateUsagePreviewMode &&
+	              !templateUsagePreviewActive &&
                 selectionPanelTab === 'metadata' &&
                 selectedFrameGroupIds.length <= 1
 	                ? metadataNameOverlayNode
 	                : null
 	            }
-	            metadataRolePrimaryOverlay={!templateUsagePreviewMode && selectionPanelTab === 'metadata' ? metadataRolePrimaryOverlayNode : null}
-	            metadataRoleSecondaryOverlay={!templateUsagePreviewMode && selectionPanelTab === 'metadata' ? metadataRoleSecondaryOverlayNode : null}
-	            metadataRoleTertiaryOverlay={!templateUsagePreviewMode && selectionPanelTab === 'metadata' ? metadataRoleTertiaryOverlayNode : null}
-	            styleOverlay={templateUsagePreviewMode ? null : positionBoxStyleOverlayNode}
+	            metadataRolePrimaryOverlay={!templateUsagePreviewActive && selectionPanelTab === 'metadata' ? metadataRolePrimaryOverlayNode : null}
+	            metadataRoleSecondaryOverlay={!templateUsagePreviewActive && selectionPanelTab === 'metadata' ? metadataRoleSecondaryOverlayNode : null}
+	            metadataRoleTertiaryOverlay={!templateUsagePreviewActive && selectionPanelTab === 'metadata' ? metadataRoleTertiaryOverlayNode : null}
+	            styleOverlay={templateUsagePreviewActive ? null : positionBoxStyleOverlayNode}
 	            styleOverlayLabel="상자 스타일"
 	            onStyleOverlayCollapsedChange={handleStyleOverlayCollapsedChange}
-	            sizeTypeOverlay={templateUsagePreviewMode ? null : positionBoxSizeTypeOverlayNode}
+	            sizeTypeOverlay={templateUsagePreviewActive ? null : positionBoxSizeTypeOverlayNode}
 	            onSizeTypeOverlayCollapsedChange={handleSizeTypeOverlayCollapsedChange}
-	            textStyleOverlay={positionTextStyleOverlayNode}
+	            textStyleOverlay={templateUsagePreviewActive ? null : positionTextStyleOverlayNode}
 	            onTextStyleOverlayCollapsedChange={handleTextStyleOverlayCollapsedChange}
 	            textStyleOverlayExpandedWidthClassName="w-fit max-w-[250px]"
-	            summaryOverlay={templateUsagePreviewMode ? null : selectionSummaryOverlayNode}
+	            summaryOverlay={templateUsagePreviewActive ? null : selectionSummaryOverlayNode}
 	            onSummaryOverlayCollapsedChange={handleSummaryOverlayCollapsedChange}
             setPreviewNode={setPreviewNode}
             syncTemplateUsagePreviewTextControls={enableTemplateUsagePreviewTextControls}

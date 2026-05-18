@@ -20,6 +20,7 @@ import { CardContent, CardHeader, CardTitle } from '../../../ui/Card';
 import { Input } from '../../../ui/Input';
 
 type TemplateEditCanvasToolbarProps = {
+  documentMode: boolean;
   nameFieldLabel: string;
   saveButtonLabel: string;
   templateNameReadOnly: boolean;
@@ -77,6 +78,7 @@ const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'mi
 };
 
 export const TemplateEditCanvasToolbar = ({
+  documentMode,
   nameFieldLabel,
   saveButtonLabel,
   templateNameReadOnly,
@@ -125,7 +127,7 @@ export const TemplateEditCanvasToolbar = ({
           </div>
           <Button
             onClick={onSave}
-            disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode}
+            disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentMode)}
             aria-label={saving ? '저장 중...' : saveButtonLabel}
             className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-4"
           >
@@ -142,46 +144,49 @@ export const TemplateEditCanvasToolbar = ({
           <button
             type="button"
             className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(templateUsagePreviewMode, !renderedPreviewHtml.trim())}`}
-            onClick={onToggleTemplateUsagePreviewMode}
+            onClick={documentMode ? undefined : onToggleTemplateUsagePreviewMode}
             disabled={!renderedPreviewHtml.trim()}
             aria-pressed={templateUsagePreviewMode}
-            aria-label={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
-            title={templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
+            aria-label={documentMode ? '미리보기' : templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
+            title={documentMode ? '미리보기' : templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
           >
-            {templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            <span className="v106-canvas-toolbar-label">{templateUsagePreviewMode ? '편집 모드' : '미리보기'}</span>
+            {documentMode ? <Eye className="h-4 w-4" /> : templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            <span className="v106-canvas-toolbar-label">{documentMode ? '미리보기' : templateUsagePreviewMode ? '편집 모드' : '미리보기'}</span>
           </button>
         </div>
-        <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
-          <button
-            type="button"
-            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode)}`}
-            onClick={() => onCanvasInteractionModeChange('select')}
-            disabled={templateUsagePreviewMode}
-            aria-label="선택 모드"
-            title="선택 모드"
-          >
-            <MousePointer2 className="h-4 w-4" />
-            <span className="v106-canvas-toolbar-label">선택</span>
-          </button>
-          <button
-            type="button"
-            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode)}`}
-            onClick={() => onCanvasInteractionModeChange('move')}
-            disabled={templateUsagePreviewMode}
-            aria-label="이동 모드"
-            title="이동 모드"
-          >
-            <Move className="h-4 w-4" />
-            <span className="v106-canvas-toolbar-label">이동</span>
-          </button>
-        </div>
+        {documentMode ? null : (
+          <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
+            <button
+              type="button"
+              className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode)}`}
+              onClick={() => onCanvasInteractionModeChange('select')}
+              disabled={templateUsagePreviewMode}
+              aria-label="선택 모드"
+              title="선택 모드"
+            >
+              <MousePointer2 className="h-4 w-4" />
+              <span className="v106-canvas-toolbar-label">선택</span>
+            </button>
+            <button
+              type="button"
+              className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode)}`}
+              onClick={() => onCanvasInteractionModeChange('move')}
+              disabled={templateUsagePreviewMode}
+              aria-label="이동 모드"
+              title="이동 모드"
+            >
+              <Move className="h-4 w-4" />
+              <span className="v106-canvas-toolbar-label">이동</span>
+            </button>
+          </div>
+        )}
         <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
           <button
             type="button"
-            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !canUndoCanvasHistory || templateUsagePreviewMode)}`}
+            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !documentMode && (!canUndoCanvasHistory || templateUsagePreviewMode))}`}
+            onMouseDown={documentMode ? (event) => event.preventDefault() : undefined}
             onClick={onUndoCanvasHistory}
-            disabled={!canUndoCanvasHistory || templateUsagePreviewMode}
+            disabled={!documentMode && (!canUndoCanvasHistory || templateUsagePreviewMode)}
             aria-label="되돌리기"
             title="되돌리기"
           >
@@ -190,9 +195,10 @@ export const TemplateEditCanvasToolbar = ({
           </button>
           <button
             type="button"
-            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !canRedoCanvasHistory || templateUsagePreviewMode)}`}
+            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !documentMode && (!canRedoCanvasHistory || templateUsagePreviewMode))}`}
+            onMouseDown={documentMode ? (event) => event.preventDefault() : undefined}
             onClick={onRedoCanvasHistory}
-            disabled={!canRedoCanvasHistory || templateUsagePreviewMode}
+            disabled={!documentMode && (!canRedoCanvasHistory || templateUsagePreviewMode)}
             aria-label="다시 실행하기"
             title="다시 실행하기"
           >
@@ -250,30 +256,32 @@ export const TemplateEditCanvasToolbar = ({
             <span className="v106-canvas-toolbar-label">{canvasFullscreen ? '전체 화면 종료' : '전체 화면'}</span>
           </button>
         </div>
-        <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="상자 편집 탭">
-          {([
-            { key: 'position', label: '크기 및 위치', icon: Move },
-            { key: 'metadata', label: '속성', icon: KeyRound },
-          ] as const).map((tab, index) => {
-            const TabIcon = tab.icon;
-            const isActive = selectionPanelTab === tab.key;
+        {documentMode ? null : (
+          <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="상자 편집 탭">
+            {([
+              { key: 'position', label: '크기 및 위치', icon: Move },
+              { key: 'metadata', label: '속성', icon: KeyRound },
+            ] as const).map((tab, index) => {
+              const TabIcon = tab.icon;
+              const isActive = selectionPanelTab === tab.key;
 
-            return (
-              <button
-                key={`selection-panel-tab:${tab.key}`}
-                type="button"
-                className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(index === 0 ? 'first' : 'last')} ${getCanvasToolbarButtonStateClassName(isActive)}`}
-                onClick={() => onSelectionPanelTabChange(tab.key)}
-                aria-pressed={isActive}
-                aria-label={tab.label}
-                title={tab.label}
-              >
-                <TabIcon className="h-4 w-4" />
-                <span className="v106-canvas-toolbar-label">{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
+              return (
+                <button
+                  key={`selection-panel-tab:${tab.key}`}
+                  type="button"
+                  className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(index === 0 ? 'first' : 'last')} ${getCanvasToolbarButtonStateClassName(isActive)}`}
+                  onClick={() => onSelectionPanelTabChange(tab.key)}
+                  aria-pressed={isActive}
+                  aria-label={tab.label}
+                  title={tab.label}
+                >
+                  <TabIcon className="h-4 w-4" />
+                  <span className="v106-canvas-toolbar-label">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </CardContent>
   </>
