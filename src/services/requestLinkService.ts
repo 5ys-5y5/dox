@@ -124,6 +124,24 @@ const getTokenHash = (token: string) => generateDocumentHash(token);
 
 const generateRequestToken = () => randomBytes(24).toString('hex');
 
+const serializeRequestLinkValueFile = (valueFile: {
+  valueKey: string;
+  storageBucket: string;
+  storagePath: string;
+  originalFileName: string;
+  mimeType?: string | null;
+  fileSizeBytes?: number | null;
+  sortOrder?: number | null;
+}) => ({
+  valueKey: String(valueFile.valueKey || '').trim(),
+  storageBucket: String(valueFile.storageBucket || '').trim(),
+  storagePath: String(valueFile.storagePath || '').trim(),
+  originalFileName: String(valueFile.originalFileName || '').trim(),
+  mimeType: valueFile.mimeType || null,
+  fileSizeBytes: valueFile.fileSizeBytes ?? null,
+  sortOrder: valueFile.sortOrder ?? 0,
+});
+
 const getRequestLinkByToken = async (token: string) => {
   const tokenHash = getTokenHash(token);
   const { data, error } = await requestLinksSchema()
@@ -358,7 +376,14 @@ export const RequestLinkService = {
         documentTypeKey: detail.document.documentTypeKey,
         siteId: detail.document.siteId,
         currentVersionNumber: detail.document.currentVersionNumber,
+        latestVersionHtml: latestVersion?.htmlCanonical || null,
+        latestVersionCreatedAt: latestVersion?.createdAt || null,
+        labelValues: latestVersion?.labelValues || {},
         allowedLabelValues,
+        valueFiles: detail.valueFiles,
+        valueEntries: detail.valueEntries,
+        templateLink: detail.templateLink,
+        linkedTemplate: detail.linkedTemplate,
       },
     };
   },
@@ -425,13 +450,40 @@ export const RequestLinkService = {
       }
     }
 
-    if (updatedLabels.length === 0) {
+    const allowedValueKeys = new Set(requestLink.allowed_labels || []);
+    const currentAllowedValueFiles = detail.valueFiles
+      .filter((file) => allowedValueKeys.has(file.valueKey))
+      .map(serializeRequestLinkValueFile)
+      .sort((left, right) =>
+        `${left.valueKey}:${left.sortOrder}:${left.originalFileName}`.localeCompare(
+          `${right.valueKey}:${right.sortOrder}:${right.originalFileName}`,
+          'ko'
+        )
+      );
+    const nextAllowedValueFiles = (params.valueFiles || [])
+      .filter((file) => allowedValueKeys.has(String(file.valueKey || '').trim()))
+      .map(serializeRequestLinkValueFile)
+      .sort((left, right) =>
+        `${left.valueKey}:${left.sortOrder}:${left.originalFileName}`.localeCompare(
+          `${right.valueKey}:${right.sortOrder}:${right.originalFileName}`,
+          'ko'
+        )
+      );
+    const attachmentFilesChanged =
+      JSON.stringify(currentAllowedValueFiles) !== JSON.stringify(nextAllowedValueFiles);
+
+    if (updatedLabels.length === 0 && !attachmentFilesChanged) {
       throw new Error('요청 링크 제출 실패: 실제로 바뀌는 허용 라벨 값이 없습니다.');
     }
 
+    const nextHtmlCanonical = typeof params.htmlCanonical === 'string' && params.htmlCanonical.trim()
+      ? params.htmlCanonical.trim()
+      : latestVersion.htmlCanonical;
+
     const versionResult = await DocumentService.createVersion(requestLink.document_id, {
-      htmlCanonical: latestVersion.htmlCanonical,
+      htmlCanonical: nextHtmlCanonical,
       labelValues: nextLabelValues,
+      valueFiles: params.valueFiles,
       changeReason: `request-link:${requestLink.id}`,
       createdBy: params.submittedBy?.trim() || 'request-link-submit',
     });

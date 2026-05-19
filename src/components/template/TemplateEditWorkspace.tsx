@@ -1384,6 +1384,9 @@ const materializeFrameBandTableGeometryInHtml = (html: string) => {
   return container.innerHTML;
 };
 
+export const materializeTemplateCanvasHtmlForPersistence = (html: string) =>
+  materializeFrameBandTableGeometryInHtml(html);
+
 const resolveFrameLayoutShell = (node: HTMLElement) => node.closest<HTMLElement>('.v102-frame-band') || node;
 
 const resolveFrameLayoutTable = (node: HTMLElement) => {
@@ -5369,18 +5372,164 @@ const updatePageInnerMinHeight = (pageInner: HTMLElement) => {
   syncTemplatePreviewScaledSourceBounds(pageInner, { width: nextWidth, height: nextHeight });
 };
 
-const snapTemplateUsagePreviewFrameEdges = (root: ParentNode) => {
+const normalizedBandRangesOverlap = (
+  left: { rowStart: number; rowEnd: number; colStart: number; colEnd: number },
+  right: { rowStart: number; rowEnd: number; colStart: number; colEnd: number }
+) =>
+  left.rowStart < right.rowEnd &&
+  left.rowEnd > right.rowStart &&
+  left.colStart < right.colEnd &&
+  left.colEnd > right.colStart;
+
+const snapTemplateUsagePreviewFrameEdges = (
+  root: ParentNode,
+  options?: {
+    sourceKeys?: Iterable<string>;
+    focusFrameGroupIds?: Iterable<string>;
+  }
+) => {
   let changed = false;
+  const sourceKeyFilter = options?.sourceKeys ? new Set(Array.from(options.sourceKeys).map((value) => value.trim()).filter(Boolean)) : null;
+  const focusFrameGroupIdSet = options?.focusFrameGroupIds
+    ? new Set(Array.from(options.focusFrameGroupIds).map((value) => value.trim()).filter(Boolean))
+    : null;
 
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
-    const edgeSnapChanged = snapFrameBandShellEdgesInPage(pageInner);
-    const pixelSnapChanged = snapFrameBandShellEdgesToPixelGridInPage(pageInner);
+    const focusRangesBySourceKey = new Map<string, { rowStart: number; rowEnd: number; colStart: number; colEnd: number }>();
+    const normalizedGeometriesByShell = new Map<HTMLElement, NormalizedBandGeometry>();
+
+    if (sourceKeyFilter || focusFrameGroupIdSet) {
+      Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
+        .map((shell) => {
+          const geometry = readNormalizedBandGeometry(shell);
+
+          if (geometry) {
+            normalizedGeometriesByShell.set(shell, geometry);
+          }
+
+          return geometry;
+        })
+        .filter(
+          (geometry): geometry is NormalizedBandGeometry =>
+            Boolean(geometry) && (!sourceKeyFilter || sourceKeyFilter.has(geometry.sourceKey))
+        )
+        .forEach((geometry) => {
+          if (!focusFrameGroupIdSet || focusFrameGroupIdSet.size <= 0) {
+            return;
+          }
+
+          const geometryGroupKey = geometry.shell.getAttribute('data-v106-band-group-key')?.trim() || '';
+
+          if (!geometryGroupKey || !focusFrameGroupIdSet.has(geometryGroupKey)) {
+            return;
+          }
+
+          const previousRange = focusRangesBySourceKey.get(geometry.sourceKey);
+          focusRangesBySourceKey.set(geometry.sourceKey, {
+            rowStart: previousRange ? Math.min(previousRange.rowStart, geometry.rowStart) : geometry.rowStart,
+            rowEnd: previousRange ? Math.max(previousRange.rowEnd, geometry.rowEnd) : geometry.rowEnd,
+            colStart: previousRange ? Math.min(previousRange.colStart, geometry.colStart) : geometry.colStart,
+            colEnd: previousRange ? Math.max(previousRange.colEnd, geometry.colEnd) : geometry.colEnd,
+          });
+        });
+    }
+
+    const matchesScope = (shell: HTMLElement) => {
+      const geometry = normalizedGeometriesByShell.get(shell) || readNormalizedBandGeometry(shell);
+
+      if (geometry) {
+        if (sourceKeyFilter && !sourceKeyFilter.has(geometry.sourceKey)) {
+          return false;
+        }
+
+        if (!focusFrameGroupIdSet || focusFrameGroupIdSet.size <= 0) {
+          return true;
+        }
+
+        const focusRange = focusRangesBySourceKey.get(geometry.sourceKey);
+        return focusRange ? normalizedBandRangesOverlap(geometry, focusRange) : false;
+      }
+
+      if (!focusFrameGroupIdSet || focusFrameGroupIdSet.size <= 0) {
+        return !sourceKeyFilter;
+      }
+
+      return focusFrameGroupIdSet.has(getFrameGroupId(resolveFrameSelectionAnchor(shell)).trim());
+    };
+
+    const scopedShells =
+      sourceKeyFilter || focusFrameGroupIdSet
+        ? Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).filter(matchesScope)
+        : null;
+
+    if (scopedShells && scopedShells.length <= 0) {
+      return;
+    }
+
+    const edgeSnapChanged = scopedShells
+      ? snapFrameRectsToNearbyEdges(
+          scopedShells
+            .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
+            .map((shell) => ({
+              element: shell,
+              rect: readFrameElementRect(shell, pageInner),
+            })),
+          (shell, rect) => {
+            writePositionedElementPageRect(shell, rect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
+            syncFrameBandShellTableSize(shell);
+          }
+        )
+      : snapFrameBandShellEdgesInPage(pageInner);
+    const pixelSnapChanged = scopedShells
+      ? (() => {
+          const entries = scopedShells
+            .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
+            .map((shell) => ({
+              element: shell,
+              rect: readFrameElementRect(shell, pageInner),
+            }));
+
+          if (!entries.length) {
+            return false;
+          }
+
+          const xSnapMap = buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.left, rect.left + rect.width]));
+          const ySnapMap = buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.top, rect.top + rect.height]));
+          let scopedChanged = false;
+
+          entries.forEach(({ element, rect }) => {
+            const nextLeft = xSnapMap.get(rect.left) ?? Math.round(rect.left);
+            const nextRight = xSnapMap.get(rect.left + rect.width) ?? Math.round(rect.left + rect.width);
+            const nextTop = ySnapMap.get(rect.top) ?? Math.round(rect.top);
+            const nextBottom = ySnapMap.get(rect.top + rect.height) ?? Math.round(rect.top + rect.height);
+            const nextRect = {
+              left: nextLeft,
+              top: nextTop,
+              width: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextRight - nextLeft),
+              height: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextBottom - nextTop),
+            };
+
+            if (
+              Math.abs(nextRect.left - rect.left) > 0.001 ||
+              Math.abs(nextRect.top - rect.top) > 0.001 ||
+              Math.abs(nextRect.width - rect.width) > 0.001 ||
+              Math.abs(nextRect.height - rect.height) > 0.001
+            ) {
+              writePositionedElementPageRect(element, nextRect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
+              syncFrameBandShellTableSize(element);
+              scopedChanged = true;
+            }
+          });
+
+          return scopedChanged;
+        })()
+      : snapFrameBandShellEdgesToPixelGridInPage(pageInner);
 
     if (!edgeSnapChanged && !pixelSnapChanged) {
       return;
     }
 
-    Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
+    (scopedShells || Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))).forEach((shell) => {
       syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(shell), pageInner);
     });
     updatePageInnerMinHeight(pageInner);
@@ -6619,8 +6768,16 @@ const settleTemplateUsagePreviewVerticalOverlaps = (
   });
 };
 
-const applyTemplateUsagePreviewAutoHeightBoundaryFit = (root: ParentNode) => {
+const applyTemplateUsagePreviewAutoHeightBoundaryFit = (
+  root: ParentNode,
+  options?: {
+    focusFrameGroupIds?: Iterable<string>;
+  }
+) => {
   let changedCount = 0;
+  const focusFrameGroupIdSet = options?.focusFrameGroupIds
+    ? new Set(Array.from(options.focusFrameGroupIds).map((value) => value.trim()).filter(Boolean))
+    : null;
 
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     const entries = collectFrameSelectionAnchors(pageInner)
@@ -6666,6 +6823,14 @@ const applyTemplateUsagePreviewAutoHeightBoundaryFit = (root: ParentNode) => {
       });
 
       if (!currentGroup.some((entry) => entry.usesBottomAutoHeight)) {
+        return;
+      }
+
+      if (
+        focusFrameGroupIdSet &&
+        focusFrameGroupIdSet.size > 0 &&
+        !currentGroup.some((entry) => focusFrameGroupIdSet.has(getFrameGroupId(entry.node).trim()))
+      ) {
         return;
       }
 
@@ -6718,10 +6883,35 @@ const resolveNormalizedBandAxisBoundaries = (
     0
   );
   const minimumSize = axis === 'row' ? MIN_TABLE_ROW_HEIGHT_PX : MIN_WRITABLE_TABLE_SIZE_PX;
+  type BoundaryCandidate = {
+    value: number;
+    span: number;
+  };
   const candidatesByBoundary = Array.from({ length: maxBoundaryIndex + 1 }, () => ({
-    explicit: [] as number[],
-    inferred: [] as number[],
+    explicit: [] as BoundaryCandidate[],
+    inferred: [] as BoundaryCandidate[],
   }));
+  const readPreferredBoundaryCandidateValue = (candidates: BoundaryCandidate[]) => {
+    const finiteCandidates = candidates.filter(
+      (candidate) => Number.isFinite(candidate.value) && Number.isFinite(candidate.span) && candidate.span > 0
+    );
+
+    if (finiteCandidates.length <= 0) {
+      return null;
+    }
+
+    const smallestSpan = finiteCandidates.reduce(
+      (minimumSpan, candidate) => Math.min(minimumSpan, candidate.span),
+      Number.POSITIVE_INFINITY
+    );
+    const preferredCandidates = finiteCandidates.filter((candidate) => Math.abs(candidate.span - smallestSpan) <= 0.01);
+
+    if (preferredCandidates.length <= 0) {
+      return null;
+    }
+
+    return Math.max(...preferredCandidates.map((candidate) => candidate.value));
+  };
 
   geometries.forEach((geometry) => {
     const shellRect = readFrameElementRect(geometry.shell, pageInner);
@@ -6733,10 +6923,10 @@ const resolveNormalizedBandAxisBoundaries = (
     const segmentSizes = readNormalizedBandAxisSegmentSizes(geometry, pageInner, axis);
 
     if (candidatesByBoundary[rangeStart]) {
-      candidatesByBoundary[rangeStart].explicit.push(origin);
+      candidatesByBoundary[rangeStart].explicit.push({ value: origin, span });
     }
     if (candidatesByBoundary[rangeEnd]) {
-      candidatesByBoundary[rangeEnd].explicit.push(origin + size);
+      candidatesByBoundary[rangeEnd].explicit.push({ value: origin + size, span });
     }
 
     for (let boundaryOffset = 1; boundaryOffset < span; boundaryOffset += 1) {
@@ -6747,9 +6937,10 @@ const resolveNormalizedBandAxisBoundaries = (
             ? segmentSizes.slice(0, boundaryOffset).reduce((sum, value) => sum + value, 0)
             : null;
 
-        candidatesByBoundary[boundaryIndex].inferred.push(
-          origin + (typeof explicitBoundaryOffset === 'number' ? explicitBoundaryOffset : (size * boundaryOffset) / span)
-        );
+        candidatesByBoundary[boundaryIndex].inferred.push({
+          value: origin + (typeof explicitBoundaryOffset === 'number' ? explicitBoundaryOffset : (size * boundaryOffset) / span),
+          span,
+        });
       }
     }
   });
@@ -6757,9 +6948,12 @@ const resolveNormalizedBandAxisBoundaries = (
   const firstBoundaryCandidates = [
     ...candidatesByBoundary[0].explicit,
     ...candidatesByBoundary[0].inferred,
-  ].filter((value) => Number.isFinite(value));
+  ]
+    .map((candidate) => candidate.value)
+    .filter((value) => Number.isFinite(value));
   const allCandidates = candidatesByBoundary
     .flatMap((entry) => [...entry.explicit, ...entry.inferred])
+    .map((candidate) => candidate.value)
     .filter((value) => Number.isFinite(value));
   const firstBoundary =
     firstBoundaryCandidates.length > 0
@@ -6770,14 +6964,12 @@ const resolveNormalizedBandAxisBoundaries = (
   const boundaries = [firstBoundary];
 
   for (let boundaryIndex = 1; boundaryIndex <= maxBoundaryIndex; boundaryIndex += 1) {
-    const boundaryCandidates = [
-      ...(candidatesByBoundary[boundaryIndex].explicit.length > 0
-        ? candidatesByBoundary[boundaryIndex].explicit
-        : candidatesByBoundary[boundaryIndex].inferred),
-    ].filter((value) => Number.isFinite(value));
+    const boundaryCandidateValue =
+      readPreferredBoundaryCandidateValue(candidatesByBoundary[boundaryIndex].explicit) ??
+      readPreferredBoundaryCandidateValue(candidatesByBoundary[boundaryIndex].inferred);
     const candidateBoundary =
-      boundaryCandidates.length > 0
-        ? Math.max(...boundaryCandidates)
+      typeof boundaryCandidateValue === 'number'
+        ? boundaryCandidateValue
         : boundaries[boundaryIndex - 1] + minimumSize;
     boundaries[boundaryIndex] = Math.max(boundaries[boundaryIndex - 1] + minimumSize, candidateBoundary);
   }
@@ -6785,17 +6977,138 @@ const resolveNormalizedBandAxisBoundaries = (
   return boundaries;
 };
 
+const buildCurrentNormalizedBandAxisBoundaries = (
+  geometries: NormalizedBandGeometry[],
+  pageInner: HTMLElement,
+  axis: 'row' | 'col'
+) => {
+  const maxBoundaryIndex = geometries.reduce(
+    (maxIndex, geometry) => Math.max(maxIndex, axis === 'row' ? geometry.rowEnd : geometry.colEnd),
+    0
+  );
+  const minimumSize = axis === 'row' ? MIN_TABLE_ROW_HEIGHT_PX : MIN_WRITABLE_TABLE_SIZE_PX;
+  type SegmentCandidate = {
+    size: number;
+    span: number;
+  };
+  const boundaryOrigins: number[] = [];
+  const candidatesBySegment = Array.from({ length: maxBoundaryIndex }, () => [] as SegmentCandidate[]);
+  const readPreferredSegmentSize = (candidates: SegmentCandidate[]) => {
+    const finiteCandidates = candidates.filter(
+      (candidate) => Number.isFinite(candidate.size) && candidate.size > 0 && Number.isFinite(candidate.span) && candidate.span > 0
+    );
+
+    if (finiteCandidates.length <= 0) {
+      return null;
+    }
+
+    const smallestSpan = finiteCandidates.reduce(
+      (minimumSpan, candidate) => Math.min(minimumSpan, candidate.span),
+      Number.POSITIVE_INFINITY
+    );
+    const preferredCandidates = finiteCandidates.filter((candidate) => Math.abs(candidate.span - smallestSpan) <= 0.01);
+
+    if (preferredCandidates.length <= 0) {
+      return null;
+    }
+
+    return Math.max(...preferredCandidates.map((candidate) => candidate.size));
+  };
+
+  geometries.forEach((geometry) => {
+    const shellRect = readFrameElementRect(geometry.shell, pageInner);
+    const rangeStart = axis === 'row' ? geometry.rowStart : geometry.colStart;
+    const rangeEnd = axis === 'row' ? geometry.rowEnd : geometry.colEnd;
+    const origin = axis === 'row' ? shellRect.top : shellRect.left;
+    const size = axis === 'row' ? shellRect.height : shellRect.width;
+    const span = Math.max(1, rangeEnd - rangeStart);
+    const segmentSizes = readNormalizedBandAxisSegmentSizes(geometry, pageInner, axis);
+
+    if (Number.isFinite(origin)) {
+      boundaryOrigins.push(origin);
+    }
+
+    for (let segmentOffset = 0; segmentOffset < span; segmentOffset += 1) {
+      const segmentIndex = rangeStart + segmentOffset;
+      if (!candidatesBySegment[segmentIndex]) {
+        continue;
+      }
+
+      const segmentSize =
+        segmentSizes && Number.isFinite(segmentSizes[segmentOffset])
+          ? segmentSizes[segmentOffset]
+          : size / span;
+
+      if (!Number.isFinite(segmentSize) || segmentSize <= 0) {
+        continue;
+      }
+
+      candidatesBySegment[segmentIndex].push({
+        size: segmentSize,
+        span,
+      });
+    }
+  });
+
+  const firstBoundary = boundaryOrigins.length > 0 ? Math.min(...boundaryOrigins) : 0;
+  const boundaries = [firstBoundary];
+
+  for (let segmentIndex = 0; segmentIndex < maxBoundaryIndex; segmentIndex += 1) {
+    const preferredSegmentSize = readPreferredSegmentSize(candidatesBySegment[segmentIndex] || []);
+    boundaries[segmentIndex + 1] = boundaries[segmentIndex] + Math.max(minimumSize, preferredSegmentSize ?? minimumSize);
+  }
+
+  return boundaries;
+};
+
+const buildScopedNormalizedBandAxisBoundaries = (
+  currentBoundaries: number[],
+  targetBoundaries: number[],
+  minimumSize: number,
+  focusRange?: { start: number; end: number } | null
+) => {
+  if (!focusRange || currentBoundaries.length !== targetBoundaries.length || targetBoundaries.length <= 0) {
+    return targetBoundaries;
+  }
+
+  const maxBoundaryIndex = targetBoundaries.length - 1;
+  const focusStart = Math.max(0, Math.min(maxBoundaryIndex, focusRange.start));
+  const focusEnd = Math.max(focusStart, Math.min(maxBoundaryIndex, focusRange.end));
+  const nextBoundaries = [...currentBoundaries];
+
+  for (let boundaryIndex = focusStart + 1; boundaryIndex <= focusEnd; boundaryIndex += 1) {
+    nextBoundaries[boundaryIndex] = Math.max(
+      nextBoundaries[boundaryIndex - 1] + minimumSize,
+      targetBoundaries[boundaryIndex] ?? nextBoundaries[boundaryIndex - 1] + minimumSize
+    );
+  }
+
+  const tailDelta = nextBoundaries[focusEnd] - currentBoundaries[focusEnd];
+
+  for (let boundaryIndex = focusEnd + 1; boundaryIndex <= maxBoundaryIndex; boundaryIndex += 1) {
+    const shiftedBoundary = (currentBoundaries[boundaryIndex] ?? nextBoundaries[boundaryIndex - 1]) + tailDelta;
+    nextBoundaries[boundaryIndex] = Math.max(nextBoundaries[boundaryIndex - 1] + minimumSize, shiftedBoundary);
+  }
+
+  return nextBoundaries;
+};
+
 const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
   root: ParentNode,
   options?: {
     sourceKeys?: Iterable<string>;
+    focusFrameGroupIds?: Iterable<string>;
   }
 ) => {
   let changed = false;
   const sourceKeyFilter = options?.sourceKeys ? new Set(Array.from(options.sourceKeys).map((value) => value.trim()).filter(Boolean)) : null;
+  const focusFrameGroupIdSet = options?.focusFrameGroupIds
+    ? new Set(Array.from(options.focusFrameGroupIds).map((value) => value.trim()).filter(Boolean))
+    : null;
 
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     const geometriesBySourceKey = new Map<string, NormalizedBandGeometry[]>();
+    const focusRangesBySourceKey = new Map<string, { rowStart: number; rowEnd: number; colStart: number; colEnd: number }>();
 
     Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
       .map((shell) => readNormalizedBandGeometry(shell))
@@ -6807,11 +7120,45 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
         const entries = geometriesBySourceKey.get(geometry.sourceKey) || [];
         entries.push(geometry);
         geometriesBySourceKey.set(geometry.sourceKey, entries);
+
+        if (!focusFrameGroupIdSet || focusFrameGroupIdSet.size <= 0) {
+          return;
+        }
+
+        const geometryGroupKey = geometry.shell.getAttribute('data-v106-band-group-key')?.trim() || '';
+
+        if (!geometryGroupKey || !focusFrameGroupIdSet.has(geometryGroupKey)) {
+          return;
+        }
+
+        const previousRange = focusRangesBySourceKey.get(geometry.sourceKey);
+
+        focusRangesBySourceKey.set(geometry.sourceKey, {
+          rowStart: previousRange ? Math.min(previousRange.rowStart, geometry.rowStart) : geometry.rowStart,
+          rowEnd: previousRange ? Math.max(previousRange.rowEnd, geometry.rowEnd) : geometry.rowEnd,
+          colStart: previousRange ? Math.min(previousRange.colStart, geometry.colStart) : geometry.colStart,
+          colEnd: previousRange ? Math.max(previousRange.colEnd, geometry.colEnd) : geometry.colEnd,
+        });
       });
 
     geometriesBySourceKey.forEach((sourceGeometries) => {
-      const rowBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'row');
-      const colBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'col');
+      const currentRowBoundaries = buildCurrentNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'row');
+      const currentColBoundaries = buildCurrentNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'col');
+      const nextRowBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'row');
+      const nextColBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'col');
+      const focusRange = focusRangesBySourceKey.get(sourceGeometries[0]?.sourceKey || '') || null;
+      const rowBoundaries = buildScopedNormalizedBandAxisBoundaries(
+        currentRowBoundaries,
+        nextRowBoundaries,
+        MIN_TABLE_ROW_HEIGHT_PX,
+        focusRange ? { start: focusRange.rowStart, end: focusRange.rowEnd } : null
+      );
+      const colBoundaries = buildScopedNormalizedBandAxisBoundaries(
+        currentColBoundaries,
+        nextColBoundaries,
+        MIN_WRITABLE_TABLE_SIZE_PX,
+        focusRange ? { start: focusRange.colStart, end: focusRange.colEnd } : null
+      );
 
       sourceGeometries.forEach((geometry) => {
         if (sourceGeometries.length <= 1) {
@@ -8814,6 +9161,8 @@ const TEMPLATE_USAGE_PREVIEW_FILE_CARD_ID_ATTR = 'data-template-usage-preview-fi
 const TEMPLATE_USAGE_PREVIEW_FILE_DRAG_ACTIVE_ATTR = 'data-template-usage-preview-file-drag-active';
 const TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR = 'data-template-usage-preview-file-api-path';
 const TEMPLATE_USAGE_PREVIEW_FILE_ALLOW_SAVE_ATTR = 'data-template-usage-preview-file-allow-save';
+const TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR = 'data-template-usage-preview-read-only';
+const TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR = 'data-template-usage-preview-field-key';
 
 type TemplateUsagePreviewAttachmentPendingFile = {
   localId: string;
@@ -8842,6 +9191,28 @@ const splitTemplateUsagePreviewFileNamesText = (value: string) =>
 
 const joinTemplateUsagePreviewFileNamesText = (fileNames: string[]) =>
   fileNames.map((fileName) => String(fileName || '').trim()).filter(Boolean).join('\n');
+
+const normalizeTemplateUsagePreviewEditableFieldKeys = (editableFieldKeys?: string[] | null) => {
+  if (!Array.isArray(editableFieldKeys)) {
+    return null;
+  }
+
+  return new Set(editableFieldKeys.map((fieldKey) => String(fieldKey || '').trim()).filter((fieldKey) => Boolean(fieldKey)));
+};
+
+const readTemplateUsagePreviewFieldKey = (control: HTMLElement) =>
+  control.getAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR)?.trim() ||
+  control.getAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR)?.trim() ||
+  control.getAttribute(TEMPLATE_FRAME_LABEL_ATTR)?.trim() ||
+  '';
+
+const isTemplateUsagePreviewControlReadOnly = (control: HTMLElement) =>
+  resolveTemplateUsagePreviewRuntimeRoot(control)?.getAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR) === 'true' ||
+  control.getAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR) === 'true';
+
+const applyTemplateUsagePreviewControlReadOnly = (control: HTMLElement, readOnly: boolean) => {
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readOnly ? 'true' : 'false');
+};
 
 const materializeTemplateUsagePreviewAttachmentControls = (root: ParentNode) => {
   root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`).forEach((control) => {
@@ -11152,6 +11523,83 @@ const enableTemplateUsagePreviewTextControls = (root: ParentNode) => {
   });
 };
 
+const applyTemplateUsagePreviewReadOnlyState = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="text"]`).forEach((control) => {
+    if (control instanceof HTMLTextAreaElement || control instanceof HTMLInputElement) {
+      disableFrameTextInputEditing(control);
+      return;
+    }
+
+    control.setAttribute('contenteditable', 'false');
+    control.removeAttribute('role');
+    control.tabIndex = -1;
+    control.style.removeProperty('pointer-events');
+    control.style.removeProperty('user-select');
+    control.style.removeProperty('-webkit-user-select');
+    control.style.cursor = '';
+    control.style.caretColor = '';
+  });
+
+  root
+    .querySelectorAll<HTMLButtonElement>(
+      `[${TEMPLATE_USAGE_PREVIEW_FILE_ACTION_ATTR}], [${TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR}], [${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR}]`
+    )
+    .forEach((button) => {
+      button.disabled = true;
+      button.tabIndex = -1;
+    });
+
+  root.querySelectorAll<HTMLInputElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR}="true"]`).forEach((input) => {
+    input.disabled = true;
+    input.tabIndex = -1;
+  });
+};
+
+const applyTemplateUsagePreviewFieldEditability = (root: ParentNode, editableFieldKeys?: string[] | null) => {
+  const editableFieldKeySet = normalizeTemplateUsagePreviewEditableFieldKeys(editableFieldKeys);
+  const globalReadOnly =
+    root instanceof HTMLElement && root.getAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR) === 'true';
+
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="text"]`).forEach((control) => {
+    const fieldKey = readTemplateUsagePreviewFieldKey(control);
+    const readOnly = globalReadOnly || (editableFieldKeySet !== null && (!fieldKey || !editableFieldKeySet.has(fieldKey)));
+
+    if (readOnly) {
+      if (control instanceof HTMLTextAreaElement || control instanceof HTMLInputElement) {
+        disableFrameTextInputEditing(control);
+      } else {
+        control.setAttribute('contenteditable', 'false');
+        control.removeAttribute('role');
+        control.tabIndex = -1;
+        control.style.removeProperty('pointer-events');
+        control.style.removeProperty('user-select');
+        control.style.removeProperty('-webkit-user-select');
+        control.style.cursor = '';
+        control.style.caretColor = '';
+      }
+      return;
+    }
+
+    enableTemplateUsagePreviewTextControl(control);
+  });
+
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`).forEach((control) => {
+    const fieldKey = readTemplateUsagePreviewFieldKey(control);
+    const readOnly = globalReadOnly || (editableFieldKeySet !== null && (!fieldKey || !editableFieldKeySet.has(fieldKey)));
+
+    applyTemplateUsagePreviewControlReadOnly(control, readOnly);
+    renderTemplateUsagePreviewAttachmentControl(control);
+  });
+
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`).forEach((control) => {
+    const fieldKey = readTemplateUsagePreviewFieldKey(control);
+    const readOnly = globalReadOnly || (editableFieldKeySet !== null && (!fieldKey || !editableFieldKeySet.has(fieldKey)));
+
+    applyTemplateUsagePreviewControlReadOnly(control, readOnly);
+    renderTemplateUsagePreviewSignatureControl(control);
+  });
+};
+
 const replaceFrameContentTarget = (node: HTMLElement, replacement: HTMLElement) => {
   const target = resolveFrameContentTarget(node);
   const computedStyle = getComputedStyle(target);
@@ -11210,9 +11658,11 @@ const prepareTemplateUsageTextValueControl = (
   node: HTMLElement,
   options?: {
     preserveValueText?: boolean;
+    readOnly?: boolean;
   }
 ) => {
-  const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '입력값';
+  const fieldKey = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '';
+  const label = fieldKey || '입력값';
   const input =
     node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
     node.querySelector<HTMLInputElement>('[data-template-frame-input="true"]');
@@ -11227,10 +11677,17 @@ const prepareTemplateUsageTextValueControl = (
       input.removeAttribute('placeholder');
     }
     input.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
+    if (fieldKey) {
+      input.setAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR, fieldKey);
+    }
     if (input instanceof HTMLTextAreaElement) {
       input.textContent = preservedValue;
     }
-    enableTemplateUsagePreviewTextControl(input);
+    if (options?.readOnly) {
+      disableFrameTextInputEditing(input);
+    } else {
+      enableTemplateUsagePreviewTextControl(input);
+    }
     applyTemplateUsagePreviewValueTextTone(input);
     return;
   }
@@ -11246,7 +11703,21 @@ const prepareTemplateUsageTextValueControl = (
     target.removeAttribute('data-placeholder');
   }
   target.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'text');
-  enableTemplateUsagePreviewTextControl(target);
+  if (fieldKey) {
+    target.setAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR, fieldKey);
+  }
+  if (options?.readOnly) {
+    target.setAttribute('contenteditable', 'false');
+    target.removeAttribute('role');
+    target.tabIndex = -1;
+    target.style.removeProperty('pointer-events');
+    target.style.removeProperty('user-select');
+    target.style.removeProperty('-webkit-user-select');
+    target.style.cursor = '';
+    target.style.caretColor = '';
+  } else {
+    enableTemplateUsagePreviewTextControl(target);
+  }
   applyTemplateUsagePreviewValueTextTone(target);
 };
 
@@ -11418,6 +11889,7 @@ const renderTemplateUsagePreviewSignatureControl = (control: HTMLElement) => {
   const runtimeMode = isTemplateFrameRuntimeMode(runtimeModeAttr) ? runtimeModeAttr : 'signature_image';
   const label = control.getAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR)?.trim() || '서명';
   const imageData = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR) || '';
+  const readOnly = isTemplateUsagePreviewControlReadOnly(control);
 
   clearElementChildren(control);
 
@@ -11473,6 +11945,8 @@ const renderTemplateUsagePreviewSignatureControl = (control: HTMLElement) => {
   clearButton.className = 'v106-template-usage-signature-clear';
   clearButton.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR, 'true');
   clearButton.textContent = '지우기';
+  clearButton.disabled = readOnly;
+  clearButton.tabIndex = readOnly ? -1 : 0;
 
   control.appendChild(canvas);
   control.appendChild(clearButton);
@@ -11840,6 +12314,7 @@ const createTemplateUsagePreviewAttachmentFileCard = (params: {
   onViewAction?: string;
   onRemoveAction: string;
   restoreAction?: string;
+  readOnly?: boolean;
 }) => {
   const card = document.createElement('div');
   card.className = 'v106-template-usage-file-card';
@@ -11870,7 +12345,21 @@ const createTemplateUsagePreviewAttachmentFileCard = (params: {
   const actions = document.createElement('div');
   actions.className = 'v106-template-usage-file-card-actions';
 
-  if (params.deleted) {
+  if (params.readOnly) {
+    if (params.onViewAction && !params.deleted) {
+      actions.appendChild(
+        createTemplateUsagePreviewAttachmentCardActionButton({
+          action: params.onViewAction,
+          label: '보기',
+          itemKind: params.itemKind,
+          itemId: params.itemId,
+          disabled: params.disabledView,
+        })
+      );
+    } else {
+      actions.style.display = 'none';
+    }
+  } else if (params.deleted) {
     actions.appendChild(
       createTemplateUsagePreviewAttachmentCardActionButton({
         action: params.restoreAction || 'restore-existing',
@@ -11914,6 +12403,7 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
   const registeredList = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_REGISTERED_LIST_ATTR}="true"]`);
   const pendingList = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_PENDING_LIST_ATTR}="true"]`);
   const uploadBox = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR}="true"]`);
+  const readOnly = isTemplateUsagePreviewControlReadOnly(control);
 
   if (!state || !registeredList || !pendingList || !uploadBox) {
     return;
@@ -11946,6 +12436,7 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
         onViewAction: 'view-existing',
         onRemoveAction: 'mark-delete-existing',
         restoreAction: 'restore-existing',
+        readOnly,
       })
     );
   });
@@ -11977,15 +12468,24 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
           meta: `${formatTemplateUsagePreviewAttachmentFileSize(file.file.size) || '-'} · 저장 대기`,
           onViewAction: 'view-new',
           onRemoveAction: 'remove-new',
+          readOnly,
         })
       );
     });
   }
 
   uploadBox.setAttribute('aria-label', '파일 추가');
+  uploadBox.toggleAttribute('disabled', readOnly);
+  uploadBox.style.display = readOnly ? 'none' : '';
 };
 
-const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
+const prepareTemplateUsageAttachmentControl = (
+  node: HTMLElement,
+  options?: {
+    readOnly?: boolean;
+  }
+) => {
+  const fieldKey = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '';
   const contextKey = resolveTemplateUsagePreviewContextKey(node);
   const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node) || 'file_slot';
   const target = resolveFrameContentTarget(node);
@@ -11996,12 +12496,16 @@ const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR, contextKey);
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR, runtimeMode);
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR, '');
+  if (fieldKey) {
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR, fieldKey);
+  }
   control.setAttribute('data-template-value', 'true');
   control.setAttribute(
     TEMPLATE_USAGE_PREVIEW_FILE_PROTOTYPE_ATTR,
     encodeURIComponent(buildTemplateUsagePreviewAttachmentPrototypeMarkup(target))
   );
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR, '');
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, options?.readOnly ? 'true' : 'false');
   control.setAttribute('role', 'group');
   control.setAttribute('aria-label', '파일 목록');
   control.tabIndex = 0;
@@ -12056,8 +12560,14 @@ const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
   control.style.maxHeight = 'none';
 };
 
-const prepareTemplateUsageSignatureControl = (node: HTMLElement) => {
-  const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '서명';
+const prepareTemplateUsageSignatureControl = (
+  node: HTMLElement,
+  options?: {
+    readOnly?: boolean;
+  }
+) => {
+  const fieldKey = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '';
+  const label = fieldKey || '서명';
   const contextKey = resolveTemplateUsagePreviewContextKey(node);
   const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node) || 'signature_image';
   const control = document.createElement('div');
@@ -12066,6 +12576,10 @@ const prepareTemplateUsageSignatureControl = (node: HTMLElement) => {
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR, contextKey);
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR, runtimeMode);
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR, label);
+  if (fieldKey) {
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR, fieldKey);
+  }
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, options?.readOnly ? 'true' : 'false');
   ensureTemplateUsagePreviewSignatureState(control);
   renderTemplateUsagePreviewSignatureControl(control);
   replaceFrameContentTarget(node, control);
@@ -12075,6 +12589,7 @@ const prepareTemplateUsagePreviewValueBox = (
   node: HTMLElement,
   options?: {
     preserveValueText?: boolean;
+    readOnly?: boolean;
   }
 ) => {
   const boxKind = readFrameBoxKind(node);
@@ -12083,12 +12598,12 @@ const prepareTemplateUsagePreviewValueBox = (
   node.setAttribute(TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR, 'true');
 
   if (boxKind === 'attachment' || runtimeMode === 'file_slot') {
-    prepareTemplateUsageAttachmentControl(node);
+    prepareTemplateUsageAttachmentControl(node, { readOnly: options?.readOnly });
     return;
   }
 
   if (boxKind === 'signature' || runtimeMode.startsWith('signature_')) {
-    prepareTemplateUsageSignatureControl(node);
+    prepareTemplateUsageSignatureControl(node, { readOnly: options?.readOnly });
     return;
   }
 
@@ -12099,6 +12614,8 @@ const buildTemplateUsagePreviewHtml = (
   source: HTMLElement | string | null | undefined,
   options?: {
     preserveValueText?: boolean;
+    readOnly?: boolean;
+    editableValueKeys?: string[] | null;
   }
 ) => {
   const container = document.createElement('div');
@@ -12128,7 +12645,11 @@ const buildTemplateUsagePreviewHtml = (
       prepareTemplateUsagePreviewValueBox(node, options);
     }
   });
-  enableTemplateUsagePreviewTextControls(container);
+  if (options?.readOnly) {
+    applyTemplateUsagePreviewReadOnlyState(container);
+  } else {
+    applyTemplateUsagePreviewFieldEditability(container, options?.editableValueKeys);
+  }
 
   return container.innerHTML.trim();
 };
@@ -12153,6 +12674,10 @@ const collectTemplateUsagePreviewAttachmentDrafts = (root: HTMLElement): Templat
     .sort((left, right) => left.valueKey.localeCompare(right.valueKey, 'ko'));
 };
 
+type TemplateUsagePreviewAutoSizeLayoutChangeOptions = {
+  focusFrameGroupIds?: string[];
+};
+
 const applyTemplateUsagePreviewAutoSize = (
   root: HTMLElement,
   frameNode: HTMLElement | null,
@@ -12160,7 +12685,7 @@ const applyTemplateUsagePreviewAutoSize = (
     restoreTextInputFocus?: boolean;
     selectionStart?: number | null;
     selectionEnd?: number | null;
-    onLayoutChange?: (root: HTMLElement) => void;
+    onLayoutChange?: (root: HTMLElement, options?: TemplateUsagePreviewAutoSizeLayoutChangeOptions) => void;
   }
 ) => {
   if (!frameNode) {
@@ -12178,14 +12703,14 @@ const applyTemplateUsagePreviewAutoSize = (
   });
   if (autoSizeResult.changedCount > 0 || isTemplateUsagePreviewModeNode(frameNode)) {
     if (options?.onLayoutChange) {
-      options.onLayoutChange(root);
+      options.onLayoutChange(root, { focusFrameGroupIds: [frameGroupId] });
     } else {
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, { focusFrameGroupIds: [frameGroupId] });
       settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-      syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, { focusFrameGroupIds: [frameGroupId] });
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, { focusFrameGroupIds: [frameGroupId] });
       settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-      snapTemplateUsagePreviewFrameEdges(root);
+      snapTemplateUsagePreviewFrameEdges(root, { focusFrameGroupIds: [frameGroupId] });
     }
   }
 
@@ -12197,7 +12722,7 @@ const applyTemplateUsagePreviewAutoSize = (
 const attachTemplateUsagePreviewRuntimeHandlers = (
   root: HTMLElement,
   options?: {
-    onAutoSizeLayoutChange?: (root: HTMLElement) => void;
+    onAutoSizeLayoutChange?: (root: HTMLElement, options?: TemplateUsagePreviewAutoSizeLayoutChangeOptions) => void;
   }
 ) => {
   type SignatureDrawState = {
@@ -12238,8 +12763,6 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
           .filter((node): node is HTMLElement => Boolean(node))
       )
     );
-
-  enableTemplateUsagePreviewTextControls(root);
 
   const syncSignatureStateByContext = (contextKey: string, patch: SignatureStatePatch = {}) => {
     if (!contextKey) {
@@ -12410,6 +12933,12 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       return;
     }
 
+    const control = canvas.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`);
+
+    if (!control || isTemplateUsagePreviewControlReadOnly(control)) {
+      return;
+    }
+
     const context = prepareSignatureContext(canvas);
     if (!context) {
       return;
@@ -12419,7 +12948,6 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     event.stopPropagation();
     canvas.setPointerCapture?.(event.pointerId);
     const point = readCanvasPoint(canvas, event);
-    const control = canvas.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`);
     const contextKey = readRuntimeContextKey(control);
     context.beginPath();
     context.arc(point.x, point.y, 1.2, 0, Math.PI * 2);
@@ -12504,6 +13032,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       event.preventDefault();
       event.stopPropagation();
       const control = addButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+      if (!control || isTemplateUsagePreviewControlReadOnly(control)) {
+        return;
+      }
       const input = control?.querySelector<HTMLInputElement>(`input[${TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR}="true"]`) || null;
 
       input?.click();
@@ -12516,6 +13047,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       event.preventDefault();
       event.stopPropagation();
       const control = fileActionButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+      if (!control || isTemplateUsagePreviewControlReadOnly(control)) {
+        return;
+      }
       const contextKey = readRuntimeContextKey(control);
       const action = fileActionButton.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_ACTION_ATTR)?.trim() || '';
       const itemId = fileActionButton.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_CARD_ID_ATTR)?.trim() || '';
@@ -12599,6 +13133,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     event.preventDefault();
     event.stopPropagation();
     const control = clearButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`);
+    if (!control || isTemplateUsagePreviewControlReadOnly(control)) {
+      return;
+    }
     const contextKey = readRuntimeContextKey(control);
 
     if (contextKey) {
@@ -12618,11 +13155,16 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       return;
     }
 
+    const control = uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+    if (!control || isTemplateUsagePreviewControlReadOnly(control)) {
+      return;
+    }
+
     event.preventDefault();
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'copy';
     }
-    setAttachmentDragActive(uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`), true);
+    setAttachmentDragActive(control, true);
   };
   const handleRuntimeDragLeave = (event: DragEvent) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
@@ -12632,13 +13174,18 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       return;
     }
 
+    const control = uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+    if (!control || isTemplateUsagePreviewControlReadOnly(control)) {
+      return;
+    }
+
     const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
 
     if (relatedTarget && uploadBox.contains(relatedTarget)) {
       return;
     }
 
-    setAttachmentDragActive(uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`), false);
+    setAttachmentDragActive(control, false);
   };
   const handleRuntimeDrop = (event: DragEvent) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
@@ -12650,6 +13197,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
 
     event.preventDefault();
     const control = uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+    if (!control || isTemplateUsagePreviewControlReadOnly(control)) {
+      return;
+    }
     const contextKey = readRuntimeContextKey(control);
     const files = Array.from(event.dataTransfer?.files || []).filter((file) => file.size > 0 && file.size <= 10 * 1024 * 1024);
     setAttachmentDragActive(control, false);
@@ -15788,6 +16338,7 @@ export default function TemplateEditWorkspace({
   initialTemplateId = '',
   initialDraft = null,
   workspaceMode = 'template',
+  editableValueKeys = null,
   hideHeader = false,
   hidePersistencePanel = false,
   templateListDisplay = 'picker',
@@ -15805,6 +16356,14 @@ export default function TemplateEditWorkspace({
   documentAttachmentApiPath = '',
 }: TemplateEditWorkspaceProps) {
   const documentMode = workspaceMode === 'document';
+  const readMode = workspaceMode === 'read';
+  const normalizedEditableValueKeys = React.useMemo(
+    () =>
+      Array.isArray(editableValueKeys)
+        ? editableValueKeys.map((fieldKey) => String(fieldKey || '').trim()).filter((fieldKey) => Boolean(fieldKey))
+        : null,
+    [editableValueKeys]
+  );
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
   const [previewHtml, setPreviewHtml] = React.useState('');
@@ -15868,7 +16427,9 @@ export default function TemplateEditWorkspace({
   const [positionSpacingBulkGapY, setPositionSpacingBulkGapY] = React.useState('');
   const [positionSpacingBulkGapError, setPositionSpacingBulkGapError] = React.useState(false);
   const [selectedPositionSpacingSettingRelationKey, setSelectedPositionSpacingSettingRelationKey] = React.useState('');
-  const templateUsagePreviewAutoSizeLayoutChangeRef = React.useRef<((root: HTMLElement) => void) | null>(null);
+  const templateUsagePreviewAutoSizeLayoutChangeRef = React.useRef<
+    ((root: HTMLElement, options?: TemplateUsagePreviewAutoSizeLayoutChangeOptions) => void) | null
+  >(null);
   const [positionSelectionStateRevision, setPositionSelectionStateRevision] = React.useState(0);
   const [positionStructureRevision, setPositionStructureRevision] = React.useState(0);
   const [definedPositionRelationGapDraftByKey, setDefinedPositionRelationGapDraftByKey] = React.useState<
@@ -16275,7 +16836,7 @@ export default function TemplateEditWorkspace({
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const templateUsagePreviewActive = documentMode || templateUsagePreviewMode;
+  const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode;
   const surfaceRenderedPreviewHtml = templateUsagePreviewActive
     ? templateUsagePreviewHtml || renderedPreviewHtml
     : renderedPreviewHtml;
@@ -17099,7 +17660,7 @@ export default function TemplateEditWorkspace({
 	  }, [pushCanvasHistoryEntry]);
 
   const toggleTemplateUsagePreviewMode = React.useCallback(() => {
-    if (documentMode) {
+    if (documentMode || readMode) {
       return;
     }
 
@@ -17140,10 +17701,10 @@ export default function TemplateEditWorkspace({
     setTemplateUsagePreviewHtml(runtimeHtml);
     setTemplateUsagePreviewMode(true);
     setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
-  }, [documentMode, renderedPreviewHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+  }, [documentMode, readMode, renderedPreviewHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
 
   React.useEffect(() => {
-    if (!documentMode) {
+    if (!documentMode && !readMode) {
       return;
     }
 
@@ -17161,7 +17722,7 @@ export default function TemplateEditWorkspace({
 
     documentPreviewSourceKeyRef.current = nextSourceKey;
     setTemplateUsagePreviewHtml('');
-  }, [activeInitialDraft?.draftKey, documentMode, renderedPreviewHtml]);
+  }, [activeInitialDraft?.draftKey, documentMode, readMode, renderedPreviewHtml]);
 
   React.useEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current) {
@@ -17215,38 +17776,57 @@ export default function TemplateEditWorkspace({
   }, []);
 
   React.useLayoutEffect(() => {
-    if (!documentMode || !previewRef.current || !renderedPreviewHtml.trim() || templateUsagePreviewHtml.trim()) {
+    if ((!documentMode && !readMode) || !previewRef.current || !renderedPreviewHtml.trim() || templateUsagePreviewHtml.trim()) {
       return;
     }
 
-    const runtimeHtml = buildTemplateUsagePreviewHtml(previewRef.current, { preserveValueText: true });
+    const runtimeHtml = buildTemplateUsagePreviewHtml(previewRef.current, {
+      preserveValueText: true,
+      readOnly: readMode,
+      editableValueKeys: normalizedEditableValueKeys,
+    });
 
     if (!runtimeHtml.trim()) {
       return;
     }
 
     setTemplateUsagePreviewHtml(runtimeHtml);
-  }, [documentMode, previewSurfaceNodeVersion, renderedPreviewHtml, templateUsagePreviewHtml]);
+  }, [documentMode, normalizedEditableValueKeys, previewSurfaceNodeVersion, readMode, renderedPreviewHtml, templateUsagePreviewHtml]);
 
   React.useEffect(() => {
-    if (!templateUsagePreviewActive || !previewRef.current) {
+    if (!templateUsagePreviewActive || !previewRef.current || readMode) {
       return undefined;
     }
 
     return attachTemplateUsagePreviewRuntimeHandlers(previewRef.current, {
-      onAutoSizeLayoutChange: (root) => {
-        templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root);
+      onAutoSizeLayoutChange: (root, layoutOptions) => {
+        templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root, layoutOptions);
       },
     });
-  }, [surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+  }, [readMode, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
 
   React.useLayoutEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current) {
       return;
     }
 
-    enableTemplateUsagePreviewTextControls(previewRef.current);
-  }, [surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+    previewRef.current.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readMode ? 'true' : 'false');
+
+    if (readMode) {
+      applyTemplateUsagePreviewReadOnlyState(previewRef.current);
+      getAttachmentControlsFromRoot(previewRef.current).forEach((control) => {
+        renderTemplateUsagePreviewAttachmentControl(control);
+      });
+      previewRef.current
+        .querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`)
+        .forEach((control) => {
+          renderTemplateUsagePreviewSignatureControl(control);
+        });
+      return;
+    }
+
+    applyTemplateUsagePreviewFieldEditability(previewRef.current, normalizedEditableValueKeys);
+  }, [normalizedEditableValueKeys, readMode, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
 
   const persistTemplateDraftHtml = React.useCallback(
     async (
@@ -19057,13 +19637,15 @@ export default function TemplateEditWorkspace({
     [applyTemplateAutoSizeBoxesWithPreservedLayout]
   );
   const applyTemplateUsagePreviewPreservedSpacingRelations = React.useCallback(
-    (root: HTMLElement) => {
+    (root: HTMLElement, options?: TemplateUsagePreviewAutoSizeLayoutChangeOptions) => {
+      const focusFrameGroupIds = options?.focusFrameGroupIds?.map((value) => value.trim()).filter(Boolean) || [];
+      const focusOptions = focusFrameGroupIds.length > 0 ? { focusFrameGroupIds } : undefined;
       applyPreservedPositionSpacingRelations(root);
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
-      syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, focusOptions);
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, focusOptions);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, focusOptions);
       settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-      snapTemplateUsagePreviewFrameEdges(root);
+      snapTemplateUsagePreviewFrameEdges(root, focusOptions);
       root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
         updatePageInnerMinHeight(pageInner);
       });
@@ -27933,8 +28515,8 @@ export default function TemplateEditWorkspace({
           restoreTextInputFocus: shouldRestoreTextInputFocus,
           selectionStart,
           selectionEnd,
-          onLayoutChange: (layoutRoot) => {
-            templateUsagePreviewAutoSizeLayoutChangeRef.current?.(layoutRoot);
+          onLayoutChange: (layoutRoot, layoutOptions) => {
+            templateUsagePreviewAutoSizeLayoutChangeRef.current?.(layoutRoot, layoutOptions);
           },
         });
       }
@@ -29644,6 +30226,7 @@ export default function TemplateEditWorkspace({
         >
           <TemplateEditCanvasToolbar
             documentMode={documentMode}
+            readMode={readMode}
             nameFieldLabel={nameFieldLabel}
             saveButtonLabel={saveButtonLabel}
             templateNameReadOnly={templateNameReadOnly}
@@ -29767,10 +30350,17 @@ export default function TemplateEditWorkspace({
 	            textStyleOverlay={templateUsagePreviewActive ? null : positionTextStyleOverlayNode}
 	            onTextStyleOverlayCollapsedChange={handleTextStyleOverlayCollapsedChange}
 	            textStyleOverlayExpandedWidthClassName="w-fit max-w-[250px]"
-	            summaryOverlay={templateUsagePreviewActive ? null : selectionSummaryOverlayNode}
-	            onSummaryOverlayCollapsedChange={handleSummaryOverlayCollapsedChange}
+            summaryOverlay={templateUsagePreviewActive ? null : selectionSummaryOverlayNode}
+            onSummaryOverlayCollapsedChange={handleSummaryOverlayCollapsedChange}
             setPreviewNode={setPreviewNode}
-            syncTemplateUsagePreviewTextControls={enableTemplateUsagePreviewTextControls}
+            syncTemplateUsagePreviewTextControls={(root) => {
+              if (readMode) {
+                applyTemplateUsagePreviewReadOnlyState(root);
+                return;
+              }
+
+              applyTemplateUsagePreviewFieldEditability(root, normalizedEditableValueKeys);
+            }}
             handlePreviewPointerDown={handlePreviewPointerDown}
             handlePreviewPointerMove={handlePreviewPointerMove}
             handlePreviewPointerUp={handlePreviewPointerUp}

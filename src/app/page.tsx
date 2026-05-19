@@ -31,6 +31,13 @@ const pageGroups = [
     description: '문서 저장, 현장 체크리스트, 템플릿, 사진 라벨링, 일괄 입력을 확인합니다.',
     pages: [
       {
+        href: '/canvas',
+        title: '상자 편집 캔버스',
+        summary: '템플릿 모드, 문서 모드, 읽기 모드를 한 화면에서 직접 확인하는 공용 캔버스 owner 페이지입니다.',
+        status: '완료',
+        statusVariant: 'blue',
+      },
+      {
         href: '/documents',
         title: '서류 클라우드 관리',
         summary: '문서 생성, 상세 조회, 버전 추가를 다룹니다.',
@@ -46,19 +53,22 @@ const pageGroups = [
         href: '/templates',
         title: '템플릿 등록',
         summary: '템플릿 메타데이터, 필드, 라벨, 서명 영역을 관리합니다.',
-        status: '구현중',
+        status: '완료',
+        statusVariant: 'blue',
       },
       {
         href: '/templates/extract',
         title: '템플릿 추출',
         summary: '입력값이 있는 문서에서 draft HTML과 후보 필드를 만듭니다.',
-        status: '구현중',
+        status: '완료',
+        statusVariant: 'blue',
       },
       {
         href: '/templates/edit',
         title: '템플릿 편집',
         summary: '저장된 템플릿의 div 상자를 다중 선택해 크기와 스타일을 일괄 조정합니다.',
-        status: '구현중',
+        status: '완료',
+        statusVariant: 'blue',
       },
       {
         href: '/photos',
@@ -132,7 +142,7 @@ export default function HomePage() {
                   >
                     <div className="space-y-3">
                       <div className="flex items-center gap-2">
-                        <Badge variant="green">{page.status}</Badge>
+                        <Badge variant={page.statusVariant || 'green'}>{page.status}</Badge>
                         <span className="text-xs text-slate-500">{page.href}</span>
                       </div>
                       <div className="space-y-1">

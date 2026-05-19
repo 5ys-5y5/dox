@@ -1,3 +1,11 @@
+import type {
+  DocumentLinkedTemplateDto,
+  DocumentTemplateLinkDto,
+  DocumentValueEntryDto,
+  DocumentValueFileDto,
+  DocumentValueFileInput,
+} from './documentDtos';
+
 export type RequestLinkRecipientChannel = 'email' | 'sms';
 
 export type RequestLinkScalarValue = string | number | boolean | null;
@@ -40,7 +48,14 @@ export type RequestLinkDocumentSummaryDto = {
   documentTypeKey: string;
   siteId: string;
   currentVersionNumber: number | null;
+  latestVersionHtml: string | null;
+  latestVersionCreatedAt: string | null;
+  labelValues: Record<string, unknown>;
   allowedLabelValues: Record<string, unknown>;
+  valueFiles: DocumentValueFileDto[];
+  valueEntries: DocumentValueEntryDto[];
+  templateLink: DocumentTemplateLinkDto | null;
+  linkedTemplate: DocumentLinkedTemplateDto | null;
 };
 
 export type RequestLinkPublicViewDto = {
@@ -55,6 +70,8 @@ export type RequestLinkPublicViewDto = {
 
 export type RequestLinkSubmitInput = {
   labelValues: Record<string, RequestLinkScalarValue>;
+  htmlCanonical?: string;
+  valueFiles?: DocumentValueFileInput[];
   submittedBy?: string | null;
 };
 

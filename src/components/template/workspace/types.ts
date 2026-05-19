@@ -626,7 +626,8 @@ export type TemplateEditWorkspaceSaveDraftResult = {
 export type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
   initialDraft?: TemplateEditWorkspaceInitialDraft | null;
-  workspaceMode?: 'template' | 'document';
+  workspaceMode?: 'template' | 'document' | 'read';
+  editableValueKeys?: string[] | null;
   hideHeader?: boolean;
   hidePersistencePanel?: boolean;
   templateListDisplay?: 'picker' | 'inline';

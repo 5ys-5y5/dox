@@ -3,10 +3,9 @@
 import { useSearchParams } from 'next/navigation';
 import * as React from 'react';
 import { X } from 'lucide-react';
-import TemplateEditWorkspace, {
-  type TemplateEditWorkspaceInitialDraft,
-} from '../../components/template/TemplateEditWorkspace';
+import { type TemplateEditWorkspaceInitialDraft } from '../../components/template/TemplateEditWorkspace';
 import { Card, CardContent } from '../../components/ui/Card';
+import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { TemplateExtractWorkspace, type TemplateExtractWorkspaceStatus } from './extract/page';
 
 export default function TemplatesPage() {
@@ -56,7 +55,8 @@ export default function TemplatesPage() {
   return (
     <main className="min-h-screen bg-white">
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
-        <TemplateEditWorkspace
+        <CanvasOwnedWorkspace
+          surface="templates"
           initialTemplateId={templateIdFromQuery}
           initialDraft={extractedDraft}
           templateListDisplay="inline"

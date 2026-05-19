@@ -2,10 +2,12 @@
 
 import * as React from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { materializeTemplateCanvasHtmlForPersistence } from '../../../components/template/TemplateEditWorkspace';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { Input } from '../../../components/ui/Input';
 import type { TemplateEditWorkspaceInitialDraft } from '../../../components/template/TemplateEditWorkspace';
+import { CanvasOwnedWorkspace } from '../../canvas/ownerPolicy';
 import type {
   TemplateExtractApproveResult,
   TemplateExtractDetailResult,
@@ -141,7 +143,7 @@ const sanitizeExtractDraftHtmlForTemplateSave = (html: string) => {
     }
   });
 
-  return documentRoot.body.innerHTML.trim();
+  return materializeTemplateCanvasHtmlForPersistence(documentRoot.body.innerHTML.trim());
 };
 
 const loadRecentPdfUploadFromBrowserCache = async (): Promise<File | null> => {
@@ -255,7 +257,6 @@ export function TemplateExtractWorkspace({
   const [versionOptionsVisible, setVersionOptionsVisible] = React.useState(false);
   const [stageActionsVisible, setStageActionsVisible] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const previewBodyRef = React.useRef<HTMLDivElement | null>(null);
   const [recentUploadMeta, setRecentUploadMeta] = React.useState<RecentPdfUploadMeta | null>(null);
   const lastDeliveredDraftKeyRef = React.useRef('');
 
@@ -329,6 +330,20 @@ export function TemplateExtractWorkspace({
     });
   }, [currentDraft, currentDraftHtml, extractConfigKey, onDraftReady, selectedFile, templateName]);
 
+  const previewInitialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
+    if (!currentDraft || !currentDraftHtml.trim()) {
+      return null;
+    }
+
+    return {
+      draftKey: `${currentDraft.draft.id}:${extractConfigKey}:${currentDraftHtml.length}`,
+      templateName: templateName.trim() || toBaseFileName(selectedFile) || '추출 미리보기',
+      sourceDocumentName: selectedFile?.name || null,
+      draftHtml: currentDraftHtml.trim(),
+      layoutResizeMode: FIXED_LAYOUT_RESIZE_MODE,
+    };
+  }, [currentDraft, currentDraftHtml, extractConfigKey, selectedFile, templateName]);
+
   React.useEffect(() => {
     if (!onStatusChange) {
       return;
@@ -353,57 +368,6 @@ export function TemplateExtractWorkspace({
 
     onStatusChange(null);
   }, [approveResult, message, onStatusChange]);
-
-  const syncPreviewDocumentScale = React.useCallback(() => {
-    const root = previewBodyRef.current;
-
-    if (!root) {
-      return;
-    }
-
-    const clearScale = (element: HTMLElement | null) => {
-      if (!element) {
-        return;
-      }
-
-      element.style.removeProperty('zoom');
-      element.removeAttribute('data-template-preview-scale-target');
-    };
-
-    const existingScaleTarget = root.querySelector<HTMLElement>('[data-template-preview-scale-target="true"]');
-    clearScale(existingScaleTarget);
-
-    const stageSection = root.querySelector<HTMLElement>(':scope > section[data-template-extraction-stage]');
-    const pageNode =
-      root.querySelector<HTMLElement>(':scope > section[data-template-extraction-stage] > section.page') ||
-      root.querySelector<HTMLElement>(':scope > section.page') ||
-      root.querySelector<HTMLElement>(':scope > .page-inner');
-
-    const scaleTarget = pageNode || stageSection;
-
-    if (!scaleTarget) {
-      return;
-    }
-
-    const computedRootStyle = window.getComputedStyle(root);
-    const paddingLeft = Number.parseFloat(computedRootStyle.paddingLeft || '0') || 0;
-    const paddingRight = Number.parseFloat(computedRootStyle.paddingRight || '0') || 0;
-    const availableWidth = Math.max(0, root.clientWidth - paddingLeft - paddingRight);
-    const sourceWidth = scaleTarget.scrollWidth || scaleTarget.getBoundingClientRect().width;
-
-    if (!availableWidth || !sourceWidth) {
-      return;
-    }
-
-    const nextScale = Math.min(1, availableWidth / sourceWidth);
-    scaleTarget.setAttribute('data-template-preview-scale-target', 'true');
-
-    if (nextScale < 1) {
-      scaleTarget.style.zoom = String(nextScale);
-    } else {
-      scaleTarget.style.removeProperty('zoom');
-    }
-  }, []);
 
   React.useEffect(() => {
     if (!selectedFile) {
@@ -443,30 +407,6 @@ export function TemplateExtractWorkspace({
       cancelled = true;
     };
   }, []);
-
-  React.useEffect(() => {
-    const root = previewBodyRef.current;
-
-    if (!root || !currentDraftHtml.trim()) {
-      return;
-    }
-
-    let animationFrameId = 0;
-    const run = () => {
-      syncPreviewDocumentScale();
-    };
-
-    animationFrameId = window.requestAnimationFrame(run);
-    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(run) : null;
-    resizeObserver?.observe(root);
-    window.addEventListener('resize', run);
-
-    return () => {
-      window.cancelAnimationFrame(animationFrameId);
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', run);
-    };
-  }, [currentDraftHtml, syncPreviewDocumentScale]);
 
   const commitDraft = React.useCallback(
     (detail: TemplateExtractDetailResult, html: string) => {
@@ -981,58 +921,21 @@ export function TemplateExtractWorkspace({
       <div className="grid items-start gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
         <div className="space-y-6">{controlsSection}</div>
 
-        <div className="min-w-0 self-start overflow-hidden rounded-xl border border-slate-200 bg-card text-card-foreground">
-          <style>{`
-            .template-extract-preview-shell {
-              background: rgb(226 232 240);
-            }
-            .template-extract-preview-shell > section,
-            .template-extract-preview-shell > .page-inner,
-            .template-extract-preview-shell > .viewer {
-              margin-left: auto !important;
-              margin-right: auto !important;
-            }
-            .template-extract-preview-shell > section,
-            .template-extract-preview-shell section.page,
-            .template-extract-preview-shell .page-inner,
-            .template-extract-preview-shell .viewer {
-              padding-top: 0 !important;
-              padding-bottom: 0 !important;
-              box-shadow: none !important;
-            }
-            .template-extract-preview-shell > section[data-template-extraction-stage],
-            .template-extract-preview-shell > section.page {
-              display: flex;
-              width: 100%;
-              flex-direction: column;
-              align-items: center;
-              background: transparent !important;
-            }
-            .template-extract-preview-shell > section > section.page,
-            .template-extract-preview-shell > section.page,
-            .template-extract-preview-shell > .page-inner {
-              background: white !important;
-            }
-            .template-extract-preview-shell section.page {
-              position: relative;
-              margin: 0 !important;
-              overflow: visible;
-            }
-            .template-extract-preview-shell .page-inner {
-              margin: 0 !important;
-              padding: 0 !important;
-              background: white !important;
-            }
-          `}</style>
-          <h2 className="border-b border-slate-200 px-6 pt-6 pb-4 text-lg font-semibold text-slate-950">미리보기</h2>
-          {currentDraftHtml ? (
-            <div
-              ref={previewBodyRef}
-              className="template-extract-preview-shell min-h-[70vh] overflow-auto"
-              dangerouslySetInnerHTML={{ __html: currentDraftHtml }}
+        <div className="min-w-0 self-start">
+          {previewInitialDraft ? (
+            <CanvasOwnedWorkspace
+              surface="templates-extract-preview"
+              key={previewInitialDraft.draftKey}
+              initialDraft={previewInitialDraft}
+              workspaceMode="read"
+              hideHeader
+              hidePersistencePanel
+              suppressInitialDraftLoadedMessage
+              templateNameReadOnly
+              saveDisabled
             />
           ) : (
-            <div className="template-extract-preview-shell flex min-h-[70vh] items-center justify-center text-sm text-slate-500">
+            <div className="flex min-h-[70vh] items-center justify-center rounded-xl border border-slate-200 bg-card text-sm text-slate-500">
               실행 결과가 여기에 표시됩니다.
             </div>
           )}

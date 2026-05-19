@@ -2,12 +2,18 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import {
+  materializeTemplateCanvasHtmlForPersistence,
+  type TemplateEditWorkspaceInitialDraft,
+} from '../../components/template/TemplateEditWorkspace';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
 import { EntityPicker } from '../../components/ui/EntityPicker';
 import { Input } from '../../components/ui/Input';
+import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import type { DocumentCreateResult, DocumentDetailResult, DocumentListItem } from '../../lib/documentDtos';
+import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import { extractPhotoExifMetadata } from '../../lib/exifMetadata';
 import type { ExportJobCreateResult, ExportTargetFormat } from '../../lib/exportDtos';
 import type { EmailSendResult } from '../../lib/messagingDtos';
@@ -115,31 +121,218 @@ const stringifyDocumentValue = (value: unknown) => {
   return collapseWhitespace(JSON.stringify(value));
 };
 
-const appendClassNameToAttributes = (attributes: string, className: string) => {
-  if (attributes.includes('class="')) {
-    return attributes.replace(/class="([^"]*)"/, (_match, existing) => `class="${existing} ${className}"`);
+const stringifyAttachmentDocumentValue = (value: unknown) => {
+  if (typeof value === 'string') {
+    return value.trim();
   }
 
-  return `${attributes} class="${className}"`;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return collapseWhitespace(JSON.stringify(value));
 };
 
-const buildInteractiveDocumentHtml = (htmlCanonical: string, selectedLabelKeys: string[]) => {
-  const selectedSet = new Set(selectedLabelKeys);
+const isValueFieldElement = (element: Element) =>
+  element.matches('[data-template-frame-role="value"]') ||
+  element.closest('[data-template-frame-role="value"]') !== null ||
+  element.matches('[data-template-usage-preview-value-box="true"]') ||
+  element.closest('[data-template-usage-preview-value-box="true"]') !== null;
 
-  return htmlCanonical.replace(
-    /<([a-zA-Z0-9:-]+)([^>]*\sdata-label="([^"]+)"[^>]*)>/g,
-    (_match, tagName: string, rawAttributes: string, labelKey: string) => {
-      const isSelected = selectedSet.has(labelKey);
-      const interactionClass = [
-        'cursor-pointer rounded px-1 py-0.5 transition-colors outline-none',
-        'focus:bg-slate-100 focus:ring-1 focus:ring-slate-300',
-        isSelected ? 'bg-slate-100 ring-1 ring-slate-300' : 'hover:bg-slate-100',
-      ].join(' ');
-      let nextAttributes = appendClassNameToAttributes(rawAttributes, interactionClass);
-      nextAttributes += ` data-doc-label="${labelKey}" data-doc-selected="${isSelected ? 'true' : 'false'}" tabindex="0" role="button" aria-pressed="${isSelected ? 'true' : 'false'}"`;
-      return `<${tagName}${nextAttributes}>`;
+const isAttachmentValueElement = (element: Element) =>
+  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
+  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
+
+const resolveDocumentValueKey = (element: Element) => {
+  const currentElementKey =
+    element.getAttribute('data-template-frame-value-key')?.trim() ||
+    element.getAttribute('data-label')?.trim() ||
+    '';
+
+  if (currentElementKey) {
+    return currentElementKey;
+  }
+
+  const owner =
+    element.closest<HTMLElement>('[data-template-frame-value-key]') ||
+    element.closest<HTMLElement>('[data-label]') ||
+    null;
+
+  if (!owner) {
+    return '';
+  }
+
+  return owner.getAttribute('data-template-frame-value-key')?.trim() || owner.getAttribute('data-label')?.trim() || '';
+};
+
+const readDocumentValueEntryValue = (entry: NonNullable<DocumentDetailResult['valueEntries']>[number]) => {
+  if (entry.valuePayload && typeof entry.valuePayload === 'object' && 'value' in entry.valuePayload) {
+    return entry.valuePayload.value;
+  }
+
+  return entry.displayText;
+};
+
+const setDocumentValueElement = (element: HTMLElement, value: string) => {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    element.value = value;
+    element.defaultValue = value;
+    element.setAttribute('value', value);
+
+    if (element instanceof HTMLTextAreaElement) {
+      element.textContent = value;
     }
-  );
+
+    if (!value) {
+      element.removeAttribute('placeholder');
+    }
+
+    return;
+  }
+
+  if (element.querySelector('[data-template-frame-input="true"]')) {
+    return;
+  }
+
+  element.textContent = value;
+
+  if (!value) {
+    element.removeAttribute('data-placeholder');
+  }
+};
+
+const materializeDocumentHtmlWithLabelValues = (htmlCanonical: string, labelValues: Record<string, unknown>) => {
+  if (!htmlCanonical.trim() || typeof document === 'undefined') {
+    return htmlCanonical;
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = htmlCanonical;
+  container
+    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
+    .forEach((element) => {
+      if (!isValueFieldElement(element)) {
+        return;
+      }
+
+      const valueKey = resolveDocumentValueKey(element);
+
+      if (!valueKey) {
+        return;
+      }
+
+      const value = isAttachmentValueElement(element)
+        ? stringifyAttachmentDocumentValue(labelValues[valueKey])
+        : stringifyDocumentValue(labelValues[valueKey]);
+      setDocumentValueElement(element, value);
+    });
+
+  return container.innerHTML.trim();
+};
+
+const isLaterOrSameDateTime = (left: string | null | undefined, right: string | null | undefined) => {
+  if (!left) {
+    return false;
+  }
+
+  if (!right) {
+    return true;
+  }
+
+  const leftTime = new Date(left).getTime();
+  const rightTime = new Date(right).getTime();
+
+  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+    return false;
+  }
+
+  return leftTime >= rightTime;
+};
+
+const resolvePreferredDocumentHtml = (params: {
+  linkedRenderHtml?: string | null;
+  lastSyncedAt?: string | null;
+  latestVersionHtml?: string | null;
+  latestVersionCreatedAt?: string | null;
+}) => {
+  const linkedRenderHtml = params.linkedRenderHtml?.trim() || '';
+  const latestVersionHtml = params.latestVersionHtml?.trim() || '';
+
+  if (linkedRenderHtml && isLaterOrSameDateTime(params.lastSyncedAt, params.latestVersionCreatedAt)) {
+    return linkedRenderHtml;
+  }
+
+  if (latestVersionHtml) {
+    return latestVersionHtml;
+  }
+
+  return linkedRenderHtml;
+};
+
+const materializeDocumentHtml = (params: {
+  linkedRenderHtml?: string | null;
+  lastSyncedAt?: string | null;
+  latestVersionHtml?: string | null;
+  latestVersionCreatedAt?: string | null;
+  labelValues: Record<string, unknown>;
+}) => {
+  const preferredHtml = resolvePreferredDocumentHtml(params);
+
+  if (!preferredHtml.trim()) {
+    return '';
+  }
+
+  return materializeDocumentHtmlWithLabelValues(preferredHtml, params.labelValues);
+};
+
+const collectSelectablePreviewFields = (
+  htmlCanonical: string,
+  labelValues: Record<string, unknown>
+): SelectablePreviewField[] => {
+  if (!htmlCanonical.trim() || typeof document === 'undefined') {
+    return [];
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = htmlCanonical;
+  const seenLabels = new Set<string>();
+  const nextFields: SelectablePreviewField[] = [];
+
+  container
+    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
+    .forEach((element) => {
+      if (!isValueFieldElement(element)) {
+        return;
+      }
+
+      const labelKey = resolveDocumentValueKey(element);
+
+      if (!labelKey || seenLabels.has(labelKey)) {
+        return;
+      }
+
+      seenLabels.add(labelKey);
+      const currentValue = isAttachmentValueElement(element)
+        ? stringifyAttachmentDocumentValue(labelValues[labelKey])
+        : stringifyDocumentValue(labelValues[labelKey]);
+      const containerText = collapseWhitespace(
+        (element.closest('tr, p, li, section, div, td') as HTMLElement | null)?.textContent || element.textContent || ''
+      );
+      const displayLabel = collapseWhitespace(containerText.replace(currentValue, '')).replace(/[:：]\s*$/, '');
+
+      nextFields.push({
+        labelKey,
+        displayLabel: displayLabel || humanizeLabelKey(labelKey),
+        contextText: containerText || humanizeLabelKey(labelKey),
+        currentValue,
+      });
+    });
+
+  return nextFields;
 };
 
 export default function DocumentsPage() {
@@ -180,7 +373,6 @@ export default function DocumentsPage() {
   const [activeTaskMode, setActiveTaskMode] = React.useState<DocumentTaskMode>('request');
   const [loading, setLoading] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
-  const requestPreviewRef = React.useRef<HTMLDivElement | null>(null);
   const previousPhotoDocumentIdRef = React.useRef('');
 
   const siteOptions = React.useMemo(
@@ -213,6 +405,63 @@ export default function DocumentsPage() {
       })),
     [documents]
   );
+
+  const selectedDocumentValueEntryValues = React.useMemo<Record<string, unknown>>(() => {
+    if (!selectedDocumentDetail?.valueEntries) {
+      return {};
+    }
+
+    return selectedDocumentDetail.valueEntries.reduce<Record<string, unknown>>((accumulator, entry) => {
+      accumulator[entry.valueKey] = readDocumentValueEntryValue(entry);
+      return accumulator;
+    }, {});
+  }, [selectedDocumentDetail?.valueEntries]);
+
+  const selectedDocumentLabelValues = React.useMemo<Record<string, unknown>>(() => {
+    return {
+      ...(selectedDocumentDetail?.latestVersion?.labelValues || {}),
+      ...(selectedDocumentDetail ? buildDocumentAttachmentTextByValueKey(selectedDocumentDetail.valueFiles) : {}),
+      ...selectedDocumentValueEntryValues,
+    };
+  }, [selectedDocumentDetail, selectedDocumentValueEntryValues]);
+
+  const selectedDocumentAttachmentFilesByValueKey = React.useMemo(
+    () => (selectedDocumentDetail ? groupDocumentValueFilesByValueKey(selectedDocumentDetail.valueFiles) : {}),
+    [selectedDocumentDetail]
+  );
+
+  const selectedDocumentInitialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
+    if (!selectedDocumentDetail?.document.id) {
+      return null;
+    }
+
+    const materializedHtml = materializeDocumentHtml({
+      linkedRenderHtml: selectedDocumentDetail.linkedTemplate?.renderSnapshotHtml,
+      lastSyncedAt: selectedDocumentDetail.templateLink?.lastSyncedAt,
+      latestVersionHtml: selectedDocumentDetail.latestVersion?.htmlCanonical,
+      latestVersionCreatedAt: selectedDocumentDetail.latestVersion?.createdAt,
+      labelValues: selectedDocumentLabelValues,
+    });
+
+    if (!materializedHtml.trim()) {
+      return null;
+    }
+
+    const draftVersionKey =
+      selectedDocumentDetail.latestVersion?.id ||
+      selectedDocumentDetail.linkedTemplate?.resolvedRevisionId ||
+      selectedDocumentDetail.templateLink?.lastSyncedRevisionId ||
+      'linked-template';
+
+    return {
+      draftKey: `${selectedDocumentDetail.document.id}:${draftVersionKey}`,
+      templateName: selectedDocumentDetail.document.title,
+      sourceDocumentName: '',
+      draftHtml: materializedHtml,
+      layoutResizeMode: 'grow_height',
+      attachmentFilesByValueKey: selectedDocumentAttachmentFilesByValueKey,
+    };
+  }, [selectedDocumentAttachmentFilesByValueKey, selectedDocumentDetail, selectedDocumentLabelValues]);
 
   const loadSites = React.useCallback(async () => {
     try {
@@ -422,57 +671,16 @@ export default function DocumentsPage() {
     setQuickPhotoLongitude(detectedMetadata.capturedLongitude);
   }, []);
 
-  const interactivePreviewHtml = React.useMemo(() => {
-    const htmlCanonical = selectedDocumentDetail?.latestVersion?.htmlCanonical || '';
-    if (!htmlCanonical) {
-      return '';
-    }
-
-    return buildInteractiveDocumentHtml(htmlCanonical, selectedAllowedLabels);
-  }, [selectedAllowedLabels, selectedDocumentDetail?.latestVersion?.htmlCanonical]);
-
   React.useEffect(() => {
-    const previewRoot = requestPreviewRef.current;
-    const latestVersion = selectedDocumentDetail?.latestVersion;
-
-    if (!previewRoot || !latestVersion || !interactivePreviewHtml || activeTaskMode !== 'request') {
+    if (activeTaskMode !== 'request' || !selectedDocumentInitialDraft?.draftHtml.trim()) {
       setPreviewFields([]);
       return;
     }
 
-    const nextFields: SelectablePreviewField[] = [];
-    const seenLabels = new Set<string>();
-    const interactiveNodes = Array.from(previewRoot.querySelectorAll<HTMLElement>('[data-doc-label]'));
-
-    interactiveNodes.forEach((element) => {
-      const labelKey = element.dataset.docLabel?.trim();
-      if (!labelKey || seenLabels.has(labelKey)) {
-        return;
-      }
-
-      seenLabels.add(labelKey);
-      const currentValue = stringifyDocumentValue(latestVersion.labelValues[labelKey]);
-      const containerText = collapseWhitespace(
-        (element.closest('tr, p, li, section, div, td') as HTMLElement | null)?.textContent || element.textContent || ''
-      );
-      const displayLabel = collapseWhitespace(containerText.replace(currentValue, '')).replace(/[:：]\s*$/, '');
-
-      nextFields.push({
-        labelKey,
-        displayLabel: displayLabel || humanizeLabelKey(labelKey),
-        contextText: containerText || humanizeLabelKey(labelKey),
-        currentValue,
-      });
-    });
-
-    setPreviewFields(nextFields);
-  }, [activeTaskMode, interactivePreviewHtml, selectedDocumentDetail?.latestVersion]);
+    setPreviewFields(collectSelectablePreviewFields(selectedDocumentInitialDraft.draftHtml, selectedDocumentLabelValues));
+  }, [activeTaskMode, selectedDocumentInitialDraft?.draftHtml, selectedDocumentLabelValues]);
 
   React.useEffect(() => {
-    if (previewFields.length === 0) {
-      return;
-    }
-
     const availableLabels = new Set(previewFields.map((field) => field.labelKey));
     setSelectedAllowedLabels((previous) => previous.filter((labelKey) => availableLabels.has(labelKey)));
   }, [previewFields]);
@@ -500,8 +708,6 @@ export default function DocumentsPage() {
     [previewFieldMap, selectedAllowedLabels]
   );
 
-  const documentPreviewHtml = selectedDocumentDetail?.latestVersion?.htmlCanonical || '';
-
   const toggleAllowedLabel = React.useCallback((labelKey: string) => {
     setSelectedAllowedLabels((previous) =>
       previous.includes(labelKey)
@@ -510,45 +716,13 @@ export default function DocumentsPage() {
     );
   }, []);
 
-  const handlePreviewClick = React.useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      const labelElement = (event.target as HTMLElement).closest<HTMLElement>('[data-doc-label]');
-      const labelKey = labelElement?.dataset.docLabel?.trim();
-
-      if (!labelKey) {
-        return;
-      }
-
-      toggleAllowedLabel(labelKey);
-    },
-    [toggleAllowedLabel]
-  );
-
-  const handlePreviewKeyDown = React.useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== 'Enter' && event.key !== ' ') {
-        return;
-      }
-
-      const labelElement = (event.target as HTMLElement).closest<HTMLElement>('[data-doc-label]');
-      const labelKey = labelElement?.dataset.docLabel?.trim();
-
-      if (!labelKey) {
-        return;
-      }
-
-      event.preventDefault();
-      toggleAllowedLabel(labelKey);
-    },
-    [toggleAllowedLabel]
-  );
-
   const handleCreateDocument = async () => {
     setLoading(true);
     setMessage(null);
 
     try {
       const labelValues = JSON.parse(labelValuesText) as Record<string, unknown>;
+      const persistedHtmlCanonical = materializeTemplateCanvasHtmlForPersistence(htmlCanonical.trim());
       const response = await fetch('/api/documents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -557,7 +731,7 @@ export default function DocumentsPage() {
           documentTypeKey,
           title,
           templateId: templateId.trim() || null,
-          htmlCanonical,
+          htmlCanonical: persistedHtmlCanonical,
           labelValues,
         }),
       });
@@ -594,11 +768,12 @@ export default function DocumentsPage() {
 
     try {
       const labelValues = JSON.parse(versionLabelValuesText) as Record<string, unknown>;
+      const persistedVersionHtmlCanonical = materializeTemplateCanvasHtmlForPersistence(versionHtmlCanonical.trim());
       const response = await fetch(`/api/documents/${normalizedDocumentId}/version`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          htmlCanonical: versionHtmlCanonical,
+          htmlCanonical: persistedVersionHtmlCanonical,
           labelValues,
           changeReason,
         }),
@@ -970,28 +1145,30 @@ export default function DocumentsPage() {
                   </div>
 
                   <div className="grid gap-4 xl:grid-cols-[1.8fr_0.9fr]">
-                    <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                    <div className="space-y-3">
                       <div>
                         <p className="text-sm font-medium text-slate-900">
                           2단계. 문서를 보면서 확인하기
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
                           {activeTaskMode === 'request'
-                            ? '문서 안에서 요청할 값을 직접 클릭하세요. 다시 클릭하면 선택이 해제됩니다.'
+                            ? '문서는 읽기 전용으로 크게 보여 줍니다. 요청할 값은 오른쪽 목록에서 고르세요.'
                             : activeTaskMode === 'export'
                               ? '이 문서의 현재 내용을 그대로 보면서 어떤 출력본을 만들지 오른쪽에서 선택합니다.'
                               : '이 문서와 연결된 사진 증빙 상태를 오른쪽 요약과 함께 확인합니다.'}
                         </p>
                       </div>
-                      {documentPreviewHtml ? (
-                        <div
-                          ref={requestPreviewRef}
-                          onClick={activeTaskMode === 'request' ? handlePreviewClick : undefined}
-                          onKeyDown={activeTaskMode === 'request' ? handlePreviewKeyDown : undefined}
-                          className="min-h-[560px] max-h-[760px] overflow-auto rounded-lg border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-700 [&_h1]:mb-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mb-3 [&_table]:mb-4 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-2 [&_li]:mb-1"
-                          dangerouslySetInnerHTML={{
-                            __html: activeTaskMode === 'request' ? interactivePreviewHtml : documentPreviewHtml,
-                          }}
+                      {selectedDocumentInitialDraft ? (
+                        <CanvasOwnedWorkspace
+                          surface="documents"
+                          key={selectedDocumentInitialDraft.draftKey}
+                          initialDraft={selectedDocumentInitialDraft}
+                          workspaceMode="read"
+                          hideHeader
+                          hidePersistencePanel
+                          suppressInitialDraftLoadedMessage
+                          templateNameReadOnly
+                          saveDisabled
                         />
                       ) : (
                         <div className="rounded-lg border border-dashed border-slate-200 px-4 py-16 text-center text-sm text-slate-500">
@@ -1006,7 +1183,7 @@ export default function DocumentsPage() {
                           <div>
                             <p className="text-sm font-medium text-slate-900">3단계. 요청 링크 설정</p>
                             <p className="mt-1 text-xs text-slate-500">
-                              문서에서 선택한 항목과 받는 사람만 확인하면 이메일까지 한 번에 처리합니다.
+                              문서는 읽기 전용으로 유지하고, 아래 목록에서 요청할 항목과 받는 사람만 고르면 이메일까지 한 번에 처리합니다.
                             </p>
                           </div>
                           <div className="space-y-2">
@@ -1035,27 +1212,35 @@ export default function DocumentsPage() {
                           </div>
                           <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
                             <div className="flex items-center justify-between gap-3">
-                              <p className="text-sm font-medium text-slate-900">선택한 요청 항목</p>
+                              <p className="text-sm font-medium text-slate-900">요청할 항목</p>
                               <Badge variant="slate">{selectedPreviewFields.length}개</Badge>
                             </div>
-                            {selectedPreviewFields.length > 0 ? (
+                            {previewFields.length > 0 ? (
                               <div className="space-y-2">
-                                {selectedPreviewFields.map((field) => (
-                                  <button
-                                    key={field.labelKey}
-                                    type="button"
-                                    onClick={() => toggleAllowedLabel(field.labelKey)}
-                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-100"
-                                  >
-                                    <p className="font-medium text-slate-900">{field.displayLabel}</p>
-                                    {field.currentValue ? (
-                                      <p className="mt-1 text-xs text-slate-500">현재 값: {field.currentValue}</p>
-                                    ) : null}
-                                  </button>
-                                ))}
+                                {previewFields.map((field) => {
+                                  const selected = selectedAllowedLabels.includes(field.labelKey);
+
+                                  return (
+                                    <button
+                                      key={field.labelKey}
+                                      type="button"
+                                      onClick={() => toggleAllowedLabel(field.labelKey)}
+                                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                                        selected
+                                          ? 'border-slate-300 bg-slate-200 text-slate-900'
+                                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      <p className="font-medium text-slate-900">{field.displayLabel}</p>
+                                      {field.currentValue ? (
+                                        <p className="mt-1 text-xs text-slate-500">현재 값: {field.currentValue}</p>
+                                      ) : null}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             ) : (
-                              <p className="text-sm text-slate-500">왼쪽 문서에서 요청할 값을 클릭하세요.</p>
+                              <p className="text-sm text-slate-500">현재 문서에서 요청 가능한 값을 찾지 못했습니다.</p>
                             )}
                           </div>
                           <Button onClick={handleCreateAndSendEmailRequest} disabled={loading}>

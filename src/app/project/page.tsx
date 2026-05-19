@@ -14,11 +14,10 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import TemplateEditWorkspace, {
-  type TemplateEditWorkspaceInitialDraft,
-} from '../../components/template/TemplateEditWorkspace';
+import { type TemplateEditWorkspaceInitialDraft } from '../../components/template/TemplateEditWorkspace';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
 import type { TemplateEditWorkspaceSaveDraftParams } from '../../components/template/workspace/types';
+import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
@@ -2548,7 +2547,7 @@ export default function ProjectPage() {
         : 'summary';
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
+    <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="space-y-2">
           <Badge variant="slate">PROJECT-MGMT-01</Badge>
@@ -2572,8 +2571,8 @@ export default function ProjectPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[1.04fr_0.96fr]">
-        <Card className="border-slate-200">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.04fr)_minmax(0,0.96fr)]">
+        <Card className="min-w-0 border-slate-200">
           <CardHeader>
             <CardTitle>1. 현장 선택과 기본 정보</CardTitle>
             <CardDescription>
@@ -2974,7 +2973,7 @@ export default function ProjectPage() {
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {showCreateSiteForm ? (
             <Card className="border-slate-200">
               <CardHeader>
@@ -3048,8 +3047,8 @@ export default function ProjectPage() {
                 <CardDescription>선택한 사진 정보와 현재 연결 상태를 같은 자리에서 확인합니다.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
                     {selectedPhoto.photo.photoUrl ? (
                       <img
                         src={selectedPhoto.photo.photoUrl}
@@ -3062,7 +3061,9 @@ export default function ProjectPage() {
                       </div>
                     )}
                   </div>
-                  <ProjectInfoList items={selectedPhotoDetailRows} />
+                  <div className="min-w-0">
+                    <ProjectInfoList items={selectedPhotoDetailRows} />
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -3140,7 +3141,8 @@ export default function ProjectPage() {
             </CardContent>
           </Card>
         ) : selectedDocumentInitialDraft ? (
-          <TemplateEditWorkspace
+          <CanvasOwnedWorkspace
+            surface="project"
             key={selectedDocumentInitialDraft.draftKey}
             initialDraft={selectedDocumentInitialDraft}
             workspaceMode="document"

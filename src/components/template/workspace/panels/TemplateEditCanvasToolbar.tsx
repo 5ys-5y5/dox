@@ -21,6 +21,7 @@ import { Input } from '../../../ui/Input';
 
 type TemplateEditCanvasToolbarProps = {
   documentMode: boolean;
+  readMode: boolean;
   nameFieldLabel: string;
   saveButtonLabel: string;
   templateNameReadOnly: boolean;
@@ -79,6 +80,7 @@ const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'mi
 
 export const TemplateEditCanvasToolbar = ({
   documentMode,
+  readMode,
   nameFieldLabel,
   saveButtonLabel,
   templateNameReadOnly,
@@ -110,37 +112,40 @@ export const TemplateEditCanvasToolbar = ({
         <div className="min-w-0 shrink-0">
           <CardTitle>상자 편집 캔버스</CardTitle>
         </div>
-        <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
-          {documentMode ? null : (
-            <div className="relative min-w-0 max-w-[420px] flex-1">
-              <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
-                <span className="sm:hidden">이름:</span>
-                <span className="hidden sm:inline">{nameFieldLabel}</span>
-              </span>
-              <Input
-                value={templateName}
-                onChange={(event) => onTemplateNameChange(event.target.value)}
-                disabled={loading || templateNameReadOnly}
-                readOnly={templateNameReadOnly}
-                aria-label={nameFieldLabel}
-                className="h-9 pl-12 sm:pl-[7.75rem]"
-              />
-            </div>
-          )}
-          <Button
-            onClick={onSave}
-            disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentMode)}
-            aria-label={saving ? '저장 중...' : saveButtonLabel}
-            className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-4"
-          >
-            <Save className="h-4 w-4 shrink-0 sm:mr-1" />
-            <span className="hidden sm:inline">{saving ? '저장 중...' : saveButtonLabel}</span>
-            <span className="sr-only sm:hidden">{saving ? '저장 중...' : saveButtonLabel}</span>
-          </Button>
-        </div>
+        {readMode ? null : (
+          <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
+            {documentMode ? null : (
+              <div className="relative min-w-0 max-w-[420px] flex-1">
+                <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
+                  <span className="sm:hidden">이름:</span>
+                  <span className="hidden sm:inline">{nameFieldLabel}</span>
+                </span>
+                <Input
+                  value={templateName}
+                  onChange={(event) => onTemplateNameChange(event.target.value)}
+                  disabled={loading || templateNameReadOnly}
+                  readOnly={templateNameReadOnly}
+                  aria-label={nameFieldLabel}
+                  className="h-9 pl-12 sm:pl-[7.75rem]"
+                />
+              </div>
+            )}
+            <Button
+              onClick={onSave}
+              disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentMode)}
+              aria-label={saving ? '저장 중...' : saveButtonLabel}
+              className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-4"
+            >
+              <Save className="h-4 w-4 shrink-0 sm:mr-1" />
+              <span className="hidden sm:inline">{saving ? '저장 중...' : saveButtonLabel}</span>
+              <span className="sr-only sm:hidden">{saving ? '저장 중...' : saveButtonLabel}</span>
+            </Button>
+          </div>
+        )}
       </div>
     </CardHeader>
-    <CardContent className={`border-b border-slate-200 bg-white px-6 pb-6 pt-0 ${canvasFullscreen ? 'shrink-0' : ''}`}>
+    {readMode ? null : (
+      <CardContent className={`border-b border-slate-200 bg-white px-6 pb-6 pt-0 ${canvasFullscreen ? 'shrink-0' : ''}`}>
       <div className="v106-canvas-toolbar flex w-full min-w-0 flex-wrap items-stretch gap-2 md:gap-3">
         <div className={`${canvasToolbarGroupClassName} shrink-0`}>
           <button
@@ -285,6 +290,7 @@ export const TemplateEditCanvasToolbar = ({
           </div>
         )}
       </div>
-    </CardContent>
+      </CardContent>
+    )}
   </>
 );

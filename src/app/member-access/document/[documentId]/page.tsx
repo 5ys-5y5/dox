@@ -4,11 +4,10 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
-import TemplateEditWorkspace, {
-  type TemplateEditWorkspaceInitialDraft,
-} from '../../../../components/template/TemplateEditWorkspace';
+import { type TemplateEditWorkspaceInitialDraft } from '../../../../components/template/TemplateEditWorkspace';
 import { buildDocumentAttachmentValueFilesForSave } from '../../../../components/template/workspace/persistence/documentAttachmentClient';
 import type { TemplateEditWorkspaceSaveDraftParams } from '../../../../components/template/workspace/types';
+import { CanvasOwnedWorkspace } from '../../../canvas/ownerPolicy';
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/Card';
@@ -429,10 +428,11 @@ export default function MemberAccessDocumentPage() {
           <CardContent className="p-6 text-sm text-slate-600">문서 접근 정보를 불러오는 중입니다.</CardContent>
         </Card>
       ) : access && initialDraft ? (
-        <TemplateEditWorkspace
+        <CanvasOwnedWorkspace
+          surface="member-access"
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
-          workspaceMode="document"
+          workspaceMode={access.accessRole === 'editor' ? 'document' : 'read'}
           hidePersistencePanel
           headerTitle="구성원 문서 접근"
           headerDescription="초대된 권한 범위 안에서 현장 문서를 열람하거나 수정합니다."
