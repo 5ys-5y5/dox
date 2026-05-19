@@ -148,6 +148,8 @@ const SIGNING_DB_SCHEMA = 'signing';
 const EXPORTS_DB_SCHEMA = 'exports';
 const MESSAGING_DB_SCHEMA = 'messaging';
 const BULK_OPS_DB_SCHEMA = 'bulk_ops';
+const DOCUMENT_VALUE_FILE_STORAGE_BUCKET = 'document-value-files';
+const DOCUMENT_VALUE_FILE_STORAGE_FILE_SIZE_LIMIT = 10485760;
 
 // DOCUMENTS_SCHEMA_BOUNDARY
 // 서류 클라우드 관리 도메인 테이블은 public이 아니라 documents 스키마만 사용합니다.
@@ -237,6 +239,100 @@ const toDocumentValueFileDto = (row: DocumentValueFileRow): DocumentValueFileDto
   uploadedAt: row.uploaded_at,
   metadata: row.metadata || {},
 });
+
+const sanitizeStorageFileName = (value: string) =>
+  String(value || '')
+    .normalize('NFKC')
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'file';
+
+const resolveDocumentAttachmentExtension = (originalFileName: string, mimeType: string) => {
+  const normalizedName = String(originalFileName || '').trim();
+  const explicitExtension = normalizedName.includes('.') ? normalizedName.split('.').pop()?.trim().toLowerCase() || '' : '';
+
+  if (explicitExtension) {
+    return explicitExtension;
+  }
+
+  const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
+
+  switch (normalizedMimeType) {
+    case 'application/pdf':
+      return 'pdf';
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/webp':
+      return 'webp';
+    case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+      return 'xlsx';
+    case 'application/vnd.ms-excel':
+      return 'xls';
+    case 'application/msword':
+      return 'doc';
+    case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+      return 'docx';
+    case 'application/x-hwp':
+      return 'hwp';
+    default:
+      return 'bin';
+  }
+};
+
+const buildDocumentValueFileStoragePath = (documentId: string, valueKey: string, originalFileName: string, mimeType: string) => {
+  const safeDocumentId = sanitizeStorageFileName(documentId);
+  const safeValueKey = sanitizeStorageFileName(valueKey);
+  const extension = resolveDocumentAttachmentExtension(originalFileName, mimeType);
+  const normalizedFileName = sanitizeStorageFileName(originalFileName).replace(new RegExp(`\\.${extension}$`, 'i'), '');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  return `${safeDocumentId}/${safeValueKey}/${timestamp}-${crypto.randomUUID()}-${normalizedFileName}.${extension}`;
+};
+
+const ensureDocumentValueFileStorageBucket = async (client: ReturnType<typeof getSupabase>) => {
+  const storageApi = client.storage as typeof client.storage & {
+    getBucket?: (id: string) => Promise<{ data: unknown; error: { message?: string } | null }>;
+    createBucket?: (
+      id: string,
+      options: { public: boolean; fileSizeLimit: number }
+    ) => Promise<{ data: unknown; error: { message?: string } | null }>;
+  };
+
+  if (typeof storageApi.getBucket === 'function') {
+    const existingBucket = await storageApi.getBucket(DOCUMENT_VALUE_FILE_STORAGE_BUCKET);
+
+    if (!existingBucket.error) {
+      return;
+    }
+
+    const shouldCreateBucket =
+      existingBucket.error.message?.includes('not found') ||
+      existingBucket.error.message?.includes('not exist');
+
+    if (!shouldCreateBucket) {
+      throw new Error(
+        `첨부파일 업로드 실패: Storage 버킷 상태를 확인할 수 없습니다. (${existingBucket.error.message || '알 수 없는 오류'})`
+      );
+    }
+  }
+
+  if (typeof storageApi.createBucket !== 'function') {
+    throw new Error('첨부파일 업로드 실패: Storage 버킷 자동 생성을 지원하지 않는 환경입니다.');
+  }
+
+  const createdBucket = await storageApi.createBucket(DOCUMENT_VALUE_FILE_STORAGE_BUCKET, {
+    public: false,
+    fileSizeLimit: DOCUMENT_VALUE_FILE_STORAGE_FILE_SIZE_LIMIT,
+  });
+
+  if (createdBucket.error && !createdBucket.error.message?.includes('already exists')) {
+    throw new Error(
+      `첨부파일 업로드 실패: Storage 버킷을 자동 생성할 수 없습니다. (${createdBucket.error.message || '알 수 없는 오류'})`
+    );
+  }
+};
 
 const toDocumentTemplateLinkDto = (row: DocumentTemplateLinkRow): DocumentTemplateLinkDto => ({
   documentId: row.document_id,
@@ -1047,6 +1143,166 @@ export const DocumentService = {
       linkedTemplate,
       photoEvidence,
       queryDebug,
+    };
+  },
+
+  async uploadDocumentValueFiles(params: {
+    documentId: string;
+    valueKey: string;
+    files: Array<{
+      originalFileName: string;
+      mimeType: string;
+      fileBytes: Uint8Array;
+      fileSizeBytes: number;
+      uploadedBy?: string | null;
+      metadata?: Record<string, unknown> | null;
+    }>;
+  }): Promise<DocumentValueFileInput[]> {
+    const documentId = params.documentId.trim();
+    const valueKey = params.valueKey.trim();
+
+    if (!documentId) {
+      throw new Error('첨부파일 업로드 실패: documentId가 필요합니다.');
+    }
+
+    if (!valueKey) {
+      throw new Error('첨부파일 업로드 실패: valueKey가 필요합니다.');
+    }
+
+    if (!Array.isArray(params.files) || params.files.length === 0) {
+      throw new Error('첨부파일 업로드 실패: 업로드할 파일이 필요합니다.');
+    }
+
+    const { document, error: documentError } = await getDocumentRegistryById(documentId);
+
+    if (documentError || !document) {
+      throw new Error(`첨부파일 업로드 실패: ${documentError?.message || '문서를 찾을 수 없습니다.'}`);
+    }
+
+    const client = getSupabase();
+    const uploads: DocumentValueFileInput[] = [];
+    const uploadedStoragePaths: string[] = [];
+
+    const uploadToStorage = async (storagePath: string, fileBytes: Uint8Array, mimeType: string) =>
+      client.storage.from(DOCUMENT_VALUE_FILE_STORAGE_BUCKET).upload(storagePath, fileBytes, {
+        contentType: mimeType || 'application/octet-stream',
+        upsert: false,
+      });
+
+    try {
+      for (const [index, file] of params.files.entries()) {
+        const originalFileName = String(file.originalFileName || '').trim();
+        const mimeType = String(file.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
+        const fileSizeBytes = Number.parseInt(String(file.fileSizeBytes || 0), 10);
+
+        if (!originalFileName) {
+          throw new Error(`첨부파일 업로드 실패: files[${index}]의 파일 이름이 비어 있습니다.`);
+        }
+
+        if (!file.fileBytes || file.fileBytes.length === 0) {
+          throw new Error(`첨부파일 업로드 실패: files[${index}]의 파일 바이트가 비어 있습니다.`);
+        }
+
+        if (!Number.isFinite(fileSizeBytes) || fileSizeBytes <= 0) {
+          throw new Error(`첨부파일 업로드 실패: files[${index}]의 파일 크기가 올바르지 않습니다.`);
+        }
+
+        if (fileSizeBytes > DOCUMENT_VALUE_FILE_STORAGE_FILE_SIZE_LIMIT) {
+          throw new Error('첨부파일 업로드 실패: 파일 하나의 최대 크기는 10MB입니다.');
+        }
+
+        const storagePath = buildDocumentValueFileStoragePath(documentId, valueKey, originalFileName, mimeType);
+        let { error: uploadError } = await uploadToStorage(storagePath, file.fileBytes, mimeType);
+
+        if (uploadError?.message?.includes('Bucket not found')) {
+          await ensureDocumentValueFileStorageBucket(client);
+          ({ error: uploadError } = await uploadToStorage(storagePath, file.fileBytes, mimeType));
+        }
+
+        if (uploadError) {
+          throw new Error(`첨부파일 업로드 실패: Storage 업로드 중 오류가 발생했습니다. (${uploadError.message})`);
+        }
+
+        uploadedStoragePaths.push(storagePath);
+        uploads.push({
+          valueKey,
+          storageBucket: DOCUMENT_VALUE_FILE_STORAGE_BUCKET,
+          storagePath,
+          originalFileName,
+          mimeType,
+          fileSizeBytes,
+          sortOrder: index,
+          uploadedBy: file.uploadedBy?.trim() || null,
+          metadata:
+            file.metadata && !Array.isArray(file.metadata) && typeof file.metadata === 'object'
+              ? file.metadata
+              : {},
+        });
+      }
+
+      return uploads;
+    } catch (error) {
+      if (uploadedStoragePaths.length > 0) {
+        await removeStorageObjects(
+          client,
+          uploadedStoragePaths.map((storagePath) => ({
+            bucket: DOCUMENT_VALUE_FILE_STORAGE_BUCKET,
+            path: storagePath,
+          })),
+          '첨부파일 업로드 실패: 업로드 롤백 중 오류가 발생했습니다.'
+        ).catch((rollbackError) => {
+          console.error('Document attachment upload rollback warning:', rollbackError);
+        });
+      }
+
+      throw error;
+    }
+  },
+
+  async createDocumentValueFileSignedUrl(params: {
+    documentId: string;
+    storageBucket: string;
+    storagePath: string;
+    expiresInSeconds?: number;
+  }) {
+    const documentId = params.documentId.trim();
+    const storageBucket = params.storageBucket.trim();
+    const storagePath = params.storagePath.trim();
+
+    if (!documentId || !storageBucket || !storagePath) {
+      throw new Error('첨부파일 보기 실패: 문서와 파일 경로 정보가 필요합니다.');
+    }
+
+    const { document, error: documentError } = await getDocumentRegistryById(documentId);
+
+    if (documentError || !document) {
+      throw new Error(`첨부파일 보기 실패: ${documentError?.message || '문서를 찾을 수 없습니다.'}`);
+    }
+
+    const client = getSupabase();
+    const documentsClient = documentsSchema(client);
+    const { data: linkedValueFile, error: linkedValueFileError } = await documentsClient
+      .from('document_value_files')
+      .select('id')
+      .eq('document_id', documentId)
+      .eq('storage_bucket', storageBucket)
+      .eq('storage_path', storagePath)
+      .maybeSingle();
+
+    if (linkedValueFileError || !linkedValueFile) {
+      throw new Error(`첨부파일 보기 실패: 현재 문서에 연결된 파일을 찾지 못했습니다. (${linkedValueFileError?.message || '연결 없음'})`);
+    }
+
+    const { data, error } = await client.storage
+      .from(storageBucket)
+      .createSignedUrl(storagePath, Math.max(30, Math.min(params.expiresInSeconds || 300, 3600)));
+
+    if (error || !data?.signedUrl) {
+      throw new Error(`첨부파일 보기 실패: 서명 URL을 생성할 수 없습니다. (${error?.message || '알 수 없는 오류'})`);
+    }
+
+    return {
+      signedUrl: data.signedUrl,
     };
   },
 

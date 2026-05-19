@@ -111,20 +111,22 @@ export const TemplateEditCanvasToolbar = ({
           <CardTitle>상자 편집 캔버스</CardTitle>
         </div>
         <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
-          <div className="relative min-w-0 max-w-[420px] flex-1">
-            <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
-              <span className="sm:hidden">이름:</span>
-              <span className="hidden sm:inline">{nameFieldLabel}</span>
-            </span>
-            <Input
-              value={templateName}
-              onChange={(event) => onTemplateNameChange(event.target.value)}
-              disabled={loading || templateNameReadOnly}
-              readOnly={templateNameReadOnly}
-              aria-label={nameFieldLabel}
-              className="h-9 pl-12 sm:pl-[7.75rem]"
-            />
-          </div>
+          {documentMode ? null : (
+            <div className="relative min-w-0 max-w-[420px] flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
+                <span className="sm:hidden">이름:</span>
+                <span className="hidden sm:inline">{nameFieldLabel}</span>
+              </span>
+              <Input
+                value={templateName}
+                onChange={(event) => onTemplateNameChange(event.target.value)}
+                disabled={loading || templateNameReadOnly}
+                readOnly={templateNameReadOnly}
+                aria-label={nameFieldLabel}
+                className="h-9 pl-12 sm:pl-[7.75rem]"
+              />
+            </div>
+          )}
           <Button
             onClick={onSave}
             disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentMode)}

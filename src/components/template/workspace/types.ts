@@ -12,6 +12,7 @@ import type {
   TemplateRecordDto,
   TemplateSchemaSnapshotInput,
 } from '../../../lib/templateDtos';
+import type { DocumentValueFileDto } from '../../../lib/documentDtos';
 import type {
   TemplateFrameBoxKind,
   TemplateFrameResizeDirection,
@@ -592,6 +593,19 @@ export type TemplateEditWorkspaceInitialDraft = {
   sourceDocumentName?: string | null;
   draftHtml: string;
   layoutResizeMode?: TemplateLayoutResizeMode;
+  attachmentFilesByValueKey?: Record<string, DocumentValueFileDto[]>;
+};
+
+export type TemplateEditWorkspaceAttachmentPendingFile = {
+  localId: string;
+  file: File;
+};
+
+export type TemplateEditWorkspaceAttachmentDraft = {
+  valueKey: string;
+  existingFiles: DocumentValueFileDto[];
+  removedExistingFileIds: string[];
+  newFiles: TemplateEditWorkspaceAttachmentPendingFile[];
 };
 
 export type TemplateEditWorkspaceSaveDraftParams = {
@@ -602,6 +616,7 @@ export type TemplateEditWorkspaceSaveDraftParams = {
   sourceDocumentName: string;
   layoutResizeMode: TemplateLayoutResizeMode;
   selectedTemplateId: string;
+  attachmentDrafts: TemplateEditWorkspaceAttachmentDraft[];
 };
 
 export type TemplateEditWorkspaceSaveDraftResult = {
@@ -628,6 +643,7 @@ export type TemplateEditWorkspaceProps = {
   saveButtonLabel?: string;
   templateNameReadOnly?: boolean;
   saveDisabled?: boolean;
+  documentAttachmentApiPath?: string;
 };
 
 export type TemplateFloatingOverlayContent = React.ReactNode | (() => React.ReactNode);

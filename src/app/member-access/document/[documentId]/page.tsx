@@ -7,10 +7,13 @@ import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import TemplateEditWorkspace, {
   type TemplateEditWorkspaceInitialDraft,
 } from '../../../../components/template/TemplateEditWorkspace';
+import { buildDocumentAttachmentValueFilesForSave } from '../../../../components/template/workspace/persistence/documentAttachmentClient';
+import type { TemplateEditWorkspaceSaveDraftParams } from '../../../../components/template/workspace/types';
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/Card';
 import type { DocumentDetailResult } from '../../../../lib/documentDtos';
+import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../../../lib/documentAttachmentValues';
 import type { MemberDocumentAccessDto } from '../../../../lib/memberAccessDtos';
 
 const collapseWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
@@ -31,11 +34,31 @@ const stringifyDocumentValue = (value: unknown) => {
   return collapseWhitespace(JSON.stringify(value));
 };
 
+const stringifyAttachmentDocumentValue = (value: unknown) => {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return collapseWhitespace(JSON.stringify(value));
+};
+
 const isValueFieldElement = (element: Element) =>
   element.matches('[data-template-frame-role="value"]') ||
   element.closest('[data-template-frame-role="value"]') !== null ||
   element.matches('[data-template-usage-preview-value-box="true"]') ||
   element.closest('[data-template-usage-preview-value-box="true"]') !== null;
+
+const isAttachmentValueElement = (element: Element) =>
+  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
+  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
 
 const resolveDocumentValueKey = (element: Element) => {
   const currentElementKey =
@@ -115,7 +138,12 @@ const materializeDocumentHtmlWithLabelValues = (htmlCanonical: string, labelValu
         return;
       }
 
-      setDocumentValueElement(element, stringifyDocumentValue(labelValues[valueKey]));
+      setDocumentValueElement(
+        element,
+        isAttachmentValueElement(element)
+          ? stringifyAttachmentDocumentValue(labelValues[valueKey])
+          : stringifyDocumentValue(labelValues[valueKey])
+      );
     });
 
   return container.innerHTML.trim();
@@ -144,11 +172,15 @@ const extractDocumentLabelValuesFromHtml = (htmlCanonical: string, fallbackValue
       }
 
       if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-        nextValues[valueKey] = element.value;
+        nextValues[valueKey] = isAttachmentValueElement(element)
+          ? String(element.value || '').trim()
+          : collapseWhitespace(element.value || '');
         return;
       }
 
-      nextValues[valueKey] = collapseWhitespace(element.textContent || '');
+      nextValues[valueKey] = isAttachmentValueElement(element)
+        ? String(element.textContent || '').trim()
+        : collapseWhitespace(element.textContent || '');
     });
 
   return nextValues;
@@ -283,6 +315,7 @@ export default function MemberAccessDocumentPage() {
     }
 
     const versionValues = access.detail.latestVersion?.labelValues || {};
+    const attachmentValues = buildDocumentAttachmentTextByValueKey(access.detail.valueFiles);
     const entryValues = access.detail.valueEntries.reduce<Record<string, unknown>>((accumulator, entry) => {
       accumulator[entry.valueKey] = readDocumentValueEntryValue(entry);
       return accumulator;
@@ -290,9 +323,15 @@ export default function MemberAccessDocumentPage() {
 
     return {
       ...versionValues,
+      ...attachmentValues,
       ...entryValues,
     };
   }, [access]);
+
+  const attachmentFilesByValueKey = React.useMemo(
+    () => (access ? groupDocumentValueFilesByValueKey(access.detail.valueFiles) : {}),
+    [access]
+  );
 
   const initialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
     if (!access) {
@@ -317,22 +356,28 @@ export default function MemberAccessDocumentPage() {
       draftHtml: html,
       sourceDocumentName: '',
       layoutResizeMode: 'grow_height',
+      attachmentFilesByValueKey,
     };
-  }, [access, labelValues]);
+  }, [access, attachmentFilesByValueKey, labelValues]);
 
   const handleSaveDraft = React.useCallback(
-    async ({ currentHtml }: { currentHtml: string }) => {
+    async ({ currentHtml, attachmentDrafts }: TemplateEditWorkspaceSaveDraftParams) => {
       if (!access || access.accessRole !== 'editor') {
         throw new Error('이 문서는 편집 권한이 없습니다.');
       }
 
       const nextLabelValues = extractDocumentLabelValuesFromHtml(currentHtml, labelValues);
+      const nextValueFiles = await buildDocumentAttachmentValueFilesForSave({
+        attachmentApiPath: `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`,
+        attachmentDrafts,
+      });
       const response = await fetch(`/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/version`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           htmlCanonical: currentHtml,
           labelValues: nextLabelValues,
+          valueFiles: nextValueFiles,
           changeReason: '구성원 문서 수정',
         }),
       });
@@ -395,6 +440,7 @@ export default function MemberAccessDocumentPage() {
           saveButtonLabel={access.accessRole === 'editor' ? '문서 저장' : '열람 전용'}
           templateNameReadOnly
           saveDisabled={access.accessRole !== 'editor'}
+          documentAttachmentApiPath={`/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`}
           onSaveDraftHtml={handleSaveDraft}
         />
       ) : (

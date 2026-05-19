@@ -18,6 +18,7 @@ import type {
   TemplateEdgeTopologySnapshotDto,
 } from '../../lib/templateEdgeSelectionDtos';
 import type { TemplateDetailResult, TemplateLayoutResizeMode, TemplateRecordDto } from '../../lib/templateDtos';
+import type { DocumentValueFileDto } from '../../lib/documentDtos';
 import type {
   TemplateFrameBoxKind,
   TemplateFrameResizeDirection,
@@ -151,6 +152,7 @@ import type {
   StyleFieldKey,
   TableCellLayoutPosition,
   TemplateEditWorkspaceInitialDraft,
+  TemplateEditWorkspaceAttachmentDraft,
   TemplateEditWorkspaceProps,
   TemplateFramePositionGroupConfig,
   TemplateFramePositionMode,
@@ -332,13 +334,8 @@ import {
   TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR,
   TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR,
   TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR,
-  TEMPLATE_USAGE_PREVIEW_FILE_DISPLAY_ATTR,
-  TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR,
   TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR,
-  TEMPLATE_USAGE_PREVIEW_FILE_LIST_ATTR,
-  TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR,
   TEMPLATE_USAGE_PREVIEW_FILE_NAMES_ATTR,
-  TEMPLATE_USAGE_PREVIEW_FILE_REMOVE_ATTR,
   TEMPLATE_USAGE_PREVIEW_LABEL_ATTR,
   TEMPLATE_USAGE_PREVIEW_MODE_ATTR,
   TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR,
@@ -5284,10 +5281,18 @@ const filterResizeSnapRects = (
 const stabilizeFrameContentHeight = (node: HTMLElement) => {
   const contentTarget = resolveFrameContentTarget(node);
   node.style.overflow = 'hidden';
+  const isAttachmentRuntimeControl =
+    contentTarget?.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'attachment';
 
   if (contentTarget && contentTarget !== node) {
-    contentTarget.style.height = '100%';
-    contentTarget.style.maxHeight = '100%';
+    if (isAttachmentRuntimeControl) {
+      contentTarget.style.height = 'auto';
+      contentTarget.style.maxHeight = 'none';
+      contentTarget.style.minHeight = '0px';
+    } else {
+      contentTarget.style.height = '100%';
+      contentTarget.style.maxHeight = '100%';
+    }
     contentTarget.style.overflow = 'hidden';
   }
 
@@ -8798,6 +8803,91 @@ const syncFormControlMarkup = (root: ParentNode) => {
   });
 };
 
+const TEMPLATE_USAGE_PREVIEW_FILE_PROTOTYPE_ATTR = 'data-template-usage-preview-file-prototype';
+const TEMPLATE_USAGE_PREVIEW_FILE_EMPTY_ATTR = 'data-template-usage-preview-file-empty';
+const TEMPLATE_USAGE_PREVIEW_FILE_REGISTERED_LIST_ATTR = 'data-template-usage-preview-file-registered-list';
+const TEMPLATE_USAGE_PREVIEW_FILE_PENDING_LIST_ATTR = 'data-template-usage-preview-file-pending-list';
+const TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR = 'data-template-usage-preview-file-upload';
+const TEMPLATE_USAGE_PREVIEW_FILE_ACTION_ATTR = 'data-template-usage-preview-file-action';
+const TEMPLATE_USAGE_PREVIEW_FILE_CARD_KIND_ATTR = 'data-template-usage-preview-file-kind';
+const TEMPLATE_USAGE_PREVIEW_FILE_CARD_ID_ATTR = 'data-template-usage-preview-file-id';
+const TEMPLATE_USAGE_PREVIEW_FILE_DRAG_ACTIVE_ATTR = 'data-template-usage-preview-file-drag-active';
+const TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR = 'data-template-usage-preview-file-api-path';
+const TEMPLATE_USAGE_PREVIEW_FILE_ALLOW_SAVE_ATTR = 'data-template-usage-preview-file-allow-save';
+
+type TemplateUsagePreviewAttachmentPendingFile = {
+  localId: string;
+  file: File;
+  previewUrl: string;
+  addedAt: string;
+};
+
+type TemplateUsagePreviewAttachmentRuntimeState = {
+  existingFiles: DocumentValueFileDto[];
+  removedExistingFileIds: string[];
+  newFiles: TemplateUsagePreviewAttachmentPendingFile[];
+  apiPath: string;
+};
+
+const templateUsagePreviewAttachmentStateByRoot = new WeakMap<
+  HTMLElement,
+  Map<string, TemplateUsagePreviewAttachmentRuntimeState>
+>();
+
+const splitTemplateUsagePreviewFileNamesText = (value: string) =>
+  String(value || '')
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter((line) => Boolean(line));
+
+const joinTemplateUsagePreviewFileNamesText = (fileNames: string[]) =>
+  fileNames.map((fileName) => String(fileName || '').trim()).filter(Boolean).join('\n');
+
+const materializeTemplateUsagePreviewAttachmentControls = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`).forEach((control) => {
+    const prototypeMarkup = control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_PROTOTYPE_ATTR)?.trim() || '';
+    const replacementContainer = document.createElement('div');
+    let replacement =
+      prototypeMarkup.length > 0
+        ? (() => {
+            try {
+              replacementContainer.innerHTML = decodeURIComponent(prototypeMarkup);
+              return replacementContainer.firstElementChild instanceof HTMLElement
+                ? replacementContainer.firstElementChild
+                : null;
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+    if (!replacement) {
+      replacement = document.createElement('textarea');
+      replacement.setAttribute('data-template-frame-input', 'true');
+      replacement.className = 'v202-frame-group-input';
+      replacement.setAttribute('spellcheck', 'false');
+      replacement.tabIndex = 0;
+    }
+
+    const nextValue = joinTemplateUsagePreviewFileNamesText(readTemplateUsagePreviewFileNames(control));
+
+    if (replacement instanceof HTMLTextAreaElement || replacement instanceof HTMLInputElement) {
+      replacement.value = nextValue;
+      replacement.defaultValue = nextValue;
+      replacement.setAttribute('value', nextValue);
+      replacement.removeAttribute('placeholder');
+
+      if (replacement instanceof HTMLTextAreaElement) {
+        replacement.textContent = nextValue;
+      }
+    } else {
+      replacement.textContent = nextValue;
+    }
+
+    control.replaceWith(replacement);
+  });
+};
+
 const stripSelectionAttrs = (
   root: ParentNode,
   options?: {
@@ -9178,6 +9268,7 @@ const extractEditorHtml = (root: HTMLElement) => {
     snapFrameBandShellEdgesToPixelGridInPage(pageInner);
     normalizeFrameBorderAppearanceLayersInPage(pageInner);
   });
+  materializeTemplateUsagePreviewAttachmentControls(container);
   syncFormControlMarkup(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
@@ -9196,6 +9287,7 @@ const extractPreviewRenderHtml = (root: HTMLElement) => {
     snapFrameBandShellEdgesToPixelGridInPage(pageInner);
     normalizeFrameBorderAppearanceLayersInPage(pageInner);
   });
+  materializeTemplateUsagePreviewAttachmentControls(container);
   syncFormControlMarkup(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
@@ -11434,98 +11526,534 @@ const writeTemplateUsagePreviewFileNames = (control: HTMLElement, fileNames: str
   );
 };
 
-const setTemplateUsagePreviewAttachmentEditMode = (control: HTMLElement, editMode: boolean) => {
-  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR, editMode ? 'edit' : 'view');
+const readTemplateUsagePreviewInitialAttachmentFileNames = (target: HTMLElement | null) => {
+  if (!target) {
+    return [] as string[];
+  }
+
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+    return splitTemplateUsagePreviewFileNamesText(target.value || target.defaultValue || target.textContent || '');
+  }
+
+  return splitTemplateUsagePreviewFileNamesText(target.textContent || '');
+};
+
+const buildTemplateUsagePreviewAttachmentPrototypeMarkup = (target: HTMLElement | null) => {
+  if (target && (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || target.hasAttribute('data-template-frame-input'))) {
+    return target.outerHTML;
+  }
+
+  const fallback = document.createElement('textarea');
+  fallback.className = 'v202-frame-group-input';
+  fallback.setAttribute('spellcheck', 'false');
+  fallback.tabIndex = 0;
+  fallback.setAttribute('data-template-frame-input', 'true');
+  return fallback.outerHTML;
+};
+const isTemplateUsagePreviewAttachmentPlaceholderId = (value: string) => value.startsWith('placeholder:');
+
+const cloneDocumentValueFileDto = (file: DocumentValueFileDto): DocumentValueFileDto => ({
+  ...file,
+  metadata: file.metadata ? { ...file.metadata } : {},
+});
+
+const cloneTemplateUsagePreviewAttachmentRuntimeState = (
+  state: TemplateUsagePreviewAttachmentRuntimeState
+): TemplateUsagePreviewAttachmentRuntimeState => ({
+  existingFiles: state.existingFiles.map(cloneDocumentValueFileDto),
+  removedExistingFileIds: [...state.removedExistingFileIds],
+  newFiles: [...state.newFiles],
+  apiPath: state.apiPath,
+});
+
+const buildEmptyTemplateUsagePreviewAttachmentRuntimeState = (
+  apiPath: string
+): TemplateUsagePreviewAttachmentRuntimeState => ({
+  existingFiles: [],
+  removedExistingFileIds: [],
+  newFiles: [],
+  apiPath,
+});
+
+const getTemplateUsagePreviewAttachmentStateStore = (root: HTMLElement) => {
+  const existingStore = templateUsagePreviewAttachmentStateByRoot.get(root);
+
+  if (existingStore) {
+    return existingStore;
+  }
+
+  const nextStore = new Map<string, TemplateUsagePreviewAttachmentRuntimeState>();
+  templateUsagePreviewAttachmentStateByRoot.set(root, nextStore);
+  return nextStore;
+};
+
+const revokeTemplateUsagePreviewAttachmentPendingFiles = (files: TemplateUsagePreviewAttachmentPendingFile[]) => {
+  files.forEach((file) => {
+    if (file.previewUrl) {
+      URL.revokeObjectURL(file.previewUrl);
+    }
+  });
+};
+
+const clearTemplateUsagePreviewAttachmentStateStore = (root: HTMLElement) => {
+  const store = templateUsagePreviewAttachmentStateByRoot.get(root);
+
+  if (!store) {
+    return;
+  }
+
+  store.forEach((state) => {
+    revokeTemplateUsagePreviewAttachmentPendingFiles(state.newFiles);
+  });
+  templateUsagePreviewAttachmentStateByRoot.delete(root);
+};
+
+const getTemplateUsagePreviewAttachmentState = (root: HTMLElement, contextKey: string) => {
+  return getTemplateUsagePreviewAttachmentStateStore(root).get(contextKey.trim()) || null;
+};
+
+const setTemplateUsagePreviewAttachmentState = (
+  root: HTMLElement,
+  contextKey: string,
+  state: TemplateUsagePreviewAttachmentRuntimeState
+) => {
+  getTemplateUsagePreviewAttachmentStateStore(root).set(contextKey.trim(), cloneTemplateUsagePreviewAttachmentRuntimeState(state));
+};
+
+const resolveTemplateUsagePreviewAttachmentActiveExistingFiles = (state: TemplateUsagePreviewAttachmentRuntimeState) => {
+  const removedIdSet = new Set(state.removedExistingFileIds);
+  return state.existingFiles.filter((file) => !removedIdSet.has(file.id));
+};
+
+const resolveTemplateUsagePreviewAttachmentActiveFileNames = (state: TemplateUsagePreviewAttachmentRuntimeState) => [
+  ...resolveTemplateUsagePreviewAttachmentActiveExistingFiles(state).map((file) => String(file.originalFileName || '').trim()),
+  ...state.newFiles.map((file) => String(file.file.name || '').trim()),
+].filter((fileName) => Boolean(fileName));
+
+const resolveTemplateUsagePreviewRuntimeRoot = (node: HTMLElement | null) =>
+  node?.closest<HTMLElement>('.template-edit-preview') || null;
+
+const getAttachmentControlsFromRoot = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`));
+
+const ensureTemplateUsagePreviewAttachmentState = (control: HTMLElement) => {
+  const root = resolveTemplateUsagePreviewRuntimeRoot(control);
+  const contextKey = control.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR)?.trim() || '';
+
+  if (!root || !contextKey) {
+    return null;
+  }
+
+  const existingState = getTemplateUsagePreviewAttachmentState(root, contextKey);
+
+  if (existingState) {
+    return existingState;
+  }
+
+  const placeholderState = buildEmptyTemplateUsagePreviewAttachmentRuntimeState(
+    control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR)?.trim() || ''
+  );
+
+  setTemplateUsagePreviewAttachmentState(root, contextKey, placeholderState);
+  return getTemplateUsagePreviewAttachmentState(root, contextKey);
+};
+
+const seedTemplateUsagePreviewAttachmentStateByContext = (
+  root: HTMLElement,
+  contextKey: string,
+  existingFiles: DocumentValueFileDto[],
+  apiPath: string
+) => {
+  const normalizedContextKey = contextKey.trim();
+
+  if (!normalizedContextKey) {
+    return;
+  }
+
+  const currentState = getTemplateUsagePreviewAttachmentState(root, normalizedContextKey);
+  const hasPendingChanges = Boolean(currentState && (currentState.newFiles.length > 0 || currentState.removedExistingFileIds.length > 0));
+  const hasRealExistingFiles = Boolean(
+    currentState && currentState.existingFiles.some((file) => !isTemplateUsagePreviewAttachmentPlaceholderId(file.id))
+  );
+
+  if (currentState && hasPendingChanges && hasRealExistingFiles) {
+    if (currentState.apiPath !== apiPath) {
+      setTemplateUsagePreviewAttachmentState(root, normalizedContextKey, {
+        ...currentState,
+        apiPath,
+      });
+    }
+    return;
+  }
+
+  const nextExistingFiles = existingFiles.map(cloneDocumentValueFileDto);
+  const nextRemovedExistingFileIds = currentState
+    ? currentState.removedExistingFileIds.filter((fileId) => nextExistingFiles.some((file) => file.id === fileId))
+    : [];
+
+  setTemplateUsagePreviewAttachmentState(root, normalizedContextKey, {
+    existingFiles: nextExistingFiles,
+    removedExistingFileIds: nextRemovedExistingFileIds,
+    newFiles: currentState?.newFiles || [],
+    apiPath,
+  });
+};
+
+const formatTemplateUsagePreviewAttachmentFileSize = (value: number | null | undefined) => {
+  const fileSizeBytes = Number(value);
+
+  if (!Number.isFinite(fileSizeBytes) || fileSizeBytes <= 0) {
+    return '';
+  }
+
+  if (fileSizeBytes >= 1024 * 1024) {
+    return `${(fileSizeBytes / (1024 * 1024)).toFixed(1)}MB`;
+  }
+
+  return `${Math.max(1, Math.round(fileSizeBytes / 1024))}KB`;
+};
+
+const formatTemplateUsagePreviewAttachmentDate = (value: string | null | undefined) => {
+  if (!value) {
+    return '';
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+
+  return parsed.toISOString().slice(0, 10);
+};
+
+type TemplateUsagePreviewAttachmentIconKind = 'file' | 'image';
+
+const createTemplateUsagePreviewLucideIcon = (
+  iconName: string,
+  paths: Array<{ d?: string; circle?: { cx: string; cy: string; r: string } }>
+) => {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svg.setAttribute('width', '24');
+  svg.setAttribute('height', '24');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('class', `lucide lucide-${iconName}`);
+  svg.setAttribute('aria-hidden', 'true');
+
+  paths.forEach((segment) => {
+    if (segment.d) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', segment.d);
+      svg.appendChild(path);
+      return;
+    }
+
+    if (segment.circle) {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', segment.circle.cx);
+      circle.setAttribute('cy', segment.circle.cy);
+      circle.setAttribute('r', segment.circle.r);
+      svg.appendChild(circle);
+    }
+  });
+
+  return svg;
+};
+
+const createTemplateUsagePreviewAttachmentIconElement = (kind: TemplateUsagePreviewAttachmentIconKind) => {
+  if (kind === 'image') {
+    return createTemplateUsagePreviewLucideIcon('image', [
+      { d: 'M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
+      { circle: { cx: '9', cy: '9', r: '2' } },
+      { d: 'm21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21' },
+    ]);
+  }
+
+  return createTemplateUsagePreviewLucideIcon('file-text', [
+    { d: 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z' },
+    { d: 'M14 2v4a2 2 0 0 0 2 2h4' },
+    { d: 'M10 9H8' },
+    { d: 'M16 13H8' },
+    { d: 'M16 17H8' },
+  ]);
+};
+
+const resolveTemplateUsagePreviewAttachmentIcon = (
+  fileName: string,
+  mimeType?: string | null
+): TemplateUsagePreviewAttachmentIconKind => {
+  const normalizedName = fileName.trim().toLowerCase();
+  const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
+
+  if (
+    normalizedMimeType.startsWith('image/') ||
+    normalizedName.endsWith('.jpg') ||
+    normalizedName.endsWith('.jpeg') ||
+    normalizedName.endsWith('.png') ||
+    normalizedName.endsWith('.webp') ||
+    normalizedName.endsWith('.gif')
+  ) {
+    return 'image';
+  }
+
+  return 'file';
+};
+
+const createTemplateUsagePreviewAttachmentCardActionButton = (params: {
+  action: string;
+  label: string;
+  itemKind: 'existing' | 'new';
+  itemId: string;
+  disabled?: boolean;
+  danger?: boolean;
+}) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'v106-template-usage-file-card-action';
+  if (params.danger) {
+    button.classList.add('v106-template-usage-file-card-action--danger');
+  }
+  button.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_ACTION_ATTR, params.action);
+  button.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_CARD_KIND_ATTR, params.itemKind);
+  button.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_CARD_ID_ATTR, params.itemId);
+  button.textContent = params.label;
+  if (params.disabled) {
+    button.disabled = true;
+  }
+  return button;
+};
+
+const createTemplateUsagePreviewAttachmentFileCard = (params: {
+  itemKind: 'existing' | 'new';
+  itemId: string;
+  fileName: string;
+  iconKind: TemplateUsagePreviewAttachmentIconKind;
+  meta: string;
+  deleted?: boolean;
+  disabledView?: boolean;
+  onViewAction?: string;
+  onRemoveAction: string;
+  restoreAction?: string;
+}) => {
+  const card = document.createElement('div');
+  card.className = 'v106-template-usage-file-card';
+
+  if (params.deleted) {
+    card.classList.add('is-deleted');
+  }
+
+  const icon = document.createElement('div');
+  icon.className = 'v106-template-usage-file-card-icon';
+  icon.appendChild(createTemplateUsagePreviewAttachmentIconElement(params.iconKind));
+
+  const info = document.createElement('div');
+  info.className = 'v106-template-usage-file-card-info';
+
+  const fileName = document.createElement('div');
+  fileName.className = 'v106-template-usage-file-card-name';
+  fileName.textContent = params.fileName;
+  fileName.title = params.fileName;
+
+  const meta = document.createElement('div');
+  meta.className = 'v106-template-usage-file-card-meta';
+  meta.textContent = params.meta;
+
+  info.appendChild(fileName);
+  info.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'v106-template-usage-file-card-actions';
+
+  if (params.deleted) {
+    actions.appendChild(
+      createTemplateUsagePreviewAttachmentCardActionButton({
+        action: params.restoreAction || 'restore-existing',
+        label: '취소',
+        itemKind: params.itemKind,
+        itemId: params.itemId,
+      })
+    );
+  } else {
+    if (params.onViewAction) {
+      actions.appendChild(
+        createTemplateUsagePreviewAttachmentCardActionButton({
+          action: params.onViewAction,
+          label: '보기',
+          itemKind: params.itemKind,
+          itemId: params.itemId,
+          disabled: params.disabledView,
+        })
+      );
+    }
+
+    actions.appendChild(
+      createTemplateUsagePreviewAttachmentCardActionButton({
+        action: params.onRemoveAction,
+        label: params.itemKind === 'new' ? '취소' : '삭제',
+        itemKind: params.itemKind,
+        itemId: params.itemId,
+        danger: params.itemKind === 'existing',
+      })
+    );
+  }
+
+  card.appendChild(icon);
+  card.appendChild(info);
+  card.appendChild(actions);
+  return card;
 };
 
 const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
-  const fileNames = readTemplateUsagePreviewFileNames(control);
-  const display = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_DISPLAY_ATTR}="true"]`);
-  const fileList = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_LIST_ATTR}="true"]`);
+  const state = ensureTemplateUsagePreviewAttachmentState(control);
+  const registeredList = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_REGISTERED_LIST_ATTR}="true"]`);
+  const pendingList = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_PENDING_LIST_ATTR}="true"]`);
+  const uploadBox = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR}="true"]`);
 
-  if (display) {
-    clearElementChildren(display);
-    fileNames.forEach((fileName) => {
-      const line = document.createElement('div');
-      line.className = 'v106-template-usage-file-display-line';
-      line.textContent = fileName;
-      display.appendChild(line);
+  if (!state || !registeredList || !pendingList || !uploadBox) {
+    return;
+  }
+
+  const activeExistingFiles = resolveTemplateUsagePreviewAttachmentActiveExistingFiles(state);
+  const activeFileNames = resolveTemplateUsagePreviewAttachmentActiveFileNames(state);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_EMPTY_ATTR, activeFileNames.length > 0 ? 'false' : 'true');
+  writeTemplateUsagePreviewFileNames(control, activeFileNames);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR, state.apiPath);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_ALLOW_SAVE_ATTR, 'true');
+  control.setAttribute('aria-label', '파일 목록');
+
+  clearElementChildren(registeredList);
+  state.existingFiles.forEach((file) => {
+    const deleted = state.removedExistingFileIds.includes(file.id);
+    const sizeText = formatTemplateUsagePreviewAttachmentFileSize(file.fileSizeBytes);
+    const dateText = formatTemplateUsagePreviewAttachmentDate(file.uploadedAt);
+    const metaText = deleted ? '삭제 예정' : [sizeText, dateText ? `${dateText} 등록` : '등록됨'].filter((segment) => Boolean(segment)).join(' · ');
+
+    registeredList.appendChild(
+      createTemplateUsagePreviewAttachmentFileCard({
+        itemKind: 'existing',
+        itemId: file.id,
+        fileName: file.originalFileName,
+        iconKind: resolveTemplateUsagePreviewAttachmentIcon(file.originalFileName, file.mimeType),
+        meta: metaText,
+        deleted,
+        disabledView: !file.storageBucket || !file.storagePath || isTemplateUsagePreviewAttachmentPlaceholderId(file.id),
+        onViewAction: 'view-existing',
+        onRemoveAction: 'mark-delete-existing',
+        restoreAction: 'restore-existing',
+      })
+    );
+  });
+
+  if (state.existingFiles.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'v106-template-usage-file-section-empty';
+    empty.textContent = '등록된 파일이 없습니다.';
+    registeredList.appendChild(empty);
+  }
+
+  clearElementChildren(pendingList);
+  pendingList.style.display = 'none';
+
+  if (state.newFiles.length > 0) {
+    pendingList.style.display = 'flex';
+    const title = document.createElement('div');
+    title.className = 'v106-template-usage-file-subtitle';
+    title.textContent = `새로 추가할 파일 ${state.newFiles.length}개`;
+    pendingList.appendChild(title);
+
+    state.newFiles.forEach((file) => {
+      pendingList.appendChild(
+        createTemplateUsagePreviewAttachmentFileCard({
+          itemKind: 'new',
+          itemId: file.localId,
+          fileName: file.file.name,
+          iconKind: resolveTemplateUsagePreviewAttachmentIcon(file.file.name, file.file.type),
+          meta: `${formatTemplateUsagePreviewAttachmentFileSize(file.file.size) || '-'} · 저장 대기`,
+          onViewAction: 'view-new',
+          onRemoveAction: 'remove-new',
+        })
+      );
     });
   }
 
-  if (fileList) {
-    clearElementChildren(fileList);
-    fileNames.forEach((fileName, index) => {
-      const row = document.createElement('div');
-      row.className = 'v106-template-usage-file-item';
-      row.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR, String(index));
-
-      const fileNameLabel = document.createElement('div');
-      fileNameLabel.className = 'v106-template-usage-file-item-name';
-      fileNameLabel.textContent = fileName;
-
-      const removeButton = document.createElement('button');
-      removeButton.type = 'button';
-      removeButton.className = 'v106-template-usage-file-remove';
-      removeButton.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_REMOVE_ATTR, 'true');
-      removeButton.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR, String(index));
-      removeButton.textContent = '삭제';
-
-      row.appendChild(fileNameLabel);
-      row.appendChild(removeButton);
-      fileList.appendChild(row);
-    });
-  }
+  uploadBox.setAttribute('aria-label', '파일 추가');
 };
 
 const prepareTemplateUsageAttachmentControl = (node: HTMLElement) => {
-  const label = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '첨부파일';
   const contextKey = resolveTemplateUsagePreviewContextKey(node);
   const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node) || 'file_slot';
+  const target = resolveFrameContentTarget(node);
+  const initialFileNames = readTemplateUsagePreviewInitialAttachmentFileNames(target);
   const control = document.createElement('div');
   control.className = 'v106-template-usage-file-control';
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR, 'attachment');
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR, contextKey);
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR, runtimeMode);
-  control.setAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR, label);
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR, '');
+  control.setAttribute('data-template-value', 'true');
+  control.setAttribute(
+    TEMPLATE_USAGE_PREVIEW_FILE_PROTOTYPE_ATTR,
+    encodeURIComponent(buildTemplateUsagePreviewAttachmentPrototypeMarkup(target))
+  );
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR, '');
   control.setAttribute('role', 'group');
-  control.setAttribute('aria-label', `${label} 첨부파일`);
+  control.setAttribute('aria-label', '파일 목록');
   control.tabIndex = 0;
-  setTemplateUsagePreviewAttachmentEditMode(control, false);
 
-  const fileDisplay = document.createElement('div');
-  fileDisplay.className = 'v106-template-usage-file-display';
-  fileDisplay.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_DISPLAY_ATTR, 'true');
+  const registeredList = document.createElement('div');
+  registeredList.className = 'v106-template-usage-file-section';
+  registeredList.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_REGISTERED_LIST_ATTR, 'true');
 
-  const fileToolbar = document.createElement('div');
-  fileToolbar.className = 'v106-template-usage-file-toolbar';
+  const pendingList = document.createElement('div');
+  pendingList.className = 'v106-template-usage-file-pending-section';
+  pendingList.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_PENDING_LIST_ATTR, 'true');
 
-  const addButton = document.createElement('button');
-  addButton.type = 'button';
-  addButton.className = 'v106-template-usage-file-add';
-  addButton.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR, 'true');
-  addButton.setAttribute('aria-label', `${label} 파일 추가`);
-  addButton.textContent = '+';
+  const uploadBox = document.createElement('button');
+  uploadBox.type = 'button';
+  uploadBox.className = 'v106-template-usage-file-upload-box';
+  uploadBox.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR, 'true');
+  uploadBox.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR, 'true');
+  uploadBox.setAttribute('aria-label', '파일 선택');
+
+  const uploadPlus = document.createElement('div');
+  uploadPlus.className = 'v106-template-usage-file-upload-plus';
+  uploadPlus.textContent = '+';
+
+  const uploadTitle = document.createElement('div');
+  uploadTitle.className = 'v106-template-usage-file-upload-title';
+  uploadTitle.textContent = '파일을 선택하거나 여기로 드래그하세요';
+
+  const uploadDescription = document.createElement('div');
+  uploadDescription.className = 'v106-template-usage-file-upload-description';
+  uploadDescription.textContent = '문서, 이미지 파일 / 최대 10MB';
+
+  uploadBox.appendChild(uploadPlus);
+  uploadBox.appendChild(uploadTitle);
+  uploadBox.appendChild(uploadDescription);
 
   const input = document.createElement('input');
   input.type = 'file';
   input.multiple = true;
   input.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR, 'true');
-  input.setAttribute('aria-label', `${label} 파일 선택`);
+  input.setAttribute('aria-label', '파일 선택');
   input.setAttribute('multiple', 'true');
 
-  const fileList = document.createElement('div');
-  fileList.className = 'v106-template-usage-file-list';
-  fileList.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_LIST_ATTR, 'true');
-
-  fileToolbar.appendChild(addButton);
-  fileToolbar.appendChild(input);
-  control.appendChild(fileDisplay);
-  control.appendChild(fileList);
-  control.appendChild(fileToolbar);
-  writeTemplateUsagePreviewFileNames(control, []);
+  control.appendChild(registeredList);
+  control.appendChild(pendingList);
+  control.appendChild(uploadBox);
+  control.appendChild(input);
+  writeTemplateUsagePreviewFileNames(control, initialFileNames);
   renderTemplateUsagePreviewAttachmentControl(control);
   replaceFrameContentTarget(node, control);
+  control.style.height = 'auto';
+  control.style.minHeight = '0px';
+  control.style.maxHeight = 'none';
 };
 
 const prepareTemplateUsageSignatureControl = (node: HTMLElement) => {
@@ -11585,6 +12113,7 @@ const buildTemplateUsagePreviewHtml = (
     snapFrameBandShellEdgesToPixelGridInPage(pageInner);
     normalizeFrameBorderAppearanceLayersInPage(pageInner);
   });
+  materializeTemplateUsagePreviewAttachmentControls(container);
   syncFormControlMarkup(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
@@ -11602,6 +12131,26 @@ const buildTemplateUsagePreviewHtml = (
   enableTemplateUsagePreviewTextControls(container);
 
   return container.innerHTML.trim();
+};
+
+const collectTemplateUsagePreviewAttachmentDrafts = (root: HTMLElement): TemplateEditWorkspaceAttachmentDraft[] => {
+  const store = templateUsagePreviewAttachmentStateByRoot.get(root);
+
+  if (!store) {
+    return [];
+  }
+
+  return Array.from(store.entries())
+    .map(([valueKey, state]) => ({
+      valueKey,
+      existingFiles: state.existingFiles.map(cloneDocumentValueFileDto),
+      removedExistingFileIds: [...state.removedExistingFileIds],
+      newFiles: state.newFiles.map((file) => ({
+        localId: file.localId,
+        file: file.file,
+      })),
+    }))
+    .sort((left, right) => left.valueKey.localeCompare(right.valueKey, 'ko'));
 };
 
 const applyTemplateUsagePreviewAutoSize = (
@@ -11744,16 +12293,16 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       });
     });
   };
-  const syncAttachmentFileNamesByContext = (contextKey: string, fileNames: string[]) => {
+  const syncAttachmentStateByContext = (contextKey: string, nextState: TemplateUsagePreviewAttachmentRuntimeState) => {
     if (!contextKey) {
       return;
     }
 
-    const normalizedFileNames = fileNames.map((name) => String(name || '').trim()).filter((name) => Boolean(name));
+    setTemplateUsagePreviewAttachmentState(root, contextKey, nextState);
     const controls = getControlsByContext('attachment', contextKey);
 
     controls.forEach((control) => {
-      writeTemplateUsagePreviewFileNames(control, normalizedFileNames);
+      control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR, nextState.apiPath);
       renderTemplateUsagePreviewAttachmentControl(control);
     });
 
@@ -11762,6 +12311,51 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
         onLayoutChange: options?.onAutoSizeLayoutChange,
       });
     });
+  };
+  const updateAttachmentStateByContext = (
+    contextKey: string,
+    updater: (state: TemplateUsagePreviewAttachmentRuntimeState) => TemplateUsagePreviewAttachmentRuntimeState
+  ) => {
+    const baseControl = getControlsByContext('attachment', contextKey)[0] || null;
+    const baseState =
+      getTemplateUsagePreviewAttachmentState(root, contextKey) ||
+      (baseControl ? ensureTemplateUsagePreviewAttachmentState(baseControl) : null);
+
+    if (!baseState) {
+      return;
+    }
+
+    syncAttachmentStateByContext(contextKey, updater(cloneTemplateUsagePreviewAttachmentRuntimeState(baseState)));
+  };
+  const appendPendingFilesToAttachmentContext = (contextKey: string, files: File[]) => {
+    if (!files.length) {
+      return;
+    }
+
+    updateAttachmentStateByContext(contextKey, (state) => ({
+      ...state,
+      newFiles: [
+        ...state.newFiles,
+        ...files.map((file) => ({
+          localId: crypto.randomUUID(),
+          file,
+          previewUrl: URL.createObjectURL(file),
+          addedAt: new Date().toISOString(),
+        })),
+      ],
+    }));
+  };
+  const setAttachmentDragActive = (control: HTMLElement | null, active: boolean) => {
+    if (!control) {
+      return;
+    }
+
+    if (active) {
+      control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_DRAG_ACTIVE_ATTR, 'true');
+      return;
+    }
+
+    control.removeAttribute(TEMPLATE_USAGE_PREVIEW_FILE_DRAG_ACTIVE_ATTR);
   };
   const readCanvasPoint = (canvas: HTMLCanvasElement, event: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();
@@ -11797,14 +12391,14 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     const contextKey = readRuntimeContextKey(control);
 
     if (control && contextKey) {
-      const nextFileNames = [
-        ...readTemplateUsagePreviewFileNames(getControlsByContext('attachment', contextKey)[0] || control),
-        ...Array.from(input.files || [])
-          .map((file) => String(file.name || '').trim())
-          .filter((fileName) => Boolean(fileName)),
-      ];
-      syncAttachmentFileNamesByContext(contextKey, nextFileNames);
-      setTemplateUsagePreviewAttachmentEditMode(control, true);
+      const oversizedFiles = Array.from(input.files || []).filter((file) => file.size > 10 * 1024 * 1024);
+      const acceptedFiles = Array.from(input.files || []).filter((file) => file.size > 0 && file.size <= 10 * 1024 * 1024);
+
+      if (oversizedFiles.length > 0 && typeof window !== 'undefined') {
+        window.alert('첨부파일 하나의 최대 크기는 10MB입니다.');
+      }
+
+      appendPendingFilesToAttachmentContext(contextKey, acceptedFiles);
     }
 
     input.value = '';
@@ -11901,8 +12495,10 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
   };
   const handleRuntimeClick = (event: MouseEvent) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
-    const attachmentControls = getAttachmentControls();
-    const addButton = target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR}="true"]`) || null;
+    const addButton =
+      target?.closest<HTMLElement>(
+        `[${TEMPLATE_USAGE_PREVIEW_FILE_ADD_ATTR}="true"], [${TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR}="true"]`
+      ) || null;
 
     if (addButton) {
       event.preventDefault();
@@ -11910,30 +12506,85 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       const control = addButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
       const input = control?.querySelector<HTMLInputElement>(`input[${TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR}="true"]`) || null;
 
-      if (control) {
-        attachmentControls.forEach((candidate) =>
-          setTemplateUsagePreviewAttachmentEditMode(candidate, candidate === control)
-        );
-      }
-
       input?.click();
       return;
     }
 
-    const removeButton = target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_REMOVE_ATTR}="true"]`) || null;
+    const fileActionButton = target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_ACTION_ATTR}]`) || null;
 
-    if (removeButton) {
+    if (fileActionButton) {
       event.preventDefault();
       event.stopPropagation();
-      const control = removeButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+      const control = fileActionButton.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
       const contextKey = readRuntimeContextKey(control);
-      const removeIndex = Number(removeButton.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_INDEX_ATTR));
+      const action = fileActionButton.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_ACTION_ATTR)?.trim() || '';
+      const itemId = fileActionButton.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_CARD_ID_ATTR)?.trim() || '';
 
-      if (control && contextKey) {
-        const baseControl = getControlsByContext('attachment', contextKey)[0] || control;
-        const nextFileNames = readTemplateUsagePreviewFileNames(baseControl).filter((_, index) => index !== removeIndex);
-        syncAttachmentFileNamesByContext(contextKey, nextFileNames);
-        setTemplateUsagePreviewAttachmentEditMode(control, true);
+      if (!control || !contextKey || !itemId) {
+        return;
+      }
+
+      if (action === 'mark-delete-existing') {
+        updateAttachmentStateByContext(contextKey, (state) => ({
+          ...state,
+          removedExistingFileIds: state.removedExistingFileIds.includes(itemId)
+            ? state.removedExistingFileIds
+            : [...state.removedExistingFileIds, itemId],
+        }));
+        return;
+      }
+
+      if (action === 'restore-existing') {
+        updateAttachmentStateByContext(contextKey, (state) => ({
+          ...state,
+          removedExistingFileIds: state.removedExistingFileIds.filter((fileId) => fileId !== itemId),
+        }));
+        return;
+      }
+
+      if (action === 'remove-new') {
+        updateAttachmentStateByContext(contextKey, (state) => {
+          const removedFile = state.newFiles.find((file) => file.localId === itemId) || null;
+
+          if (removedFile?.previewUrl) {
+            URL.revokeObjectURL(removedFile.previewUrl);
+          }
+
+          return {
+            ...state,
+            newFiles: state.newFiles.filter((file) => file.localId !== itemId),
+          };
+        });
+        return;
+      }
+
+      if (action === 'view-new') {
+        const state = getTemplateUsagePreviewAttachmentState(root, contextKey);
+        const pendingFile = state?.newFiles.find((file) => file.localId === itemId) || null;
+
+        if (pendingFile?.previewUrl && typeof window !== 'undefined') {
+          window.open(pendingFile.previewUrl, '_blank', 'noopener,noreferrer');
+        }
+        return;
+      }
+
+      if (action === 'view-existing') {
+        const state = getTemplateUsagePreviewAttachmentState(root, contextKey);
+        const existingFile = state?.existingFiles.find((file) => file.id === itemId) || null;
+
+        if (
+          existingFile &&
+          state?.apiPath &&
+          existingFile.storageBucket &&
+          existingFile.storagePath &&
+          !isTemplateUsagePreviewAttachmentPlaceholderId(existingFile.id) &&
+          typeof window !== 'undefined'
+        ) {
+          const url = new URL(state.apiPath, window.location.origin);
+          url.searchParams.set('bucket', existingFile.storageBucket);
+          url.searchParams.set('path', existingFile.storagePath);
+          window.open(url.toString(), '_blank', 'noopener,noreferrer');
+        }
       }
       return;
     }
@@ -11942,13 +12593,6 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       target?.closest<HTMLButtonElement>(`[${TEMPLATE_USAGE_PREVIEW_SIGNATURE_CLEAR_ATTR}="true"]`) || null;
 
     if (!clearButton) {
-      const activeAttachmentControl =
-        target?.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`) || null;
-
-      attachmentControls.forEach((control) => {
-        setTemplateUsagePreviewAttachmentEditMode(control, control === activeAttachmentControl);
-      });
-
       return;
     }
 
@@ -11966,17 +12610,77 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       });
     }
   };
+  const handleRuntimeDragOver = (event: DragEvent) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const uploadBox = target?.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR}="true"]`) || null;
 
-  const initialAttachmentFilesByContext = new Map<string, string[]>();
+    if (!uploadBox) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    setAttachmentDragActive(uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`), true);
+  };
+  const handleRuntimeDragLeave = (event: DragEvent) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const uploadBox = target?.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR}="true"]`) || null;
+
+    if (!uploadBox) {
+      return;
+    }
+
+    const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+
+    if (relatedTarget && uploadBox.contains(relatedTarget)) {
+      return;
+    }
+
+    setAttachmentDragActive(uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`), false);
+  };
+  const handleRuntimeDrop = (event: DragEvent) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const uploadBox = target?.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR}="true"]`) || null;
+
+    if (!uploadBox) {
+      return;
+    }
+
+    event.preventDefault();
+    const control = uploadBox.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="attachment"]`);
+    const contextKey = readRuntimeContextKey(control);
+    const files = Array.from(event.dataTransfer?.files || []).filter((file) => file.size > 0 && file.size <= 10 * 1024 * 1024);
+    setAttachmentDragActive(control, false);
+
+    if (contextKey) {
+      appendPendingFilesToAttachmentContext(contextKey, files);
+    }
+  };
+
+  const initialAttachmentFilesByContext = new Map<string, TemplateUsagePreviewAttachmentRuntimeState>();
   getAttachmentControls().forEach((control) => {
     const contextKey = readRuntimeContextKey(control);
     if (!contextKey || initialAttachmentFilesByContext.has(contextKey)) {
       return;
     }
-    initialAttachmentFilesByContext.set(contextKey, readTemplateUsagePreviewFileNames(control));
+    const seededState = getTemplateUsagePreviewAttachmentState(root, contextKey);
+
+    if (seededState) {
+      initialAttachmentFilesByContext.set(contextKey, seededState);
+      return;
+    }
+
+    initialAttachmentFilesByContext.set(
+      contextKey,
+      buildEmptyTemplateUsagePreviewAttachmentRuntimeState(
+        control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR)?.trim() || ''
+      )
+    );
   });
-  initialAttachmentFilesByContext.forEach((fileNames, contextKey) => {
-    syncAttachmentFileNamesByContext(contextKey, fileNames);
+  initialAttachmentFilesByContext.forEach((state, contextKey) => {
+    syncAttachmentStateByContext(contextKey, state);
   });
 
   const initialSignatureControlsByContext = new Map<string, HTMLElement>();
@@ -12028,6 +12732,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
   root.addEventListener('pointerup', handleSignaturePointerEnd, true);
   root.addEventListener('pointercancel', handleSignaturePointerEnd, true);
   root.addEventListener('click', handleRuntimeClick, true);
+  root.addEventListener('dragover', handleRuntimeDragOver, true);
+  root.addEventListener('dragleave', handleRuntimeDragLeave, true);
+  root.addEventListener('drop', handleRuntimeDrop, true);
 
   return () => {
     root.removeEventListener('change', handleFileChange);
@@ -12036,6 +12743,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     root.removeEventListener('pointerup', handleSignaturePointerEnd, true);
     root.removeEventListener('pointercancel', handleSignaturePointerEnd, true);
     root.removeEventListener('click', handleRuntimeClick, true);
+    root.removeEventListener('dragover', handleRuntimeDragOver, true);
+    root.removeEventListener('dragleave', handleRuntimeDragLeave, true);
+    root.removeEventListener('drop', handleRuntimeDrop, true);
     activeSignatureDrawStateByPointerId.clear();
   };
 };
@@ -12173,6 +12883,17 @@ const measureNaturalElementContentHeight = (target: HTMLElement) => {
     : target;
   const targetRect = measurementTarget.getBoundingClientRect();
   const computedStyle = getComputedStyle(measurementTarget);
+
+  if (measurementTarget.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'attachment') {
+    const naturalHeight = Math.max(
+      measurementTarget.scrollHeight || 0,
+      measurementTarget.clientHeight || 0,
+      targetRect.height || 0
+    );
+
+    return Math.ceil(naturalHeight);
+  }
+
   const clone = measurementTarget.cloneNode(true) as HTMLElement;
 
   clone.removeAttribute('id');
@@ -12256,12 +12977,14 @@ const measureRequiredFrameHeightFromTargets = (
 
   return targets.reduce((maxHeight, target) => {
     const targetRect = target.getBoundingClientRect();
+    const ignoreExistingInset =
+      target.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'attachment';
     const requiredTargetHeight =
       target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
         ? measureNaturalTextControlHeight(target)
         : measureNaturalElementContentHeight(target);
-    const targetTopOffset = Math.max(0, targetRect.top - frameRect.top);
-    const targetBottomInset = Math.max(0, frameRect.bottom - targetRect.bottom);
+    const targetTopOffset = ignoreExistingInset ? 0 : Math.max(0, targetRect.top - frameRect.top);
+    const targetBottomInset = ignoreExistingInset ? 0 : Math.max(0, frameRect.bottom - targetRect.bottom);
     const requiredFrameHeight = targetTopOffset + requiredTargetHeight + targetBottomInset;
 
     return Math.max(maxHeight, requiredFrameHeight);
@@ -14948,7 +15671,10 @@ const applyFrameStylePatch = (
 
   if (typeof patch.height === 'number' && Number.isFinite(patch.height)) {
     applyPositionStyleHeight(node, patch.height);
-    if (contentTarget !== node) {
+    if (
+      contentTarget !== node &&
+      contentTarget.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) !== 'attachment'
+    ) {
       contentTarget.style.height = '100%';
     }
   }
@@ -15076,6 +15802,7 @@ export default function TemplateEditWorkspace({
   saveButtonLabel = '저장',
   templateNameReadOnly = false,
   saveDisabled = false,
+  documentAttachmentApiPath = '',
 }: TemplateEditWorkspaceProps) {
   const documentMode = workspaceMode === 'document';
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
@@ -15194,6 +15921,7 @@ export default function TemplateEditWorkspace({
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const [previewSurfaceNodeVersion, setPreviewSurfaceNodeVersion] = React.useState(0);
   const documentPreviewSourceKeyRef = React.useRef('');
+  const documentAttachmentStateSourceKeyRef = React.useRef('');
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const bumpPositionStructureRevision = React.useCallback(() => {
     setPositionStructureRevision((previous) => previous + 1);
@@ -15814,6 +16542,10 @@ export default function TemplateEditWorkspace({
     return new URLSearchParams(window.location.search).get('templateId')?.trim() || '';
   }, [initialTemplateId]);
   const activeInitialDraft = workspaceDraft || initialDraft;
+  const activeInitialDraftAttachmentFilesByValueKey = React.useMemo(
+    () => activeInitialDraft?.attachmentFilesByValueKey || {},
+    [activeInitialDraft?.attachmentFilesByValueKey]
+  );
   const runtimeModeOptions = React.useMemo(
     () => (frameMetadataDraft.boxKind ? getCompatibleRuntimeModes(frameMetadataDraft.boxKind) : getAllRuntimeModes()),
     [frameMetadataDraft.boxKind]
@@ -16431,6 +17163,57 @@ export default function TemplateEditWorkspace({
     setTemplateUsagePreviewHtml('');
   }, [activeInitialDraft?.draftKey, documentMode, renderedPreviewHtml]);
 
+  React.useEffect(() => {
+    if (!templateUsagePreviewActive || !previewRef.current) {
+      return;
+    }
+
+    const root = previewRef.current;
+    const sourceKey = `${activeInitialDraft?.draftKey?.trim() || ''}:${documentAttachmentApiPath.trim()}`;
+
+    if (documentAttachmentStateSourceKeyRef.current !== sourceKey) {
+      clearTemplateUsagePreviewAttachmentStateStore(root);
+      documentAttachmentStateSourceKeyRef.current = sourceKey;
+    }
+
+    Object.entries(activeInitialDraftAttachmentFilesByValueKey).forEach(([contextKey, files]) => {
+      seedTemplateUsagePreviewAttachmentStateByContext(root, contextKey, files || [], documentAttachmentApiPath.trim());
+    });
+
+    getTemplateUsagePreviewAttachmentStateStore(root).forEach((state, contextKey) => {
+      if (activeInitialDraftAttachmentFilesByValueKey[contextKey]) {
+        return;
+      }
+
+      if (state.apiPath !== documentAttachmentApiPath.trim()) {
+        setTemplateUsagePreviewAttachmentState(root, contextKey, {
+          ...state,
+          apiPath: documentAttachmentApiPath.trim(),
+        });
+      }
+    });
+
+    getAttachmentControlsFromRoot(root).forEach((control) => {
+      renderTemplateUsagePreviewAttachmentControl(control);
+    });
+  }, [
+    activeInitialDraft?.draftKey,
+    activeInitialDraftAttachmentFilesByValueKey,
+    documentAttachmentApiPath,
+    previewSurfaceNodeVersion,
+    templateUsagePreviewActive,
+  ]);
+
+  React.useEffect(() => {
+    return () => {
+      const root = previewRef.current;
+
+      if (root) {
+        clearTemplateUsagePreviewAttachmentStateStore(root);
+      }
+    };
+  }, []);
+
   React.useLayoutEffect(() => {
     if (!documentMode || !previewRef.current || !renderedPreviewHtml.trim() || templateUsagePreviewHtml.trim()) {
       return;
@@ -16476,6 +17259,7 @@ export default function TemplateEditWorkspace({
       const persistedDraftHtml = materializeFrameBandTableGeometryInHtml(currentHtml).trim();
       const previewRoot = previewRef.current;
       const renderSnapshotHtml = previewRoot ? extractPreviewRenderHtml(previewRoot).trim() : persistedDraftHtml;
+      const attachmentDrafts = previewRoot ? collectTemplateUsagePreviewAttachmentDrafts(previewRoot) : [];
       const revisionSnapshot = previewRoot
         ? extractTemplateStructureSnapshot(previewRoot, renderSnapshotHtml)
         : {
@@ -16503,6 +17287,7 @@ export default function TemplateEditWorkspace({
             sourceDocumentName,
             layoutResizeMode,
             selectedTemplateId: normalizedTemplateId,
+            attachmentDrafts,
           });
           lastPersistedDraftHtmlRef.current = persistedDraftHtml;
           queuedAutoPersistDraftHtmlRef.current = '';
@@ -27951,81 +28736,176 @@ export default function TemplateEditWorkspace({
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control,
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control {
 	          width: 100%;
-	          height: 100%;
-	          min-height: 28px;
+	          min-height: 0;
 	          box-sizing: border-box;
 	          display: flex;
 	          flex-direction: column;
 	          gap: 4px;
-	          color: rgb(15 23 42);
+	          color: inherit;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control {
-	          cursor: text;
-	          justify-content: flex-start;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-display,
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-list {
 	          min-width: 0;
-	          display: grid;
-	          gap: 4px;
-	          align-content: start;
+	          height: auto;
+	          justify-content: flex-start;
+	          border: none;
+	          border-radius: 0;
+	          background: transparent;
+	          overflow: hidden;
 	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="edit"] .v106-template-usage-file-list {
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-section,
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-pending-section {
+	          display: flex;
+	          min-width: 0;
+	          flex-direction: column;
+	          gap: 2px;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-subtitle,
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-section-empty {
+	          font-size: 11px;
+	          font-weight: 600;
+	          color: rgb(100 116 139);
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card {
+	          display: flex;
+	          align-items: center;
+	          gap: 6px;
+	          min-width: 0;
+	          min-height: 20px;
+	          padding: 0;
+	          border: none;
+	          border-radius: 0;
+	          background: transparent;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card.is-deleted {
+	          background: transparent;
+	          border: none;
+	          opacity: 1;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-icon {
+	          width: 16px;
+	          height: 16px;
+	          flex: 0 0 16px;
+	          border-radius: 0;
+	          background: transparent;
+	          display: flex;
+	          align-items: center;
+	          justify-content: center;
+	          color: rgb(100 116 139);
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-icon svg {
+	          width: 14px;
+	          height: 14px;
+	          display: block;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-info {
+	          flex: 1 1 auto;
+	          min-width: 0;
+	          display: flex;
+	          align-items: center;
+	          gap: 6px;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-name {
+	          min-width: 0;
+	          flex: 0 1 auto;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
+	          white-space: nowrap;
+	          font-size: 12px;
+	          font-weight: 600;
+	          color: inherit;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card.is-deleted .v106-template-usage-file-card-name {
+	          color: rgb(153 27 27);
+	          text-decoration: line-through;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-meta {
 	          flex: 0 0 auto;
-	          min-height: 0;
-	          overflow: visible;
+	          min-width: 0;
+	          font-size: 11px;
+	          color: rgb(100 116 139);
+	          white-space: nowrap;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
 	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-display-line,
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-item-name {
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card.is-deleted .v106-template-usage-file-card-meta {
+	          color: rgb(220 38 38);
+	          font-weight: 600;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-actions {
+	          display: flex;
+	          flex: 0 0 auto;
+	          gap: 4px;
+	          align-items: center;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-action {
+	          height: 18px;
+	          padding: 0 4px;
+	          border: 1px solid rgb(209 213 219);
+	          border-radius: 4px;
+	          background: rgb(255 255 255);
+	          color: rgb(51 65 85);
+	          cursor: pointer;
+	          font-size: 11px;
+	          font-weight: 600;
+	          line-height: 1;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-action--danger {
+	          color: rgb(220 38 38);
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-action:disabled {
+	          cursor: not-allowed;
+	          opacity: .45;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-upload-box {
+	          width: 100%;
+	          border: 1.5px dashed rgb(203 213 225);
+	          border-radius: 10px;
+	          background: rgb(248 250 252);
+	          min-height: 30px;
+	          height: 30px;
+	          padding: 4px 8px;
+	          display: flex;
+	          flex-direction: row;
+	          gap: 6px;
+	          align-items: center;
+	          justify-content: flex-start;
+	          text-align: left;
+	          cursor: pointer;
+	          color: inherit;
+	          overflow: hidden;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_DRAG_ACTIVE_ATTR}="true"] .v106-template-usage-file-upload-box {
+	          border-color: rgb(14 165 233);
+	          background: rgb(240 249 255);
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-upload-plus {
+	          width: 16px;
+	          height: 16px;
+	          flex: 0 0 16px;
+	          border-radius: 999px;
+	          background: rgb(229 231 235);
+	          display: flex;
+	          align-items: center;
+	          justify-content: center;
+	          font-size: 12px;
+	          font-weight: 700;
+	          color: rgb(71 85 105);
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-upload-title {
+	          flex: 0 1 auto;
 	          min-width: 0;
 	          overflow: hidden;
 	          text-overflow: ellipsis;
 	          white-space: nowrap;
 	          font-size: 11px;
-	          line-height: 1.35;
-	          color: rgb(51 65 85);
+	          font-weight: 600;
+	          color: rgb(17 24 39);
 	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-toolbar {
-	          display: none;
-	          grid-auto-flow: column;
-	          justify-content: start;
-	          gap: 6px;
-	          align-items: center;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="edit"] .v106-template-usage-file-display {
-	          display: none;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="view"] .v106-template-usage-file-list {
-	          display: none;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-control[${TEMPLATE_USAGE_PREVIEW_FILE_MODE_ATTR}="edit"] .v106-template-usage-file-toolbar {
-	          display: inline-grid;
-	          margin-top: 4px;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-item {
-	          display: grid;
-	          grid-template-columns: minmax(0, 1fr) auto;
-	          gap: 6px;
-	          align-items: center;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-add,
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-remove {
-	          border: 1px solid rgb(203 213 225);
-	          border-radius: 999px;
-	          background: rgb(255 255 255);
-	          color: rgb(51 65 85);
-	          cursor: pointer;
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-upload-description {
+	          flex: 0 0 auto;
+	          white-space: nowrap;
 	          font-size: 10px;
-	          font-weight: 700;
-	          line-height: 1;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-add {
-	          min-width: 22px;
-	          height: 22px;
-	          padding: 0;
-	        }
-	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-remove {
-	          padding: 4px 8px;
+	          color: rgb(100 116 139);
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] input[${TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR}="true"] {
 	          position: absolute;

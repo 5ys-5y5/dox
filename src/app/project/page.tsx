@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
 import {
   CalendarDays,
@@ -16,6 +17,8 @@ import {
 import TemplateEditWorkspace, {
   type TemplateEditWorkspaceInitialDraft,
 } from '../../components/template/TemplateEditWorkspace';
+import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
+import type { TemplateEditWorkspaceSaveDraftParams } from '../../components/template/workspace/types';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
@@ -24,6 +27,7 @@ import { Input } from '../../components/ui/Input';
 import { MejaiScrollTable, type MejaiScrollTableColumn, type MejaiScrollTableRow } from '../../components/ui/MejaiScrollTable';
 import { MultiEntityPicker } from '../../components/ui/MultiEntityPicker';
 import type { DocumentCreateResult, DocumentDeleteResult, DocumentDetailResult, DocumentListItem } from '../../lib/documentDtos';
+import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import type {
   DocumentMemberAccessRole,
   DocumentMemberInviteResult,
@@ -300,6 +304,9 @@ const formatMemberDispatchMessage = (dispatch: MemberDispatchResultDto) => {
   return dispatch.message;
 };
 
+const buildProjectSelectionQueryKey = (siteId: string, documentId: string) =>
+  `${siteId.trim()}::${documentId.trim()}`;
+
 const getMemberAccessErrorMessage = (error: unknown, fallbackMessage: string) => {
   const message = error instanceof Error ? error.message : fallbackMessage;
 
@@ -361,11 +368,31 @@ const stringifyDocumentValue = (value: unknown) => {
   return collapseWhitespace(JSON.stringify(value));
 };
 
+const stringifyAttachmentDocumentValue = (value: unknown) => {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return collapseWhitespace(JSON.stringify(value));
+};
+
 const isValueFieldElement = (element: Element) =>
   element.matches('[data-template-frame-role="value"]') ||
   element.closest('[data-template-frame-role="value"]') !== null ||
   element.matches('[data-template-usage-preview-value-box="true"]') ||
   element.closest('[data-template-usage-preview-value-box="true"]') !== null;
+
+const isAttachmentValueElement = (element: Element) =>
+  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
+  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
 
 const resolveDocumentValueKey = (element: Element) => {
   const currentElementKey =
@@ -445,7 +472,9 @@ const materializeDocumentHtmlWithLabelValues = (htmlCanonical: string, labelValu
         return;
       }
 
-      const value = stringifyDocumentValue(labelValues[valueKey]);
+      const value = isAttachmentValueElement(element)
+        ? stringifyAttachmentDocumentValue(labelValues[valueKey])
+        : stringifyDocumentValue(labelValues[valueKey]);
       setDocumentValueElement(element, value);
     });
 
@@ -475,7 +504,9 @@ const extractDocumentLabelValuesFromHtml = (htmlCanonical: string, fallbackValue
       }
 
       if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-        nextValues[valueKey] = collapseWhitespace(element.value || '');
+        nextValues[valueKey] = isAttachmentValueElement(element)
+          ? String(element.value || '').trim()
+          : collapseWhitespace(element.value || '');
         return;
       }
 
@@ -483,7 +514,9 @@ const extractDocumentLabelValuesFromHtml = (htmlCanonical: string, fallbackValue
         return;
       }
 
-      nextValues[valueKey] = collapseWhitespace(element.textContent || '');
+      nextValues[valueKey] = isAttachmentValueElement(element)
+        ? String(element.textContent || '').trim()
+        : collapseWhitespace(element.textContent || '');
     });
 
   return nextValues;
@@ -761,6 +794,12 @@ function ProjectInfoList({
 }
 
 export default function ProjectPage() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedSiteId = searchParams.get('projectId')?.trim() || searchParams.get('siteId')?.trim() || '';
+  const requestedDocumentId = searchParams.get('documentId')?.trim() || '';
+  const selectionQuerySyncRef = React.useRef<string | null>(null);
   const [sites, setSites] = React.useState<SiteRecordDto[]>([]);
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [documents, setDocuments] = React.useState<DocumentListItem[]>([]);
@@ -804,6 +843,48 @@ export default function ProjectPage() {
   const [invitingDocumentMember, setInvitingDocumentMember] = React.useState(false);
   const [deletingSiteMemberId, setDeletingSiteMemberId] = React.useState('');
   const [deletingDocumentMemberId, setDeletingDocumentMemberId] = React.useState('');
+
+  React.useEffect(() => {
+    const nextQueryKey = buildProjectSelectionQueryKey(requestedSiteId, requestedDocumentId);
+
+    if (selectionQuerySyncRef.current === nextQueryKey) {
+      return;
+    }
+
+    selectionQuerySyncRef.current = nextQueryKey;
+    setSelectedSiteId(requestedSiteId);
+    setSelectedDocumentId(requestedDocumentId);
+  }, [requestedDocumentId, requestedSiteId]);
+
+  React.useEffect(() => {
+    const normalizedSiteId = selectedSiteId.trim();
+    const normalizedDocumentId = selectedDocumentId.trim();
+    const nextQueryKey = buildProjectSelectionQueryKey(normalizedSiteId, normalizedDocumentId);
+
+    if (selectionQuerySyncRef.current === nextQueryKey) {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+
+    nextSearchParams.delete('siteId');
+
+    if (normalizedSiteId) {
+      nextSearchParams.set('projectId', normalizedSiteId);
+    } else {
+      nextSearchParams.delete('projectId');
+    }
+
+    if (normalizedDocumentId) {
+      nextSearchParams.set('documentId', normalizedDocumentId);
+    } else {
+      nextSearchParams.delete('documentId');
+    }
+
+    selectionQuerySyncRef.current = nextQueryKey;
+    const nextQueryString = nextSearchParams.toString();
+    router.replace(nextQueryString ? `${pathname}?${nextQueryString}` : pathname, { scroll: false });
+  }, [pathname, router, searchParams, selectedDocumentId, selectedSiteId]);
 
   const selectedSite = React.useMemo(
     () => sites.find((site) => site.id === selectedSiteId) || null,
@@ -898,9 +979,15 @@ export default function ProjectPage() {
   const selectedDocumentLabelValues = React.useMemo<Record<string, unknown>>(() => {
     return {
       ...(selectedDocumentVersionSource?.labelValues || {}),
+      ...(selectedDocumentDetail ? buildDocumentAttachmentTextByValueKey(selectedDocumentDetail.valueFiles) : {}),
       ...selectedDocumentValueEntryValues,
     };
-  }, [selectedDocumentValueEntryValues, selectedDocumentVersionSource?.labelValues]);
+  }, [selectedDocumentDetail, selectedDocumentValueEntryValues, selectedDocumentVersionSource?.labelValues]);
+
+  const selectedDocumentAttachmentFilesByValueKey = React.useMemo(
+    () => (selectedDocumentDetail ? groupDocumentValueFilesByValueKey(selectedDocumentDetail.valueFiles) : {}),
+    [selectedDocumentDetail]
+  );
 
   const selectedDocumentInitialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
     if (!selectedDocumentId) {
@@ -931,8 +1018,10 @@ export default function ProjectPage() {
       draftHtml: materializedHtml,
       sourceDocumentName: '',
       layoutResizeMode: 'grow_height',
+      attachmentFilesByValueKey: selectedDocumentAttachmentFilesByValueKey,
     };
   }, [
+    selectedDocumentAttachmentFilesByValueKey,
     selectedDocumentDetail?.linkedTemplate?.resolvedRevisionId,
     selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
     selectedDocumentDetail?.templateLink?.lastSyncedAt,
@@ -1906,29 +1995,46 @@ export default function ProjectPage() {
 
   const siteDocumentRows = React.useMemo<ProjectListRow[]>(
     () =>
-      documents.map((item) => ({
-        key: item.document.id,
-        label: item.document.title,
-        statusLabel: getDocumentStatusLabel(item.document.status),
-        statusVariant: getDocumentStatusVariant(item.document.status),
-        summary: [
-          `버전 ${item.document.currentVersionNumber || 0}`,
-          item.latestVersion?.createdAt ? `마지막 저장 ${formatDateTime(item.latestVersion.createdAt)}` : '저장 이력 없음',
-        ].join(' · '),
-        source: '현재 현장 문서',
-        selected: item.document.id === selectedDocumentId,
-        onClick: () => handleSelectDocument(item.document.id),
-        action: {
-          title: '현장 문서 삭제',
-          ariaLabel: `${item.document.title} 삭제`,
-          icon: <Trash2 className="h-4 w-4" />,
-          disabled: deletingDocument,
-          onClick: () => {
-            void handleDeleteDocument(item.document.id);
+      documents.map((item) => {
+        const linkedTemplate = item.document.templateId
+          ? templates.find((template) => template.id === item.document.templateId) || null
+          : null;
+
+        return {
+          key: item.document.id,
+          label: item.document.title,
+          statusLabel: getDocumentStatusLabel(item.document.status),
+          statusVariant: getDocumentStatusVariant(item.document.status),
+          summary: [
+            `버전 ${item.document.currentVersionNumber || 0}`,
+            item.latestVersion?.createdAt ? `마지막 저장 ${formatDateTime(item.latestVersion.createdAt)}` : '저장 이력 없음',
+          ].join(' · '),
+          source: item.document.templateId
+            ? (
+                <div className="min-w-0">
+                  <div className="truncate text-[11px] text-slate-700" title={linkedTemplate?.templateName || '이름 없는 템플릿'}>
+                    {linkedTemplate?.templateName || '이름 없는 템플릿'}
+                  </div>
+                  <div className="truncate text-[10px] text-slate-500" title={item.document.templateId}>
+                    {item.document.templateId}
+                  </div>
+                </div>
+              )
+            : '연결된 템플릿 없음',
+          selected: item.document.id === selectedDocumentId,
+          onClick: () => handleSelectDocument(item.document.id),
+          action: {
+            title: '현장 문서 삭제',
+            ariaLabel: `${item.document.title} 삭제`,
+            icon: <Trash2 className="h-4 w-4" />,
+            disabled: deletingDocument,
+            onClick: () => {
+              void handleDeleteDocument(item.document.id);
+            },
           },
-        },
-      })),
-    [deletingDocument, documents, handleDeleteDocument, handleSelectDocument, selectedDocumentId]
+        };
+      }),
+    [deletingDocument, documents, handleDeleteDocument, handleSelectDocument, selectedDocumentId, templates]
   );
 
   const photoRows = React.useMemo<ProjectListRow[]>(
@@ -2368,7 +2474,7 @@ export default function ProjectPage() {
   };
 
   const handleSaveDocumentDraft = React.useCallback(
-    async ({ currentHtml }: { currentHtml: string }) => {
+    async ({ currentHtml, attachmentDrafts }: TemplateEditWorkspaceSaveDraftParams) => {
       const targetDocumentId =
         selectedDocumentDetail?.document.id || selectedDocumentListItem?.document.id || selectedDocumentId.trim();
 
@@ -2377,6 +2483,10 @@ export default function ProjectPage() {
       }
 
       const nextLabelValues = extractDocumentLabelValuesFromHtml(currentHtml, selectedDocumentLabelValues);
+      const nextValueFiles = await buildDocumentAttachmentValueFilesForSave({
+        attachmentApiPath: `/api/documents/${encodeURIComponent(targetDocumentId)}/attachments`,
+        attachmentDrafts,
+      });
       const documentTitle = selectedDocumentDetail?.document.title || selectedDocumentListItem?.document.title || '현장 문서';
 
       const response = await fetch(`/api/documents/${targetDocumentId}/version`, {
@@ -2385,6 +2495,7 @@ export default function ProjectPage() {
         body: JSON.stringify({
           htmlCanonical: currentHtml,
           labelValues: nextLabelValues,
+          valueFiles: nextValueFiles,
           changeReason: 'project-page-edit',
           createdBy: 'project-page',
         }),
@@ -3038,6 +3149,9 @@ export default function ProjectPage() {
             nameFieldLabel="문서 이름:"
             saveButtonLabel="문서 저장"
             templateNameReadOnly
+            documentAttachmentApiPath={`/api/documents/${encodeURIComponent(
+              selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId
+            )}/attachments`}
             onSaveDraftHtml={handleSaveDocumentDraft}
             suppressInitialDraftLoadedMessage
           />
