@@ -6,14 +6,22 @@ import { X } from 'lucide-react';
 import { type TemplateEditWorkspaceInitialDraft } from '../../components/template/TemplateEditWorkspace';
 import { Card, CardContent } from '../../components/ui/Card';
 import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
-import { TemplateExtractWorkspace, type TemplateExtractWorkspaceStatus } from './extract/page';
+import {
+  TemplateExtractWorkspace,
+  type TemplateExtractWorkspaceStatus,
+} from '../../components/template/TemplateExtractWorkspace';
 
 export default function TemplatesPage() {
   const searchParams = useSearchParams();
   const templateIdFromQuery = searchParams.get('templateId')?.trim() || '';
+  const [activeTemplateId, setActiveTemplateId] = React.useState(templateIdFromQuery);
   const [extractedDraft, setExtractedDraft] = React.useState<TemplateEditWorkspaceInitialDraft | null>(null);
   const [extractStatus, setExtractStatus] = React.useState<TemplateExtractWorkspaceStatus | null>(null);
   const [extractStatusResetKey, setExtractStatusResetKey] = React.useState(0);
+
+  React.useEffect(() => {
+    setActiveTemplateId(templateIdFromQuery);
+  }, [templateIdFromQuery]);
 
   const topNotice = extractStatus ? (
     <Card className="border-slate-200 bg-slate-50">
@@ -57,7 +65,7 @@ export default function TemplatesPage() {
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
         <CanvasOwnedWorkspace
           surface="templates"
-          initialTemplateId={templateIdFromQuery}
+          initialTemplateId={activeTemplateId}
           initialDraft={extractedDraft}
           templateListDisplay="inline"
           onTemplateSaved={() => setExtractedDraft(null)}
@@ -70,7 +78,17 @@ export default function TemplatesPage() {
               showPreview={false}
               showStatusSection={false}
               statusResetKey={extractStatusResetKey}
+              autoSaveOnExtract
               onDraftReady={setExtractedDraft}
+              onAutoSaveComplete={(result) => {
+                setExtractedDraft(null);
+                setActiveTemplateId(result.templateId);
+                if (typeof window !== 'undefined') {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('templateId', result.templateId);
+                  window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+                }
+              }}
               onStatusChange={setExtractStatus}
             />
           }

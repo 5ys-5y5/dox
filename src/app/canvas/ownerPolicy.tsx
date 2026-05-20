@@ -23,6 +23,7 @@ type CanvasOwnedWorkspaceProps = TemplateEditWorkspaceProps & {
 type CanvasSurfacePolicy = {
   allowedModes: CanvasWorkspaceMode[];
   allowEditableValueKeys?: boolean;
+  allowTemplateInitialDraft?: boolean;
 };
 
 const CANVAS_SURFACE_POLICIES: Record<CanvasOwnerSurface, CanvasSurfacePolicy> = {
@@ -45,6 +46,7 @@ const CANVAS_SURFACE_POLICIES: Record<CanvasOwnerSurface, CanvasSurfacePolicy> =
   },
   templates: {
     allowedModes: ['template'],
+    allowTemplateInitialDraft: true,
   },
   'templates-edit': {
     allowedModes: ['template'],
@@ -69,7 +71,7 @@ const validateCanvasOwnedWorkspace = (surface: CanvasOwnerSurface, props: Templa
   }
 
   if (workspaceMode === 'template') {
-    if (props.initialDraft) {
+    if (props.initialDraft && !policy.allowTemplateInitialDraft) {
       return false;
     }
     if (props.documentAttachmentApiPath || props.onSaveDraftHtml || hasEditableValueKeys(props.editableValueKeys)) {

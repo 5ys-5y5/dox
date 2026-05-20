@@ -12,7 +12,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { EntityPicker } from '../../components/ui/EntityPicker';
 import { Input } from '../../components/ui/Input';
 import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
+import {
+  collapseDocumentCanvasWhitespace as collapseWhitespace,
+  isDocumentCanvasAttachmentValueElement as isAttachmentValueElement,
+  isDocumentCanvasValueFieldElement as isValueFieldElement,
+  mergeDocumentCanvasLabelValues,
+  materializeDocumentCanvasHtml as materializeDocumentHtml,
+  resolveDocumentCanvasValueKey as resolveDocumentValueKey,
+  stringifyAttachmentDocumentValue,
+  stringifyDocumentValue,
+} from '../../lib/documentCanvasState';
 import type { DocumentCreateResult, DocumentDetailResult, DocumentListItem } from '../../lib/documentDtos';
+import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import { extractPhotoExifMetadata } from '../../lib/exifMetadata';
 import type { ExportJobCreateResult, ExportTargetFormat } from '../../lib/exportDtos';
@@ -96,198 +107,12 @@ type SelectablePreviewField = {
 
 type DocumentTaskMode = 'request' | 'export' | 'photo';
 
-const collapseWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
-
 const humanizeLabelKey = (labelKey: string) =>
   labelKey
     .split('_')
     .filter(Boolean)
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ');
-
-const stringifyDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return collapseWhitespace(value);
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const stringifyAttachmentDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const isValueFieldElement = (element: Element) =>
-  element.matches('[data-template-frame-role="value"]') ||
-  element.closest('[data-template-frame-role="value"]') !== null ||
-  element.matches('[data-template-usage-preview-value-box="true"]') ||
-  element.closest('[data-template-usage-preview-value-box="true"]') !== null;
-
-const isAttachmentValueElement = (element: Element) =>
-  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
-  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
-
-const resolveDocumentValueKey = (element: Element) => {
-  const currentElementKey =
-    element.getAttribute('data-template-frame-value-key')?.trim() ||
-    element.getAttribute('data-label')?.trim() ||
-    '';
-
-  if (currentElementKey) {
-    return currentElementKey;
-  }
-
-  const owner =
-    element.closest<HTMLElement>('[data-template-frame-value-key]') ||
-    element.closest<HTMLElement>('[data-label]') ||
-    null;
-
-  if (!owner) {
-    return '';
-  }
-
-  return owner.getAttribute('data-template-frame-value-key')?.trim() || owner.getAttribute('data-label')?.trim() || '';
-};
-
-const readDocumentValueEntryValue = (entry: NonNullable<DocumentDetailResult['valueEntries']>[number]) => {
-  if (entry.valuePayload && typeof entry.valuePayload === 'object' && 'value' in entry.valuePayload) {
-    return entry.valuePayload.value;
-  }
-
-  return entry.displayText;
-};
-
-const setDocumentValueElement = (element: HTMLElement, value: string) => {
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    element.value = value;
-    element.defaultValue = value;
-    element.setAttribute('value', value);
-
-    if (element instanceof HTMLTextAreaElement) {
-      element.textContent = value;
-    }
-
-    if (!value) {
-      element.removeAttribute('placeholder');
-    }
-
-    return;
-  }
-
-  if (element.querySelector('[data-template-frame-input="true"]')) {
-    return;
-  }
-
-  element.textContent = value;
-
-  if (!value) {
-    element.removeAttribute('data-placeholder');
-  }
-};
-
-const materializeDocumentHtmlWithLabelValues = (htmlCanonical: string, labelValues: Record<string, unknown>) => {
-  if (!htmlCanonical.trim() || typeof document === 'undefined') {
-    return htmlCanonical;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = htmlCanonical;
-  container
-    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
-    .forEach((element) => {
-      if (!isValueFieldElement(element)) {
-        return;
-      }
-
-      const valueKey = resolveDocumentValueKey(element);
-
-      if (!valueKey) {
-        return;
-      }
-
-      const value = isAttachmentValueElement(element)
-        ? stringifyAttachmentDocumentValue(labelValues[valueKey])
-        : stringifyDocumentValue(labelValues[valueKey]);
-      setDocumentValueElement(element, value);
-    });
-
-  return container.innerHTML.trim();
-};
-
-const isLaterOrSameDateTime = (left: string | null | undefined, right: string | null | undefined) => {
-  if (!left) {
-    return false;
-  }
-
-  if (!right) {
-    return true;
-  }
-
-  const leftTime = new Date(left).getTime();
-  const rightTime = new Date(right).getTime();
-
-  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-    return false;
-  }
-
-  return leftTime >= rightTime;
-};
-
-const resolvePreferredDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-}) => {
-  const linkedRenderHtml = params.linkedRenderHtml?.trim() || '';
-  const latestVersionHtml = params.latestVersionHtml?.trim() || '';
-
-  if (linkedRenderHtml && isLaterOrSameDateTime(params.lastSyncedAt, params.latestVersionCreatedAt)) {
-    return linkedRenderHtml;
-  }
-
-  if (latestVersionHtml) {
-    return latestVersionHtml;
-  }
-
-  return linkedRenderHtml;
-};
-
-const materializeDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-  labelValues: Record<string, unknown>;
-}) => {
-  const preferredHtml = resolvePreferredDocumentHtml(params);
-
-  if (!preferredHtml.trim()) {
-    return '';
-  }
-
-  return materializeDocumentHtmlWithLabelValues(preferredHtml, params.labelValues);
-};
 
 const collectSelectablePreviewFields = (
   htmlCanonical: string,
@@ -407,14 +232,7 @@ export default function DocumentsPage() {
   );
 
   const selectedDocumentValueEntryValues = React.useMemo<Record<string, unknown>>(() => {
-    if (!selectedDocumentDetail?.valueEntries) {
-      return {};
-    }
-
-    return selectedDocumentDetail.valueEntries.reduce<Record<string, unknown>>((accumulator, entry) => {
-      accumulator[entry.valueKey] = readDocumentValueEntryValue(entry);
-      return accumulator;
-    }, {});
+    return mergeDocumentCanvasLabelValues({}, selectedDocumentDetail?.valueEntries || []);
   }, [selectedDocumentDetail?.valueEntries]);
 
   const selectedDocumentLabelValues = React.useMemo<Record<string, unknown>>(() => {
@@ -436,10 +254,9 @@ export default function DocumentsPage() {
     }
 
     const materializedHtml = materializeDocumentHtml({
-      linkedRenderHtml: selectedDocumentDetail.linkedTemplate?.renderSnapshotHtml,
-      lastSyncedAt: selectedDocumentDetail.templateLink?.lastSyncedAt,
+      linkedRenderHtml:
+        selectedDocumentDetail.linkedTemplate?.draftHtml || selectedDocumentDetail.linkedTemplate?.renderSnapshotHtml,
       latestVersionHtml: selectedDocumentDetail.latestVersion?.htmlCanonical,
-      latestVersionCreatedAt: selectedDocumentDetail.latestVersion?.createdAt,
       labelValues: selectedDocumentLabelValues,
     });
 
@@ -454,7 +271,7 @@ export default function DocumentsPage() {
       'linked-template';
 
     return {
-      draftKey: `${selectedDocumentDetail.document.id}:${draftVersionKey}`,
+      draftKey: `${selectedDocumentDetail.document.id}:${draftVersionKey}:${buildDocumentHtmlContentKey(materializedHtml)}`,
       templateName: selectedDocumentDetail.document.title,
       sourceDocumentName: '',
       draftHtml: materializedHtml,

@@ -9,6 +9,8 @@ import {
   Minus,
   MousePointer2,
   Move,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   Redo2,
   Save,
@@ -32,6 +34,8 @@ type TemplateEditCanvasToolbarProps = {
   canvasFullscreen: boolean;
   previewZoom: number;
   selectionPanelTab: 'position' | 'metadata';
+  editSettingsPanelVisible: boolean;
+  editSettingsPanelAvailable: boolean;
   templateUsagePreviewMode: boolean;
   renderedPreviewHtml: string;
   canvasInteractionMode: 'select' | 'move';
@@ -39,6 +43,7 @@ type TemplateEditCanvasToolbarProps = {
   canRedoCanvasHistory: boolean;
   onUpdatePreviewZoom: (nextValue: number | ((previous: number) => number)) => void;
   onToggleCanvasFullscreen: () => void;
+  onToggleEditSettingsPanel: () => void;
   onSelectionPanelTabChange: (tab: 'position' | 'metadata') => void;
   onToggleTemplateUsagePreviewMode: () => void;
   onCanvasInteractionModeChange: (mode: 'select' | 'move') => void;
@@ -91,6 +96,8 @@ export const TemplateEditCanvasToolbar = ({
   canvasFullscreen,
   previewZoom,
   selectionPanelTab,
+  editSettingsPanelVisible,
+  editSettingsPanelAvailable,
   templateUsagePreviewMode,
   renderedPreviewHtml,
   canvasInteractionMode,
@@ -98,6 +105,7 @@ export const TemplateEditCanvasToolbar = ({
   canRedoCanvasHistory,
   onUpdatePreviewZoom,
   onToggleCanvasFullscreen,
+  onToggleEditSettingsPanel,
   onSelectionPanelTabChange,
   onToggleTemplateUsagePreviewMode,
   onCanvasInteractionModeChange,
@@ -263,6 +271,25 @@ export const TemplateEditCanvasToolbar = ({
             <span className="v106-canvas-toolbar-label">{canvasFullscreen ? '전체 화면 종료' : '전체 화면'}</span>
           </button>
         </div>
+        {documentMode ? null : (
+          <div className={`${canvasToolbarGroupClassName} shrink-0`}>
+            <button
+              type="button"
+              className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(
+                editSettingsPanelVisible,
+                !editSettingsPanelAvailable || templateUsagePreviewMode
+              )}`}
+              onClick={onToggleEditSettingsPanel}
+              disabled={!editSettingsPanelAvailable || templateUsagePreviewMode}
+              aria-pressed={editSettingsPanelVisible}
+              aria-label={editSettingsPanelVisible ? '편집 설정 숨기기' : '편집 설정 펼치기'}
+              title={editSettingsPanelVisible ? '편집 설정 숨기기' : '편집 설정 펼치기'}
+            >
+              {editSettingsPanelVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              <span className="v106-canvas-toolbar-label">편집 설정</span>
+            </button>
+          </div>
+        )}
         {documentMode ? null : (
           <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="상자 편집 탭">
             {([

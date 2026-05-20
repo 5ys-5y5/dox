@@ -4,237 +4,26 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
-import { type TemplateEditWorkspaceInitialDraft } from '../../../../components/template/TemplateEditWorkspace';
+import {
+  materializeTemplateCanvasHtmlForPersistence,
+  type TemplateEditWorkspaceInitialDraft,
+} from '../../../../components/template/TemplateEditWorkspace';
 import { buildDocumentAttachmentValueFilesForSave } from '../../../../components/template/workspace/persistence/documentAttachmentClient';
 import type { TemplateEditWorkspaceSaveDraftParams } from '../../../../components/template/workspace/types';
 import { CanvasOwnedWorkspace } from '../../../canvas/ownerPolicy';
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/Card';
+import {
+  extractDocumentCanvasLabelValuesFromHtml as extractDocumentLabelValuesFromHtml,
+  mergeDocumentCanvasLabelValues,
+  materializeDocumentCanvasHtml as materializeDocumentHtml,
+  stringifyDocumentValue,
+} from '../../../../lib/documentCanvasState';
 import type { DocumentDetailResult } from '../../../../lib/documentDtos';
+import { buildDocumentHtmlContentKey } from '../../../../lib/documentCanvasHtml';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../../../lib/documentAttachmentValues';
 import type { MemberDocumentAccessDto } from '../../../../lib/memberAccessDtos';
-
-const collapseWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
-
-const stringifyDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return collapseWhitespace(value);
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const stringifyAttachmentDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const isValueFieldElement = (element: Element) =>
-  element.matches('[data-template-frame-role="value"]') ||
-  element.closest('[data-template-frame-role="value"]') !== null ||
-  element.matches('[data-template-usage-preview-value-box="true"]') ||
-  element.closest('[data-template-usage-preview-value-box="true"]') !== null;
-
-const isAttachmentValueElement = (element: Element) =>
-  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
-  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
-
-const resolveDocumentValueKey = (element: Element) => {
-  const currentElementKey =
-    element.getAttribute('data-template-frame-value-key')?.trim() ||
-    element.getAttribute('data-label')?.trim() ||
-    '';
-
-  if (currentElementKey) {
-    return currentElementKey;
-  }
-
-  const owner =
-    element.closest<HTMLElement>('[data-template-frame-value-key]') ||
-    element.closest<HTMLElement>('[data-label]') ||
-    null;
-
-  if (!owner) {
-    return '';
-  }
-
-  return owner.getAttribute('data-template-frame-value-key')?.trim() || owner.getAttribute('data-label')?.trim() || '';
-};
-
-const readDocumentValueEntryValue = (entry: NonNullable<DocumentDetailResult['valueEntries']>[number]) => {
-  if (entry.valuePayload && typeof entry.valuePayload === 'object' && 'value' in entry.valuePayload) {
-    return entry.valuePayload.value;
-  }
-
-  return entry.displayText;
-};
-
-const setDocumentValueElement = (element: HTMLElement, value: string) => {
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    element.value = value;
-    element.defaultValue = value;
-    element.setAttribute('value', value);
-
-    if (element instanceof HTMLTextAreaElement) {
-      element.textContent = value;
-    }
-
-    if (!value) {
-      element.removeAttribute('placeholder');
-    }
-
-    return;
-  }
-
-  if (element.querySelector('[data-template-frame-input="true"]')) {
-    return;
-  }
-
-  element.textContent = value;
-
-  if (!value) {
-    element.removeAttribute('data-placeholder');
-  }
-};
-
-const materializeDocumentHtmlWithLabelValues = (htmlCanonical: string, labelValues: Record<string, unknown>) => {
-  if (!htmlCanonical.trim() || typeof document === 'undefined') {
-    return htmlCanonical;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = htmlCanonical;
-  container
-    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
-    .forEach((element) => {
-      if (!isValueFieldElement(element)) {
-        return;
-      }
-
-      const valueKey = resolveDocumentValueKey(element);
-
-      if (!valueKey) {
-        return;
-      }
-
-      setDocumentValueElement(
-        element,
-        isAttachmentValueElement(element)
-          ? stringifyAttachmentDocumentValue(labelValues[valueKey])
-          : stringifyDocumentValue(labelValues[valueKey])
-      );
-    });
-
-  return container.innerHTML.trim();
-};
-
-const extractDocumentLabelValuesFromHtml = (htmlCanonical: string, fallbackValues: Record<string, unknown>) => {
-  if (!htmlCanonical.trim() || typeof document === 'undefined') {
-    return fallbackValues;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = htmlCanonical;
-  const nextValues = { ...fallbackValues };
-
-  container
-    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
-    .forEach((element) => {
-      if (!isValueFieldElement(element)) {
-        return;
-      }
-
-      const valueKey = resolveDocumentValueKey(element);
-
-      if (!valueKey) {
-        return;
-      }
-
-      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-        nextValues[valueKey] = isAttachmentValueElement(element)
-          ? String(element.value || '').trim()
-          : collapseWhitespace(element.value || '');
-        return;
-      }
-
-      nextValues[valueKey] = isAttachmentValueElement(element)
-        ? String(element.textContent || '').trim()
-        : collapseWhitespace(element.textContent || '');
-    });
-
-  return nextValues;
-};
-
-const isLaterOrSameDateTime = (left: string | null | undefined, right: string | null | undefined) => {
-  if (!left || !right) {
-    return Boolean(left) && !right;
-  }
-
-  const leftTime = new Date(left).getTime();
-  const rightTime = new Date(right).getTime();
-
-  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-    return false;
-  }
-
-  return leftTime >= rightTime;
-};
-
-const resolvePreferredDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-}) => {
-  const linkedRenderHtml = params.linkedRenderHtml?.trim() || '';
-  const latestVersionHtml = params.latestVersionHtml?.trim() || '';
-
-  if (linkedRenderHtml && isLaterOrSameDateTime(params.lastSyncedAt, params.latestVersionCreatedAt)) {
-    return linkedRenderHtml;
-  }
-
-  if (latestVersionHtml) {
-    return latestVersionHtml;
-  }
-
-  return linkedRenderHtml;
-};
-
-const materializeDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-  labelValues: Record<string, unknown>;
-}) => {
-  const preferredHtml = resolvePreferredDocumentHtml(params);
-
-  if (!preferredHtml.trim()) {
-    return '';
-  }
-
-  return materializeDocumentHtmlWithLabelValues(preferredHtml, params.labelValues);
-};
 
 const formatDateTime = (value: string | null | undefined) => {
   if (!value) {
@@ -313,17 +102,9 @@ export default function MemberAccessDocumentPage() {
       return {};
     }
 
-    const versionValues = access.detail.latestVersion?.labelValues || {};
-    const attachmentValues = buildDocumentAttachmentTextByValueKey(access.detail.valueFiles);
-    const entryValues = access.detail.valueEntries.reduce<Record<string, unknown>>((accumulator, entry) => {
-      accumulator[entry.valueKey] = readDocumentValueEntryValue(entry);
-      return accumulator;
-    }, {});
-
     return {
-      ...versionValues,
-      ...attachmentValues,
-      ...entryValues,
+      ...mergeDocumentCanvasLabelValues(access.detail.latestVersion?.labelValues || {}, access.detail.valueEntries),
+      ...buildDocumentAttachmentTextByValueKey(access.detail.valueFiles),
     };
   }, [access]);
 
@@ -338,10 +119,9 @@ export default function MemberAccessDocumentPage() {
     }
 
     const html = materializeDocumentHtml({
-      linkedRenderHtml: access.detail.linkedTemplate?.renderSnapshotHtml,
-      lastSyncedAt: access.detail.templateLink?.lastSyncedAt,
+      linkedRenderHtml:
+        access.detail.linkedTemplate?.draftHtml || access.detail.linkedTemplate?.renderSnapshotHtml,
       latestVersionHtml: access.detail.latestVersion?.htmlCanonical,
-      latestVersionCreatedAt: access.detail.latestVersion?.createdAt,
       labelValues,
     });
 
@@ -350,7 +130,7 @@ export default function MemberAccessDocumentPage() {
     }
 
     return {
-      draftKey: `${access.detail.document.id}:${access.detail.latestVersion?.id || access.detail.linkedTemplate?.resolvedRevisionId || 'draft'}`,
+      draftKey: `${access.detail.document.id}:${access.detail.latestVersion?.id || access.detail.linkedTemplate?.resolvedRevisionId || 'draft'}:${buildDocumentHtmlContentKey(html)}`,
       templateName: access.detail.document.title,
       draftHtml: html,
       sourceDocumentName: '',
@@ -370,11 +150,14 @@ export default function MemberAccessDocumentPage() {
         attachmentApiPath: `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`,
         attachmentDrafts,
       });
+      const persistedHtml = materializeTemplateCanvasHtmlForPersistence(currentHtml, {
+        attachmentFiles: nextValueFiles,
+      });
       const response = await fetch(`/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/version`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          htmlCanonical: currentHtml,
+          htmlCanonical: persistedHtml,
           labelValues: nextLabelValues,
           valueFiles: nextValueFiles,
           changeReason: '구성원 문서 수정',

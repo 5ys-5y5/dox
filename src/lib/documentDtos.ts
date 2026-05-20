@@ -151,6 +151,7 @@ export type DocumentLinkedTemplateDto = {
   currentRevisionId: string | null;
   resolvedRevisionId: string | null;
   resolvedRevisionNumber: number | null;
+  draftHtml: string | null;
   renderSnapshotHtml: string | null;
 };
 

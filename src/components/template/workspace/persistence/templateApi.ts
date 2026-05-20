@@ -1,4 +1,6 @@
 import type {
+  TemplateDeleteImpactResult,
+  TemplateDeleteResult,
   TemplateDetailResult,
   TemplateLayoutResizeMode,
   TemplateRecordDto,
@@ -41,12 +43,20 @@ export const fetchTemplateDetail = async (templateId: string): Promise<TemplateD
   return readApiJson<TemplateDetailResult>(response, '템플릿 상세를 불러오지 못했습니다.');
 };
 
-export const deleteTemplateRecord = async (templateId: string): Promise<void> => {
+export const fetchTemplateDeleteImpact = async (templateId: string): Promise<TemplateDeleteImpactResult> => {
+  const response = await fetch(`/api/templates/${templateId}?deleteImpact=1&ts=${Date.now()}`, {
+    cache: 'no-store',
+  });
+
+  return readApiJson<TemplateDeleteImpactResult>(response, '템플릿 삭제 영향을 확인하지 못했습니다.');
+};
+
+export const deleteTemplateRecord = async (templateId: string): Promise<TemplateDeleteResult> => {
   const response = await fetch(`/api/templates/${templateId}`, {
     method: 'DELETE',
   });
 
-  await readApiJson<null>(response, '템플릿 삭제에 실패했습니다.');
+  return readApiJson<TemplateDeleteResult>(response, '템플릿 삭제에 실패했습니다.');
 };
 
 export const saveTemplateRecord = async ({

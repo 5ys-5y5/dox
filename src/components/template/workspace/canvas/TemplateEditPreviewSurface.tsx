@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronUp, GripHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import * as React from 'react';
 import { CardContent } from '../../../ui/Card';
 import {
@@ -20,6 +20,14 @@ import type {
   TemplateFloatingOverlayId,
 } from '../types';
 
+type OverlayRailSection = {
+  node: React.ReactElement;
+};
+
+function compactOverlayRailSections(sections: Array<OverlayRailSection | null>) {
+  return sections.filter((section): section is OverlayRailSection => Boolean(section));
+}
+
 export const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
   renderedPreviewHtml,
   canvasFullscreen,
@@ -30,6 +38,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   metadataVisualMode,
   templateUsagePreviewMode,
   selectionPanelTab,
+  editSettingsPanelVisible,
   showMetadataIcons,
   actionOverlay,
   actionOverlayLabel = '기능 버튼',
@@ -60,7 +69,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
 }: TemplateEditPreviewSurfaceProps) {
   const surfaceShellRef = React.useRef<HTMLDivElement | null>(null);
   const previewNodeRef = React.useRef<HTMLDivElement | null>(null);
-  const floatingOverlayNodeRefs = React.useRef<Record<TemplateFloatingOverlayId, HTMLDivElement | null>>({
+  const floatingOverlayNodeRefs = React.useRef<Record<TemplateFloatingOverlayId, HTMLElement | null>>({
     summary: null,
     style: null,
     sizeType: null,
@@ -349,14 +358,14 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       switch (overlayId) {
         case 'summary':
           return 73;
+        case 'action':
+          return 94;
         case 'style':
           return 104;
         case 'sizeType':
-          return 118;
+          return 116;
         case 'textStyle':
           return 113;
-        case 'action':
-          return 94;
         case 'metadataName':
           return 78;
         case 'metadataRolePrimary':
@@ -822,7 +831,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     label: string,
     collapsed: boolean,
     setCollapsed: React.Dispatch<React.SetStateAction<boolean>> | null,
-    finishDrag: (event: React.PointerEvent<HTMLButtonElement>) => void,
+    _finishDrag: (event: React.PointerEvent<HTMLButtonElement>) => void,
     content: TemplateFloatingOverlayContent | null | undefined,
     options: {
       alwaysExpanded?: boolean;
@@ -837,120 +846,77 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     }
 
     const isCollapsed = options.alwaysExpanded ? false : collapsed;
-    const overlayCorner = floatingOverlayCorners[overlayId];
-    const expandedWidthClassName = options.expandedWidthClassName || 'w-[30rem] max-w-[calc(100%_-_1.5rem)]';
-    const overlayWidthClassName = isCollapsed ? 'w-max max-w-[calc(100%_-_1.5rem)]' : expandedWidthClassName;
-    const overlayZIndexClassName =
-      overlayId === 'metadataRoleTertiary'
-        ? 'z-[75]'
-        : overlayId === 'metadataRoleSecondary'
-          ? 'z-[74]'
-          : overlayId === 'metadataRolePrimary'
-            ? 'z-[73]'
-            : overlayId === 'action' || overlayId === 'metadataName'
-              ? 'z-[72]'
-              : overlayId === 'style' || overlayId === 'sizeType'
-                ? 'z-[71]'
-                : 'z-[70]';
-    const pinnedOverlayStyle = resolveFloatingOverlayPinnedStyle(overlayId, overlayCorner, isCollapsed);
-    const overlayPinnedStyle =
-      overlayId === 'style' || overlayId === 'sizeType' || overlayId === 'textStyle'
-        ? {
-            ...pinnedOverlayStyle,
-            maxWidth: '250px',
-          }
-        : pinnedOverlayStyle;
 
-    return (
-      <div
-        ref={(node) => {
-          floatingOverlayNodeRefs.current[overlayId] = node;
-        }}
-        className={`absolute ${overlayZIndexClassName} ${overlayWidthClassName}`}
-        style={overlayPinnedStyle}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => event.stopPropagation()}
-      >
+    return {
+      node: (
         <div
-          className={`overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-lg backdrop-blur ${
-            isCollapsed ? 'w-fit max-w-full' : ''
-          }`}
-          style={
-            isCollapsed
-              ? {
-                  height: `${SUMMARY_OVERLAY_COLLAPSED_HEIGHT_PX}px`,
-                }
-              : undefined
-          }
+          key={overlayId}
+          ref={(node) => {
+            floatingOverlayNodeRefs.current[overlayId] = node;
+          }}
+          className="w-full border-b border-slate-200 last:border-b-0"
+          data-template-floating-overlay-expanded={isCollapsed ? 'false' : 'true'}
+          data-template-floating-overlay-id={overlayId}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
         >
-          <button
-            type="button"
-            className={`flex cursor-move items-center bg-white/90 text-xs font-semibold text-slate-700 ${
-              isCollapsed
-                ? 'h-full w-auto justify-between gap-1.5 px-2 text-[11px] leading-none'
-                : 'h-8 w-full justify-between gap-3 border-b border-slate-200 px-2'
-            }`}
-            aria-label={
-              options.alwaysExpanded
-                ? `${label} 위치 이동`
-                : isCollapsed
-                  ? `${label} 열기 및 위치 이동`
-                  : `${label} 접기 및 위치 이동`
-            }
-            title={`${label} 위치 이동`}
-            onPointerDown={(event) => handleFloatingOverlayPointerDown(overlayId, event)}
-            onPointerMove={handleFloatingOverlayPointerMove}
-            onPointerUp={finishDrag}
-            onPointerCancel={cancelFloatingOverlayDrag}
-            onKeyDown={(event) => {
-              if (options.alwaysExpanded || !setCollapsed || (event.key !== 'Enter' && event.key !== ' ')) {
-                return;
+          <div className="w-full min-w-0 overflow-hidden">
+            <button
+              type="button"
+              className="flex h-8 w-full items-center justify-between gap-3 bg-white px-3 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+              aria-label={
+                options.alwaysExpanded
+                  ? label
+                  : isCollapsed
+                    ? `${label} 열기`
+                    : `${label} 접기`
               }
+              title={label}
+              onClick={(event) => {
+                if (options.alwaysExpanded || !setCollapsed) {
+                  return;
+                }
 
-              event.preventDefault();
-              event.stopPropagation();
-              setCollapsed((current) => !current);
-            }}
-            onLostPointerCapture={(event) => {
-              const dragState = floatingOverlayDragStateRef.current;
+                event.preventDefault();
+                event.stopPropagation();
+                setCollapsed((current) => !current);
+              }}
+              onKeyDown={(event) => {
+                if (options.alwaysExpanded || !setCollapsed || (event.key !== 'Enter' && event.key !== ' ')) {
+                  return;
+                }
 
-              if (dragState?.pointerId === event.pointerId) {
-                const activeOverlayId = dragState.overlayId;
-                floatingOverlayDragStateRef.current = null;
-                setFloatingOverlayQuadrantGuide(null);
-                resetFloatingOverlayDirectDragStyle(activeOverlayId);
-              }
-            }}
-          >
-            <span className="flex items-center gap-1.5">
-              <GripHorizontal className="h-3 w-3 rotate-90 text-slate-400" aria-hidden="true" />
-              <span className={isCollapsed ? 'whitespace-nowrap' : undefined}>{label}</span>
-            </span>
-            {options.alwaysExpanded ? null : isCollapsed ? (
-              <ChevronDown className="h-3 w-3 text-slate-500" aria-hidden="true" />
-            ) : (
-              <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
-            )}
-          </button>
-          {isCollapsed && !options.keepMountedWhenCollapsed ? null : (
-            <div
-              className={
-                isCollapsed
-                  ? 'hidden'
-                  : overlayId === 'style'
-                    ? 'flex w-full max-w-full flex-col items-stretch gap-2.5 p-2'
-                    : overlayId === 'sizeType'
-                      ? 'max-w-full p-2'
-                      : 'max-h-[min(26rem,calc(100vh-14rem))] overflow-auto p-2'
-              }
-              aria-hidden={isCollapsed}
+                event.preventDefault();
+                event.stopPropagation();
+                setCollapsed((current) => !current);
+              }}
             >
-              {contentRenderer ? contentRenderer() : (content as React.ReactNode)}
-            </div>
-          )}
+              <span className="min-w-0 truncate">{label}</span>
+              {options.alwaysExpanded ? null : isCollapsed ? (
+                <ChevronDown className="h-3 w-3 text-slate-500" aria-hidden="true" />
+              ) : (
+                <ChevronUp className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
+              )}
+            </button>
+            {isCollapsed ? null : (
+              <div
+                data-template-overlay-rail-content="true"
+                className={
+                  overlayId === 'style'
+                    ? 'flex w-full max-w-full flex-col items-stretch gap-2.5 bg-slate-100 px-3 py-2.5'
+                    : overlayId === 'sizeType'
+                      ? 'max-w-full bg-slate-100 px-3 py-2.5'
+                      : 'bg-slate-100 px-3 py-2.5'
+                }
+                aria-hidden="false"
+              >
+                {contentRenderer ? contentRenderer() : (content as React.ReactNode)}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    );
+      ),
+    };
   };
 
   if (!renderedPreviewHtml) {
@@ -963,137 +929,133 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     );
   }
 
+  const positionOverlayRailSections =
+    selectionPanelTab === 'position'
+      ? compactOverlayRailSections([
+          renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
+          renderFloatingOverlaySection(
+            'style',
+            styleOverlayLabel,
+            styleOverlayCollapsed,
+            setStyleOverlayCollapsed,
+            finishStyleOverlayDrag,
+            styleOverlay,
+            { expandedWidthClassName: 'w-[250px] max-w-[250px]', keepMountedWhenCollapsed: true }
+          ),
+          renderFloatingOverlaySection(
+            'sizeType',
+            '상자 크기 타입',
+            sizeTypeOverlayCollapsed,
+            setSizeTypeOverlayCollapsed,
+            finishSizeTypeOverlayDrag,
+            sizeTypeOverlay,
+            { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
+          ),
+          renderFloatingOverlaySection(
+            'textStyle',
+            '텍스트 스타일',
+            textStyleOverlayCollapsed,
+            setTextStyleOverlayCollapsed,
+            finishTextStyleOverlayDrag,
+            textStyleOverlay,
+            {
+              expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]',
+              keepMountedWhenCollapsed: true,
+            }
+          ),
+          renderFloatingOverlaySection(
+            'action',
+            actionOverlayLabel,
+            actionOverlayCollapsed,
+            setActionOverlayCollapsed,
+            finishActionOverlayDrag,
+            actionOverlay,
+            {
+              expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
+              keepMountedWhenCollapsed: true,
+            }
+          ),
+        ])
+      : [];
+  const metadataOverlayRailSections =
+    selectionPanelTab === 'metadata'
+      ? compactOverlayRailSections([
+          renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
+          renderFloatingOverlaySection(
+            'metadataRolePrimary',
+            '상자 역할 - 1',
+            metadataRolePrimaryOverlayCollapsed,
+            setMetadataRolePrimaryOverlayCollapsed,
+            finishMetadataRolePrimaryOverlayDrag,
+            metadataRolePrimaryOverlay,
+            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+          ),
+          renderFloatingOverlaySection(
+            'metadataRoleSecondary',
+            '상자 역할 - 2',
+            metadataRoleSecondaryOverlayCollapsed,
+            setMetadataRoleSecondaryOverlayCollapsed,
+            finishMetadataRoleSecondaryOverlayDrag,
+            metadataRoleSecondaryOverlay,
+            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+          ),
+          renderFloatingOverlaySection(
+            'metadataRoleTertiary',
+            '상자 연결',
+            metadataRoleTertiaryOverlayCollapsed,
+            setMetadataRoleTertiaryOverlayCollapsed,
+            finishMetadataRoleTertiaryOverlayDrag,
+            metadataRoleTertiaryOverlay,
+            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+          ),
+        ])
+      : [];
+  const overlayRailSections = selectionPanelTab === 'metadata' ? metadataOverlayRailSections : positionOverlayRailSections;
+  const hasOverlayRail = editSettingsPanelVisible && overlayRailSections.length > 0;
+  const overlayRailContent = overlayRailSections.map((section) => section.node);
+
   return (
     <CardContent
       ref={surfaceShellRef}
       className={`relative min-h-0 overflow-hidden bg-slate-200 p-0 ${canvasFullscreen ? 'flex-1' : 'h-[70vh] max-h-[70vh]'}`}
     >
-      <div
-        ref={setPreviewSurfaceNode}
-        className="template-edit-preview template-extract-draft-preview template-extract-preview-surface h-full max-h-full bg-slate-200 template-clone template-clone--raster-first-v2-structured"
-        data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
-        data-canvas-icon-scale={canvasIconScale}
-        data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
-        data-space-pan-dragging={spacePanDragging ? 'true' : 'false'}
-        data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
-        data-template-usage-preview-mode={templateUsagePreviewMode ? 'true' : 'false'}
-        data-selection-panel-tab={selectionPanelTab}
-        data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
-        onPointerDownCapture={handlePreviewPointerDown}
-        onPointerMoveCapture={handlePreviewPointerMove}
-        onPointerUpCapture={handlePreviewPointerUp}
-        onPointerCancelCapture={handlePreviewPointerCancel}
-        onLostPointerCaptureCapture={handlePreviewLostPointerCapture}
-        onClickCapture={handlePreviewClickCapture}
-        onInput={handlePreviewInput}
-        dangerouslySetInnerHTML={renderedPreviewMarkup}
-      />
-      {selectionPanelTab === 'position' && floatingOverlayQuadrantGuide ? (
-        <div
-          className="pointer-events-none absolute z-[60]"
-          style={{
-            left: `${floatingOverlayQuadrantGuide.left}px`,
-            top: `${floatingOverlayQuadrantGuide.top}px`,
-            width: `${floatingOverlayQuadrantGuide.width}px`,
-            height: `${floatingOverlayQuadrantGuide.height}px`,
-          }}
-        >
+      <div className="flex h-full min-h-0 w-full">
+        <div className="min-w-0 flex-1">
           <div
-            className="grid h-full w-full grid-cols-2 grid-rows-2"
-            style={{
-              padding: `${SUMMARY_OVERLAY_INSET_PX}px`,
-              gap: `${FLOATING_OVERLAY_STACK_GAP_PX}px`,
-            }}
-          >
-            {(
-              [
-                ['top-left', 'row-start-1 col-start-1'],
-                ['top-right', 'row-start-1 col-start-2'],
-                ['bottom-left', 'row-start-2 col-start-1'],
-                ['bottom-right', 'row-start-2 col-start-2'],
-              ] as const
-            ).map(([corner, positionClassName]) => (
-              <div
-                key={corner}
-                className={`rounded-lg transition-colors ${
-                  floatingOverlayQuadrantGuide.activeCorner === corner ? 'bg-sky-500/10' : 'bg-sky-500/[0.03]'
-                } ${positionClassName}`}
-              />
-            ))}
-          </div>
+            ref={setPreviewSurfaceNode}
+            className="template-edit-preview template-extract-draft-preview template-extract-preview-surface h-full max-h-full bg-slate-200 template-clone template-clone--raster-first-v2-structured"
+            data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
+            data-canvas-icon-scale={canvasIconScale}
+            data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
+            data-space-pan-dragging={spacePanDragging ? 'true' : 'false'}
+            data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
+            data-template-usage-preview-mode={templateUsagePreviewMode ? 'true' : 'false'}
+            data-selection-panel-tab={selectionPanelTab}
+            data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
+            onPointerDownCapture={handlePreviewPointerDown}
+            onPointerMoveCapture={handlePreviewPointerMove}
+            onPointerUpCapture={handlePreviewPointerUp}
+            onPointerCancelCapture={handlePreviewPointerCancel}
+            onLostPointerCaptureCapture={handlePreviewLostPointerCapture}
+            onClickCapture={handlePreviewClickCapture}
+            onInput={handlePreviewInput}
+            dangerouslySetInnerHTML={renderedPreviewMarkup}
+          />
         </div>
-      ) : null}
-      {renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay)}
-      {renderFloatingOverlaySection(
-        'style',
-        styleOverlayLabel,
-        styleOverlayCollapsed,
-        setStyleOverlayCollapsed,
-        finishStyleOverlayDrag,
-        styleOverlay,
-        { expandedWidthClassName: 'w-[250px] max-w-[250px]', keepMountedWhenCollapsed: true }
-      )}
-      {renderFloatingOverlaySection(
-        'sizeType',
-        '상자 크기 타입',
-        sizeTypeOverlayCollapsed,
-        setSizeTypeOverlayCollapsed,
-        finishSizeTypeOverlayDrag,
-        sizeTypeOverlay,
-        { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
-      )}
-      {renderFloatingOverlaySection(
-        'textStyle',
-        '텍스트 스타일',
-        textStyleOverlayCollapsed,
-        setTextStyleOverlayCollapsed,
-        finishTextStyleOverlayDrag,
-        textStyleOverlay,
-        {
-          expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]',
-          keepMountedWhenCollapsed: true,
-        }
-      )}
-      {renderFloatingOverlaySection(
-        'metadataName',
-        '상자명',
-        metadataNameOverlayCollapsed,
-        setMetadataNameOverlayCollapsed,
-        finishMetadataNameOverlayDrag,
-        metadataNameOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection(
-        'metadataRolePrimary',
-        '상자 역할 - 1',
-        metadataRolePrimaryOverlayCollapsed,
-        setMetadataRolePrimaryOverlayCollapsed,
-        finishMetadataRolePrimaryOverlayDrag,
-        metadataRolePrimaryOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection(
-        'metadataRoleSecondary',
-        '상자 역할 - 2',
-        metadataRoleSecondaryOverlayCollapsed,
-        setMetadataRoleSecondaryOverlayCollapsed,
-        finishMetadataRoleSecondaryOverlayDrag,
-        metadataRoleSecondaryOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection(
-        'metadataRoleTertiary',
-        '상자 연결',
-        metadataRoleTertiaryOverlayCollapsed,
-        setMetadataRoleTertiaryOverlayCollapsed,
-        finishMetadataRoleTertiaryOverlayDrag,
-        metadataRoleTertiaryOverlay,
-        { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-      )}
-      {renderFloatingOverlaySection('action', actionOverlayLabel, actionOverlayCollapsed, setActionOverlayCollapsed, finishActionOverlayDrag, actionOverlay, {
-        expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
-        keepMountedWhenCollapsed: true,
-      })}
+        {hasOverlayRail ? (
+          <aside
+            className="h-full w-[300px] shrink-0 overflow-y-auto border-l border-slate-300 bg-white p-0"
+            data-template-overlay-rail="true"
+            aria-label="상자 편집 패널"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex min-h-0 flex-col" data-template-overlay-rail-items="true">
+              {overlayRailContent}
+            </div>
+          </aside>
+        ) : null}
+      </div>
     </CardContent>
   );
 });

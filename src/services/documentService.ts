@@ -1070,7 +1070,7 @@ export const DocumentService = {
     if (!queryDebug.templateLink && templateLink?.templateId) {
       const { data: templateRegistryData, error: templateRegistryError } = await templatesSchema(client)
         .from('template_registry')
-        .select('id, template_name, current_revision_id')
+        .select('id, template_name, draft_html, current_revision_id')
         .eq('id', templateLink.templateId)
         .single();
 
@@ -1098,6 +1098,7 @@ export const DocumentService = {
               currentRevisionId: templateRegistry.current_revision_id,
               resolvedRevisionId: revision.id,
               resolvedRevisionNumber: revision.revision_number,
+              draftHtml: templateRegistry.draft_html,
               renderSnapshotHtml: revision.render_snapshot_html,
             };
           }
@@ -1108,6 +1109,7 @@ export const DocumentService = {
             currentRevisionId: templateRegistry.current_revision_id,
             resolvedRevisionId: null,
             resolvedRevisionNumber: null,
+            draftHtml: templateRegistry.draft_html,
             renderSnapshotHtml: null,
           };
         }

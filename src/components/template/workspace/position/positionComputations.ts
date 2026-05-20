@@ -1311,6 +1311,105 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
     })
     .filter((relation: DefinedPositionRelativeRelation | null): relation is DefinedPositionRelativeRelation => Boolean(relation));
 
+  const fallbackGroupWrapperRelations = (args.positionBoxGroups || [])
+    .map((group: PositionImpactGroup) => {
+      if (!group || group.frameGroupIds.length <= 1 || typeof args.resolvePositionGroupWrapperElement !== 'function') {
+        return null;
+      }
+
+      const targetWrapper = args.resolvePositionGroupWrapperElement(root, group.id) as HTMLElement | null;
+      const targetPageInner = targetWrapper?.closest<HTMLElement>('.page-inner') || null;
+      const targetConfig = targetWrapper
+        ? args.readStoredRelativeAnchorConfig(targetWrapper) || readPartialRelativeAnchorConfig(targetWrapper)
+        : null;
+
+      if (!targetWrapper || !targetPageInner || !targetConfig || targetConfig.anchorKind === 'page-corner') {
+        return null;
+      }
+
+      const targetRect = args.readPositionGroupWrapperRect(root, group.id) || resolveRectFromFrameGroupIds(group.frameGroupIds);
+
+      if (!targetRect) {
+        return null;
+      }
+
+      let anchorKind: DefinedPositionRelativeRelation['anchorKind'] = 'frame';
+      let anchorGroupId = '';
+      let anchorFrameGroupId = '';
+      let anchorFrameGroupIds: string[] = [];
+      let anchorLabel = '';
+      let anchorRect: FrameNodeRect | null = null;
+      const rawAnchorId = String(targetConfig.anchorId || '').trim();
+
+      if (targetConfig.anchorKind === 'group') {
+        const anchorGroup = args.positionBoxGroupById.get(rawAnchorId) || null;
+        if (anchorGroup && anchorGroup.frameGroupIds.length > 1) {
+          anchorKind = 'group';
+          anchorGroupId = anchorGroup.id;
+          anchorFrameGroupIds = anchorGroup.frameGroupIds.slice();
+          anchorLabel = buildGroupLabel(anchorGroup);
+          anchorRect =
+            args.readPositionGroupWrapperRect(root, anchorGroup.id) ||
+            resolveRectFromFrameGroupIds(anchorGroup.frameGroupIds);
+        } else {
+          anchorKind = 'frame';
+          anchorFrameGroupId = rawAnchorId;
+          anchorFrameGroupIds = rawAnchorId ? [rawAnchorId] : [];
+          anchorLabel = buildFrameLabel(rawAnchorId);
+          anchorRect = resolveRectFromFrameGroupIds(anchorFrameGroupIds);
+        }
+      } else {
+        const anchorFrameGroup = args.positionBoxGroupByFrameGroupId.get(rawAnchorId) || null;
+        if (anchorFrameGroup && anchorFrameGroup.frameGroupIds.length > 1) {
+          anchorKind = 'group';
+          anchorGroupId = anchorFrameGroup.id;
+          anchorFrameGroupIds = anchorFrameGroup.frameGroupIds.slice();
+          anchorLabel = buildGroupLabel(anchorFrameGroup);
+          anchorRect =
+            args.readPositionGroupWrapperRect(root, anchorFrameGroup.id) ||
+            resolveRectFromFrameGroupIds(anchorFrameGroup.frameGroupIds);
+        } else {
+          anchorKind = 'frame';
+          anchorFrameGroupId = rawAnchorId;
+          anchorFrameGroupIds = rawAnchorId ? [rawAnchorId] : [];
+          anchorLabel = buildFrameLabel(rawAnchorId);
+          anchorRect = resolveRectFromFrameGroupIds(anchorFrameGroupIds);
+        }
+      }
+
+      const anchorEntityId = anchorKind === 'group' ? anchorGroupId : anchorFrameGroupId;
+      const relationKey = `group:${group.id}:configured:${group.id}:${anchorKind}:${anchorEntityId}`;
+
+      if (!group.id || !anchorEntityId || group.id === anchorEntityId || !anchorRect || seenRelationKeys.has(relationKey)) {
+        return null;
+      }
+
+      seenRelationKeys.add(relationKey);
+      const gapYPx =
+        targetConfig.anchorY === 'bottom'
+          ? Math.round(targetRect.top - (anchorRect.top + anchorRect.height))
+          : Math.round(anchorRect.top - (targetRect.top + targetRect.height));
+
+      return {
+        key: relationKey,
+        targetKind: 'group',
+        targetGroupId: group.id,
+        targetLabel: buildGroupLabel(group),
+        targetFrameGroupIds: group.frameGroupIds.slice(),
+        targetConfiguredFrameGroupIds: group.frameGroupIds.slice(),
+        relationConfiguredFrameGroupIds: group.frameGroupIds.slice(),
+        anchorKind,
+        anchorLabel: anchorLabel || anchorEntityId,
+        anchorPageCornerId: '',
+        anchorGroupId,
+        anchorFrameGroupId,
+        anchorFrameGroupIds,
+        anchorY: targetConfig.anchorY,
+        gapYPx,
+      } as DefinedPositionRelativeRelation;
+    })
+    .filter((relation: DefinedPositionRelativeRelation | null): relation is DefinedPositionRelativeRelation => Boolean(relation));
+
   const expandedBaseRelations = baseRelations
     .flatMap((relation: DefinedPositionRelativeRelation) => {
       const configuredFrameGroupIds = (
@@ -1348,7 +1447,7 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
       return true;
     });
 
-  const rawRelations = [...fallbackRelations, ...expandedBaseRelations];
+  const rawRelations = [...fallbackGroupWrapperRelations, ...fallbackRelations, ...expandedBaseRelations];
   const parentGroupIdByChildGroupId = new Map<string, string>();
   args.positionBoxGroups.forEach((group: PositionImpactGroup) => {
     (group.childGroupIds || []).forEach((childGroupId) => {
@@ -1563,6 +1662,32 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
 
     return (leftRect?.top || 0) - (rightRect?.top || 0);
   });
+  const buildRelationEntityPairKey = (relation: DefinedPositionRelativeRelation) => {
+    const targetEntityId = relation.targetKind === 'group'
+      ? relation.targetGroupId.trim()
+      : (
+          relation.targetFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+          relation.targetConfiguredFrameGroupIds.find((frameGroupId) => Boolean(frameGroupId.trim())) ||
+          ''
+        ).trim();
+    const anchorEntityId = relation.anchorKind === 'group'
+      ? relation.anchorGroupId.trim()
+      : relation.anchorKind === 'frame'
+        ? relation.anchorFrameGroupId.trim()
+        : '';
+
+    return [targetEntityId ? `${relation.targetKind}:${targetEntityId}` : '', anchorEntityId ? `${relation.anchorKind}:${anchorEntityId}` : '']
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, 'ko'))
+      .join('<->');
+  };
+  const simplifiedRelationEntityPairKeys = new Set(
+    simplifiedRelations.map(buildRelationEntityPairKey).filter(Boolean)
+  );
+  const directWrapperRelations = fallbackGroupWrapperRelations.filter((relation) => {
+    const relationPairKey = buildRelationEntityPairKey(relation);
+    return Boolean(relationPairKey) && !simplifiedRelationEntityPairKeys.has(relationPairKey);
+  });
   const coveredConfiguredFrameGroupIds = new Set(
     simplifiedRelations.flatMap((relation) =>
       relation.relationConfiguredFrameGroupIds && relation.relationConfiguredFrameGroupIds.length > 0
@@ -1602,5 +1727,5 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
     return hasUnresolvedAnchor || hasUnresolvedTarget;
   });
 
-  return [...simplifiedRelations, ...unresolvedBaseRelations];
+  return [...simplifiedRelations, ...directWrapperRelations, ...unresolvedBaseRelations];
 };

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Badge } from '../components/ui/Badge';
+import { cn } from '../lib/utils';
 
 const pageGroups = [
   {
@@ -110,6 +111,35 @@ const pageGroups = [
   },
 ];
 
+type HomePageStatusVariant = 'blue' | 'green' | 'amber' | 'slate' | 'red';
+
+const resolvePageStatusVariant = (page: {
+  status: string;
+  statusVariant?: HomePageStatusVariant;
+}): HomePageStatusVariant => {
+  if (page.statusVariant) {
+    return page.statusVariant;
+  }
+
+  if (page.status === '완료') {
+    return 'blue';
+  }
+
+  if (page.status === '구현중' || page.status === '진행중') {
+    return 'amber';
+  }
+
+  return 'green';
+};
+
+const pageCardToneClassNameByVariant: Record<HomePageStatusVariant, string> = {
+  blue: 'border-blue-200 bg-blue-50/70 hover:border-blue-300 hover:bg-blue-50',
+  green: 'border-emerald-200 bg-emerald-50/70 hover:border-emerald-300 hover:bg-emerald-50',
+  amber: 'border-amber-200 bg-amber-50/75 hover:border-amber-300 hover:bg-amber-50',
+  slate: 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-50',
+  red: 'border-rose-200 bg-rose-50/70 hover:border-rose-300 hover:bg-rose-50',
+};
+
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-white">
@@ -134,25 +164,32 @@ export default function HomePage() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {group.pages.map((page) => (
-                  <Link
-                    key={page.href}
-                    href={page.href}
-                    className="flex min-h-[180px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 transition-colors hover:bg-slate-50"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Badge variant={page.statusVariant || 'green'}>{page.status}</Badge>
-                        <span className="text-xs text-slate-500">{page.href}</span>
+                {group.pages.map((page) => {
+                  const statusVariant = resolvePageStatusVariant(page);
+
+                  return (
+                    <Link
+                      key={page.href}
+                      href={page.href}
+                      className={cn(
+                        'flex min-h-[180px] flex-col justify-between rounded-2xl p-5 transition-colors',
+                        pageCardToneClassNameByVariant[statusVariant]
+                      )}
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Badge variant={statusVariant}>{page.status}</Badge>
+                          <span className="text-xs text-slate-500">{page.href}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-xl font-semibold text-slate-950">{page.title}</h3>
+                          <p className="text-sm text-slate-600">{page.summary}</p>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <h3 className="text-xl font-semibold text-slate-950">{page.title}</h3>
-                        <p className="text-sm text-slate-600">{page.summary}</p>
-                      </div>
-                    </div>
-                    <div className="pt-4 text-sm font-medium text-slate-900">페이지 열기</div>
-                  </Link>
-                ))}
+                      <div className="pt-4 text-sm font-medium text-slate-900">페이지 열기</div>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           ))}

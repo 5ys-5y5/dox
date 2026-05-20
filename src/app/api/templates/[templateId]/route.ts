@@ -9,9 +9,24 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   try {
     const { templateId } = await context.params;
+    const url = new URL(request.url);
+
+    if (url.searchParams.get('deleteImpact') === '1') {
+      const deleteImpact = await TemplateService.getTemplateDeleteImpact(templateId);
+
+      return NextResponse.json(
+        { success: true, data: deleteImpact },
+        {
+          headers: {
+            'Cache-Control': 'no-store, max-age=0',
+          },
+        }
+      );
+    }
+
     const templateDetail = await TemplateService.getTemplate(templateId);
 
     // TEMPLATE_DETAIL_NO_CACHE_REQUIRED

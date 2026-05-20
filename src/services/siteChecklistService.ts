@@ -127,6 +127,7 @@ const SIGNING_DB_SCHEMA = 'signing';
 const EXPORTS_DB_SCHEMA = 'exports';
 const MESSAGING_DB_SCHEMA = 'messaging';
 const BULK_OPS_DB_SCHEMA = 'bulk_ops';
+const MEMBER_ACCESS_DB_SCHEMA = 'member_access';
 
 // SITES_SCHEMA_BOUNDARY
 // 현장 체크리스트 도메인 테이블은 public이 아니라 sites 스키마만 사용합니다.
@@ -146,6 +147,7 @@ const signingSchema = (client = getSupabase()) => client.schema(SIGNING_DB_SCHEM
 const exportsSchema = (client = getSupabase()) => client.schema(EXPORTS_DB_SCHEMA);
 const messagingSchema = (client = getSupabase()) => client.schema(MESSAGING_DB_SCHEMA);
 const bulkOpsSchema = (client = getSupabase()) => client.schema(BULK_OPS_DB_SCHEMA);
+const memberAccessSchema = (client = getSupabase()) => client.schema(MEMBER_ACCESS_DB_SCHEMA);
 
 const normalizeTradeKeys = (tradeKeys?: string[] | null) => {
   if (!Array.isArray(tradeKeys) || tradeKeys.length === 0) {
@@ -275,6 +277,23 @@ const countRows = async (
   return count || 0;
 };
 
+const countRowsBestEffort = async (
+  queryPromise: PromiseLike<{
+    count: number | null;
+    error: { message: string } | null;
+  }>,
+  warningPrefix: string
+) => {
+  const { count, error } = await queryPromise;
+
+  if (error) {
+    console.warn(`${warningPrefix}: ${error.message}`);
+    return 0;
+  }
+
+  return count || 0;
+};
+
 const describeCounts = (items: Array<[label: string, count: number]>) => {
   return items
     .filter(([, count]) => count > 0)
@@ -361,6 +380,7 @@ const buildSiteDeletionContext = async (siteId: string): Promise<SiteDeletionCon
   const exportsClient = exportsSchema(client);
   const messagingClient = messagingSchema(client);
   const bulkClient = bulkOpsSchema(client);
+  const memberAccessClient = memberAccessSchema(client);
 
   const [
     siteResponse,
@@ -369,6 +389,7 @@ const buildSiteDeletionContext = async (siteId: string): Promise<SiteDeletionCon
     checklistSnapshotCount,
     checklistItemCount,
     photoRequirementCount,
+    siteMembershipCount,
   ] = await Promise.all([
     getSiteById(normalizedSiteId, client),
     documentsClient.from('document_registry').select('id').eq('site_id', normalizedSiteId),
@@ -387,6 +408,10 @@ const buildSiteDeletionContext = async (siteId: string): Promise<SiteDeletionCon
         .select('*', { count: 'exact', head: true })
         .eq('site_id', normalizedSiteId),
       '현장 삭제 준비 실패: 사진 요구사항 수를 확인할 수 없습니다.'
+    ),
+    countRowsBestEffort(
+      memberAccessClient.from('site_memberships').select('*', { count: 'exact', head: true }).eq('site_id', normalizedSiteId),
+      '현장 삭제 준비 경고: 프로젝트 구성원 접근 권한 수를 확인할 수 없습니다.'
     ),
   ]);
 
@@ -425,6 +450,7 @@ const buildSiteDeletionContext = async (siteId: string): Promise<SiteDeletionCon
     bulkPreviewItemResponse,
     photoAssignmentCount,
     photoSuggestionCount,
+    documentMembershipCount,
   ] = await Promise.all([
     documentIds.length > 0
       ? countRows(
@@ -484,6 +510,15 @@ const buildSiteDeletionContext = async (siteId: string): Promise<SiteDeletionCon
       ? countRows(
           photosClient.from('photo_label_suggestions').select('*', { count: 'exact', head: true }).in('photo_id', photoIds),
           '현장 삭제 준비 실패: 사진 추천 라벨 수를 확인할 수 없습니다.'
+        )
+      : Promise.resolve(0),
+    documentIds.length > 0
+      ? countRowsBestEffort(
+          memberAccessClient
+            .from('document_memberships')
+            .select('*', { count: 'exact', head: true })
+            .in('document_id', documentIds),
+          '현장 삭제 준비 경고: 문서 구성원 접근 권한 수를 확인할 수 없습니다.'
         )
       : Promise.resolve(0),
   ]);
@@ -673,6 +708,15 @@ const buildSiteDeletionContext = async (siteId: string): Promise<SiteDeletionCon
       ])
     ),
     buildDeleteImpactItem('documents', '현장 문서', documentIds.length, '현장에 귀속된 문서 본문과 상태 정보입니다.'),
+    buildDeleteImpactItem(
+      'member-access',
+      '구성원 접근 권한',
+      siteMembershipCount + documentMembershipCount,
+      `${describeCounts([
+        ['프로젝트 접근 권한', siteMembershipCount],
+        ['문서 접근 권한', documentMembershipCount],
+      ])} 구성원 계정, 전화번호 인증 상태, 다른 프로젝트/문서 접근 권한은 유지됩니다.`
+    ),
     buildDeleteImpactItem(
       'document-files',
       '문서 버전·출력본·첨부 파일',

@@ -10,7 +10,8 @@ type UseCanvasEditorStateSyncOptions = {
   renderedPreviewHtml: string;
   surfaceRenderedPreviewHtml: string;
   selectionPanelTab: string;
-  templateUsagePreviewMode: boolean;
+  templateUsagePreviewActive: boolean;
+  templateUsagePreviewModeAttr: string;
   boxCreationMode: boolean;
   boxCreationPositionMode: string;
   frameEdgeButtonSelector: string;
@@ -34,7 +35,8 @@ export const useCanvasEditorStateSync = ({
   renderedPreviewHtml,
   surfaceRenderedPreviewHtml,
   selectionPanelTab,
-  templateUsagePreviewMode,
+  templateUsagePreviewActive,
+  templateUsagePreviewModeAttr,
   boxCreationMode,
   boxCreationPositionMode,
   frameEdgeButtonSelector,
@@ -49,10 +51,20 @@ export const useCanvasEditorStateSync = ({
   cancelScheduledPreviewEditorState,
   syncPreviewSurfaceScale,
 }: UseCanvasEditorStateSyncOptions) => {
+  const isRuntimePreviewRoot = React.useCallback(
+    (root: HTMLElement | null | undefined) =>
+      Boolean(root && (templateUsagePreviewActive || root.getAttribute(templateUsagePreviewModeAttr) === 'true')),
+    [templateUsagePreviewActive, templateUsagePreviewModeAttr]
+  );
+
   React.useEffect(() => {
     const root = previewRef.current;
 
     if (!root || !renderedPreviewHtml || typeof window === 'undefined') {
+      return;
+    }
+
+    if (isRuntimePreviewRoot(root)) {
       return;
     }
 
@@ -65,7 +77,7 @@ export const useCanvasEditorStateSync = ({
     let cancelled = false;
 
     const applyInitialEditorAutoSize = () => {
-      if (templateUsagePreviewMode) {
+      if (isRuntimePreviewRoot(root)) {
         return;
       }
 
@@ -78,7 +90,7 @@ export const useCanvasEditorStateSync = ({
         materializePositionGroups: false,
         recordHistory: false,
         updatePreviewDomVersion: false,
-        updateRenderedHtml: false,
+        updateRenderedHtml: true,
       });
       requestPreviewTextFit();
     };
@@ -123,6 +135,7 @@ export const useCanvasEditorStateSync = ({
     cancelScheduledPreviewEditorState,
     draftPreviewHtmlRef,
     frameEdgeButtonSelector,
+    isRuntimePreviewRoot,
     previewEditorStateRetryCountRef,
     previewRef,
     renderedPreviewHtml,
@@ -134,13 +147,18 @@ export const useCanvasEditorStateSync = ({
     templateMetadataRelationRenderSignatureAttr,
     templatePreviewContentStabilizedAttr,
     templatePreviewEditPermissionsTabAttr,
-    templateUsagePreviewMode,
   ]);
 
   React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!root || !renderedPreviewHtml || typeof window === 'undefined' || selectionPanelTab !== 'position') {
+    if (
+      !root ||
+      !renderedPreviewHtml ||
+      typeof window === 'undefined' ||
+      selectionPanelTab !== 'position' ||
+      isRuntimePreviewRoot(root)
+    ) {
       return;
     }
 
@@ -149,6 +167,11 @@ export const useCanvasEditorStateSync = ({
       const liveRoot = previewRef.current;
 
       if (!liveRoot) {
+        return;
+      }
+
+      if (isRuntimePreviewRoot(liveRoot)) {
+        window.clearInterval(timerId);
         return;
       }
 
@@ -168,12 +191,18 @@ export const useCanvasEditorStateSync = ({
     return () => {
       window.clearInterval(timerId);
     };
-  }, [frameEdgeButtonSelector, previewRef, renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
+  }, [frameEdgeButtonSelector, isRuntimePreviewRoot, previewRef, renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
 
   React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!root || !renderedPreviewHtml || typeof window === 'undefined' || selectionPanelTab !== 'position') {
+    if (
+      !root ||
+      !renderedPreviewHtml ||
+      typeof window === 'undefined' ||
+      selectionPanelTab !== 'position' ||
+      isRuntimePreviewRoot(root)
+    ) {
       return;
     }
 
@@ -192,6 +221,7 @@ export const useCanvasEditorStateSync = ({
     boxCreationMode,
     boxCreationPositionMode,
     frameEdgeButtonSelector,
+    isRuntimePreviewRoot,
     previewRef,
     renderedPreviewHtml,
     schedulePreviewEditorState,
@@ -225,5 +255,5 @@ export const useCanvasEditorStateSync = ({
       window.cancelAnimationFrame(frameId);
       window.removeEventListener('resize', handleWindowResize);
     };
-  }, [pendingPreviewViewportResetRef, previewRef, surfaceRenderedPreviewHtml, syncPreviewSurfaceScale, templateUsagePreviewMode]);
+  }, [pendingPreviewViewportResetRef, previewRef, surfaceRenderedPreviewHtml, syncPreviewSurfaceScale, templateUsagePreviewActive]);
 };

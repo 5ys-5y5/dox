@@ -1,5 +1,6 @@
 'use client';
 
+import type * as React from 'react';
 import type { PositionGroupEditMode } from '../types';
 
 type TemplatePositionActionOverlayProps = {
@@ -19,6 +20,7 @@ type TemplatePositionActionOverlayProps = {
   onStartPositionGroupExcludeMode: () => void;
   onStartPositionGroupIncludeMode: () => void;
   onCancelPositionGroupEditMode: () => void;
+  positionSpacingPanel?: React.ReactNode;
 };
 
 export const TemplatePositionActionOverlay = ({
@@ -38,9 +40,14 @@ export const TemplatePositionActionOverlay = ({
   onStartPositionGroupExcludeMode,
   onStartPositionGroupIncludeMode,
   onCancelPositionGroupEditMode,
+  positionSpacingPanel,
 }: TemplatePositionActionOverlayProps) => {
   const canShowPositionActions = !positionOrderLockSelectionMode && positionGroupEditMode.kind === 'idle';
   const canShowPositionGroupEditMode = !positionOrderLockSelectionMode && positionGroupEditMode.kind !== 'idle';
+
+  if (positionOrderLockSelectionMode) {
+    return positionSpacingPanel ? <div className="space-y-2">{positionSpacingPanel}</div> : null;
+  }
 
   if (!canShowPositionActions && !canShowPositionGroupEditMode) {
     return null;

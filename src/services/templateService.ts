@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { SiteChecklistService } from './siteChecklistService';
 import type {
   TemplateCreateInput,
   TemplateDetailResult,
@@ -17,6 +18,8 @@ import type {
   TemplateSignatureAreaDto,
   TemplateSignatureAreaInput,
   TemplateDeleteResult,
+  TemplateDeleteImpactResult,
+  TemplateDeleteProjectImpactDto,
   TemplateUpdateInput,
   TemplateUpdateResult,
 } from '../lib/templateDtos';
@@ -83,6 +86,17 @@ type TemplateSignatureAreaRow = {
   sort_order: number | null;
 };
 
+type TemplateDeleteDocumentRow = {
+  id: string;
+  site_id: string;
+  document_type_key: string;
+  title: string;
+};
+
+type DocumentTemplateLinkDeleteRow = {
+  document_id: string;
+};
+
 const getSupabase = () => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -95,6 +109,7 @@ const getSupabase = () => {
 };
 
 const TEMPLATES_DB_SCHEMA = 'templates';
+const DOCUMENTS_DB_SCHEMA = 'documents';
 const LAYOUT_RESIZE_MODES: TemplateLayoutResizeMode[] = ['fixed', 'grow_height', 'grow_width'];
 const TEMPLATE_FIELD_TYPES = ['text', 'textarea', 'date', 'number', 'select', 'checkbox', 'signature'] as const;
 
@@ -109,6 +124,7 @@ const TEMPLATE_FIELD_TYPES = ['text', 'textarea', 'date', 'number', 'select', 'c
 // templates 스키마를 읽을 수 있어야 합니다.
 // runtime 에서 Invalid schema: templates 오류가 나오면 pgrst.db_schemas 에 templates 를 추가해야 합니다.
 const templatesSchema = (client = getSupabase()) => client.schema(TEMPLATES_DB_SCHEMA);
+const documentsSchema = (client = getSupabase()) => client.schema(DOCUMENTS_DB_SCHEMA);
 
 const toTemplateRecordDto = (row: TemplateRegistryRow): TemplateRecordDto => ({
   id: row.id,
@@ -276,6 +292,128 @@ const getTemplateById = async (templateId: string) => {
     .maybeSingle();
 
   return { template: data as TemplateRegistryRow | null, error };
+};
+
+const mergeTemplateDeleteDocumentRows = (rows: TemplateDeleteDocumentRow[]) => {
+  const rowsByDocumentId = new Map<string, TemplateDeleteDocumentRow>();
+
+  for (const row of rows) {
+    if (!row.id || rowsByDocumentId.has(row.id)) {
+      continue;
+    }
+
+    rowsByDocumentId.set(row.id, row);
+  }
+
+  return Array.from(rowsByDocumentId.values());
+};
+
+const buildTemplateDeleteImpact = async (templateId: string): Promise<TemplateDeleteImpactResult> => {
+  const normalizedTemplateId = templateId.trim();
+
+  if (!normalizedTemplateId) {
+    throw new Error('템플릿 삭제 영향 조회 실패: templateId가 필요합니다.');
+  }
+
+  const client = getSupabase();
+  const templatesClient = templatesSchema(client);
+  const documentsClient = documentsSchema(client);
+
+  const { data: templateData, error: templateError } = await templatesClient
+    .from('template_registry')
+    .select('*')
+    .eq('id', normalizedTemplateId)
+    .maybeSingle();
+  const template = templateData as TemplateRegistryRow | null;
+
+  if (templateError || !template) {
+    throw new Error(`템플릿 삭제 영향 조회 실패: ${templateError?.message || '템플릿을 찾을 수 없습니다.'}`);
+  }
+
+  const [registryDocumentsResponse, linkResponse] = await Promise.all([
+    documentsClient
+      .from('document_registry')
+      .select('id, site_id, document_type_key, title')
+      .eq('template_id', normalizedTemplateId)
+      .neq('status', 'deleted')
+      .is('deleted_at', null),
+    documentsClient.from('document_template_links').select('document_id').eq('template_id', normalizedTemplateId),
+  ]);
+
+  if (registryDocumentsResponse.error) {
+    throw new Error(
+      `템플릿 삭제 영향 조회 실패: 템플릿 기반 문서 조회 중 오류가 발생했습니다. (${registryDocumentsResponse.error.message})`
+    );
+  }
+
+  if (linkResponse.error) {
+    throw new Error(
+      `템플릿 삭제 영향 조회 실패: 문서-템플릿 연결 조회 중 오류가 발생했습니다. (${linkResponse.error.message})`
+    );
+  }
+
+  const linkedDocumentIds = Array.from(
+    new Set(((linkResponse.data || []) as DocumentTemplateLinkDeleteRow[]).map((row) => row.document_id).filter(Boolean))
+  );
+  const linkedDocumentsResponse =
+    linkedDocumentIds.length > 0
+      ? await documentsClient
+          .from('document_registry')
+          .select('id, site_id, document_type_key, title')
+          .in('id', linkedDocumentIds)
+          .neq('status', 'deleted')
+          .is('deleted_at', null)
+      : { data: [], error: null };
+
+  if (linkedDocumentsResponse.error) {
+    throw new Error(
+      `템플릿 삭제 영향 조회 실패: 연결 문서 상세 조회 중 오류가 발생했습니다. (${linkedDocumentsResponse.error.message})`
+    );
+  }
+
+  const documents = mergeTemplateDeleteDocumentRows([
+    ...((registryDocumentsResponse.data || []) as TemplateDeleteDocumentRow[]),
+    ...((linkedDocumentsResponse.data || []) as TemplateDeleteDocumentRow[]),
+  ]);
+  const documentsBySiteId = documents.reduce<Map<string, TemplateDeleteDocumentRow[]>>((accumulator, document) => {
+    const normalizedSiteId = document.site_id?.trim();
+
+    if (!normalizedSiteId) {
+      return accumulator;
+    }
+
+    const nextDocuments = accumulator.get(normalizedSiteId) || [];
+    nextDocuments.push(document);
+    accumulator.set(normalizedSiteId, nextDocuments);
+    return accumulator;
+  }, new Map<string, TemplateDeleteDocumentRow[]>());
+  const projects: TemplateDeleteProjectImpactDto[] = [];
+
+  for (const [siteId, siteDocuments] of documentsBySiteId.entries()) {
+    const siteImpact = await SiteChecklistService.getDeleteImpact(siteId);
+    projects.push({
+      site: siteImpact.site,
+      documentCount: siteDocuments.length,
+      documents: siteDocuments.map((document) => ({
+        id: document.id,
+        title: document.title,
+        documentTypeKey: document.document_type_key,
+      })),
+      items: siteImpact.items,
+    });
+  }
+
+  return {
+    template: {
+      id: template.id,
+      templateName: template.template_name,
+      sourceDocumentName: template.source_document_name,
+      sourceDocumentId: template.source_document_id,
+    },
+    affectedProjectCount: projects.length,
+    affectedDocumentCount: documents.length,
+    projects,
+  };
 };
 
 const sanitizeTemplateSchemaFrames = (frames?: TemplateSchemaFrameInput[] | null) => {
@@ -704,6 +842,10 @@ export const TemplateService = {
     };
   },
 
+  async getTemplateDeleteImpact(templateId: string): Promise<TemplateDeleteImpactResult> {
+    return buildTemplateDeleteImpact(templateId);
+  },
+
   async updateTemplate(templateId: string, params: TemplateUpdateInput): Promise<TemplateUpdateResult> {
     const normalizedTemplateId = templateId.trim();
 
@@ -799,6 +941,11 @@ export const TemplateService = {
 
     const client = getSupabase();
     const templatesClient = templatesSchema(client);
+    const deleteImpact = await buildTemplateDeleteImpact(normalizedTemplateId);
+
+    for (const project of deleteImpact.projects) {
+      await SiteChecklistService.deleteSite(project.site.id);
+    }
 
     const { error: deleteBindingError } = await templatesClient
       .from('template_label_bindings')
@@ -843,6 +990,9 @@ export const TemplateService = {
 
     return {
       templateId: normalizedTemplateId,
+      deletedProjectCount: deleteImpact.affectedProjectCount,
+      deletedDocumentCount: deleteImpact.affectedDocumentCount,
+      deletedProjects: deleteImpact.projects,
     };
   },
 

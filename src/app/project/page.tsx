@@ -14,7 +14,10 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import { type TemplateEditWorkspaceInitialDraft } from '../../components/template/TemplateEditWorkspace';
+import {
+  materializeTemplateCanvasHtmlForPersistence,
+  type TemplateEditWorkspaceInitialDraft,
+} from '../../components/template/TemplateEditWorkspace';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
 import type { TemplateEditWorkspaceSaveDraftParams } from '../../components/template/workspace/types';
 import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
@@ -25,6 +28,14 @@ import { EntityPicker } from '../../components/ui/EntityPicker';
 import { Input } from '../../components/ui/Input';
 import { MejaiScrollTable, type MejaiScrollTableColumn, type MejaiScrollTableRow } from '../../components/ui/MejaiScrollTable';
 import { MultiEntityPicker } from '../../components/ui/MultiEntityPicker';
+import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
+import {
+  collapseDocumentCanvasWhitespace as collapseWhitespace,
+  extractDocumentCanvasLabelValuesFromHtml as extractDocumentLabelValuesFromHtml,
+  mergeDocumentCanvasLabelValues,
+  materializeDocumentCanvasHtml as materializeDocumentHtml,
+  stringifyDocumentValue,
+} from '../../lib/documentCanvasState';
 import type { DocumentCreateResult, DocumentDeleteResult, DocumentDetailResult, DocumentListItem } from '../../lib/documentDtos';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import type {
@@ -253,8 +264,6 @@ const DOCUMENT_DETAIL_DEBUG_LABELS: Record<keyof ApiErrorDebug, string> = {
   valueEntries: '문서 값',
 };
 
-const collapseWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
-
 const formatPhoneNumber = (value: string | null | undefined) => {
   const digits = (value || '').replace(/[^0-9]/g, '');
 
@@ -350,231 +359,6 @@ function RoleSegmentedButtons<TValue extends string>({
     </div>
   );
 }
-
-const stringifyDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return collapseWhitespace(value);
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const stringifyAttachmentDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const isValueFieldElement = (element: Element) =>
-  element.matches('[data-template-frame-role="value"]') ||
-  element.closest('[data-template-frame-role="value"]') !== null ||
-  element.matches('[data-template-usage-preview-value-box="true"]') ||
-  element.closest('[data-template-usage-preview-value-box="true"]') !== null;
-
-const isAttachmentValueElement = (element: Element) =>
-  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
-  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
-
-const resolveDocumentValueKey = (element: Element) => {
-  const currentElementKey =
-    element.getAttribute('data-template-frame-value-key')?.trim() ||
-    element.getAttribute('data-label')?.trim() ||
-    '';
-
-  if (currentElementKey) {
-    return currentElementKey;
-  }
-
-  const owner =
-    element.closest<HTMLElement>('[data-template-frame-value-key]') ||
-    element.closest<HTMLElement>('[data-label]') ||
-    null;
-
-  if (!owner) {
-    return '';
-  }
-
-  return owner.getAttribute('data-template-frame-value-key')?.trim() || owner.getAttribute('data-label')?.trim() || '';
-};
-
-const readDocumentValueEntryValue = (entry: NonNullable<DocumentDetailResult['valueEntries']>[number]) => {
-  if (entry.valuePayload && typeof entry.valuePayload === 'object' && 'value' in entry.valuePayload) {
-    return entry.valuePayload.value;
-  }
-
-  return entry.displayText;
-};
-
-const setDocumentValueElement = (element: HTMLElement, value: string) => {
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    element.value = value;
-    element.defaultValue = value;
-    element.setAttribute('value', value);
-
-    if (element instanceof HTMLTextAreaElement) {
-      element.textContent = value;
-    }
-
-    if (!value) {
-      element.removeAttribute('placeholder');
-    }
-
-    return;
-  }
-
-  if (element.querySelector('[data-template-frame-input="true"]')) {
-    return;
-  }
-
-  element.textContent = value;
-
-  if (!value) {
-    element.removeAttribute('data-placeholder');
-  }
-};
-
-const materializeDocumentHtmlWithLabelValues = (htmlCanonical: string, labelValues: Record<string, unknown>) => {
-  if (!htmlCanonical.trim() || typeof document === 'undefined') {
-    return htmlCanonical;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = htmlCanonical;
-  container
-    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
-    .forEach((element) => {
-      if (!isValueFieldElement(element)) {
-        return;
-      }
-
-      const valueKey = resolveDocumentValueKey(element);
-
-      if (!valueKey) {
-        return;
-      }
-
-      const value = isAttachmentValueElement(element)
-        ? stringifyAttachmentDocumentValue(labelValues[valueKey])
-        : stringifyDocumentValue(labelValues[valueKey]);
-      setDocumentValueElement(element, value);
-    });
-
-  return container.innerHTML.trim();
-};
-
-const extractDocumentLabelValuesFromHtml = (htmlCanonical: string, fallbackValues: Record<string, unknown>) => {
-  if (!htmlCanonical.trim() || typeof document === 'undefined') {
-    return fallbackValues;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = htmlCanonical;
-  const nextValues = { ...fallbackValues };
-
-  container
-    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
-    .forEach((element) => {
-      if (!isValueFieldElement(element)) {
-        return;
-      }
-
-      const valueKey = resolveDocumentValueKey(element);
-
-      if (!valueKey) {
-        return;
-      }
-
-      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-        nextValues[valueKey] = isAttachmentValueElement(element)
-          ? String(element.value || '').trim()
-          : collapseWhitespace(element.value || '');
-        return;
-      }
-
-      if (element.querySelector('[data-template-frame-input="true"]')) {
-        return;
-      }
-
-      nextValues[valueKey] = isAttachmentValueElement(element)
-        ? String(element.textContent || '').trim()
-        : collapseWhitespace(element.textContent || '');
-    });
-
-  return nextValues;
-};
-
-const isLaterOrSameDateTime = (left: string | null | undefined, right: string | null | undefined) => {
-  if (!left) {
-    return false;
-  }
-
-  if (!right) {
-    return true;
-  }
-
-  const leftTime = new Date(left).getTime();
-  const rightTime = new Date(right).getTime();
-
-  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-    return false;
-  }
-
-  return leftTime >= rightTime;
-};
-
-const resolvePreferredDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-}) => {
-  const linkedRenderHtml = params.linkedRenderHtml?.trim() || '';
-  const latestVersionHtml = params.latestVersionHtml?.trim() || '';
-
-  if (linkedRenderHtml && isLaterOrSameDateTime(params.lastSyncedAt, params.latestVersionCreatedAt)) {
-    return linkedRenderHtml;
-  }
-
-  if (latestVersionHtml) {
-    return latestVersionHtml;
-  }
-
-  return linkedRenderHtml;
-};
-
-const materializeDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-  labelValues: Record<string, unknown>;
-}) => {
-  const preferredHtml = resolvePreferredDocumentHtml(params);
-
-  if (!preferredHtml.trim()) {
-    return '';
-  }
-
-  return materializeDocumentHtmlWithLabelValues(preferredHtml, params.labelValues);
-};
 
 const getDocumentStatusVariant = (status: DocumentListItem['document']['status']) => {
   switch (status) {
@@ -948,14 +732,7 @@ export default function ProjectPage() {
   );
 
   const selectedDocumentValueEntryValues = React.useMemo<Record<string, unknown>>(() => {
-    if (!selectedDocumentDetail?.valueEntries) {
-      return {};
-    }
-
-    return selectedDocumentDetail.valueEntries.reduce<Record<string, unknown>>((accumulator, entry) => {
-      accumulator[entry.valueKey] = readDocumentValueEntryValue(entry);
-      return accumulator;
-    }, {});
+    return mergeDocumentCanvasLabelValues({}, selectedDocumentDetail?.valueEntries || []);
   }, [selectedDocumentDetail?.valueEntries]);
 
   const draftDocumentCount = React.useMemo(
@@ -994,10 +771,9 @@ export default function ProjectPage() {
     }
 
     const materializedHtml = materializeDocumentHtml({
-      linkedRenderHtml: selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
-      lastSyncedAt: selectedDocumentDetail?.templateLink?.lastSyncedAt,
+      linkedRenderHtml:
+        selectedDocumentDetail?.linkedTemplate?.draftHtml || selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
       latestVersionHtml: selectedDocumentVersionSource?.htmlCanonical,
-      latestVersionCreatedAt: selectedDocumentVersionSource?.createdAt,
       labelValues: selectedDocumentLabelValues,
     });
 
@@ -1012,7 +788,7 @@ export default function ProjectPage() {
       'linked-template';
 
     return {
-      draftKey: `${selectedDocumentId}:${draftVersionKey}`,
+      draftKey: `${selectedDocumentId}:${draftVersionKey}:${buildDocumentHtmlContentKey(materializedHtml)}`,
       templateName: selectedDocumentListItem?.document.title || selectedDocumentDetail?.document.title || '현장 문서',
       draftHtml: materializedHtml,
       sourceDocumentName: '',
@@ -1022,6 +798,7 @@ export default function ProjectPage() {
   }, [
     selectedDocumentAttachmentFilesByValueKey,
     selectedDocumentDetail?.linkedTemplate?.resolvedRevisionId,
+    selectedDocumentDetail?.linkedTemplate?.draftHtml,
     selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
     selectedDocumentDetail?.templateLink?.lastSyncedAt,
     selectedDocumentDetail?.templateLink?.lastSyncedRevisionId,
@@ -1109,10 +886,9 @@ export default function ProjectPage() {
     const templateLinkIssue = selectedDocumentQueryDebug?.templateLink?.trim() || '';
     const valueEntriesIssue = selectedDocumentQueryDebug?.valueEntries?.trim() || '';
     const effectiveDocumentHtml = materializeDocumentHtml({
-      linkedRenderHtml: selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
-      lastSyncedAt: selectedDocumentDetail?.templateLink?.lastSyncedAt,
+      linkedRenderHtml:
+        selectedDocumentDetail?.linkedTemplate?.draftHtml || selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
       latestVersionHtml: latestVersion?.htmlCanonical,
-      latestVersionCreatedAt: latestVersion?.createdAt,
       labelValues: selectedDocumentLabelValues,
     }).trim();
     const blockedByFailures = Object.entries(selectedDocumentQueryDebug || {})
@@ -1159,7 +935,7 @@ export default function ProjectPage() {
                 ? detailFailureMessage
                 : '최신 본문 HTML이 없습니다.',
         source: selectedDocumentDetail?.linkedTemplate
-          ? 'template_revisions renderSnapshotHtml + 문서 값'
+          ? 'template draftHtml/renderSnapshotHtml + 문서 값'
           : '문서 목록 latestVersion 또는 문서 상세 응답',
       },
       {
@@ -2486,13 +2262,16 @@ export default function ProjectPage() {
         attachmentApiPath: `/api/documents/${encodeURIComponent(targetDocumentId)}/attachments`,
         attachmentDrafts,
       });
+      const persistedHtml = materializeTemplateCanvasHtmlForPersistence(currentHtml, {
+        attachmentFiles: nextValueFiles,
+      });
       const documentTitle = selectedDocumentDetail?.document.title || selectedDocumentListItem?.document.title || '현장 문서';
 
       const response = await fetch(`/api/documents/${targetDocumentId}/version`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          htmlCanonical: currentHtml,
+          htmlCanonical: persistedHtml,
           labelValues: nextLabelValues,
           valueFiles: nextValueFiles,
           changeReason: 'project-page-edit',

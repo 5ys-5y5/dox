@@ -645,6 +645,14 @@ export type TemplateEditWorkspaceProps = {
   templateNameReadOnly?: boolean;
   saveDisabled?: boolean;
   documentAttachmentApiPath?: string;
+  templateUsagePreviewLayoutDebugOptions?: {
+    stabilizeInitialLayout?: boolean;
+    enableInitialAutoSize?: boolean;
+    preventInitialValueClearShrink?: boolean;
+    preventRuntimeAutoSizeShrink?: boolean;
+    measurePeerClusterHeightTargets?: boolean;
+    measurePeerClusterWidthTargets?: boolean;
+  };
 };
 
 export type TemplateFloatingOverlayContent = React.ReactNode | (() => React.ReactNode);
@@ -659,6 +667,7 @@ export type TemplateEditPreviewSurfaceProps = {
   metadataVisualMode: boolean;
   templateUsagePreviewMode: boolean;
   selectionPanelTab: SelectionPanelTab;
+  editSettingsPanelVisible: boolean;
   showMetadataIcons: boolean;
   actionOverlay?: TemplateFloatingOverlayContent;
   actionOverlayLabel?: string;

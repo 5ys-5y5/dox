@@ -1,10 +1,18 @@
 'use client';
 
 import * as React from 'react';
+import { X } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { type TemplateEditWorkspaceInitialDraft } from '../../components/template/TemplateEditWorkspace';
+import {
+  materializeTemplateCanvasHtmlForPersistence,
+  type TemplateEditWorkspaceInitialDraft,
+} from '../../components/template/TemplateEditWorkspace';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
 import type { TemplateEditWorkspaceSaveDraftParams } from '../../components/template/workspace/types';
+import {
+  TemplateExtractWorkspace,
+  type TemplateExtractWorkspaceStatus,
+} from '../../components/template/TemplateExtractWorkspace';
 import { CanvasOwnedWorkspace } from './ownerPolicy';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -14,7 +22,14 @@ import { EntityPicker, type EntityPickerOption } from '../../components/ui/Entit
 import { Input } from '../../components/ui/Input';
 import { OptionButtonGroup } from '../../components/ui/OptionButtonGroup';
 import { SettingToggleRow } from '../../components/ui/SettingToggleRow';
+import {
+  extractDocumentCanvasLabelValuesFromHtml,
+  mergeDocumentCanvasLabelValues,
+  materializeDocumentCanvasHtml,
+  stringifyDocumentValue,
+} from '../../lib/documentCanvasState';
 import type { DocumentDetailResult, DocumentListItem } from '../../lib/documentDtos';
+import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import type { TemplateRecordDto } from '../../lib/templateDtos';
 
@@ -37,227 +52,6 @@ const fetchSuccessData = async <T,>(url: string): Promise<T> => {
   }
 
   return result.data as T;
-};
-
-const collapseWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
-
-const stringifyDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return collapseWhitespace(value);
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const stringifyAttachmentDocumentValue = (value: unknown) => {
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  return collapseWhitespace(JSON.stringify(value));
-};
-
-const isValueFieldElement = (element: Element) =>
-  element.matches('[data-template-frame-role="value"]') ||
-  element.closest('[data-template-frame-role="value"]') !== null ||
-  element.matches('[data-template-usage-preview-value-box="true"]') ||
-  element.closest('[data-template-usage-preview-value-box="true"]') !== null;
-
-const isAttachmentValueElement = (element: Element) =>
-  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
-  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
-
-const resolveDocumentValueKey = (element: Element) => {
-  const currentElementKey =
-    element.getAttribute('data-template-frame-value-key')?.trim() ||
-    element.getAttribute('data-label')?.trim() ||
-    '';
-
-  if (currentElementKey) {
-    return currentElementKey;
-  }
-
-  const owner =
-    element.closest<HTMLElement>('[data-template-frame-value-key]') ||
-    element.closest<HTMLElement>('[data-label]') ||
-    null;
-
-  if (!owner) {
-    return '';
-  }
-
-  return owner.getAttribute('data-template-frame-value-key')?.trim() || owner.getAttribute('data-label')?.trim() || '';
-};
-
-const readDocumentValueEntryValue = (entry: NonNullable<DocumentDetailResult['valueEntries']>[number]) => {
-  if (entry.valuePayload && typeof entry.valuePayload === 'object' && 'value' in entry.valuePayload) {
-    return entry.valuePayload.value;
-  }
-
-  return entry.displayText;
-};
-
-const setDocumentValueElement = (element: HTMLElement, value: string) => {
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    element.value = value;
-    element.defaultValue = value;
-    element.setAttribute('value', value);
-
-    if (element instanceof HTMLTextAreaElement) {
-      element.textContent = value;
-    }
-
-    if (!value) {
-      element.removeAttribute('placeholder');
-    }
-
-    return;
-  }
-
-  if (element.querySelector('[data-template-frame-input="true"]')) {
-    return;
-  }
-
-  element.textContent = value;
-
-  if (!value) {
-    element.removeAttribute('data-placeholder');
-  }
-};
-
-const materializeDocumentHtmlWithLabelValues = (htmlCanonical: string, labelValues: Record<string, unknown>) => {
-  if (!htmlCanonical.trim() || typeof document === 'undefined') {
-    return htmlCanonical;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = htmlCanonical;
-  container
-    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
-    .forEach((element) => {
-      if (!isValueFieldElement(element)) {
-        return;
-      }
-
-      const valueKey = resolveDocumentValueKey(element);
-
-      if (!valueKey) {
-        return;
-      }
-
-      setDocumentValueElement(
-        element,
-        isAttachmentValueElement(element)
-          ? stringifyAttachmentDocumentValue(labelValues[valueKey])
-          : stringifyDocumentValue(labelValues[valueKey])
-      );
-    });
-
-  return container.innerHTML.trim();
-};
-
-const extractDocumentLabelValuesFromHtml = (htmlCanonical: string, fallbackValues: Record<string, unknown>) => {
-  if (!htmlCanonical.trim() || typeof document === 'undefined') {
-    return fallbackValues;
-  }
-
-  const container = document.createElement('div');
-  container.innerHTML = htmlCanonical;
-  const nextValues = { ...fallbackValues };
-
-  container
-    .querySelectorAll<HTMLElement>('[data-template-frame-input="true"], [data-label], [data-template-frame-value-key]')
-    .forEach((element) => {
-      if (!isValueFieldElement(element)) {
-        return;
-      }
-
-      const valueKey = resolveDocumentValueKey(element);
-
-      if (!valueKey) {
-        return;
-      }
-
-      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-        nextValues[valueKey] = isAttachmentValueElement(element)
-          ? String(element.value || '').trim()
-          : collapseWhitespace(element.value || '');
-        return;
-      }
-
-      nextValues[valueKey] = isAttachmentValueElement(element)
-        ? String(element.textContent || '').trim()
-        : collapseWhitespace(element.textContent || '');
-    });
-
-  return nextValues;
-};
-
-const isLaterOrSameDateTime = (left: string | null | undefined, right: string | null | undefined) => {
-  if (!left || !right) {
-    return Boolean(left) && !right;
-  }
-
-  const leftTime = new Date(left).getTime();
-  const rightTime = new Date(right).getTime();
-
-  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-    return false;
-  }
-
-  return leftTime >= rightTime;
-};
-
-const resolvePreferredDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-}) => {
-  const linkedRenderHtml = params.linkedRenderHtml?.trim() || '';
-  const latestVersionHtml = params.latestVersionHtml?.trim() || '';
-
-  if (linkedRenderHtml && isLaterOrSameDateTime(params.lastSyncedAt, params.latestVersionCreatedAt)) {
-    return linkedRenderHtml;
-  }
-
-  if (latestVersionHtml) {
-    return latestVersionHtml;
-  }
-
-  return linkedRenderHtml;
-};
-
-const materializeDocumentHtml = (params: {
-  linkedRenderHtml?: string | null;
-  lastSyncedAt?: string | null;
-  latestVersionHtml?: string | null;
-  latestVersionCreatedAt?: string | null;
-  labelValues: Record<string, unknown>;
-}) => {
-  const preferredHtml = resolvePreferredDocumentHtml(params);
-
-  if (!preferredHtml.trim()) {
-    return '';
-  }
-
-  return materializeDocumentHtmlWithLabelValues(preferredHtml, params.labelValues);
 };
 
 const formatDateTime = (value: string | null | undefined) => {
@@ -304,12 +98,18 @@ type CanvasOwnerSettings = {
   enableDocumentAttachmentApiPath: boolean;
   limitEditableValueKeys: boolean;
   enableOnTemplateSaved: boolean;
+  stabilizeInitialLayout: boolean;
+  enableRuntimeInitialAutoSize: boolean;
+  preventInitialValueClearShrink: boolean;
+  preventRuntimeAutoSizeShrink: boolean;
+  blockPeerClusterHeightTargets: boolean;
+  blockPeerClusterWidthTargets: boolean;
 };
 
 const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   hideHeader: true,
   hidePersistencePanel: false,
-  templateListDisplay: 'picker',
+  templateListDisplay: 'inline',
   showTopNotice: false,
   showAdditionalControlPanels: false,
   suppressInitialDraftLoadedMessage: true,
@@ -322,6 +122,12 @@ const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   enableDocumentAttachmentApiPath: true,
   limitEditableValueKeys: false,
   enableOnTemplateSaved: true,
+  stabilizeInitialLayout: true,
+  enableRuntimeInitialAutoSize: true,
+  preventInitialValueClearShrink: true,
+  preventRuntimeAutoSizeShrink: false,
+  blockPeerClusterHeightTargets: false,
+  blockPeerClusterWidthTargets: false,
 };
 
 export default function CanvasOwnerPage() {
@@ -339,6 +145,8 @@ export default function CanvasOwnerPage() {
   const [loadingDocumentDetail, setLoadingDocumentDetail] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [ownerEventMessage, setOwnerEventMessage] = React.useState<string | null>(null);
+  const [extractStatus, setExtractStatus] = React.useState<TemplateExtractWorkspaceStatus | null>(null);
+  const [extractStatusResetKey, setExtractStatusResetKey] = React.useState(0);
   const [draftReloadNonce, setDraftReloadNonce] = React.useState(0);
   const [settings, setSettings] = React.useState<CanvasOwnerSettings>(defaultCanvasOwnerSettings);
 
@@ -453,16 +261,13 @@ export default function CanvasOwnerPage() {
       return {};
     }
 
-    const nextValues = {
-      ...(selectedDocumentDetail.latestVersion?.labelValues || {}),
+    return {
+      ...mergeDocumentCanvasLabelValues(
+        selectedDocumentDetail.latestVersion?.labelValues || {},
+        selectedDocumentDetail.valueEntries
+      ),
       ...buildDocumentAttachmentTextByValueKey(selectedDocumentDetail.valueFiles || []),
-    } as Record<string, unknown>;
-
-    selectedDocumentDetail.valueEntries.forEach((entry) => {
-      nextValues[entry.valueKey] = readDocumentValueEntryValue(entry);
-    });
-
-    return nextValues;
+    };
   }, [selectedDocumentDetail]);
 
   const selectedDocumentInitialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
@@ -470,11 +275,10 @@ export default function CanvasOwnerPage() {
       return null;
     }
 
-    const draftHtml = materializeDocumentHtml({
-      linkedRenderHtml: selectedDocumentDetail.linkedTemplate?.renderSnapshotHtml,
-      lastSyncedAt: selectedDocumentDetail.templateLink?.lastSyncedAt || null,
+    const draftHtml = materializeDocumentCanvasHtml({
+      linkedRenderHtml:
+        selectedDocumentDetail.linkedTemplate?.draftHtml || selectedDocumentDetail.linkedTemplate?.renderSnapshotHtml,
       latestVersionHtml: selectedDocumentDetail.latestVersion?.htmlCanonical,
-      latestVersionCreatedAt: selectedDocumentDetail.latestVersion?.createdAt,
       labelValues: selectedDocumentLabelValues,
     });
 
@@ -483,7 +287,7 @@ export default function CanvasOwnerPage() {
     }
 
     return {
-      draftKey: `canvas:${workspaceMode}:${selectedDocumentDetail.document.id}:${selectedDocumentDetail.latestVersion?.id || 'no-version'}:${draftReloadNonce}`,
+      draftKey: `canvas:${workspaceMode}:${selectedDocumentDetail.document.id}:${selectedDocumentDetail.latestVersion?.id || 'no-version'}:${buildDocumentHtmlContentKey(draftHtml)}:${draftReloadNonce}`,
       templateName: selectedDocumentDetail.document.title,
       draftHtml,
       sourceDocumentName: '',
@@ -498,17 +302,20 @@ export default function CanvasOwnerPage() {
         throw new Error('문서를 먼저 선택해 주세요.');
       }
 
-      const nextLabelValues = extractDocumentLabelValuesFromHtml(currentHtml, selectedDocumentLabelValues);
+      const nextLabelValues = extractDocumentCanvasLabelValuesFromHtml(currentHtml, selectedDocumentLabelValues);
       const nextValueFiles = await buildDocumentAttachmentValueFilesForSave({
         attachmentApiPath: `/api/documents/${encodeURIComponent(selectedDocumentDetail.document.id)}/attachments`,
         attachmentDrafts,
+      });
+      const persistedHtml = materializeTemplateCanvasHtmlForPersistence(currentHtml, {
+        attachmentFiles: nextValueFiles,
       });
 
       const response = await fetch(`/api/documents/${encodeURIComponent(selectedDocumentDetail.document.id)}/version`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          htmlCanonical: currentHtml,
+          htmlCanonical: persistedHtml,
           labelValues: nextLabelValues,
           valueFiles: nextValueFiles,
           changeReason: 'canvas-owner-edit',
@@ -551,82 +358,590 @@ export default function CanvasOwnerPage() {
       owner page sample `topNotice`가 켜진 상태입니다. 현재 모드: {workspaceMode}
     </div>
   ) : null;
-  const additionalControlPanels = settings.showAdditionalControlPanels ? (
+  const extractStatusNotice = extractStatus ? (
+    <Card className="border-slate-200 bg-slate-50">
+      <CardContent className="p-4 text-sm text-slate-700">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            {extractStatus.kind === 'approve' ? (
+              <>
+                <p className="font-medium text-slate-950">저장 완료</p>
+                <p>템플릿 ID: {extractStatus.templateId}</p>
+              </>
+            ) : (
+              <p>{extractStatus.message}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="알림 닫기"
+            title="알림 닫기"
+            onClick={() => {
+              setExtractStatus(null);
+              setExtractStatusResetKey((previous) => previous + 1);
+            }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </CardContent>
+    </Card>
+  ) : null;
+  const templateExtractPanel =
+    workspaceMode === 'template' ? (
+      <TemplateExtractWorkspace
+        hideHeader
+        showSaveControls={false}
+        showPreview={false}
+        showStatusSection={false}
+        statusResetKey={extractStatusResetKey}
+        autoSaveOnExtract
+        onAutoSaveComplete={(result) => {
+          updateQuery({ mode: 'template', templateId: result.templateId });
+          setOwnerEventMessage(`PDF 추출 저장 완료: ${result.templateId}`);
+          void loadLists();
+        }}
+        onStatusChange={setExtractStatus}
+      />
+    ) : null;
+  const additionalControlPanels = (
+    <>
+      {templateExtractPanel}
+      {settings.showAdditionalControlPanels ? (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
       <div className="font-medium text-slate-900">additionalControlPanels 샘플</div>
       <p className="mt-1 text-xs leading-5 text-slate-500">
         TemplatePersistencePanel 위에 외부 제어 패널을 삽입하는 public prop 상태를 여기서 확인합니다.
       </p>
     </div>
-  ) : undefined;
+      ) : null}
+    </>
+  );
   const effectiveDocumentAttachmentApiPath =
     settings.enableDocumentAttachmentApiPath && selectedDocumentDetail
       ? `/api/documents/${encodeURIComponent(selectedDocumentDetail.document.id)}/attachments`
       : '';
   const effectiveSaveDisabled =
     workspaceMode === 'read' ? true : settings.saveDisabled || (workspaceMode === 'document' && loadingDocumentDetail);
+  const templateUsagePreviewLayoutDebugOptions = React.useMemo(
+    () => ({
+      stabilizeInitialLayout: settings.stabilizeInitialLayout,
+      enableInitialAutoSize: settings.enableRuntimeInitialAutoSize,
+      preventInitialValueClearShrink: settings.preventInitialValueClearShrink,
+      preventRuntimeAutoSizeShrink: settings.preventRuntimeAutoSizeShrink,
+      measurePeerClusterHeightTargets: !settings.blockPeerClusterHeightTargets,
+      measurePeerClusterWidthTargets: !settings.blockPeerClusterWidthTargets,
+    }),
+    [
+      settings.blockPeerClusterHeightTargets,
+      settings.blockPeerClusterWidthTargets,
+      settings.enableRuntimeInitialAutoSize,
+      settings.preventInitialValueClearShrink,
+      settings.preventRuntimeAutoSizeShrink,
+      settings.stabilizeInitialLayout,
+    ]
+  );
   const canvasConfigRows = [
     {
-      label: '헤더 숨김',
+      sectionKey: 'display',
+      sectionLabel: '표시 영역',
+      label: '워크스페이스 헤더 숨김',
+      definitionName: 'hideHeader',
+      description: '공용 캔버스 내부 제목과 설명 헤더를 렌더링하지 않습니다.',
       checked: settings.hideHeader,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('hideHeader', checked),
     },
     {
-      label: '불러오기 및 저장 숨김',
+      sectionKey: 'display',
+      sectionLabel: '표시 영역',
+      label: '불러오기 및 저장 패널 숨김',
+      definitionName: 'hidePersistencePanel',
+      description: '템플릿 이름, 원본 문서명, 저장 버튼이 포함된 패널을 숨깁니다.',
       checked: settings.hidePersistencePanel,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('hidePersistencePanel', checked),
     },
     {
-      label: 'topNotice 표시',
+      sectionKey: 'display',
+      sectionLabel: '표시 영역',
+      label: '상단 알림 표시',
+      definitionName: 'showTopNotice',
+      description: '공용 워크스페이스 상단의 안내 또는 실행 알림 영역을 표시합니다.',
       checked: settings.showTopNotice,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showTopNotice', checked),
     },
     {
+      sectionKey: 'display',
+      sectionLabel: '표시 영역',
       label: '추가 제어 패널',
+      definitionName: 'showAdditionalControlPanels',
+      description: '기본 툴바 외의 보조 제어 패널을 함께 표시합니다.',
       checked: settings.showAdditionalControlPanels,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showAdditionalControlPanels', checked),
     },
     {
-      label: '초기 draft 안내 억제',
+      sectionKey: 'initialLayout',
+      sectionLabel: '초기 로드/레이아웃',
+      label: '초기 초안 로드 안내 억제',
+      definitionName: 'suppressInitialDraftLoadedMessage',
+      description: '초기 draft 로드 완료 메시지를 사용자 알림으로 출력하지 않습니다.',
       checked: settings.suppressInitialDraftLoadedMessage,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('suppressInitialDraftLoadedMessage', checked),
     },
     {
-      label: '이름 읽기 전용',
+      sectionKey: 'initialLayout',
+      sectionLabel: '초기 로드/레이아웃',
+      label: '초기 레이아웃 안정화',
+      definitionName: 'stabilizeInitialLayout',
+      description: '미리보기 HTML 생성 직후 숨김 측정으로 자동 크기와 peer edge 배치를 먼저 확정합니다.',
+      checked: settings.stabilizeInitialLayout,
+      disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('stabilizeInitialLayout', checked),
+    },
+    {
+      sectionKey: 'initialLayout',
+      sectionLabel: '초기 로드/레이아웃',
+      label: '런타임 초기 자동 크기',
+      definitionName: 'enableRuntimeInitialAutoSize',
+      description: '미리보기 런타임 연결 직후 자동 높이와 자동 너비 계산을 한 번 더 실행합니다.',
+      checked: settings.enableRuntimeInitialAutoSize,
+      disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('enableRuntimeInitialAutoSize', checked),
+    },
+    {
+      sectionKey: 'initialLayout',
+      sectionLabel: '초기 로드/레이아웃',
+      label: '초기 value 제거 축소 방지',
+      definitionName: 'preventInitialValueClearShrink',
+      description: '미리보기 HTML 안정화 중 자동 크기 대상이 아닌 프레임이 예시 value 제거 영향으로 줄어드는 것을 막습니다. 자동 높이/너비 상자는 자체 규칙을 우선합니다.',
+      checked: settings.preventInitialValueClearShrink,
+      disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('preventInitialValueClearShrink', checked),
+    },
+    {
+      sectionKey: 'peerAutoSize',
+      sectionLabel: 'Peer Edge/자동 크기',
+      label: 'peer cluster 높이 측정 차단',
+      definitionName: 'blockPeerClusterHeightTargets',
+      description: '자동 높이 측정 시 같은 peer cluster의 연동 높이 대상을 제외하고 현재 상자 기준으로 계산합니다.',
+      checked: settings.blockPeerClusterHeightTargets,
+      disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('blockPeerClusterHeightTargets', checked),
+    },
+    {
+      sectionKey: 'peerAutoSize',
+      sectionLabel: 'Peer Edge/자동 크기',
+      label: 'peer cluster 너비 측정 차단',
+      definitionName: 'blockPeerClusterWidthTargets',
+      description: '자동 너비 측정 시 같은 peer cluster의 연동 너비 대상을 제외하고 현재 상자 기준으로 계산합니다.',
+      checked: settings.blockPeerClusterWidthTargets,
+      disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('blockPeerClusterWidthTargets', checked),
+    },
+    {
+      sectionKey: 'peerAutoSize',
+      sectionLabel: 'Peer Edge/자동 크기',
+      label: '런타임 자동 크기 축소 차단',
+      definitionName: 'preventRuntimeAutoSizeShrink',
+      description: '입력, 첨부, 서명 이후 자동 크기 재계산에서 음수 delta를 차단합니다. 기본 OFF가 자동 높이 축소/확장 정상 동작입니다.',
+      checked: settings.preventRuntimeAutoSizeShrink,
+      disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('preventRuntimeAutoSizeShrink', checked),
+    },
+    {
+      sectionKey: 'saveInput',
+      sectionLabel: '입력/저장',
+      label: '이름 입력 읽기 전용',
+      definitionName: 'templateNameReadOnly',
+      description: '이름 입력 필드는 표시하되 사용자가 직접 수정할 수 없게 합니다.',
       checked: settings.templateNameReadOnly,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('templateNameReadOnly', checked),
     },
     {
+      sectionKey: 'saveInput',
+      sectionLabel: '입력/저장',
       label: '저장 비활성',
+      definitionName: 'saveDisabled',
+      description: '저장 버튼을 렌더링하지만 클릭할 수 없는 상태로 만듭니다.',
       checked: settings.saveDisabled,
       disabled: workspaceMode === 'read',
       onCheckedChange: (checked: boolean) => updateSetting('saveDisabled', checked),
     },
     {
+      sectionKey: 'documentBinding',
+      sectionLabel: '문서 연동',
       label: '첨부파일 API 연결',
+      definitionName: 'enableDocumentAttachmentApiPath',
+      description: '문서 모드에서 첨부파일 상자가 실제 문서 첨부 API를 사용하게 합니다.',
       checked: settings.enableDocumentAttachmentApiPath,
       disabled: workspaceMode === 'template',
       onCheckedChange: (checked: boolean) => updateSetting('enableDocumentAttachmentApiPath', checked),
     },
     {
-      label: 'editableValueKeys 제한',
+      sectionKey: 'documentBinding',
+      sectionLabel: '문서 연동',
+      label: '편집 가능 value 키 제한',
+      definitionName: 'limitEditableValueKeys',
+      description: '문서 모드에서 전달된 editableValueKeys에 포함된 value 상자만 수정할 수 있게 제한합니다.',
       checked: settings.limitEditableValueKeys,
       disabled: workspaceMode === 'template' || editableValueKeyCandidates.length === 0,
       onCheckedChange: (checked: boolean) => updateSetting('limitEditableValueKeys', checked),
     },
     {
-      label: 'onTemplateSaved 콜백',
+      sectionKey: 'saveInput',
+      sectionLabel: '입력/저장',
+      label: '저장 완료 콜백 연결',
+      definitionName: 'onTemplateSaved',
+      description: '템플릿 저장 성공 시 owner 페이지의 저장 후처리 콜백을 실행합니다.',
       checked: settings.enableOnTemplateSaved,
       disabled: workspaceMode !== 'template',
       onCheckedChange: (checked: boolean) => updateSetting('enableOnTemplateSaved', checked),
     },
   ];
+  const canvasConfigSections = [
+    {
+      key: 'display',
+      label: '표시 영역',
+      description: '공용 캔버스의 헤더, 패널, 알림, 보조 제어 UI 출력 여부입니다.',
+    },
+    {
+      key: 'initialLayout',
+      label: '초기 로드/레이아웃',
+      description: '초기 초안 로드 알림과 미리보기 진입 시 레이아웃 안정화 실행 여부입니다.',
+    },
+    {
+      key: 'peerAutoSize',
+      label: 'Peer Edge/자동 크기',
+      description: '자동 높이와 자동 너비 계산에서 peer cluster 연동 대상을 포함할지 정합니다.',
+    },
+    {
+      key: 'saveInput',
+      label: '입력/저장',
+      description: '이름 입력, 저장 버튼, 저장 완료 콜백의 사용 가능 상태입니다.',
+    },
+    {
+      key: 'documentBinding',
+      label: '문서 연동',
+      description: '문서 모드에서 값 입력 제한과 첨부파일 API 연결 방식을 정합니다.',
+    },
+  ].map((section) => ({
+    ...section,
+    rows: canvasConfigRows.filter((row) => row.sectionKey === section.key),
+  }));
+  const effectiveTemplateWorkspacePropRows = [
+    {
+      section: 'Owner policy',
+      name: 'surface',
+      value: 'canvas',
+      description: 'CanvasOwnedWorkspace가 허용 정책을 검증할 owner surface입니다.',
+    },
+    {
+      section: 'Owner policy',
+      name: 'workspaceMode',
+      value: workspaceMode,
+      description: '공용 캔버스를 템플릿 편집, 문서 기록, 읽기 전용 중 어떤 모드로 여는지 정합니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'initialTemplateId',
+      value: workspaceMode === 'template' ? selectedTemplateId || '-' : '-',
+      description: '템플릿 모드에서 최초로 불러올 템플릿 ID입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'initialDraft',
+      value: selectedDocumentInitialDraft ? selectedDocumentInitialDraft.draftKey : 'null',
+      description: '문서/읽기 모드에서 공용 캔버스에 주입되는 문서 초안입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'editableValueKeys',
+      value: effectiveEditableValueKeys?.length ? effectiveEditableValueKeys.join(', ') : 'null',
+      description: '문서 모드에서 수정 가능한 value 키 목록입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'hideHeader',
+      value: settings.hideHeader ? 'true' : 'false',
+      description: '공용 캔버스 내부 헤더 출력 여부를 제어합니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'hidePersistencePanel',
+      value: settings.hidePersistencePanel ? 'true' : 'false',
+      description: '불러오기 및 저장 패널 출력 여부를 제어합니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'templateListDisplay',
+      value: workspaceMode === 'template' ? settings.templateListDisplay : 'not passed',
+      description: '템플릿 목록을 picker 또는 inline으로 출력합니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'additionalControlPanels',
+      value: templateExtractPanel || settings.showAdditionalControlPanels ? 'enabled' : 'disabled',
+      description: 'PDF 추출 등 외부 제어 패널 주입 여부입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'topNotice',
+      value: settings.showTopNotice ? 'enabled' : 'disabled',
+      description: '공용 캔버스 상단 알림 주입 여부입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'suppressInitialDraftLoadedMessage',
+      value: settings.suppressInitialDraftLoadedMessage ? 'true' : 'false',
+      description: '초기 초안 로드 알림을 억제합니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'headerTitle',
+      value: effectiveHeaderTitle,
+      description: '공용 캔버스 내부 헤더 제목입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'headerDescription',
+      value: effectiveHeaderDescription,
+      description: '공용 캔버스 내부 헤더 설명입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'nameFieldLabel',
+      value: effectiveNameFieldLabel,
+      description: '이름 입력 필드의 라벨입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'saveButtonLabel',
+      value: effectiveSaveButtonLabel,
+      description: '저장 버튼에 표시되는 문구입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'templateNameReadOnly',
+      value: settings.templateNameReadOnly ? 'true' : 'false',
+      description: '이름 입력 필드를 읽기 전용으로 둘지 정합니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'saveDisabled',
+      value: effectiveSaveDisabled ? 'true' : 'false',
+      description: '저장 버튼의 실제 비활성 상태입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'documentAttachmentApiPath',
+      value: effectiveDocumentAttachmentApiPath || '-',
+      description: '문서 모드 첨부파일 API 경로입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'onTemplateSaved',
+      value: workspaceMode === 'template' && settings.enableOnTemplateSaved ? 'enabled' : 'disabled',
+      description: '템플릿 저장 후 owner 페이지 콜백 연결 여부입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'onSaveDraftHtml',
+      value: workspaceMode === 'document' ? 'enabled' : 'disabled',
+      description: '문서 모드 저장 콜백 연결 여부입니다.',
+    },
+    {
+      section: 'templateUsagePreviewLayoutDebugOptions',
+      name: 'stabilizeInitialLayout',
+      value: settings.stabilizeInitialLayout ? 'true' : 'false',
+      description: '미리보기 HTML 생성 직후 숨김 측정으로 자동 크기와 peer edge 배치를 확정합니다.',
+    },
+    {
+      section: 'templateUsagePreviewLayoutDebugOptions',
+      name: 'enableInitialAutoSize',
+      value: settings.enableRuntimeInitialAutoSize ? 'true' : 'false',
+      description: '런타임 연결 직후 자동 크기 계산을 한 번 더 실행합니다.',
+    },
+    {
+      section: 'templateUsagePreviewLayoutDebugOptions',
+      name: 'preventInitialValueClearShrink',
+      value: settings.preventInitialValueClearShrink ? 'true' : 'false',
+      description: '자동 크기 대상이 아닌 프레임의 미리보기 진입 1회성 축소만 차단합니다.',
+    },
+    {
+      section: 'templateUsagePreviewLayoutDebugOptions',
+      name: 'preventRuntimeAutoSizeShrink',
+      value: settings.preventRuntimeAutoSizeShrink ? 'true' : 'false',
+      description: '입력/첨부/서명 이후 런타임 자동 크기 축소를 차단합니다. 기본 OFF입니다.',
+    },
+    {
+      section: 'templateUsagePreviewLayoutDebugOptions',
+      name: 'measurePeerClusterHeightTargets',
+      value: !settings.blockPeerClusterHeightTargets ? 'true' : 'false',
+      description: '자동 높이 측정에서 peer cluster 높이 대상을 포함합니다.',
+    },
+    {
+      section: 'templateUsagePreviewLayoutDebugOptions',
+      name: 'measurePeerClusterWidthTargets',
+      value: !settings.blockPeerClusterWidthTargets ? 'true' : 'false',
+      description: '자동 너비 측정에서 peer cluster 너비 대상을 포함합니다.',
+    },
+  ];
+  const effectiveTemplateWorkspacePropSections = [
+    {
+      key: 'ownerPolicy',
+      sourceSection: 'Owner policy',
+      label: 'Owner 정책',
+      definitionName: 'Owner policy',
+      description: 'CanvasOwnedWorkspace가 공용 캔버스 사용 경로와 모드를 검증하는 값입니다.',
+    },
+    {
+      key: 'workspaceProps',
+      sourceSection: 'TemplateEditWorkspaceProps',
+      label: '워크스페이스 전달값',
+      definitionName: 'TemplateEditWorkspaceProps',
+      description: '공용 캔버스 컴포넌트에 실제로 전달되는 public props입니다.',
+    },
+    {
+      key: 'usagePreviewLayout',
+      sourceSection: 'templateUsagePreviewLayoutDebugOptions',
+      label: '미리보기/자동 크기',
+      definitionName: 'templateUsagePreviewLayoutDebugOptions',
+      description: '미리보기 진입, 자동 높이/너비, peer edge 런타임 계산 옵션입니다.',
+    },
+  ].map((section) => ({
+    ...section,
+    rows: effectiveTemplateWorkspacePropRows.filter((row) => row.section === section.sourceSection),
+  }));
+  const renderCanvasTextSettings = () => (
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="space-y-1">
+        <label className="text-[11px] font-medium text-slate-700">headerTitle</label>
+        <Input className={compactInputClassName} value={settings.headerTitle} onChange={(event) => updateSetting('headerTitle', event.target.value)} />
+      </div>
+      <div className="space-y-1">
+        <label className="text-[11px] font-medium text-slate-700">headerDescription</label>
+        <Input
+          className={compactInputClassName}
+          value={settings.headerDescription}
+          onChange={(event) => updateSetting('headerDescription', event.target.value)}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-[11px] font-medium text-slate-700">nameFieldLabel</label>
+        <Input
+          className={compactInputClassName}
+          value={settings.nameFieldLabel}
+          onChange={(event) => updateSetting('nameFieldLabel', event.target.value)}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-[11px] font-medium text-slate-700">saveButtonLabel</label>
+        <Input
+          className={compactInputClassName}
+          value={settings.saveButtonLabel}
+          onChange={(event) => updateSetting('saveButtonLabel', event.target.value)}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-[11px] font-medium text-slate-700">templateListDisplay</label>
+        <OptionButtonGroup
+          value={settings.templateListDisplay}
+          onChange={(value) => updateSetting('templateListDisplay', value)}
+          options={[
+            { value: 'picker', label: 'picker' },
+            { value: 'inline', label: 'inline' },
+          ]}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-[11px] font-medium text-slate-700">draftKey</label>
+        <Button type="button" variant="outline" className="h-8 w-full px-2 text-[11px]" onClick={() => setDraftReloadNonce((previous) => previous + 1)}>
+          초안 다시 적용
+        </Button>
+      </div>
+    </div>
+  );
+  const renderCanvasConfigSections = () => (
+    <div className="space-y-1.5">
+      {canvasConfigSections.map((section) =>
+        section.rows.length > 0 ? (
+          <div key={section.key} className="space-y-1">
+            <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+              <div className="flex min-w-0 items-baseline gap-1.5">
+                <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">{section.label}</div>
+                <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">{section.description}</div>
+              </div>
+              <span className="shrink-0 text-[9px] font-semibold text-slate-400">
+                {section.rows.length}개
+              </span>
+            </div>
+            <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
+              {section.rows.map((row) => (
+                <SettingToggleRow
+                  key={row.definitionName}
+                  label={row.label}
+                  sectionLabel={row.sectionLabel}
+                  definitionName={row.definitionName}
+                  description={row.description}
+                  checked={row.checked}
+                  disabled={row.disabled}
+                  onCheckedChange={row.onCheckedChange}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null
+      )}
+    </div>
+  );
+  const renderEffectiveTemplateWorkspaceProps = () => (
+    <div className="space-y-1.5">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">전달 prop 전체</div>
+          <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+            CanvasOwnedWorkspace를 거쳐 TemplateEditWorkspace에 실제로 전달되는 effective 값입니다.
+          </div>
+        </div>
+        <span className="shrink-0 text-[9px] font-semibold text-slate-400">{effectiveTemplateWorkspacePropRows.length}개</span>
+      </div>
+      {effectiveTemplateWorkspacePropSections.map((section) =>
+        section.rows.length > 0 ? (
+          <div key={section.key} className="space-y-1">
+            <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+              <div className="flex min-w-0 items-baseline gap-1.5">
+                <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">{section.label}</div>
+                <div className="shrink-0 text-[10px] font-medium leading-3 text-slate-500">{section.definitionName}</div>
+                <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">{section.description}</div>
+              </div>
+              <span className="shrink-0 text-[9px] font-semibold text-slate-400">{section.rows.length}개</span>
+            </div>
+            <div className="grid gap-1 md:grid-cols-2 2xl:grid-cols-3">
+              {section.rows.map((row) => (
+                <div key={`${row.section}:${row.name}`} className="min-w-0 rounded border border-slate-200 px-1.5 py-1 text-[11px] text-slate-700">
+                  <div className="flex min-w-0 items-center gap-1 leading-3">
+                    <span className="min-w-0 truncate font-semibold text-slate-800">{row.name}</span>
+                  </div>
+                  <div className="mt-0.5 truncate text-[10px] font-semibold leading-[11px] text-blue-700" title={row.value}>
+                    {row.value}
+                  </div>
+                  <div className="mt-0.5 truncate text-[10px] leading-[11px] text-slate-500" title={row.description}>
+                    {row.description}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null
+      )}
+    </div>
+  );
 
   return (
     <main className="min-h-screen bg-white">
@@ -652,6 +967,8 @@ export default function CanvasOwnerPage() {
             <CardContent className="p-4 text-sm text-slate-700">{ownerEventMessage}</CardContent>
           </Card>
         ) : null}
+
+        {extractStatusNotice}
 
         <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
           <Card className="border-slate-200">
@@ -679,82 +996,22 @@ export default function CanvasOwnerPage() {
             </CardContent>
           </Card>
 
-          {workspaceMode === 'template' ? (
-            <Card className="border-slate-200">
-              <CardHeader className="space-y-1 p-4 pb-3">
-                <CardTitle className="text-sm">현재 템플릿</CardTitle>
-                <CardDescription className="text-xs leading-5">템플릿 선택 상태와 public prop 설정을 함께 확인합니다.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 p-4 pt-0 text-sm text-slate-700">
-                <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[72px_minmax(0,1fr)]">
-                  <div className="font-medium text-slate-700">이름</div>
-                  <div className="truncate text-slate-900">{selectedTemplateSummary?.templateName || '아직 선택되지 않음'}</div>
-                  <div className="font-medium text-slate-700">ID</div>
-                  <div className="truncate text-slate-500">{selectedTemplateSummary?.id || '-'}</div>
-                </div>
-                <div className="space-y-3">
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">headerTitle</label>
-                      <Input className={compactInputClassName} value={settings.headerTitle} onChange={(event) => updateSetting('headerTitle', event.target.value)} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">headerDescription</label>
-                      <Input
-                        className={compactInputClassName}
-                        value={settings.headerDescription}
-                        onChange={(event) => updateSetting('headerDescription', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">nameFieldLabel</label>
-                      <Input
-                        className={compactInputClassName}
-                        value={settings.nameFieldLabel}
-                        onChange={(event) => updateSetting('nameFieldLabel', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">saveButtonLabel</label>
-                      <Input
-                        className={compactInputClassName}
-                        value={settings.saveButtonLabel}
-                        onChange={(event) => updateSetting('saveButtonLabel', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">templateListDisplay</label>
-                      <OptionButtonGroup
-                        value={settings.templateListDisplay}
-                        onChange={(value) => updateSetting('templateListDisplay', value)}
-                        options={[
-                          { value: 'picker', label: 'picker' },
-                          { value: 'inline', label: 'inline' },
-                        ]}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">초안 다시 적용</label>
-                      <Button type="button" variant="outline" className="h-8 w-full px-2 text-[11px]" onClick={() => setDraftReloadNonce((previous) => previous + 1)}>
-                        draftKey 새로 만들기
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
-                    {canvasConfigRows.map((row) => (
-                      <SettingToggleRow
-                        key={row.label}
-                        label={row.label}
-                        checked={row.checked}
-                        disabled={row.disabled}
-                        onCheckedChange={row.onCheckedChange}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
+	          {workspaceMode === 'template' ? (
+	            <Card className="border-slate-200">
+	              <CardHeader className="space-y-1 p-4 pb-3">
+	                <CardTitle className="text-sm">현재 템플릿</CardTitle>
+	                <CardDescription className="text-xs leading-5">템플릿 선택 상태를 확인합니다.</CardDescription>
+	              </CardHeader>
+	              <CardContent className="space-y-3 p-4 pt-0 text-sm text-slate-700">
+	                <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[72px_minmax(0,1fr)]">
+	                  <div className="font-medium text-slate-700">이름</div>
+	                  <div className="truncate text-slate-900">{selectedTemplateSummary?.templateName || '아직 선택되지 않음'}</div>
+	                  <div className="font-medium text-slate-700">ID</div>
+	                  <div className="truncate text-slate-500">{selectedTemplateSummary?.id || '-'}</div>
+	                </div>
+	              </CardContent>
+	            </Card>
+	          ) : (
             <Card className="border-slate-200">
               <CardHeader className="space-y-1 p-4 pb-3">
                 <CardTitle className="text-sm">문서 선택</CardTitle>
@@ -795,60 +1052,25 @@ export default function CanvasOwnerPage() {
                   </p>
                 )}
 
-                <div className="space-y-3">
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">headerTitle</label>
-                      <Input className={compactInputClassName} value={settings.headerTitle} onChange={(event) => updateSetting('headerTitle', event.target.value)} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">headerDescription</label>
-                      <Input
-                        className={compactInputClassName}
-                        value={settings.headerDescription}
-                        onChange={(event) => updateSetting('headerDescription', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">nameFieldLabel</label>
-                      <Input
-                        className={compactInputClassName}
-                        value={settings.nameFieldLabel}
-                        onChange={(event) => updateSetting('nameFieldLabel', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">saveButtonLabel</label>
-                      <Input
-                        className={compactInputClassName}
-                        value={settings.saveButtonLabel}
-                        onChange={(event) => updateSetting('saveButtonLabel', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-medium text-slate-700">초안 다시 적용</label>
-                      <Button type="button" variant="outline" className="h-8 w-full px-2 text-[11px]" onClick={() => setDraftReloadNonce((previous) => previous + 1)}>
-                        draftKey 새로 만들기
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
-                    {canvasConfigRows.map((row) => (
-                      <SettingToggleRow
-                        key={row.label}
-                        label={row.label}
-                        checked={row.checked}
-                        disabled={row.disabled}
-                        onCheckedChange={row.onCheckedChange}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+	              </CardContent>
+	            </Card>
+	          )}
 
-          <div className="space-y-3 xl:col-span-2">
+	          <Card className="border-slate-200 xl:col-span-2">
+	            <CardHeader className="space-y-1 p-4 pb-3">
+	              <CardTitle className="text-sm">상자 편집 캔버스 환경설정</CardTitle>
+	              <CardDescription className="text-xs leading-5">
+	                공용 캔버스에 전달되는 설정과 런타임 옵션을 모두 이 위치에서 확인하고 변경합니다.
+	              </CardDescription>
+	            </CardHeader>
+	            <CardContent className="space-y-3 p-4 pt-0">
+	              {renderCanvasTextSettings()}
+	              {renderCanvasConfigSections()}
+	              {renderEffectiveTemplateWorkspaceProps()}
+	            </CardContent>
+	          </Card>
+
+	          <div className="space-y-3 xl:col-span-2">
             <Divider label="공용 캔버스" className="py-0" />
             {workspaceMode === 'template' ? (
               <CanvasOwnedWorkspace
@@ -866,6 +1088,7 @@ export default function CanvasOwnerPage() {
                 saveButtonLabel={effectiveSaveButtonLabel}
                 templateNameReadOnly={settings.templateNameReadOnly}
                 saveDisabled={effectiveSaveDisabled}
+                templateUsagePreviewLayoutDebugOptions={templateUsagePreviewLayoutDebugOptions}
                 onTemplateSaved={
                   settings.enableOnTemplateSaved
                     ? (template) => setOwnerEventMessage(`onTemplateSaved 콜백: ${template.templateName} (${template.id})`)
@@ -890,6 +1113,7 @@ export default function CanvasOwnerPage() {
                 templateNameReadOnly={settings.templateNameReadOnly}
                 saveDisabled={effectiveSaveDisabled}
                 documentAttachmentApiPath={effectiveDocumentAttachmentApiPath}
+                templateUsagePreviewLayoutDebugOptions={templateUsagePreviewLayoutDebugOptions}
                 onSaveDraftHtml={workspaceMode === 'document' ? handleSaveDocumentDraft : undefined}
               />
             ) : (

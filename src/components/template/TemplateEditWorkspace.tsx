@@ -17,8 +17,13 @@ import type {
   TemplateEdgeSide,
   TemplateEdgeTopologySnapshotDto,
 } from '../../lib/templateEdgeSelectionDtos';
-import type { TemplateDetailResult, TemplateLayoutResizeMode, TemplateRecordDto } from '../../lib/templateDtos';
-import type { DocumentValueFileDto } from '../../lib/documentDtos';
+import type {
+  TemplateDeleteImpactResult,
+  TemplateDetailResult,
+  TemplateLayoutResizeMode,
+  TemplateRecordDto,
+} from '../../lib/templateDtos';
+import type { DocumentValueFileDto, DocumentValueFileInput } from '../../lib/documentDtos';
 import type {
   TemplateFrameBoxKind,
   TemplateFrameResizeDirection,
@@ -76,6 +81,7 @@ import {
 import { useCanvasSelectionActions } from './workspace/selection/useCanvasSelectionActions';
 import {
   deleteTemplateRecord,
+  fetchTemplateDeleteImpact,
   fetchTemplateDetail,
   fetchTemplateList,
   saveTemplateRecord,
@@ -227,6 +233,9 @@ import {
   FRAME_MARQUEE_AUTOSCROLL_MAX_SPEED_PX,
   FRAME_MARQUEE_DRAG_THRESHOLD_PX,
   FRAME_MARQUEE_GHOST_CLASS,
+  EDGE_DRAG_AUTOSNAP_RELEASE_THRESHOLD_PX,
+  EDGE_DRAG_AUTOSNAP_SPAN_TOUCH_TOLERANCE_PX,
+  EDGE_DRAG_AUTOSNAP_THRESHOLD_PX,
   EDGE_DRAG_START_THRESHOLD_PX,
   FRAME_MOVE_DRAG_THRESHOLD_PX,
   FRAME_OUTLINE_OVERLAY_ATTR,
@@ -359,12 +368,22 @@ import {
   FLOATING_OVERLAY_STACK_GAP_PX,
   FRAME_METADATA_DRAFT_FIELD_KEYS,
 } from './workspace/constants';
+const TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR = 'data-template-frame-relative-anchor-group-bottom-gap';
+
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
   if (element.getAttribute(attrName) === nextValue) {
     return;
   }
 
   element.setAttribute(attrName, nextValue);
+};
+
+const setStylePropertyIfChanged = (style: CSSStyleDeclaration, propertyName: string, nextValue: string) => {
+  if (style.getPropertyValue(propertyName) === nextValue) {
+    return;
+  }
+
+  style.setProperty(propertyName, nextValue);
 };
 
 const removeElementAttributeIfPresent = (element: HTMLElement, attrName: string) => {
@@ -1322,10 +1341,10 @@ const materializeFrameBandTableGeometryInContainer = (container: ParentNode) => 
     const shellLeft = parseFramePx(shell.style.left);
     const shellTop = parseFramePx(shell.style.top);
     if (shell.style.left.trim()) {
-      shell.style.left = toFrameCssPx(Math.round(shellLeft));
+      setStylePropertyIfChanged(shell.style, 'left', toFrameCssPx(Math.round(shellLeft)));
     }
     if (shell.style.top.trim()) {
-      shell.style.top = toFrameCssPx(Math.round(shellTop));
+      setStylePropertyIfChanged(shell.style, 'top', toFrameCssPx(Math.round(shellTop)));
     }
 
     const colElements = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
@@ -1335,18 +1354,19 @@ const materializeFrameBandTableGeometryInContainer = (container: ParentNode) => 
       snappedColWidths.forEach((width, index) => {
         const col = colElements[index];
         if (col) {
-          col.style.width = toFrameCssPx(width);
+          setStylePropertyIfChanged(col.style, 'width', toFrameCssPx(width));
           col.removeAttribute('width');
         }
       });
       const tableWidth = snappedColWidths.reduce((sum, width) => sum + width, 0);
-      table.style.width = toFrameCssPx(tableWidth);
-      shell.style.width = toFrameCssPx(tableWidth);
+      setStylePropertyIfChanged(table.style, 'width', toFrameCssPx(tableWidth));
+      setStylePropertyIfChanged(shell.style, 'width', toFrameCssPx(tableWidth));
     } else {
       const shellWidth = parseFramePx(shell.style.width);
       if (shellWidth > 0) {
-        shell.style.width = toFrameCssPx(Math.round(shellWidth));
-        table.style.width = shell.style.width;
+        const nextWidth = toFrameCssPx(Math.round(shellWidth));
+        setStylePropertyIfChanged(shell.style, 'width', nextWidth);
+        setStylePropertyIfChanged(table.style, 'width', nextWidth);
       }
     }
 
@@ -1357,17 +1377,18 @@ const materializeFrameBandTableGeometryInContainer = (container: ParentNode) => 
       snappedRowHeights.forEach((height, index) => {
         const row = rows[index];
         if (row) {
-          row.style.height = toFrameCssPx(height);
+          setStylePropertyIfChanged(row.style, 'height', toFrameCssPx(height));
         }
       });
       const tableHeight = snappedRowHeights.reduce((sum, height) => sum + height, 0);
-      table.style.height = toFrameCssPx(tableHeight);
-      shell.style.height = toFrameCssPx(tableHeight);
+      setStylePropertyIfChanged(table.style, 'height', toFrameCssPx(tableHeight));
+      setStylePropertyIfChanged(shell.style, 'height', toFrameCssPx(tableHeight));
     } else {
       const shellHeight = parseFramePx(shell.style.height);
       if (shellHeight > 0) {
-        shell.style.height = toFrameCssPx(Math.round(shellHeight));
-        table.style.height = shell.style.height;
+        const nextHeight = toFrameCssPx(Math.round(shellHeight));
+        setStylePropertyIfChanged(shell.style, 'height', nextHeight);
+        setStylePropertyIfChanged(table.style, 'height', nextHeight);
       }
     }
   });
@@ -1384,8 +1405,139 @@ const materializeFrameBandTableGeometryInHtml = (html: string) => {
   return container.innerHTML;
 };
 
-export const materializeTemplateCanvasHtmlForPersistence = (html: string) =>
-  materializeFrameBandTableGeometryInHtml(html);
+type TemplateCanvasPersistenceAttachmentFile = DocumentValueFileDto | DocumentValueFileInput;
+
+type TemplateCanvasPersistenceOptions = {
+  attachmentFiles?: TemplateCanvasPersistenceAttachmentFile[] | null;
+};
+
+type TemplateCanvasGeometrySanitizeOptions = {
+  preserveValueText?: boolean;
+  readOnly?: boolean;
+  editableValueKeys?: string[] | null;
+  attachmentFilesByValueKey?: Record<string, DocumentValueFileDto[]>;
+  documentAttachmentApiPath?: string;
+};
+
+const normalizeTemplateCanvasPersistenceAttachmentFiles = (
+  files: TemplateCanvasPersistenceAttachmentFile[] | null | undefined
+) =>
+  (files || [])
+    .map((file, index) => {
+      const valueKey = String(file?.valueKey || '').trim();
+      const originalFileName = String(file?.originalFileName || '').trim();
+
+      if (!valueKey || !originalFileName) {
+        return null;
+      }
+
+      const dto: DocumentValueFileDto = {
+        id: 'id' in file && typeof file.id === 'string' && file.id.trim() ? file.id.trim() : `persisted:${valueKey}:${index}`,
+        documentId: 'documentId' in file && typeof file.documentId === 'string' ? file.documentId : '',
+        versionId: 'versionId' in file && typeof file.versionId === 'string' ? file.versionId : '',
+        valueKey,
+        storageBucket: String(file?.storageBucket || '').trim(),
+        storagePath: String(file?.storagePath || '').trim(),
+        originalFileName,
+        mimeType: file?.mimeType || null,
+        fileSizeBytes: file?.fileSizeBytes ?? null,
+        sortOrder:
+          file?.sortOrder == null || !Number.isFinite(Number(file.sortOrder)) ? index : Number(file.sortOrder),
+        uploadedBy: file?.uploadedBy || null,
+        uploadedAt: 'uploadedAt' in file && typeof file.uploadedAt === 'string' && file.uploadedAt.trim()
+          ? file.uploadedAt
+          : new Date().toISOString(),
+        metadata: file?.metadata && typeof file.metadata === 'object' && !Array.isArray(file.metadata) ? file.metadata : {},
+      };
+
+      return dto;
+    })
+    .filter((file): file is DocumentValueFileDto => Boolean(file))
+    .sort((left, right) => {
+      if (left.valueKey !== right.valueKey) {
+        return left.valueKey.localeCompare(right.valueKey, 'ko');
+      }
+
+      if (left.sortOrder !== right.sortOrder) {
+        return left.sortOrder - right.sortOrder;
+      }
+
+      return left.originalFileName.localeCompare(right.originalFileName, 'ko');
+    });
+
+const groupTemplateCanvasPersistenceAttachmentFilesByValueKey = (
+  files: TemplateCanvasPersistenceAttachmentFile[] | null | undefined
+) =>
+  normalizeTemplateCanvasPersistenceAttachmentFiles(files).reduce<Record<string, DocumentValueFileDto[]>>((accumulator, file) => {
+    if (!accumulator[file.valueKey]) {
+      accumulator[file.valueKey] = [];
+    }
+
+    accumulator[file.valueKey]?.push(file);
+    return accumulator;
+  }, {});
+
+const resolveTemplateCanvasPersistenceAttachmentFilesByControlKey = (
+  filesByValueKey: Record<string, DocumentValueFileDto[]>,
+  contextKey: string,
+  fieldKey = ''
+) => {
+  const normalizedContextKey = contextKey.trim();
+  const normalizedFieldKey = fieldKey.trim();
+  const normalizedContextValueKey = normalizedContextKey.replace(/^(parent|value|color|frame):/, '').trim();
+
+  return (
+    filesByValueKey[normalizedContextKey] ||
+    filesByValueKey[normalizedFieldKey] ||
+    filesByValueKey[normalizedContextValueKey] ||
+    []
+  );
+};
+
+const sanitizeTemplateCanvasHtmlGeometry = (
+  html: string,
+  options?: TemplateCanvasGeometrySanitizeOptions
+) => {
+  const normalizedHtml = materializeFrameBandTableGeometryInHtml(html.trim());
+
+  if (!normalizedHtml.trim() || typeof document === 'undefined') {
+    return normalizedHtml;
+  }
+
+  const runtimeHtml = buildTemplateUsagePreviewHtml(normalizedHtml, {
+    preserveValueText: options?.preserveValueText ?? true,
+    readOnly: options?.readOnly,
+    editableValueKeys: options?.editableValueKeys,
+    initialAttachmentFilesByValueKey: options?.attachmentFilesByValueKey,
+    documentAttachmentApiPath: options?.documentAttachmentApiPath?.trim() || '',
+  });
+
+  if (!runtimeHtml.trim()) {
+    return normalizedHtml;
+  }
+
+  const container = document.createElement('div');
+  container.className = 'template-edit-preview';
+  container.setAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR, 'true');
+  container.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, options?.readOnly ? 'true' : 'false');
+  container.innerHTML = runtimeHtml;
+
+  const sanitizedEditorHtml = extractEditorHtml(container).trim();
+  return materializeFrameBandTableGeometryInHtml(sanitizedEditorHtml || normalizedHtml);
+};
+
+export const materializeTemplateCanvasHtmlForPersistence = (
+  html: string,
+  options?: TemplateCanvasPersistenceOptions
+) => {
+  return sanitizeTemplateCanvasHtmlGeometry(html, {
+    preserveValueText: true,
+    attachmentFilesByValueKey:
+      options && Object.prototype.hasOwnProperty.call(options, 'attachmentFiles')
+        ? groupTemplateCanvasPersistenceAttachmentFilesByValueKey(options.attachmentFiles)
+        : undefined,
+  });
+};
 
 const resolveFrameLayoutShell = (node: HTMLElement) => node.closest<HTMLElement>('.v102-frame-band') || node;
 
@@ -1514,7 +1666,7 @@ const buildFrameRectUnion = (rects: FrameNodeRect[]): FrameNodeRect => {
   };
 };
 
-const FRAME_EDGE_SNAP_TOLERANCE_PX = 0.75;
+const FRAME_EDGE_SNAP_TOLERANCE_PX = 1.25;
 
 const buildSnappedAxisValueMap = (values: number[], tolerance = FRAME_EDGE_SNAP_TOLERANCE_PX) => {
   const sortedValues = values
@@ -1604,8 +1756,8 @@ const syncFrameBandShellTableSize = (shell: HTMLElement) => {
     return;
   }
 
-  table.style.width = shell.style.width;
-  table.style.height = shell.style.height;
+  setStylePropertyIfChanged(table.style, 'width', shell.style.width);
+  setStylePropertyIfChanged(table.style, 'height', shell.style.height);
 };
 
 const syncFrameBandShellTableRowsToShellSize = (shell: HTMLElement) => {
@@ -1790,15 +1942,15 @@ const writePositionedElementPageRect = (
   const resolvedPageInner = pageInner || element.closest<HTMLElement>('.page-inner');
   const ancestorOffset = readPositionedAncestorOffset(element, resolvedPageInner);
   const minSize = options?.minSize ?? MIN_FRAME_SIZE_PX;
-  element.style.left = toFrameCssPx(rect.left - ancestorOffset.left);
-  element.style.top = toFrameCssPx(rect.top - ancestorOffset.top);
+  setStylePropertyIfChanged(element.style, 'left', toFrameCssPx(rect.left - ancestorOffset.left));
+  setStylePropertyIfChanged(element.style, 'top', toFrameCssPx(rect.top - ancestorOffset.top));
 
   if (options?.width !== false) {
-    element.style.width = toFrameCssPx(Math.max(minSize, rect.width));
+    setStylePropertyIfChanged(element.style, 'width', toFrameCssPx(Math.max(minSize, rect.width)));
   }
 
   if (options?.height !== false) {
-    element.style.height = toFrameCssPx(Math.max(minSize, rect.height));
+    setStylePropertyIfChanged(element.style, 'height', toFrameCssPx(Math.max(minSize, rect.height)));
   }
 };
 
@@ -2291,6 +2443,10 @@ const getRelativeAnchorAttributeTargets = (frameNode: HTMLElement | null | undef
     return [];
   }
 
+  if (isPositionGroupWrapperElement(frameNode)) {
+    return [frameNode];
+  }
+
   const shell = resolveFrameLayoutShell(frameNode);
   const frameGroupId = getFrameGroupId(frameNode);
   const escapedFrameGroupId =
@@ -2314,7 +2470,7 @@ const writeFramePositionModeAttrs = (
   positionMode: TemplateFramePositionMode
 ) => {
   getRelativeAnchorAttributeTargets(frameNode).forEach((element) => {
-    element.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
+    setElementAttributeIfChanged(element, TEMPLATE_FRAME_POSITION_MODE_ATTR, positionMode);
   });
 };
 
@@ -2540,14 +2696,37 @@ const writeFrameRelativeAnchorAttrs = (
     return;
   }
 
+  const shell = resolveFrameLayoutShell(frameNode);
+  const bottomGap = Number.parseFloat(shell.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR) || '');
+  const pageInner = shell.closest<HTMLElement>('.page-inner');
+  const anchorRect =
+    Number.isFinite(bottomGap) && config.anchorKind === 'group' && config.anchorY === 'top' && pageInner
+      ? resolveRelativeAnchorRect(pageInner, config)
+      : null;
+  const effectiveConfig =
+    Number.isFinite(bottomGap) && anchorRect
+      ? {
+          ...config,
+          offsetY: Math.max(0, anchorRect.height + bottomGap),
+        }
+      : config;
+
   getRelativeAnchorAttributeTargets(frameNode).forEach((element) => {
-    element.setAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR, config.positionMode);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR, config.anchorKind);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR, config.anchorId);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR, config.anchorX);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR, config.anchorY);
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR, String(Number(config.offsetX.toFixed(3))));
-    element.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR, String(Number(config.offsetY.toFixed(3))));
+    setElementAttributeIfChanged(element, TEMPLATE_FRAME_POSITION_MODE_ATTR, effectiveConfig.positionMode);
+    setElementAttributeIfChanged(element, TEMPLATE_FRAME_RELATIVE_ANCHOR_KIND_ATTR, effectiveConfig.anchorKind);
+    setElementAttributeIfChanged(element, TEMPLATE_FRAME_RELATIVE_ANCHOR_ID_ATTR, effectiveConfig.anchorId);
+    setElementAttributeIfChanged(element, TEMPLATE_FRAME_RELATIVE_ANCHOR_X_ATTR, effectiveConfig.anchorX);
+    setElementAttributeIfChanged(element, TEMPLATE_FRAME_RELATIVE_ANCHOR_Y_ATTR, effectiveConfig.anchorY);
+    setElementAttributeIfChanged(
+      element,
+      TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_X_ATTR,
+      String(Number(effectiveConfig.offsetX.toFixed(3)))
+    );
+    setElementAttributeIfChanged(
+      element,
+      TEMPLATE_FRAME_RELATIVE_ANCHOR_OFFSET_Y_ATTR,
+      String(Number(effectiveConfig.offsetY.toFixed(3)))
+    );
   });
 };
 
@@ -2716,6 +2895,11 @@ const readFramePositionMode = (
 ): TemplateFramePositionMode => {
   if (!frameNode) {
     return 'absolute';
+  }
+
+  if (isPositionGroupWrapperElement(frameNode)) {
+    const explicitMode = frameNode.getAttribute(TEMPLATE_FRAME_POSITION_MODE_ATTR)?.trim() || '';
+    return explicitMode === 'relative' ? 'relative' : 'absolute';
   }
 
   const shell = resolveFrameLayoutShell(frameNode);
@@ -3745,6 +3929,88 @@ const readPositionGroupWrapperRect = (scope: ParentNode | null | undefined, grou
   return wrapper && pageInner ? readFrameElementRect(wrapper, pageInner) : null;
 };
 
+const annotateTemplateUsagePreviewGroupBottomGapAnchors = (root: ParentNode) => {
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const shell = resolveFrameLayoutShell(node);
+    const config =
+      readStoredRelativeAnchorConfig(shell) ||
+      readStoredRelativeAnchorConfig(node) ||
+      readStoredRelativeAnchorConfig(resolveFrameContentTarget(node));
+
+    if (!config || config.anchorKind !== 'group' || config.anchorY !== 'top') {
+      shell.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR);
+      return;
+    }
+
+    const anchorRect = readPositionGroupWrapperRect(root, String(config.anchorId || ''));
+    const nodeRect = readFrameMoveRect(shell);
+
+    if (!anchorRect || nodeRect.top < anchorRect.top + anchorRect.height - 0.5) {
+      shell.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR);
+      return;
+    }
+
+    const bottomGap = config.offsetY - anchorRect.height;
+
+    if (!Number.isFinite(bottomGap) || bottomGap < -0.5) {
+      shell.removeAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR);
+      return;
+    }
+
+    shell.setAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR, String(Math.max(0, Math.round(bottomGap * 1000) / 1000)));
+  });
+};
+
+const applyTemplateUsagePreviewGroupBottomGapAnchors = (root: HTMLElement) => {
+  let changedCount = 0;
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const shell = resolveFrameLayoutShell(node);
+    const bottomGap = Number.parseFloat(shell.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR) || '');
+
+    if (!Number.isFinite(bottomGap)) {
+      return;
+    }
+
+    const config =
+      readStoredRelativeAnchorConfig(shell) ||
+      readStoredRelativeAnchorConfig(node) ||
+      readStoredRelativeAnchorConfig(resolveFrameContentTarget(node));
+
+    if (!config || config.anchorKind !== 'group' || config.anchorY !== 'top') {
+      return;
+    }
+
+    const pageInner = shell.closest<HTMLElement>('.page-inner');
+    const anchorRect = readPositionGroupWrapperRect(root, String(config.anchorId || ''));
+
+    if (!pageInner || !anchorRect) {
+      return;
+    }
+
+    const currentRect = readFrameElementRect(shell, pageInner);
+    const nextOffsetY = Math.max(0, anchorRect.height + bottomGap);
+    const nextTop = anchorRect.top + nextOffsetY;
+
+    if (Math.abs(nextTop - currentRect.top) <= 0.5 && Math.abs(nextOffsetY - config.offsetY) <= 0.5) {
+      return;
+    }
+
+    const nextConfig = {
+      ...config,
+      offsetY: nextOffsetY,
+    };
+    writeFrameRelativeAnchorAttrs(shell, nextConfig);
+    writePositionedElementPageRect(shell, { ...currentRect, top: nextTop }, pageInner, {
+      minSize: MIN_WRITABLE_TABLE_SIZE_PX,
+    });
+    syncFrameBandShellTableSize(shell);
+    changedCount += 1;
+  });
+
+  return changedCount;
+};
+
 const collectPageInnerElements = (scope: ParentNode | null | undefined) => {
   if (!scope || typeof HTMLElement === 'undefined') {
     return [] as HTMLElement[];
@@ -3905,19 +4171,17 @@ const unwrapPositionGroupWrapperElement = (wrapper: HTMLElement, pageInner: HTML
 };
 
 const applyPositionGroupWrapperReferenceOnlyStyle = (wrapper: HTMLElement) => {
-  wrapper.style.position = 'absolute';
-  wrapper.style.boxSizing = 'border-box';
-  wrapper.style.background = 'transparent';
-  wrapper.style.backgroundColor = 'transparent';
-  wrapper.style.border = '0';
-  wrapper.style.borderWidth = '0px';
-  wrapper.style.borderStyle = 'none';
-  wrapper.style.borderColor = 'transparent';
-  wrapper.style.outline = 'none';
-  wrapper.style.outlineOffset = '0px';
-  wrapper.style.boxShadow = 'none';
-  wrapper.style.filter = 'none';
-  wrapper.style.pointerEvents = 'auto';
+  setStylePropertyIfChanged(wrapper.style, 'position', 'absolute');
+  setStylePropertyIfChanged(wrapper.style, 'box-sizing', 'border-box');
+  setStylePropertyIfChanged(wrapper.style, 'background-color', 'transparent');
+  setStylePropertyIfChanged(wrapper.style, 'border-width', '0px');
+  setStylePropertyIfChanged(wrapper.style, 'border-style', 'none');
+  setStylePropertyIfChanged(wrapper.style, 'border-color', 'transparent');
+  setStylePropertyIfChanged(wrapper.style, 'outline', 'none');
+  setStylePropertyIfChanged(wrapper.style, 'outline-offset', '0px');
+  setStylePropertyIfChanged(wrapper.style, 'box-shadow', 'none');
+  setStylePropertyIfChanged(wrapper.style, 'filter', 'none');
+  setStylePropertyIfChanged(wrapper.style, 'pointer-events', 'auto');
 };
 
 const materializePositionGroupWrappersInPage = (pageInner: HTMLElement): boolean => {
@@ -5129,7 +5393,7 @@ const setTableColWidths = (table: HTMLTableElement, colWidths: number[]) => {
   const cols = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
   cols.forEach((col, index) => {
     const nextWidth = getWritableTableSize(colWidths[index] || 0);
-    col.style.width = toFrameCssPx(nextWidth);
+    setStylePropertyIfChanged(col.style, 'width', toFrameCssPx(nextWidth));
     col.removeAttribute('width');
   });
 };
@@ -5138,7 +5402,7 @@ const setTableRowHeights = (table: HTMLTableElement, rowHeights: number[]) => {
   const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tr'));
   rows.forEach((row, index) => {
     const nextHeight = getWritableTableSize(rowHeights[index] || 0);
-    row.style.height = toFrameCssPx(nextHeight);
+    setStylePropertyIfChanged(row.style, 'height', toFrameCssPx(nextHeight));
   });
 };
 
@@ -5159,20 +5423,20 @@ const syncShellSizeFromTable = (
     rowHeights.length > 0 ? rowHeights.reduce((sum, height) => sum + getWritableTableSize(height), 0) : 0;
 
   if (syncWidth && totalWidth > 0) {
-    shell.style.width = toFrameCssPx(totalWidth);
+    setStylePropertyIfChanged(shell.style, 'width', toFrameCssPx(totalWidth));
   }
 
   if (syncHeight && totalHeight > 0) {
-    shell.style.height = toFrameCssPx(totalHeight);
+    setStylePropertyIfChanged(shell.style, 'height', toFrameCssPx(totalHeight));
   }
 
   if (table) {
     if (syncWidth && totalWidth > 0) {
-      table.style.width = toFrameCssPx(totalWidth);
+      setStylePropertyIfChanged(table.style, 'width', toFrameCssPx(totalWidth));
     }
 
     if (syncHeight && totalHeight > 0) {
-      table.style.height = toFrameCssPx(totalHeight);
+      setStylePropertyIfChanged(table.style, 'height', toFrameCssPx(totalHeight));
     }
   }
 };
@@ -5386,6 +5650,7 @@ const snapTemplateUsagePreviewFrameEdges = (
   options?: {
     sourceKeys?: Iterable<string>;
     focusFrameGroupIds?: Iterable<string>;
+    axes?: Array<'height' | 'width'>;
   }
 ) => {
   let changed = false;
@@ -5393,6 +5658,7 @@ const snapTemplateUsagePreviewFrameEdges = (
   const focusFrameGroupIdSet = options?.focusFrameGroupIds
     ? new Set(Array.from(options.focusFrameGroupIds).map((value) => value.trim()).filter(Boolean))
     : null;
+  const { allowHeight, allowWidth } = resolveTemplateUsagePreviewLayoutAxes(options?.axes);
 
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     const focusRangesBySourceKey = new Map<string, { rowStart: number; rowEnd: number; colStart: number; colEnd: number }>();
@@ -5466,64 +5732,82 @@ const snapTemplateUsagePreviewFrameEdges = (
       return;
     }
 
-    const edgeSnapChanged = scopedShells
-      ? snapFrameRectsToNearbyEdges(
+    const runAxisScopedPixelSnap = (entries: Array<{ element: HTMLElement; rect: FrameNodeRect }>) => {
+      if (!entries.length || (!allowHeight && !allowWidth)) {
+        return false;
+      }
+
+      const xSnapMap = allowWidth
+        ? buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.left, rect.left + rect.width]))
+        : null;
+      const ySnapMap = allowHeight
+        ? buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.top, rect.top + rect.height]))
+        : null;
+      let scopedChanged = false;
+
+      entries.forEach(({ element, rect }) => {
+        const nextLeft = allowWidth ? xSnapMap?.get(rect.left) ?? Math.round(rect.left) : rect.left;
+        const nextRight = allowWidth ? xSnapMap?.get(rect.left + rect.width) ?? Math.round(rect.left + rect.width) : rect.left + rect.width;
+        const nextTop = allowHeight ? ySnapMap?.get(rect.top) ?? Math.round(rect.top) : rect.top;
+        const nextBottom = allowHeight ? ySnapMap?.get(rect.top + rect.height) ?? Math.round(rect.top + rect.height) : rect.top + rect.height;
+        const nextRect = {
+          left: nextLeft,
+          top: nextTop,
+          width: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextRight - nextLeft),
+          height: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextBottom - nextTop),
+        };
+
+        if (
+          Math.abs(nextRect.left - rect.left) > 0.001 ||
+          Math.abs(nextRect.top - rect.top) > 0.001 ||
+          Math.abs(nextRect.width - rect.width) > 0.001 ||
+          Math.abs(nextRect.height - rect.height) > 0.001
+        ) {
+          writePositionedElementPageRect(element, nextRect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
+          syncFrameBandShellTableSize(element);
+          scopedChanged = true;
+        }
+      });
+
+      return scopedChanged;
+    };
+
+    const edgeSnapChanged =
+      allowHeight && allowWidth
+        ? scopedShells
+          ? snapFrameRectsToNearbyEdges(
+              scopedShells
+                .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
+                .map((shell) => ({
+                  element: shell,
+                  rect: readFrameElementRect(shell, pageInner),
+                })),
+              (shell, rect) => {
+                writePositionedElementPageRect(shell, rect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
+                syncFrameBandShellTableSize(shell);
+              }
+            )
+          : snapFrameBandShellEdgesInPage(pageInner)
+        : false;
+    const pixelSnapChanged = scopedShells
+      ? runAxisScopedPixelSnap(
           scopedShells
             .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
             .map((shell) => ({
               element: shell,
               rect: readFrameElementRect(shell, pageInner),
-            })),
-          (shell, rect) => {
-            writePositionedElementPageRect(shell, rect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
-            syncFrameBandShellTableSize(shell);
-          }
+            }))
         )
-      : snapFrameBandShellEdgesInPage(pageInner);
-    const pixelSnapChanged = scopedShells
-      ? (() => {
-          const entries = scopedShells
-            .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
-            .map((shell) => ({
-              element: shell,
-              rect: readFrameElementRect(shell, pageInner),
-            }));
-
-          if (!entries.length) {
-            return false;
-          }
-
-          const xSnapMap = buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.left, rect.left + rect.width]));
-          const ySnapMap = buildPixelSnappedAxisValueMap(entries.flatMap(({ rect }) => [rect.top, rect.top + rect.height]));
-          let scopedChanged = false;
-
-          entries.forEach(({ element, rect }) => {
-            const nextLeft = xSnapMap.get(rect.left) ?? Math.round(rect.left);
-            const nextRight = xSnapMap.get(rect.left + rect.width) ?? Math.round(rect.left + rect.width);
-            const nextTop = ySnapMap.get(rect.top) ?? Math.round(rect.top);
-            const nextBottom = ySnapMap.get(rect.top + rect.height) ?? Math.round(rect.top + rect.height);
-            const nextRect = {
-              left: nextLeft,
-              top: nextTop,
-              width: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextRight - nextLeft),
-              height: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextBottom - nextTop),
-            };
-
-            if (
-              Math.abs(nextRect.left - rect.left) > 0.001 ||
-              Math.abs(nextRect.top - rect.top) > 0.001 ||
-              Math.abs(nextRect.width - rect.width) > 0.001 ||
-              Math.abs(nextRect.height - rect.height) > 0.001
-            ) {
-              writePositionedElementPageRect(element, nextRect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
-              syncFrameBandShellTableSize(element);
-              scopedChanged = true;
-            }
-          });
-
-          return scopedChanged;
-        })()
-      : snapFrameBandShellEdgesToPixelGridInPage(pageInner);
+      : allowHeight && allowWidth
+        ? snapFrameBandShellEdgesToPixelGridInPage(pageInner)
+        : runAxisScopedPixelSnap(
+            Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
+              .filter((shell) => shell.style.left.trim() && shell.style.top.trim() && shell.style.width.trim() && shell.style.height.trim())
+              .map((shell) => ({
+                element: shell,
+                rect: readFrameElementRect(shell, pageInner),
+              }))
+          );
 
     if (!edgeSnapChanged && !pixelSnapChanged) {
       return;
@@ -6552,7 +6836,7 @@ const isSimpleExactPhysicalBoundaryVerticalDrag = ({
   snapshot,
   edgeRoleById,
 }: {
-  direction: ResizeDirection;
+  direction: TemplateFrameResizeDirection;
   snapshot?: TemplateEdgeTopologySnapshotDto | null;
   edgeRoleById?: TemplateEdgeRoleMapDto;
 }) => {
@@ -6678,20 +6962,43 @@ const shiftShellsBelowBoundary = (
   boundaryY: number,
   deltaY: number,
   excludedShells: HTMLElement[] = [],
-  options?: { includeAbsolute?: boolean }
+  options?: { includeAbsolute?: boolean; absoluteFrameGroupIds?: Iterable<string> }
 ) => {
   if (Math.abs(deltaY) < 0.5) {
     return;
   }
 
   const excludedSet = new Set(excludedShells);
+  const allowedAbsoluteFrameGroupIds =
+    options?.includeAbsolute
+      ? new Set(
+          options.absoluteFrameGroupIds
+            ? Array.from(options.absoluteFrameGroupIds).map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+            : Array.from(
+                collectPositionImpactGroupIdsBySourceIds(
+                  pageInner,
+                  excludedShells
+                    .map((shell) => getFrameGroupId(resolveFrameSelectionAnchor(shell) || shell).trim())
+                    .filter(Boolean)
+                )
+              )
+        )
+      : null;
 
   Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band')).forEach((shell) => {
     if (excludedSet.has(shell)) {
       return;
     }
 
-    if (!options?.includeAbsolute && isAbsolutePositionedShell(shell)) {
+    if (isAbsolutePositionedShell(shell)) {
+      const frameGroupId = getFrameGroupId(resolveFrameSelectionAnchor(shell) || shell).trim();
+
+      if (!allowedAbsoluteFrameGroupIds?.has(frameGroupId)) {
+        return;
+      }
+    }
+
+    if (shell.hasAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR)) {
       return;
     }
 
@@ -6709,12 +7016,24 @@ const shiftShellsBelowBoundary = (
 
 const settleTemplateUsagePreviewVerticalOverlaps = (
   root: ParentNode,
-  options?: { includeAbsolute?: boolean }
+  options?: { includeAbsolute?: boolean; absoluteFrameGroupIds?: Iterable<string> }
 ) => {
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     const placedRects: FrameNodeRect[] = [];
+    const allowedAbsoluteFrameGroupIds =
+      options?.includeAbsolute && options.absoluteFrameGroupIds
+        ? new Set(Array.from(options.absoluteFrameGroupIds).map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
+        : null;
     const shells = Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
-      .filter((shell) => options?.includeAbsolute || !isAbsolutePositionedShell(shell))
+      .filter((shell) => {
+        if (!isAbsolutePositionedShell(shell)) {
+          return true;
+        }
+
+        const frameGroupId = getFrameGroupId(resolveFrameSelectionAnchor(shell) || shell).trim();
+        return Boolean(options?.includeAbsolute && allowedAbsoluteFrameGroupIds?.has(frameGroupId));
+      })
+      .filter((shell) => !shell.hasAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR))
       .sort((left, right) => {
         if (options?.includeAbsolute) {
           const leftGeometry = readNormalizedBandGeometry(left);
@@ -6772,6 +7091,7 @@ const applyTemplateUsagePreviewAutoHeightBoundaryFit = (
   root: ParentNode,
   options?: {
     focusFrameGroupIds?: Iterable<string>;
+    preventShrink?: boolean;
   }
 ) => {
   let changedCount = 0;
@@ -6845,7 +7165,7 @@ const applyTemplateUsagePreviewAutoHeightBoundaryFit = (
       );
       const deltaY = nextBottom - currentBottom;
 
-      if (!Number.isFinite(nextBottom) || Math.abs(deltaY) <= 0.5) {
+      if (!Number.isFinite(nextBottom) || Math.abs(deltaY) <= 0.5 || (options?.preventShrink && deltaY < 0)) {
         return;
       }
 
@@ -7061,33 +7381,86 @@ const buildCurrentNormalizedBandAxisBoundaries = (
   return boundaries;
 };
 
-const buildScopedNormalizedBandAxisBoundaries = (
-  currentBoundaries: number[],
-  targetBoundaries: number[],
-  minimumSize: number,
-  focusRange?: { start: number; end: number } | null
+const buildNormalizedBandAxisSegmentSizeMap = (
+  geometries: NormalizedBandGeometry[],
+  pageInner: HTMLElement,
+  axis: 'row' | 'col'
 ) => {
-  if (!focusRange || currentBoundaries.length !== targetBoundaries.length || targetBoundaries.length <= 0) {
-    return targetBoundaries;
-  }
-
-  const maxBoundaryIndex = targetBoundaries.length - 1;
-  const focusStart = Math.max(0, Math.min(maxBoundaryIndex, focusRange.start));
-  const focusEnd = Math.max(focusStart, Math.min(maxBoundaryIndex, focusRange.end));
-  const nextBoundaries = [...currentBoundaries];
-
-  for (let boundaryIndex = focusStart + 1; boundaryIndex <= focusEnd; boundaryIndex += 1) {
-    nextBoundaries[boundaryIndex] = Math.max(
-      nextBoundaries[boundaryIndex - 1] + minimumSize,
-      targetBoundaries[boundaryIndex] ?? nextBoundaries[boundaryIndex - 1] + minimumSize
+  type SegmentCandidate = {
+    size: number;
+    span: number;
+  };
+  const candidatesBySegment = new Map<number, SegmentCandidate[]>();
+  const readPreferredSegmentSize = (candidates: SegmentCandidate[]) => {
+    const finiteCandidates = candidates.filter(
+      (candidate) => Number.isFinite(candidate.size) && candidate.size > 0 && Number.isFinite(candidate.span) && candidate.span > 0
     );
+
+    if (finiteCandidates.length <= 0) {
+      return null;
+    }
+
+    const smallestSpan = finiteCandidates.reduce(
+      (minimumSpan, candidate) => Math.min(minimumSpan, candidate.span),
+      Number.POSITIVE_INFINITY
+    );
+    const preferredCandidates = finiteCandidates.filter((candidate) => Math.abs(candidate.span - smallestSpan) <= 0.01);
+
+    if (preferredCandidates.length <= 0) {
+      return null;
+    }
+
+    return Math.max(...preferredCandidates.map((candidate) => candidate.size));
+  };
+
+  geometries.forEach((geometry) => {
+    const shellRect = readFrameElementRect(geometry.shell, pageInner);
+    const rangeStart = axis === 'row' ? geometry.rowStart : geometry.colStart;
+    const rangeEnd = axis === 'row' ? geometry.rowEnd : geometry.colEnd;
+    const size = axis === 'row' ? shellRect.height : shellRect.width;
+    const span = Math.max(1, rangeEnd - rangeStart);
+    const segmentSizes = readNormalizedBandAxisSegmentSizes(geometry, pageInner, axis);
+
+    for (let segmentOffset = 0; segmentOffset < span; segmentOffset += 1) {
+      const segmentIndex = rangeStart + segmentOffset;
+      const segmentSize =
+        segmentSizes && Number.isFinite(segmentSizes[segmentOffset])
+          ? segmentSizes[segmentOffset]
+          : size / span;
+
+      if (!Number.isFinite(segmentSize) || segmentSize <= 0) {
+        continue;
+      }
+
+      const candidates = candidatesBySegment.get(segmentIndex) || [];
+      candidates.push({ size: segmentSize, span });
+      candidatesBySegment.set(segmentIndex, candidates);
+    }
+  });
+
+  return new Map(
+    Array.from(candidatesBySegment.entries())
+      .map(([segmentIndex, candidates]) => [segmentIndex, readPreferredSegmentSize(candidates)] as const)
+      .filter((entry): entry is [number, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+  );
+};
+
+const buildSegmentScopedNormalizedBandAxisBoundaries = (
+  currentBoundaries: number[],
+  targetSegmentSizes: Map<number, number> | null,
+  minimumSize: number
+) => {
+  if (!targetSegmentSizes || targetSegmentSizes.size <= 0 || currentBoundaries.length <= 0) {
+    return currentBoundaries;
   }
 
-  const tailDelta = nextBoundaries[focusEnd] - currentBoundaries[focusEnd];
+  const nextBoundaries = [currentBoundaries[0] ?? 0];
 
-  for (let boundaryIndex = focusEnd + 1; boundaryIndex <= maxBoundaryIndex; boundaryIndex += 1) {
-    const shiftedBoundary = (currentBoundaries[boundaryIndex] ?? nextBoundaries[boundaryIndex - 1]) + tailDelta;
-    nextBoundaries[boundaryIndex] = Math.max(nextBoundaries[boundaryIndex - 1] + minimumSize, shiftedBoundary);
+  for (let segmentIndex = 0; segmentIndex < currentBoundaries.length - 1; segmentIndex += 1) {
+    const currentSize = (currentBoundaries[segmentIndex + 1] ?? nextBoundaries[segmentIndex] + minimumSize) - (currentBoundaries[segmentIndex] ?? 0);
+    const targetSize = targetSegmentSizes.get(segmentIndex);
+    const nextSize = Number.isFinite(targetSize) ? targetSize : currentSize;
+    nextBoundaries[segmentIndex + 1] = nextBoundaries[segmentIndex] + Math.max(minimumSize, nextSize);
   }
 
   return nextBoundaries;
@@ -7098,6 +7471,7 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
   options?: {
     sourceKeys?: Iterable<string>;
     focusFrameGroupIds?: Iterable<string>;
+    axes?: Array<'height' | 'width'>;
   }
 ) => {
   let changed = false;
@@ -7105,10 +7479,11 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
   const focusFrameGroupIdSet = options?.focusFrameGroupIds
     ? new Set(Array.from(options.focusFrameGroupIds).map((value) => value.trim()).filter(Boolean))
     : null;
+  const { allowHeight, allowWidth } = resolveTemplateUsagePreviewLayoutAxes(options?.axes);
 
   Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).forEach((pageInner) => {
     const geometriesBySourceKey = new Map<string, NormalizedBandGeometry[]>();
-    const focusRangesBySourceKey = new Map<string, { rowStart: number; rowEnd: number; colStart: number; colEnd: number }>();
+    const focusedGeometriesBySourceKey = new Map<string, NormalizedBandGeometry[]>();
 
     Array.from(pageInner.querySelectorAll<HTMLElement>('.v102-frame-band'))
       .map((shell) => readNormalizedBandGeometry(shell))
@@ -7131,34 +7506,34 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
           return;
         }
 
-        const previousRange = focusRangesBySourceKey.get(geometry.sourceKey);
-
-        focusRangesBySourceKey.set(geometry.sourceKey, {
-          rowStart: previousRange ? Math.min(previousRange.rowStart, geometry.rowStart) : geometry.rowStart,
-          rowEnd: previousRange ? Math.max(previousRange.rowEnd, geometry.rowEnd) : geometry.rowEnd,
-          colStart: previousRange ? Math.min(previousRange.colStart, geometry.colStart) : geometry.colStart,
-          colEnd: previousRange ? Math.max(previousRange.colEnd, geometry.colEnd) : geometry.colEnd,
-        });
+        const focusedEntries = focusedGeometriesBySourceKey.get(geometry.sourceKey) || [];
+        focusedEntries.push(geometry);
+        focusedGeometriesBySourceKey.set(geometry.sourceKey, focusedEntries);
       });
 
     geometriesBySourceKey.forEach((sourceGeometries) => {
+      const sourceKey = sourceGeometries[0]?.sourceKey || '';
+      const focusedGeometries = focusedGeometriesBySourceKey.get(sourceKey) || [];
       const currentRowBoundaries = buildCurrentNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'row');
       const currentColBoundaries = buildCurrentNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'col');
-      const nextRowBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'row');
-      const nextColBoundaries = resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'col');
-      const focusRange = focusRangesBySourceKey.get(sourceGeometries[0]?.sourceKey || '') || null;
-      const rowBoundaries = buildScopedNormalizedBandAxisBoundaries(
-        currentRowBoundaries,
-        nextRowBoundaries,
-        MIN_TABLE_ROW_HEIGHT_PX,
-        focusRange ? { start: focusRange.rowStart, end: focusRange.rowEnd } : null
-      );
-      const colBoundaries = buildScopedNormalizedBandAxisBoundaries(
-        currentColBoundaries,
-        nextColBoundaries,
-        MIN_WRITABLE_TABLE_SIZE_PX,
-        focusRange ? { start: focusRange.colStart, end: focusRange.colEnd } : null
-      );
+      const focusedRowSegmentSizes = focusedGeometries.length > 0
+        ? buildNormalizedBandAxisSegmentSizeMap(focusedGeometries, pageInner, 'row')
+        : null;
+      const focusedColSegmentSizes = focusedGeometries.length > 0
+        ? buildNormalizedBandAxisSegmentSizeMap(focusedGeometries, pageInner, 'col')
+        : null;
+      const nextRowBoundaries = focusedRowSegmentSizes
+        ? buildSegmentScopedNormalizedBandAxisBoundaries(currentRowBoundaries, focusedRowSegmentSizes, MIN_TABLE_ROW_HEIGHT_PX)
+        : resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'row');
+      const nextColBoundaries = focusedColSegmentSizes
+        ? buildSegmentScopedNormalizedBandAxisBoundaries(currentColBoundaries, focusedColSegmentSizes, MIN_WRITABLE_TABLE_SIZE_PX)
+        : resolveNormalizedBandAxisBoundaries(sourceGeometries, pageInner, 'col');
+      const rowBoundaries = allowHeight
+        ? nextRowBoundaries
+        : currentRowBoundaries;
+      const colBoundaries = allowWidth
+        ? nextColBoundaries
+        : currentColBoundaries;
 
       sourceGeometries.forEach((geometry) => {
         if (sourceGeometries.length <= 1) {
@@ -7166,10 +7541,10 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
         }
 
         const shellRect = readFrameElementRect(geometry.shell, pageInner);
-        const nextTop = rowBoundaries[geometry.rowStart];
-        const nextLeft = colBoundaries[geometry.colStart];
-        const nextBottom = rowBoundaries[geometry.rowEnd];
-        const nextRight = colBoundaries[geometry.colEnd];
+        const nextTop = allowHeight ? rowBoundaries[geometry.rowStart] : shellRect.top;
+        const nextLeft = allowWidth ? colBoundaries[geometry.colStart] : shellRect.left;
+        const nextBottom = allowHeight ? rowBoundaries[geometry.rowEnd] : shellRect.top + shellRect.height;
+        const nextRight = allowWidth ? colBoundaries[geometry.colEnd] : shellRect.left + shellRect.width;
         const nextHeight = Math.max(MIN_FRAME_SIZE_PX, nextBottom - nextTop);
         const nextWidth = Math.max(MIN_FRAME_SIZE_PX, nextRight - nextLeft);
 
@@ -7186,16 +7561,25 @@ const syncTemplateUsagePreviewNormalizedBandPeerBounds = (
           return;
         }
 
-        const rowSizes = rowBoundaries
-          .slice(geometry.rowStart + 1, geometry.rowEnd + 1)
-          .map((boundary, index) => Math.max(MIN_TABLE_ROW_HEIGHT_PX, boundary - rowBoundaries[geometry.rowStart + index]));
-        const colSizes = colBoundaries
-          .slice(geometry.colStart + 1, geometry.colEnd + 1)
-          .map((boundary, index) => Math.max(MIN_WRITABLE_TABLE_SIZE_PX, boundary - colBoundaries[geometry.colStart + index]));
-
         const table =
           geometry.shell.querySelector<HTMLTableElement>('table.v102-frame-band-table') ||
           geometry.shell.querySelector<HTMLTableElement>('table');
+        const rowSizes =
+          allowHeight || !table
+            ? rowBoundaries
+                .slice(geometry.rowStart + 1, geometry.rowEnd + 1)
+                .map((boundary, index) =>
+                  Math.max(MIN_TABLE_ROW_HEIGHT_PX, boundary - rowBoundaries[geometry.rowStart + index])
+                )
+            : readTableRowHeights(table);
+        const colSizes =
+          allowWidth || !table
+            ? colBoundaries
+                .slice(geometry.colStart + 1, geometry.colEnd + 1)
+                .map((boundary, index) =>
+                  Math.max(MIN_WRITABLE_TABLE_SIZE_PX, boundary - colBoundaries[geometry.colStart + index])
+                )
+            : readTableColWidths(table);
 
         writePositionedElementPageRect(
           geometry.shell,
@@ -8877,6 +9261,17 @@ const syncFrameRelativeAnchorOffsetsToCurrentRect = (
     return null;
   }
 
+  const shell = resolveFrameLayoutShell(frameNode);
+  const bottomGap = Number.parseFloat(shell.getAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR) || '');
+  if (Number.isFinite(bottomGap) && currentConfig.anchorKind === 'group' && currentConfig.anchorY === 'top') {
+    const nextConfig = {
+      ...currentConfig,
+      offsetY: Math.max(0, anchorRect.height + bottomGap),
+    };
+    writeFrameRelativeAnchorAttrs(frameNode, nextConfig);
+    return nextConfig;
+  }
+
   const nextConfig = buildRelativeAnchorConfigFromRect({
     frameRect: readFrameMoveRect(frameNode),
     anchorRect,
@@ -8892,11 +9287,40 @@ const syncFrameRelativeAnchorOffsetsToCurrentRect = (
 const applyRelativeAnchoredFrameRects = (pageInner: HTMLElement, excludedFrameGroupIds: string[] = []) => {
   materializePositionGroupWrappers(pageInner);
   const excludedFrameGroupIdSet = new Set(excludedFrameGroupIds);
+  const relativeGroupWrappers = collectPositionGroupWrapperElements(pageInner).filter((wrapper) =>
+    Boolean(readFrameRelativeAnchorConfig(wrapper, pageInner))
+  );
   const relativeNodes = collectFrameSelectionAnchors(pageInner).filter((node) =>
     Boolean(ensureFrameRelativeAnchorConfig(node, pageInner))
   );
 
   for (let pass = 0; pass < 3; pass += 1) {
+    relativeGroupWrappers.forEach((wrapper) => {
+      const config = readFrameRelativeAnchorConfig(wrapper, pageInner);
+
+      if (!config) {
+        return;
+      }
+
+      const anchorRect = resolveRelativeAnchorRect(pageInner, config);
+
+      if (!anchorRect) {
+        return;
+      }
+
+      const currentRect = readFrameElementRect(wrapper, pageInner);
+      const nextRect = buildFrameRectFromRelativeAnchor(currentRect, anchorRect, config);
+
+      if (
+        Math.abs(nextRect.left - currentRect.left) <= 0.5 &&
+        Math.abs(nextRect.top - currentRect.top) <= 0.5
+      ) {
+        return;
+      }
+
+      writePositionedElementPageRect(wrapper, nextRect, pageInner, { minSize: 1 });
+    });
+    materializePositionGroupWrappers(pageInner);
     relativeNodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node);
 
@@ -9161,6 +9585,8 @@ const TEMPLATE_USAGE_PREVIEW_FILE_CARD_ID_ATTR = 'data-template-usage-preview-fi
 const TEMPLATE_USAGE_PREVIEW_FILE_DRAG_ACTIVE_ATTR = 'data-template-usage-preview-file-drag-active';
 const TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR = 'data-template-usage-preview-file-api-path';
 const TEMPLATE_USAGE_PREVIEW_FILE_ALLOW_SAVE_ATTR = 'data-template-usage-preview-file-allow-save';
+const TEMPLATE_USAGE_PREVIEW_FILE_SEED_FILES_ATTR = 'data-template-usage-preview-file-seed-files';
+const TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROTOTYPE_ATTR = 'data-template-usage-preview-signature-prototype';
 const TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR = 'data-template-usage-preview-read-only';
 const TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR = 'data-template-usage-preview-field-key';
 
@@ -9237,6 +9663,7 @@ const materializeTemplateUsagePreviewAttachmentControls = (root: ParentNode) => 
       replacement.setAttribute('data-template-frame-input', 'true');
       replacement.className = 'v202-frame-group-input';
       replacement.setAttribute('spellcheck', 'false');
+      replacement.setAttribute('rows', '1');
       replacement.tabIndex = 0;
     }
 
@@ -9247,6 +9674,71 @@ const materializeTemplateUsagePreviewAttachmentControls = (root: ParentNode) => 
       replacement.defaultValue = nextValue;
       replacement.setAttribute('value', nextValue);
       replacement.removeAttribute('placeholder');
+
+      if (replacement instanceof HTMLTextAreaElement) {
+        replacement.textContent = nextValue;
+      }
+    } else {
+      replacement.textContent = nextValue;
+    }
+
+    control.replaceWith(replacement);
+  });
+};
+
+const materializeTemplateUsagePreviewSignatureControls = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`).forEach((control) => {
+    const prototypeMarkup = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROTOTYPE_ATTR)?.trim() || '';
+    const replacementContainer = document.createElement('div');
+    let replacement =
+      prototypeMarkup.length > 0
+        ? (() => {
+            try {
+              replacementContainer.innerHTML = decodeURIComponent(prototypeMarkup);
+              return replacementContainer.firstElementChild instanceof HTMLElement
+                ? replacementContainer.firstElementChild
+                : null;
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+    if (!replacement) {
+      replacement = document.createElement('textarea');
+      replacement.setAttribute('data-template-frame-input', 'true');
+      replacement.className = 'v202-frame-group-input';
+      replacement.setAttribute('spellcheck', 'false');
+      replacement.setAttribute('rows', '1');
+      replacement.tabIndex = 0;
+    }
+
+    const runtimeModeAttr = control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || 'signature_image';
+    const runtimeMode = isTemplateFrameRuntimeMode(runtimeModeAttr) ? runtimeModeAttr : 'signature_image';
+    applyTemplateUsagePreviewSignatureStateSnapshot(replacement, readTemplateUsagePreviewSignatureStateSnapshot(control));
+
+    const nextValue =
+      runtimeMode === 'signature_history'
+        ? (() => {
+            const history = readTemplateUsagePreviewSignatureHistory(control);
+            return history.length === 0
+              ? '서명 이력 없음'
+              : history
+                  .slice()
+                  .reverse()
+                  .map((entry) => `${formatTemplateUsagePreviewSignedAt(entry.at)} · ${entry.message}`)
+                  .join('\n');
+          })()
+        : runtimeMode === 'signature_image'
+          ? control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR) === 'signed'
+            ? `${control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR)?.trim() || '서명'} 전자서명 완료`
+            : ''
+          : readTemplateUsagePreviewSignatureModeValue(control, runtimeMode);
+
+    if (replacement instanceof HTMLTextAreaElement || replacement instanceof HTMLInputElement) {
+      replacement.value = nextValue;
+      replacement.defaultValue = nextValue;
+      replacement.setAttribute('value', nextValue);
 
       if (replacement instanceof HTMLTextAreaElement) {
         replacement.textContent = nextValue;
@@ -9640,6 +10132,7 @@ const extractEditorHtml = (root: HTMLElement) => {
     normalizeFrameBorderAppearanceLayersInPage(pageInner);
   });
   materializeTemplateUsagePreviewAttachmentControls(container);
+  materializeTemplateUsagePreviewSignatureControls(container);
   syncFormControlMarkup(container);
   stripTransientFrameEditorUi(container);
   stripSelectionAttrs(container);
@@ -11499,6 +11992,10 @@ const enableTemplateUsagePreviewTextControl = (target: HTMLElement) => {
     target.readOnly = false;
     target.disabled = false;
     target.tabIndex = 0;
+    if (target instanceof HTMLTextAreaElement) {
+      target.rows = 1;
+      target.setAttribute('rows', '1');
+    }
     target.style.setProperty('pointer-events', 'auto', 'important');
     target.style.setProperty('user-select', 'text', 'important');
     target.style.setProperty('-webkit-user-select', 'text', 'important');
@@ -12020,9 +12517,67 @@ const buildTemplateUsagePreviewAttachmentPrototypeMarkup = (target: HTMLElement 
   const fallback = document.createElement('textarea');
   fallback.className = 'v202-frame-group-input';
   fallback.setAttribute('spellcheck', 'false');
+  fallback.setAttribute('rows', '1');
   fallback.tabIndex = 0;
   fallback.setAttribute('data-template-frame-input', 'true');
   return fallback.outerHTML;
+};
+
+const buildTemplateUsagePreviewSignaturePrototypeMarkup = (target: HTMLElement | null) => {
+  if (target && (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || target.hasAttribute('data-template-frame-input'))) {
+    return target.outerHTML;
+  }
+
+  const fallback = document.createElement('textarea');
+  fallback.className = 'v202-frame-group-input';
+  fallback.setAttribute('spellcheck', 'false');
+  fallback.setAttribute('rows', '1');
+  fallback.tabIndex = 0;
+  fallback.setAttribute('data-template-frame-input', 'true');
+  return fallback.outerHTML;
+};
+
+type TemplateUsagePreviewSignatureStateSnapshot = {
+  status: string;
+  signerName: string;
+  signedAt: string;
+  provider: string;
+  imageData: string;
+  history: string;
+};
+
+const readTemplateUsagePreviewSignatureStateSnapshot = (
+  source: HTMLElement | null | undefined
+): TemplateUsagePreviewSignatureStateSnapshot => ({
+  status: String(source?.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR) || '').trim(),
+  signerName: String(source?.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR) || '').trim(),
+  signedAt: String(source?.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR) || '').trim(),
+  provider: String(source?.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR) || '').trim(),
+  imageData: String(source?.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR) || '').trim(),
+  history: String(source?.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_HISTORY_ATTR) || '').trim(),
+});
+
+const applyTemplateUsagePreviewSignatureStateSnapshot = (
+  target: HTMLElement,
+  snapshot: TemplateUsagePreviewSignatureStateSnapshot
+) => {
+  const setAttr = (attributeName: string, value: string) => {
+    const normalizedValue = String(value || '').trim();
+
+    if (normalizedValue) {
+      target.setAttribute(attributeName, normalizedValue);
+      return;
+    }
+
+    target.removeAttribute(attributeName);
+  };
+
+  setAttr(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR, snapshot.status);
+  setAttr(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR, snapshot.signerName);
+  setAttr(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR, snapshot.signedAt);
+  setAttr(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR, snapshot.provider);
+  setAttr(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR, snapshot.imageData);
+  setAttr(TEMPLATE_USAGE_PREVIEW_SIGNATURE_HISTORY_ATTR, snapshot.history);
 };
 const isTemplateUsagePreviewAttachmentPlaceholderId = (value: string) => value.startsWith('placeholder:');
 
@@ -12030,6 +12585,42 @@ const cloneDocumentValueFileDto = (file: DocumentValueFileDto): DocumentValueFil
   ...file,
   metadata: file.metadata ? { ...file.metadata } : {},
 });
+
+const readTemplateUsagePreviewAttachmentSeedFiles = (control: HTMLElement) => {
+  const rawValue = control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_SEED_FILES_ATTR)?.trim() || '';
+
+  if (!rawValue) {
+    return [] as DocumentValueFileDto[];
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue);
+
+    if (!Array.isArray(parsedValue)) {
+      return [] as DocumentValueFileDto[];
+    }
+
+    return parsedValue
+      .filter((value) => value && typeof value === 'object')
+      .map((value) => cloneDocumentValueFileDto(value as DocumentValueFileDto));
+  } catch {
+    return [] as DocumentValueFileDto[];
+  }
+};
+
+const writeTemplateUsagePreviewAttachmentSeedFiles = (
+  control: HTMLElement,
+  files: DocumentValueFileDto[] | null | undefined
+) => {
+  const normalizedFiles = (files || []).map(cloneDocumentValueFileDto);
+
+  if (normalizedFiles.length <= 0) {
+    control.removeAttribute(TEMPLATE_USAGE_PREVIEW_FILE_SEED_FILES_ATTR);
+    return;
+  }
+
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_SEED_FILES_ATTR, JSON.stringify(normalizedFiles));
+};
 
 const cloneTemplateUsagePreviewAttachmentRuntimeState = (
   state: TemplateUsagePreviewAttachmentRuntimeState
@@ -12113,9 +12704,16 @@ const getAttachmentControlsFromRoot = (root: HTMLElement) =>
 const ensureTemplateUsagePreviewAttachmentState = (control: HTMLElement) => {
   const root = resolveTemplateUsagePreviewRuntimeRoot(control);
   const contextKey = control.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR)?.trim() || '';
+  const apiPath = control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR)?.trim() || '';
+  const seedFiles = readTemplateUsagePreviewAttachmentSeedFiles(control);
 
   if (!root || !contextKey) {
-    return null;
+    return {
+      existingFiles: seedFiles,
+      removedExistingFileIds: [],
+      newFiles: [],
+      apiPath,
+    } satisfies TemplateUsagePreviewAttachmentRuntimeState;
   }
 
   const existingState = getTemplateUsagePreviewAttachmentState(root, contextKey);
@@ -12124,11 +12722,12 @@ const ensureTemplateUsagePreviewAttachmentState = (control: HTMLElement) => {
     return existingState;
   }
 
-  const placeholderState = buildEmptyTemplateUsagePreviewAttachmentRuntimeState(
-    control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR)?.trim() || ''
-  );
-
-  setTemplateUsagePreviewAttachmentState(root, contextKey, placeholderState);
+  setTemplateUsagePreviewAttachmentState(root, contextKey, {
+    existingFiles: seedFiles,
+    removedExistingFileIds: [],
+    newFiles: [],
+    apiPath,
+  });
   return getTemplateUsagePreviewAttachmentState(root, contextKey);
 };
 
@@ -12441,7 +13040,7 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
     );
   });
 
-  if (state.existingFiles.length === 0) {
+  if (state.existingFiles.length === 0 && state.newFiles.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'v106-template-usage-file-section-empty';
     empty.textContent = '등록된 파일이 없습니다.';
@@ -12483,6 +13082,8 @@ const prepareTemplateUsageAttachmentControl = (
   node: HTMLElement,
   options?: {
     readOnly?: boolean;
+    initialExistingFiles?: DocumentValueFileDto[] | null;
+    apiPath?: string;
   }
 ) => {
   const fieldKey = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '';
@@ -12504,11 +13105,12 @@ const prepareTemplateUsageAttachmentControl = (
     TEMPLATE_USAGE_PREVIEW_FILE_PROTOTYPE_ATTR,
     encodeURIComponent(buildTemplateUsagePreviewAttachmentPrototypeMarkup(target))
   );
-  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR, '');
+  control.setAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR, options?.apiPath?.trim() || '');
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, options?.readOnly ? 'true' : 'false');
   control.setAttribute('role', 'group');
   control.setAttribute('aria-label', '파일 목록');
   control.tabIndex = 0;
+  writeTemplateUsagePreviewAttachmentSeedFiles(control, options?.initialExistingFiles || []);
 
   const registeredList = document.createElement('div');
   registeredList.className = 'v106-template-usage-file-section';
@@ -12566,6 +13168,7 @@ const prepareTemplateUsageSignatureControl = (
     readOnly?: boolean;
   }
 ) => {
+  const target = resolveFrameContentTarget(node);
   const fieldKey = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '';
   const label = fieldKey || '서명';
   const contextKey = resolveTemplateUsagePreviewContextKey(node);
@@ -12580,6 +13183,20 @@ const prepareTemplateUsageSignatureControl = (
     control.setAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR, fieldKey);
   }
   control.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, options?.readOnly ? 'true' : 'false');
+  control.setAttribute(
+    TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROTOTYPE_ATTR,
+    encodeURIComponent(buildTemplateUsagePreviewSignaturePrototypeMarkup(target))
+  );
+  applyTemplateUsagePreviewSignatureStateSnapshot(
+    control,
+    readTemplateUsagePreviewSignatureStateSnapshot(
+      [target, node].find((candidate) =>
+        candidate?.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR) ||
+        candidate?.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_HISTORY_ATTR) ||
+        candidate?.hasAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR)
+      ) || null
+    )
+  );
   ensureTemplateUsagePreviewSignatureState(control);
   renderTemplateUsagePreviewSignatureControl(control);
   replaceFrameContentTarget(node, control);
@@ -12590,6 +13207,8 @@ const prepareTemplateUsagePreviewValueBox = (
   options?: {
     preserveValueText?: boolean;
     readOnly?: boolean;
+    initialAttachmentFilesByValueKey?: Record<string, DocumentValueFileDto[]>;
+    documentAttachmentApiPath?: string;
   }
 ) => {
   const boxKind = readFrameBoxKind(node);
@@ -12598,7 +13217,17 @@ const prepareTemplateUsagePreviewValueBox = (
   node.setAttribute(TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR, 'true');
 
   if (boxKind === 'attachment' || runtimeMode === 'file_slot') {
-    prepareTemplateUsageAttachmentControl(node, { readOnly: options?.readOnly });
+    const contextKey = resolveTemplateUsagePreviewContextKey(node).trim();
+    const fieldKey = readFrameValueKey(node) || readFrameBoxLabel(node) || getFrameGroupId(node) || '';
+    prepareTemplateUsageAttachmentControl(node, {
+      readOnly: options?.readOnly,
+      initialExistingFiles: resolveTemplateCanvasPersistenceAttachmentFilesByControlKey(
+        options?.initialAttachmentFilesByValueKey || {},
+        contextKey,
+        fieldKey
+      ),
+      apiPath: options?.documentAttachmentApiPath?.trim() || '',
+    });
     return;
   }
 
@@ -12610,12 +13239,103 @@ const prepareTemplateUsagePreviewValueBox = (
   prepareTemplateUsageTextValueControl(node, options);
 };
 
+const snapshotTemplateUsagePreviewFrameRects = (root: ParentNode) => {
+  const rectByFrameGroupId = new Map<string, FrameNodeRect>();
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+
+    if (!frameGroupId || rectByFrameGroupId.has(frameGroupId)) {
+      return;
+    }
+
+    const shell = resolveFrameLayoutShell(node);
+    rectByFrameGroupId.set(frameGroupId, readFrameElementRect(shell, shell.closest<HTMLElement>('.page-inner')));
+  });
+
+  return rectByFrameGroupId;
+};
+
+const restoreTemplateUsagePreviewNonShrinkingFrameRects = (
+  root: ParentNode,
+  rectByFrameGroupId: Map<string, FrameNodeRect>,
+  options?: {
+    allowAutoHeightShrink?: boolean;
+    allowAutoWidthShrink?: boolean;
+  }
+) => {
+  if (rectByFrameGroupId.size <= 0) {
+    return 0;
+  }
+
+  let changedCount = 0;
+
+  collectFrameSelectionAnchors(root).forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    const baseRect = frameGroupId ? rectByFrameGroupId.get(frameGroupId) : null;
+
+    if (!baseRect) {
+      return;
+    }
+
+    const shell = resolveFrameLayoutShell(node);
+    const pageInner = shell.closest<HTMLElement>('.page-inner');
+    const currentRect = readFrameElementRect(shell, pageInner);
+    const nextRect = { ...currentRect };
+    const allowHeightShrink = options?.allowAutoHeightShrink === true && readFrameAutoHeightBox(node);
+    const allowWidthShrink = options?.allowAutoWidthShrink === true && readFrameAutoWidthBox(node);
+    const heightShrunk = !allowHeightShrink && currentRect.height < baseRect.height - 0.5;
+    const widthShrunk = !allowWidthShrink && currentRect.width < baseRect.width - 0.5;
+
+    if (heightShrunk) {
+      nextRect.height = baseRect.height;
+      if (currentRect.top > baseRect.top + 0.5) {
+        nextRect.top = baseRect.top;
+      }
+    }
+
+    if (!allowHeightShrink && currentRect.top < baseRect.top - 0.5) {
+      nextRect.top = baseRect.top;
+    }
+
+    if (widthShrunk) {
+      nextRect.width = baseRect.width;
+      if (currentRect.left > baseRect.left + 0.5) {
+        nextRect.left = baseRect.left;
+      }
+    }
+
+    if (
+      Math.abs(nextRect.left - currentRect.left) <= 0.5 &&
+      Math.abs(nextRect.top - currentRect.top) <= 0.5 &&
+      Math.abs(nextRect.width - currentRect.width) <= 0.5 &&
+      Math.abs(nextRect.height - currentRect.height) <= 0.5
+    ) {
+      return;
+    }
+
+    writePositionedElementPageRect(shell, nextRect, pageInner, { minSize: MIN_WRITABLE_TABLE_SIZE_PX });
+    syncFrameBandShellTableSize(shell);
+    syncFrameBandShellTableRowsToShellSize(shell);
+    syncFrameRelativeAnchorOffsetsToCurrentRect(resolveFrameSelectionAnchor(shell), pageInner);
+    changedCount += 1;
+  });
+
+  return changedCount;
+};
+
 const buildTemplateUsagePreviewHtml = (
   source: HTMLElement | string | null | undefined,
   options?: {
     preserveValueText?: boolean;
     readOnly?: boolean;
     editableValueKeys?: string[] | null;
+    initialAttachmentFilesByValueKey?: Record<string, DocumentValueFileDto[]>;
+    documentAttachmentApiPath?: string;
+    stabilizeInitialLayout?: boolean;
+    preventInitialValueClearShrink?: boolean;
+    measurePeerClusterHeightTargets?: boolean;
+    measurePeerClusterWidthTargets?: boolean;
   }
 ) => {
   const container = document.createElement('div');
@@ -12638,6 +13358,12 @@ const buildTemplateUsagePreviewHtml = (
   clearFrameReviewWarningUi(container);
   stripFrameMetadataMarkers(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
+  annotateTemplateUsagePreviewGroupBottomGapAnchors(container);
+  const preventInitialShrink =
+    options?.preventInitialValueClearShrink !== false && options?.preserveValueText !== true;
+  const sourceFrameRectSnapshot = preventInitialShrink
+    ? snapshotTemplateUsagePreviewFrameRects(container)
+    : new Map<string, FrameNodeRect>();
 
   collectFrameSelectionAnchors(container).forEach((node) => {
     const role = readFrameRole(node);
@@ -12651,7 +13377,133 @@ const buildTemplateUsagePreviewHtml = (
     applyTemplateUsagePreviewFieldEditability(container, options?.editableValueKeys);
   }
 
-  return container.innerHTML.trim();
+  if (options?.stabilizeInitialLayout === false) {
+    return container.innerHTML.trim();
+  }
+
+  if (typeof document === 'undefined') {
+    return container.innerHTML.trim();
+  }
+
+  const measurementRoot = document.createElement('div');
+  measurementRoot.className = 'template-edit-preview';
+  measurementRoot.setAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR, 'true');
+  measurementRoot.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, options?.readOnly ? 'true' : 'false');
+  measurementRoot.style.position = 'fixed';
+  measurementRoot.style.left = '-10000px';
+  measurementRoot.style.top = '0';
+  measurementRoot.style.visibility = 'hidden';
+  measurementRoot.style.pointerEvents = 'none';
+  measurementRoot.style.zIndex = '-1';
+  measurementRoot.style.contain = 'layout style paint';
+  measurementRoot.innerHTML = container.innerHTML;
+  document.body.appendChild(measurementRoot);
+
+  try {
+    const autoSizedFrameNodes = collectFrameSelectionAnchors(measurementRoot).filter(
+      (frameNode) => readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode)
+    );
+    const autoSizedFrameGroupIds = Array.from(
+      new Set(autoSizedFrameNodes.map((frameNode) => getFrameGroupId(frameNode).trim()).filter((frameGroupId) => Boolean(frameGroupId)))
+    );
+
+    if (autoSizedFrameGroupIds.length > 0) {
+      const autoSizeResult = applyTemplateAutoSizeBoxes(measurementRoot, autoSizedFrameGroupIds, {
+        applyRelativeAnchors: false,
+        preventShrink: false,
+        measurePeerClusterHeightTargets: options?.measurePeerClusterHeightTargets,
+        measurePeerClusterWidthTargets: options?.measurePeerClusterWidthTargets,
+      });
+      const groupBottomGapChangedCount = applyTemplateUsagePreviewGroupBottomGapAnchors(measurementRoot);
+      const boundaryFitChangedCount = applyTemplateUsagePreviewAutoHeightBoundaryFit(measurementRoot, {
+        preventShrink: false,
+      });
+      const changedFrameGroupIdSet = new Set(autoSizeResult.changedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
+      if (groupBottomGapChangedCount > 0) {
+        collectFrameSelectionAnchors(measurementRoot)
+          .filter((frameNode) => frameNode.hasAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR))
+          .forEach((frameNode) => {
+            changedFrameGroupIdSet.add(getFrameGroupId(frameNode).trim());
+          });
+      }
+      autoSizedFrameNodes.forEach((frameNode) => {
+        if (Math.abs(applyTemplateUsagePreviewAttachmentAutoHeight(frameNode, { preventShrink: preventInitialShrink })) > 0.5) {
+          changedFrameGroupIdSet.add(getFrameGroupId(frameNode).trim());
+        }
+      });
+      const changedFrameGroupIds = Array.from(changedFrameGroupIdSet);
+      const changedAxes = new Set<'height' | 'width'>();
+
+      autoSizedFrameNodes.forEach((frameNode) => {
+        const frameGroupId = getFrameGroupId(frameNode).trim();
+
+        if (!frameGroupId || changedFrameGroupIdSet.size <= 0 || !changedFrameGroupIdSet.has(frameGroupId)) {
+          return;
+        }
+
+        if (readFrameAutoHeightBox(frameNode)) {
+          changedAxes.add('height');
+        }
+
+        if (readFrameAutoWidthBox(frameNode)) {
+          changedAxes.add('width');
+        }
+      });
+
+      if (boundaryFitChangedCount > 0 || groupBottomGapChangedCount > 0) {
+        changedAxes.add('height');
+      }
+
+      const axes = changedAxes.size > 0 ? Array.from(changedAxes) : undefined;
+
+      if (changedFrameGroupIds.length > 0 && axes?.includes('height')) {
+        settleTemplateUsagePreviewVerticalOverlaps(measurementRoot, { includeAbsolute: true });
+      }
+
+      if (changedFrameGroupIds.length > 0 || axes) {
+        syncTemplateUsagePreviewNormalizedBandPeerBounds(
+          measurementRoot,
+          changedFrameGroupIds.length > 0 ? { focusFrameGroupIds: changedFrameGroupIds, axes } : { axes }
+        );
+      }
+
+      const overflowResult = applyTemplateAutoHeightTextOverflowCorrections(measurementRoot, autoSizedFrameGroupIds, {
+        measurePeerClusterHeightTargets: options?.measurePeerClusterHeightTargets,
+      });
+
+      if (overflowResult.changedCount > 0) {
+        syncTemplateUsagePreviewNormalizedBandPeerBounds(measurementRoot, {
+          focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+          axes: ['height'],
+        });
+      }
+
+      if (changedFrameGroupIds.length > 0 && axes?.includes('height')) {
+        applyTemplateUsagePreviewAutoHeightBoundaryFit(measurementRoot, { preventShrink: preventInitialShrink });
+        settleTemplateUsagePreviewVerticalOverlaps(measurementRoot, { includeAbsolute: true });
+      }
+
+      if (changedFrameGroupIds.length > 0 && axes && axes.length > 0) {
+        snapTemplateUsagePreviewFrameEdges(measurementRoot, { axes });
+      }
+      applyTemplateUsagePreviewGroupBottomGapAnchors(measurementRoot);
+
+      measurementRoot.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+        updatePageInnerMinHeight(pageInner);
+      });
+    }
+
+    if (preventInitialShrink) {
+      restoreTemplateUsagePreviewNonShrinkingFrameRects(measurementRoot, sourceFrameRectSnapshot, {
+        allowAutoHeightShrink: true,
+        allowAutoWidthShrink: true,
+      });
+    }
+    materializeFrameBandTableGeometryInContainer(measurementRoot);
+    return measurementRoot.innerHTML.trim();
+  } finally {
+    measurementRoot.remove();
+  }
 };
 
 const collectTemplateUsagePreviewAttachmentDrafts = (root: HTMLElement): TemplateEditWorkspaceAttachmentDraft[] => {
@@ -12676,6 +13528,70 @@ const collectTemplateUsagePreviewAttachmentDrafts = (root: HTMLElement): Templat
 
 type TemplateUsagePreviewAutoSizeLayoutChangeOptions = {
   focusFrameGroupIds?: string[];
+  axes?: Array<'height' | 'width'>;
+};
+
+const resolveTemplateUsagePreviewLayoutAxes = (
+  axes: Array<'height' | 'width'> | null | undefined
+) => {
+  if (!axes || axes.length <= 0) {
+    return {
+      allowHeight: true,
+      allowWidth: true,
+    };
+  }
+
+  const axisSet = new Set(axes);
+  return {
+    allowHeight: axisSet.has('height'),
+    allowWidth: axisSet.has('width'),
+  };
+};
+
+const isAttachmentRuntimeFrame = (frameNode: HTMLElement) => {
+  const boxKind = readFrameBoxKind(frameNode);
+  const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(frameNode);
+  return boxKind === 'attachment' || runtimeMode === 'file_slot';
+};
+
+const applyTemplateUsagePreviewAttachmentAutoHeight = (
+  frameNode: HTMLElement,
+  options?: {
+    preventShrink?: boolean;
+  }
+) => {
+  if (!isTemplateUsagePreviewModeNode(frameNode) || !isAttachmentRuntimeFrame(frameNode)) {
+    return 0;
+  }
+
+  const shell = resolveFrameLayoutShell(frameNode);
+  const pageInner = shell.closest<HTMLElement>('.page-inner');
+
+  if (!pageInner) {
+    return 0;
+  }
+
+  const nextHeight = measureRequiredAutoHeightFrameHeight(frameNode);
+  const currentRect = readFrameElementRect(shell, pageInner);
+
+  const delta = nextHeight - currentRect.height;
+
+  if (!Number.isFinite(nextHeight) || Math.abs(delta) <= 0.5 || (options?.preventShrink && delta < 0)) {
+    return 0;
+  }
+
+  writePositionedElementPageRect(
+    shell,
+    {
+      ...currentRect,
+      height: Math.max(MIN_WRITABLE_TABLE_SIZE_PX, nextHeight),
+    },
+    pageInner,
+    { minSize: MIN_WRITABLE_TABLE_SIZE_PX }
+  );
+  syncFrameBandShellTableRowsToShellSize(shell);
+  stabilizeFrameContentHeight(frameNode);
+  return delta;
 };
 
 const applyTemplateUsagePreviewAutoSize = (
@@ -12686,6 +13602,9 @@ const applyTemplateUsagePreviewAutoSize = (
     selectionStart?: number | null;
     selectionEnd?: number | null;
     onLayoutChange?: (root: HTMLElement, options?: TemplateUsagePreviewAutoSizeLayoutChangeOptions) => void;
+    preventShrink?: boolean;
+    measurePeerClusterHeightTargets?: boolean;
+    measurePeerClusterWidthTargets?: boolean;
   }
 ) => {
   if (!frameNode) {
@@ -12698,19 +13617,75 @@ const applyTemplateUsagePreviewAutoSize = (
     return;
   }
 
+  const layoutAxes = [
+    ...(readFrameAutoHeightBox(frameNode) ? (['height'] as const) : []),
+    ...(readFrameAutoWidthBox(frameNode) ? (['width'] as const) : []),
+  ];
+  const liveTextInput =
+    frameNode.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
+    frameNode.querySelector<HTMLInputElement>('[data-template-frame-input="true"]') ||
+    null;
+
+  if (
+    liveTextInput &&
+    readFrameAutoHeightBox(frameNode) &&
+    !readFrameAutoWidthBox(frameNode) &&
+    !liveTextInput.value.includes('\n')
+  ) {
+    const currentRect = liveTextInput.getBoundingClientRect();
+    const naturalWidth = measureNaturalTextControlWidth(liveTextInput);
+
+    if (naturalWidth <= Math.max(currentRect.width, liveTextInput.clientWidth || 0) + 1) {
+      const currentFrameHeight = resolveFrameLayoutShell(frameNode).getBoundingClientRect().height || 0;
+      const requiredFrameHeight = measureRequiredAutoHeightFrameHeight(frameNode);
+
+      if (currentFrameHeight <= requiredFrameHeight + 0.5) {
+        if (options?.restoreTextInputFocus) {
+          restoreFrameTextInputFocus(root, frameGroupId, options.selectionStart ?? null, options.selectionEnd ?? null);
+        }
+        return;
+      }
+    }
+  }
+
   const autoSizeResult = applyTemplateAutoSizeBoxes(root, [frameGroupId], {
     applyRelativeAnchors: false,
+    preventShrink: options?.preventShrink === true,
+    measurePeerClusterHeightTargets: options?.measurePeerClusterHeightTargets,
+    measurePeerClusterWidthTargets: options?.measurePeerClusterWidthTargets,
   });
-  if (autoSizeResult.changedCount > 0 || isTemplateUsagePreviewModeNode(frameNode)) {
+  const attachmentHeightDelta = applyTemplateUsagePreviewAttachmentAutoHeight(frameNode, {
+    preventShrink: options?.preventShrink === true,
+  });
+  const didChange = autoSizeResult.changedCount > 0 || Math.abs(attachmentHeightDelta) > 0.5;
+  const layoutFrameGroupIds = autoSizeResult.changedFrameGroupIds.length > 0 ? autoSizeResult.changedFrameGroupIds : [frameGroupId];
+  if (didChange) {
     if (options?.onLayoutChange) {
-      options.onLayoutChange(root, { focusFrameGroupIds: [frameGroupId] });
+      options.onLayoutChange(root, { focusFrameGroupIds: layoutFrameGroupIds, axes: [...layoutAxes] });
     } else {
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, { focusFrameGroupIds: [frameGroupId] });
-      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, { focusFrameGroupIds: [frameGroupId] });
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, { focusFrameGroupIds: [frameGroupId] });
-      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-      snapTemplateUsagePreviewFrameEdges(root, { focusFrameGroupIds: [frameGroupId] });
+      const { allowHeight, allowWidth } = resolveTemplateUsagePreviewLayoutAxes([...layoutAxes]);
+
+      if (allowHeight) {
+        applyTemplateUsagePreviewAutoHeightBoundaryFit(root, { focusFrameGroupIds: layoutFrameGroupIds });
+        settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      }
+
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+        focusFrameGroupIds: layoutFrameGroupIds,
+        axes: [...layoutAxes],
+      });
+
+      if (allowHeight) {
+        applyTemplateUsagePreviewAutoHeightBoundaryFit(root, { focusFrameGroupIds: layoutFrameGroupIds });
+        settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      }
+
+      if (allowHeight || allowWidth) {
+        snapTemplateUsagePreviewFrameEdges(root, {
+          focusFrameGroupIds: layoutFrameGroupIds,
+          axes: [...layoutAxes],
+        });
+      }
     }
   }
 
@@ -12723,6 +13698,10 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
   root: HTMLElement,
   options?: {
     onAutoSizeLayoutChange?: (root: HTMLElement, options?: TemplateUsagePreviewAutoSizeLayoutChangeOptions) => void;
+    enableInitialAutoSize?: boolean;
+    preventRuntimeAutoSizeShrink?: boolean;
+    measurePeerClusterHeightTargets?: boolean;
+    measurePeerClusterWidthTargets?: boolean;
   }
 ) => {
   type SignatureDrawState = {
@@ -12764,7 +13743,13 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       )
     );
 
-  const syncSignatureStateByContext = (contextKey: string, patch: SignatureStatePatch = {}) => {
+  const syncSignatureStateByContext = (
+    contextKey: string,
+    patch: SignatureStatePatch = {},
+    syncOptions?: {
+      syncLayout?: boolean;
+    }
+  ) => {
     if (!contextKey) {
       return;
     }
@@ -12810,13 +13795,24 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       renderTemplateUsagePreviewSignatureControl(control);
     });
 
-    collectContextFrameNodes('signature', contextKey).forEach((frameNode) => {
-      applyTemplateUsagePreviewAutoSize(root, frameNode, {
-        onLayoutChange: options?.onAutoSizeLayoutChange,
+    if (syncOptions?.syncLayout) {
+      collectContextFrameNodes('signature', contextKey).forEach((frameNode) => {
+        applyTemplateUsagePreviewAutoSize(root, frameNode, {
+          onLayoutChange: options?.onAutoSizeLayoutChange,
+          preventShrink: options?.preventRuntimeAutoSizeShrink === true,
+          measurePeerClusterHeightTargets: options?.measurePeerClusterHeightTargets,
+          measurePeerClusterWidthTargets: options?.measurePeerClusterWidthTargets,
+        });
       });
-    });
+    }
   };
-  const syncAttachmentStateByContext = (contextKey: string, nextState: TemplateUsagePreviewAttachmentRuntimeState) => {
+  const syncAttachmentStateByContext = (
+    contextKey: string,
+    nextState: TemplateUsagePreviewAttachmentRuntimeState,
+    syncOptions?: {
+      syncLayout?: boolean;
+    }
+  ) => {
     if (!contextKey) {
       return;
     }
@@ -12829,11 +13825,16 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       renderTemplateUsagePreviewAttachmentControl(control);
     });
 
-    collectContextFrameNodes('attachment', contextKey).forEach((frameNode) => {
-      applyTemplateUsagePreviewAutoSize(root, frameNode, {
-        onLayoutChange: options?.onAutoSizeLayoutChange,
+    if (syncOptions?.syncLayout) {
+      collectContextFrameNodes('attachment', contextKey).forEach((frameNode) => {
+        applyTemplateUsagePreviewAutoSize(root, frameNode, {
+          onLayoutChange: options?.onAutoSizeLayoutChange,
+          preventShrink: options?.preventRuntimeAutoSizeShrink === true,
+          measurePeerClusterHeightTargets: options?.measurePeerClusterHeightTargets,
+          measurePeerClusterWidthTargets: options?.measurePeerClusterWidthTargets,
+        });
       });
-    });
+    }
   };
   const updateAttachmentStateByContext = (
     contextKey: string,
@@ -12848,7 +13849,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       return;
     }
 
-    syncAttachmentStateByContext(contextKey, updater(cloneTemplateUsagePreviewAttachmentRuntimeState(baseState)));
+    syncAttachmentStateByContext(contextKey, updater(cloneTemplateUsagePreviewAttachmentRuntimeState(baseState)), {
+      syncLayout: true,
+    });
   };
   const appendPendingFilesToAttachmentContext = (contextKey: string, files: File[]) => {
     if (!files.length) {
@@ -13011,13 +14014,9 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       provider: DEFAULT_TEMPLATE_USAGE_SIGNATURE_PROVIDER,
       imageData,
       appendHistoryMessage: '서명 완료',
+    }, {
+      syncLayout: true,
     });
-
-    if (drawState.frameNode) {
-      applyTemplateUsagePreviewAutoSize(root, drawState.frameNode, {
-        onLayoutChange: options?.onAutoSizeLayoutChange,
-      });
-    }
 
     activeSignatureDrawStateByPointerId.delete(event.pointerId);
   };
@@ -13144,6 +14143,8 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
         signedAt: '',
         imageData: '',
         appendHistoryMessage: '서명 지움',
+      }, {
+        syncLayout: true,
       });
     }
   };
@@ -13215,22 +14216,13 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     if (!contextKey || initialAttachmentFilesByContext.has(contextKey)) {
       return;
     }
-    const seededState = getTemplateUsagePreviewAttachmentState(root, contextKey);
-
+    const seededState = ensureTemplateUsagePreviewAttachmentState(control);
     if (seededState) {
       initialAttachmentFilesByContext.set(contextKey, seededState);
-      return;
     }
-
-    initialAttachmentFilesByContext.set(
-      contextKey,
-      buildEmptyTemplateUsagePreviewAttachmentRuntimeState(
-        control.getAttribute(TEMPLATE_USAGE_PREVIEW_FILE_API_PATH_ATTR)?.trim() || ''
-      )
-    );
   });
   initialAttachmentFilesByContext.forEach((state, contextKey) => {
-    syncAttachmentStateByContext(contextKey, state);
+    setTemplateUsagePreviewAttachmentState(root, contextKey, state);
   });
 
   const initialSignatureControlsByContext = new Map<string, HTMLElement>();
@@ -13243,37 +14235,49 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
   });
   initialSignatureControlsByContext.forEach((control, contextKey) => {
     ensureTemplateUsagePreviewSignatureState(control);
-    syncSignatureStateByContext(contextKey, {});
   });
 
-  const initialAutoSizedFrameGroupIds = Array.from(
-    new Set(
-      collectFrameSelectionAnchors(root)
-        .filter((frameNode) => {
-          const frameGroupId = getFrameGroupId(frameNode);
+  if (options?.enableInitialAutoSize) {
+    const initialAutoSizedFrameGroupIds = Array.from(
+      new Set(
+        collectFrameSelectionAnchors(root)
+          .filter((frameNode) => {
+            const frameGroupId = getFrameGroupId(frameNode);
 
-          if (!frameGroupId || (!readFrameAutoHeightBox(frameNode) && !readFrameAutoWidthBox(frameNode))) {
-            return false;
-          }
+            if (
+              !frameGroupId ||
+              (!readFrameAutoHeightBox(frameNode) && !readFrameAutoWidthBox(frameNode))
+            ) {
+              return false;
+            }
 
-          return true;
-        })
-        .map((frameNode) => getFrameGroupId(frameNode).trim())
-        .filter((frameGroupId) => Boolean(frameGroupId))
-    )
-  );
+            return true;
+          })
+          .map((frameNode) => getFrameGroupId(frameNode).trim())
+          .filter((frameGroupId) => Boolean(frameGroupId))
+      )
+    );
 
-  if (initialAutoSizedFrameGroupIds.length > 0) {
-    applyTemplateAutoSizeBoxes(root, initialAutoSizedFrameGroupIds, {
-      applyRelativeAnchors: false,
-    });
-    applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
-    settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-    syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
-    applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
-    settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-    snapTemplateUsagePreviewFrameEdges(root);
-    options?.onAutoSizeLayoutChange?.(root);
+    if (initialAutoSizedFrameGroupIds.length > 0) {
+      applyTemplateAutoSizeBoxes(root, initialAutoSizedFrameGroupIds, {
+        applyRelativeAnchors: false,
+        measurePeerClusterHeightTargets: options?.measurePeerClusterHeightTargets,
+        measurePeerClusterWidthTargets: options?.measurePeerClusterWidthTargets,
+      });
+      applyTemplateUsagePreviewGroupBottomGapAnchors(root);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+        focusFrameGroupIds: initialAutoSizedFrameGroupIds,
+        axes: ['height', 'width'],
+      });
+      applyTemplateUsagePreviewGroupBottomGapAnchors(root);
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      snapTemplateUsagePreviewFrameEdges(root);
+      applyTemplateUsagePreviewGroupBottomGapAnchors(root);
+      options?.onAutoSizeLayoutChange?.(root);
+    }
   }
 
   root.addEventListener('change', handleFileChange);
@@ -13370,6 +14374,7 @@ const ensureSharedTextHeightMeasureNode = (kind: 'textarea' | 'input') => {
 const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const targetRect = target.getBoundingClientRect();
   const computedStyle = getComputedStyle(target);
+  const previewMode = Boolean(target.closest(`.template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"]`));
   const verticalBorderPx = readComputedVerticalBorderPx(computedStyle);
   const liveScrollHeight = target.scrollHeight || 0;
   const paddingTop = parseFramePx(computedStyle.paddingTop);
@@ -13378,6 +14383,22 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   const lineHeight = parseFramePx(computedStyle.lineHeight);
   const naturalSingleLineHeight =
     paddingTop + paddingBottom + verticalBorderPx + Math.max(lineHeight, fontSize, 0);
+  const currentRenderedHeight = Math.ceil(targetRect.height || 0);
+  const isSingleLineValue = !target.value.includes('\n');
+
+  if (isSingleLineValue && currentRenderedHeight > 0) {
+    const liveClientWidth =
+      target instanceof HTMLTextAreaElement
+        ? Math.max(target.clientWidth || 0, targetRect.width || 0)
+        : Math.max(target.clientWidth || 0, targetRect.width || 0);
+    const liveNaturalWidth = measureNaturalTextControlWidth(target);
+    const wrapsWithinCurrentWidth = liveNaturalWidth > liveClientWidth + 1;
+
+    if (!wrapsWithinCurrentWidth) {
+      const liveHeight = previewMode ? 0 : liveScrollHeight + verticalBorderPx;
+      return Math.ceil(Math.max(MIN_FRAME_SIZE_PX, naturalSingleLineHeight, liveHeight));
+    }
+  }
 
   if (target instanceof HTMLInputElement) {
     const liveInputHeight = Math.max(
@@ -13396,7 +14417,9 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
     return Math.ceil((target.scrollHeight || target.getBoundingClientRect().height || 0) + verticalBorderPx);
   }
 
-  measureNode.value = target.value;
+  // Empty controls must still reserve one text line, otherwise the first
+  // non-wrapping character inflates the frame on first input.
+  measureNode.value = target.value.length > 0 ? target.value : ' ';
   measureNode.style.position = 'fixed';
   measureNode.style.left = '-10000px';
   measureNode.style.top = '0';
@@ -13424,25 +14447,36 @@ const measureNaturalTextControlHeight = (target: HTMLTextAreaElement | HTMLInput
   const measuredHeight =
     measureNode.scrollHeight || measureNode.getBoundingClientRect().height || target.scrollHeight || 0;
 
-  return Math.ceil(Math.max(measuredHeight + verticalBorderPx, naturalSingleLineHeight, targetRect.height > 0 && target instanceof HTMLInputElement ? targetRect.height : 0));
+  return Math.ceil(
+    Math.max(
+      measuredHeight + verticalBorderPx,
+      naturalSingleLineHeight,
+      !previewMode && targetRect.height > 0 && target instanceof HTMLInputElement ? targetRect.height : 0
+    )
+  );
 };
 
 const measureNaturalElementContentHeight = (target: HTMLElement) => {
   const measurementTarget = target.classList.contains('v102-frame-band')
     ? target.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) || target
     : target;
+  const previewControlType = measurementTarget.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR)?.trim() || '';
+
+  if (previewControlType === 'attachment') {
+    return Math.ceil(
+      Math.max(
+        measurementTarget.scrollHeight || 0,
+        measurementTarget.offsetHeight || 0,
+        measurementTarget.getBoundingClientRect().height || 0
+      )
+    );
+  }
+
   const targetRect = measurementTarget.getBoundingClientRect();
   const computedStyle = getComputedStyle(measurementTarget);
-
-  if (measurementTarget.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'attachment') {
-    const naturalHeight = Math.max(
-      measurementTarget.scrollHeight || 0,
-      measurementTarget.clientHeight || 0,
-      targetRect.height || 0
-    );
-
-    return Math.ceil(naturalHeight);
-  }
+  const previewRoot = measurementTarget.closest<HTMLElement>(
+    `.template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"]`
+  );
 
   const clone = measurementTarget.cloneNode(true) as HTMLElement;
 
@@ -13474,26 +14508,49 @@ const measureNaturalElementContentHeight = (target: HTMLElement) => {
   clone.style.whiteSpace = computedStyle.whiteSpace;
   clone.style.wordBreak = computedStyle.wordBreak;
   clone.style.overflowWrap = computedStyle.overflowWrap;
-  document.body.appendChild(clone);
+
+  if (measurementTarget.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'attachment') {
+    clone.style.display = 'flex';
+    clone.style.flexDirection = 'column';
+    clone.style.alignItems = 'stretch';
+    clone.style.justifyContent = 'flex-start';
+    clone.style.gap = '4px';
+  }
+
+  const measurementHost = previewRoot ? document.createElement('div') : clone;
+
+  if (previewRoot) {
+    measurementHost.className = previewRoot.className;
+    previewRoot.getAttributeNames().forEach((attributeName) => {
+      if (attributeName === 'class') {
+        return;
+      }
+
+      measurementHost.setAttribute(attributeName, previewRoot.getAttribute(attributeName) || '');
+    });
+    measurementHost.style.position = 'fixed';
+    measurementHost.style.left = '-10000px';
+    measurementHost.style.top = '0';
+    measurementHost.style.visibility = 'hidden';
+    measurementHost.style.pointerEvents = 'none';
+    measurementHost.style.zIndex = '-1';
+    measurementHost.style.contain = 'layout style paint';
+    measurementHost.style.width = clone.style.width;
+    measurementHost.appendChild(clone);
+  }
+
+  document.body.appendChild(measurementHost);
 
   const measuredHeight = Math.max(clone.scrollHeight || 0, clone.getBoundingClientRect().height || 0);
-  clone.remove();
+  measurementHost.remove();
 
   return Math.ceil(measuredHeight);
 };
 
 const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputElement) => {
   const computedStyle = getComputedStyle(target);
-  const horizontalBorderPx = parseFramePx(computedStyle.borderLeftWidth) + parseFramePx(computedStyle.borderRightWidth);
-  const liveScrollWidth = target.scrollWidth || 0;
-  const targetRectWidth = target.getBoundingClientRect().width || 0;
-
-  if (liveScrollWidth > 0 && liveScrollWidth + horizontalBorderPx > targetRectWidth + 0.5) {
-    return Math.ceil(liveScrollWidth + horizontalBorderPx);
-  }
-
   const clone = document.createElement('div');
-  const text = target.value;
+  const text = target.value || target.textContent || target.getAttribute('value') || '';
 
   clone.textContent = text || ' ';
   clone.style.position = 'fixed';
@@ -13514,9 +14571,9 @@ const measureNaturalTextControlWidth = (target: HTMLTextAreaElement | HTMLInputE
   clone.style.overflowWrap = 'normal';
   document.body.appendChild(clone);
 
-  const measuredWidth = clone.scrollWidth || clone.getBoundingClientRect().width || target.scrollWidth || 0;
+  const measuredWidth = Math.max(clone.scrollWidth || 0, clone.getBoundingClientRect().width || 0);
   clone.remove();
-  return measuredWidth;
+  return Math.ceil(measuredWidth);
 };
 
 const measureRequiredFrameHeightFromTargets = (
@@ -13524,11 +14581,13 @@ const measureRequiredFrameHeightFromTargets = (
   targets: HTMLElement[]
 ) => {
   const frameRect = resolveFrameLayoutShell(node).getBoundingClientRect();
+  const previewMode = isTemplateUsagePreviewModeNode(node);
 
   return targets.reduce((maxHeight, target) => {
     const targetRect = target.getBoundingClientRect();
     const ignoreExistingInset =
-      target.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'attachment';
+      target.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR) === 'attachment' ||
+      (previewMode && (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement));
     const requiredTargetHeight =
       target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
         ? measureNaturalTextControlHeight(target)
@@ -13546,19 +14605,26 @@ const measureRequiredFrameWidthFromTargets = (
   targets: HTMLElement[]
 ) => {
   const frameRect = resolveFrameLayoutShell(node).getBoundingClientRect();
+  const previewMode = isTemplateUsagePreviewModeNode(node);
 
   return targets.reduce((maxWidth, target) => {
     const targetRect = target.getBoundingClientRect();
+    const previewControlType = target.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR)?.trim() || '';
+    const ignoreExistingInset =
+      previewControlType === 'attachment' ||
+      (previewMode && (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement));
     const naturalTextControlWidth =
       target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
         ? measureNaturalTextControlWidth(target)
         : 0;
     const requiredTargetWidth =
-      naturalTextControlWidth > 0
+      previewControlType === 'attachment'
+        ? Math.max(target.scrollWidth || 0, target.offsetWidth || 0, target.clientWidth || 0, targetRect.width || 0)
+        : naturalTextControlWidth > 0
         ? naturalTextControlWidth
         : Math.max(target.scrollWidth || 0, target.offsetWidth || 0, target.clientWidth || 0, targetRect.width || 0);
-    const targetLeftOffset = Math.max(0, targetRect.left - frameRect.left);
-    const targetRightInset = Math.max(0, frameRect.right - targetRect.right);
+    const targetLeftOffset = ignoreExistingInset ? 0 : Math.max(0, targetRect.left - frameRect.left);
+    const targetRightInset = ignoreExistingInset ? 0 : Math.max(0, frameRect.right - targetRect.right);
     const requiredFrameWidth = targetLeftOffset + requiredTargetWidth + targetRightInset;
 
     return Math.max(maxWidth, requiredFrameWidth);
@@ -13686,10 +14752,11 @@ const measureRequiredAutoHeightFrameHeight = (node: HTMLElement) => {
     const previewBaseHeight =
       readFrameAutoHeightStoredBaseHeight(node) ??
       (readFrameAutoHeightBaseExplicit(node) ? readFrameAutoHeightBaseHeight(node) : MIN_FRAME_SIZE_PX);
+    const currentFrameHeight = readFrameNodeRect(node).height;
 
     if (isSignatureImageRuntimeFrame(node)) {
       return Math.ceil(
-        Math.max(MIN_FRAME_SIZE_PX, previewBaseHeight, measureTemplateUsagePreviewSignatureImageContentHeight(node))
+        Math.max(MIN_FRAME_SIZE_PX, previewBaseHeight, Number.isFinite(currentFrameHeight) ? currentFrameHeight : 0)
       );
     }
 
@@ -13717,10 +14784,11 @@ const measureRequiredAutoWidthFrameWidth = (node: HTMLElement) => {
     const previewBaseWidth =
       readFrameAutoWidthStoredBaseWidth(node) ??
       (readFrameAutoWidthBaseExplicit(node) ? readFrameAutoWidthBaseWidth(node) : MIN_FRAME_SIZE_PX);
+    const currentFrameWidth = readFrameNodeRect(node).width;
 
     if (isSignatureImageRuntimeFrame(node)) {
       return Math.ceil(
-        Math.max(MIN_FRAME_SIZE_PX, previewBaseWidth, measureTemplateUsagePreviewSignatureImageContentWidth(node))
+        Math.max(MIN_FRAME_SIZE_PX, previewBaseWidth, Number.isFinite(currentFrameWidth) ? currentFrameWidth : 0)
       );
     }
 
@@ -13757,6 +14825,9 @@ type TemplateAutoSizeApplyOptions = {
   applyRelativeAnchors?: boolean;
   skipHeight?: boolean;
   skipWidth?: boolean;
+  preventShrink?: boolean;
+  measurePeerClusterHeightTargets?: boolean;
+  measurePeerClusterWidthTargets?: boolean;
 };
 
 const applyTemplateAutoHeightBoxes = (
@@ -13771,6 +14842,7 @@ const applyTemplateAutoHeightBoxes = (
   const targetFrameGroupIdSet = frameGroupIds?.length
     ? new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
     : null;
+  const useLocalOnly = options.measurePeerClusterHeightTargets === false;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
   const processedFrameGroupIdSet = new Set<string>();
@@ -13787,7 +14859,9 @@ const applyTemplateAutoHeightBoxes = (
       const frameGroupId = getFrameGroupId(node);
       const anchorSide = normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'));
       const clusterNodes = frameGroupId
-        ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom', edgeTopologySnapshot)]
+        ? useLocalOnly
+          ? [node]
+          : [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'bottom', edgeTopologySnapshot)]
         : [node];
       const uniqueClusterNodes = Array.from(
         new Map(
@@ -13807,12 +14881,13 @@ const applyTemplateAutoHeightBoxes = (
 
       const currentClusterHeight = uniqueClusterNodes.reduce(
         (maxHeight, clusterNode) => Math.max(maxHeight, readFrameNodeRect(clusterNode).height),
-        Number.NEGATIVE_INFINITY
+        useLocalOnly ? readFrameNodeRect(node).height : Number.NEGATIVE_INFINITY
       );
-      const requiredClusterHeight = uniqueClusterNodes.reduce((maxHeight, clusterNode) => {
+      const clusterMeasurementNodes = useLocalOnly ? [node] : uniqueClusterNodes;
+      const requiredClusterHeight = clusterMeasurementNodes.reduce((maxHeight, clusterNode) => {
         const requiredHeight = measureRequiredAutoHeightFrameHeight(clusterNode);
         return Number.isFinite(requiredHeight) ? Math.max(maxHeight, requiredHeight) : maxHeight;
-      }, Number.NEGATIVE_INFINITY);
+      }, useLocalOnly ? measureRequiredAutoHeightFrameHeight(node) : Number.NEGATIVE_INFINITY);
       const requestedDelta = requiredClusterHeight - currentClusterHeight;
 
       if (!Number.isFinite(requiredClusterHeight) || !Number.isFinite(currentClusterHeight)) {
@@ -13824,10 +14899,20 @@ const applyTemplateAutoHeightBoxes = (
         return;
       }
 
-      const appliedDelta = applyFrameAutoHeightDelta(node, requestedDelta, anchorSide);
+      if (options.preventShrink && requestedDelta < 0) {
+        return;
+      }
+
+      const appliedDelta = useLocalOnly
+        ? anchorSide === 'top'
+          ? applyFrameAutoHeightFromTopDeltaLocal(node, requestedDelta)
+          : applyFrameAutoHeightDeltaLocal(node, requestedDelta)
+        : applyFrameAutoHeightDelta(node, requestedDelta, anchorSide);
 
       if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(...uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)));
+        changedFrameGroupIds.push(
+          ...(useLocalOnly ? [frameGroupId] : uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)))
+        );
       } else {
         skippedCount += uniqueClusterNodes.length;
       }
@@ -13857,6 +14942,7 @@ const applyTemplateAutoWidthBoxes = (
   const targetFrameGroupIdSet = frameGroupIds?.length
     ? new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
     : null;
+  const useLocalOnly = options.measurePeerClusterWidthTargets === false;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
   const processedFrameGroupIdSet = new Set<string>();
@@ -13873,7 +14959,9 @@ const applyTemplateAutoWidthBoxes = (
       const frameGroupId = getFrameGroupId(node);
       const anchorSide = normalizeTextAutoWidthAnchorSide(readFrameAutoSizeAnchorSide(node, 'right'));
       const clusterNodes = frameGroupId
-        ? [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right', edgeTopologySnapshot)]
+        ? useLocalOnly
+          ? [node]
+          : [node, ...collectAutoSizeSameSidePeerNodes(root, frameGroupId, 'right', edgeTopologySnapshot)]
         : [node];
       const uniqueClusterNodes = Array.from(
         new Map(
@@ -13893,12 +14981,13 @@ const applyTemplateAutoWidthBoxes = (
 
       const currentClusterWidth = uniqueClusterNodes.reduce(
         (maxWidth, clusterNode) => Math.max(maxWidth, readFrameNodeRect(clusterNode).width),
-        Number.NEGATIVE_INFINITY
+        useLocalOnly ? readFrameNodeRect(node).width : Number.NEGATIVE_INFINITY
       );
-      const requiredClusterWidth = uniqueClusterNodes.reduce((maxWidth, clusterNode) => {
+      const clusterMeasurementNodes = useLocalOnly ? [node] : uniqueClusterNodes;
+      const requiredClusterWidth = clusterMeasurementNodes.reduce((maxWidth, clusterNode) => {
         const requiredWidth = measureRequiredAutoWidthFrameWidth(clusterNode);
         return Number.isFinite(requiredWidth) ? Math.max(maxWidth, requiredWidth) : maxWidth;
-      }, Number.NEGATIVE_INFINITY);
+      }, useLocalOnly ? measureRequiredAutoWidthFrameWidth(node) : Number.NEGATIVE_INFINITY);
       const requestedDelta = requiredClusterWidth - currentClusterWidth;
 
       if (!Number.isFinite(requiredClusterWidth) || !Number.isFinite(currentClusterWidth)) {
@@ -13910,10 +14999,20 @@ const applyTemplateAutoWidthBoxes = (
         return;
       }
 
-      const appliedDelta = applyFrameAutoWidthDelta(node, requestedDelta, anchorSide);
+      if (options.preventShrink && requestedDelta < 0) {
+        return;
+      }
+
+      const appliedDelta = useLocalOnly
+        ? anchorSide === 'left'
+          ? applyFrameAutoWidthFromLeftDeltaLocal(node, requestedDelta)
+          : applyFrameAutoWidthRightDeltaLocal(node, requestedDelta)
+        : applyFrameAutoWidthDelta(node, requestedDelta, anchorSide);
 
       if (Math.abs(appliedDelta) > 0.5) {
-        changedFrameGroupIds.push(...uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)));
+        changedFrameGroupIds.push(
+          ...(useLocalOnly ? [frameGroupId] : uniqueClusterNodes.map((clusterNode) => getFrameGroupId(clusterNode)))
+        );
       } else {
         skippedCount += uniqueClusterNodes.length;
       }
@@ -13933,7 +15032,8 @@ const applyTemplateAutoWidthBoxes = (
 
 const applyTemplateAutoHeightTextOverflowCorrections = (
   root: HTMLElement,
-  frameGroupIds?: string[]
+  frameGroupIds?: string[],
+  options: TemplateAutoSizeApplyOptions = {}
 ): {
   changedCount: number;
   skippedCount: number;
@@ -13942,6 +15042,7 @@ const applyTemplateAutoHeightTextOverflowCorrections = (
   const targetFrameGroupIdSet = frameGroupIds?.length
     ? new Set(frameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean))
     : null;
+  const useLocalOnly = options.measurePeerClusterHeightTargets === false;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
 
@@ -13962,17 +15063,22 @@ const applyTemplateAutoHeightTextOverflowCorrections = (
         return;
       }
 
-      const overflowDelta = Math.ceil((textInput.scrollHeight || 0) - (textInput.clientHeight || 0));
+      const currentShellHeight = resolveFrameLayoutShell(node).getBoundingClientRect().height || 0;
+      const requiredFrameHeight = measureRequiredAutoHeightFrameHeight(node);
+      const directTextOverflowDelta = Math.ceil((textInput.scrollHeight || 0) - (textInput.clientHeight || 0));
+      const measuredOverflowDelta = Math.ceil(requiredFrameHeight - currentShellHeight);
+      const overflowDelta = Math.max(directTextOverflowDelta, measuredOverflowDelta);
 
       if (overflowDelta <= 0.5) {
         return;
       }
 
-      const appliedDelta = applyFrameAutoHeightDelta(
-        node,
-        overflowDelta,
-        normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'))
-      );
+      const anchorSide = normalizeTextAutoHeightAnchorSide(readFrameAutoSizeAnchorSide(node, 'bottom'));
+      const appliedDelta = useLocalOnly
+        ? anchorSide === 'top'
+          ? applyFrameAutoHeightFromTopDeltaLocal(node, overflowDelta)
+          : applyFrameAutoHeightDeltaLocal(node, overflowDelta)
+        : applyFrameAutoHeightDelta(node, overflowDelta, anchorSide);
 
       if (Math.abs(appliedDelta) > 0.5) {
         changedFrameGroupIds.push(getFrameGroupId(node));
@@ -14003,6 +15109,10 @@ const applyTemplateSecondaryContentFit = (
     : null;
   const changedFrameGroupIds: string[] = [];
   let skippedCount = 0;
+  const useLocalOnly =
+    axis === 'width'
+      ? options.measurePeerClusterWidthTargets === false
+      : options.measurePeerClusterHeightTargets === false;
 
   materializePositionGroupWrappers(root);
 
@@ -14035,8 +15145,12 @@ const applyTemplateSecondaryContentFit = (
 
       const appliedDelta =
         axis === 'width'
-          ? applyFrameAutoWidthDelta(node, requestedDelta, 'right')
-          : applyFrameAutoHeightDelta(node, requestedDelta, 'bottom');
+          ? useLocalOnly
+            ? applyFrameAutoWidthRightDeltaLocal(node, requestedDelta)
+            : applyFrameAutoWidthDelta(node, requestedDelta, 'right')
+          : useLocalOnly
+            ? applyFrameAutoHeightDeltaLocal(node, requestedDelta)
+            : applyFrameAutoHeightDelta(node, requestedDelta, 'bottom');
 
       if (Math.abs(appliedDelta) > 0.5) {
         changedFrameGroupIds.push(frameGroupId);
@@ -14046,8 +15160,22 @@ const applyTemplateSecondaryContentFit = (
     });
 
   if (changedFrameGroupIds.length > 0 && options.applyRelativeAnchors !== false) {
+    const changedFrameGroupIdSet = new Set(changedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
+    const changedSourceKeys = new Set(
+      collectFrameSelectionAnchors(root)
+        .filter((node) => changedFrameGroupIdSet.has(getFrameGroupId(node).trim()))
+        .map((node) => node.closest<HTMLElement>('.v102-frame-band')?.getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR)?.trim() || '')
+        .filter(Boolean)
+    );
+
     materializePositionGroupWrappers(root);
-    syncTemplateUsagePreviewNormalizedBandPeerBounds(root);
+    if (changedSourceKeys.size > 0) {
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+        sourceKeys: changedSourceKeys,
+        focusFrameGroupIds: changedFrameGroupIds,
+        axes: [axis],
+      });
+    }
     ensureRelativeAnchorConfigs(root);
     applyRelativeAnchoredFrameRectsInRoot(root);
   }
@@ -14072,11 +15200,23 @@ const applyTemplateAutoSizeBoxes = (
   const emptyResult = { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
   const heightResult = options.skipHeight
     ? emptyResult
-    : applyTemplateAutoHeightBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
+    : applyTemplateAutoHeightBoxes(root, frameGroupIds, {
+        applyRelativeAnchors: false,
+        preventShrink: options.preventShrink,
+        measurePeerClusterHeightTargets: options.measurePeerClusterHeightTargets,
+      });
   const widthResult = options.skipWidth
     ? emptyResult
-    : applyTemplateAutoWidthBoxes(root, frameGroupIds, { applyRelativeAnchors: false });
-  const heightOverflowResult = options.skipHeight ? emptyResult : applyTemplateAutoHeightTextOverflowCorrections(root, frameGroupIds);
+    : applyTemplateAutoWidthBoxes(root, frameGroupIds, {
+        applyRelativeAnchors: false,
+        preventShrink: options.preventShrink,
+        measurePeerClusterWidthTargets: options.measurePeerClusterWidthTargets,
+      });
+  const heightOverflowResult = options.skipHeight
+    ? emptyResult
+    : applyTemplateAutoHeightTextOverflowCorrections(root, frameGroupIds, {
+        measurePeerClusterHeightTargets: options.measurePeerClusterHeightTargets,
+      });
   const changedFrameGroupIds = Array.from(
     new Set([...heightResult.changedFrameGroupIds, ...widthResult.changedFrameGroupIds, ...heightOverflowResult.changedFrameGroupIds])
   );
@@ -16354,9 +17494,21 @@ export default function TemplateEditWorkspace({
   templateNameReadOnly = false,
   saveDisabled = false,
   documentAttachmentApiPath = '',
+  templateUsagePreviewLayoutDebugOptions,
 }: TemplateEditWorkspaceProps) {
   const documentMode = workspaceMode === 'document';
   const readMode = workspaceMode === 'read';
+  const usagePreviewStabilizeInitialLayout =
+    templateUsagePreviewLayoutDebugOptions?.stabilizeInitialLayout !== false;
+  const usagePreviewEnableInitialAutoSize = templateUsagePreviewLayoutDebugOptions?.enableInitialAutoSize === true;
+  const usagePreviewPreventInitialValueClearShrink =
+    templateUsagePreviewLayoutDebugOptions?.preventInitialValueClearShrink !== false;
+  const usagePreviewPreventRuntimeAutoSizeShrink =
+    templateUsagePreviewLayoutDebugOptions?.preventRuntimeAutoSizeShrink === true;
+  const usagePreviewMeasurePeerClusterHeightTargets =
+    templateUsagePreviewLayoutDebugOptions?.measurePeerClusterHeightTargets !== false;
+  const usagePreviewMeasurePeerClusterWidthTargets =
+    templateUsagePreviewLayoutDebugOptions?.measurePeerClusterWidthTargets !== false;
   const normalizedEditableValueKeys = React.useMemo(
     () =>
       Array.isArray(editableValueKeys)
@@ -16394,6 +17546,7 @@ export default function TemplateEditWorkspace({
     React.useState<AppearanceCorner[]>(() => [...APPEARANCE_CORNERS]);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
+  const [editSettingsPanelVisible, setEditSettingsPanelVisible] = React.useState(true);
   const [canvasFullscreen, setCanvasFullscreen] = React.useState(false);
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
   const [positionRelationTargetFrameGroupId, setPositionRelationTargetFrameGroupId] = React.useState('');
@@ -16439,6 +17592,11 @@ export default function TemplateEditWorkspace({
   const [canvasIconScale, setCanvasIconScale] = React.useState<CanvasIconScale>('m');
   const [templateUsagePreviewMode, setTemplateUsagePreviewMode] = React.useState(false);
   const [templateUsagePreviewHtml, setTemplateUsagePreviewHtml] = React.useState('');
+  const templateUsagePreviewBuildSourceHtmlRef = React.useRef('');
+  const templateUsagePreviewBuildIdRef = React.useRef(0);
+  const templateUsagePreviewBuildRafRef = React.useRef<number | null>(null);
+  const templateUsagePreviewBuildTimeoutRef = React.useRef<number | null>(null);
+  const templateUsagePreviewInitialShrinkGuardPendingRef = React.useRef(false);
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [spacePanArmed, setSpacePanArmed] = React.useState(false);
   const [spacePanDragging, setSpacePanDragging] = React.useState(false);
@@ -16564,6 +17722,9 @@ export default function TemplateEditWorkspace({
   );
   const toggleCanvasFullscreen = React.useCallback(() => {
     setCanvasFullscreen((previous) => !previous);
+  }, []);
+  const toggleEditSettingsPanelVisible = React.useCallback(() => {
+    setEditSettingsPanelVisible((previous) => !previous);
   }, []);
   const clampPreviewZoomPercent = React.useCallback((value: number) => {
     if (!Number.isFinite(value)) {
@@ -16765,6 +17926,7 @@ export default function TemplateEditWorkspace({
   const lastPersistedDraftHtmlRef = React.useRef('');
   const templateUsagePreviewEditorDraftSnapshotRef = React.useRef('');
   const templateUsagePreviewRenderSnapshotRef = React.useRef('');
+  const templateUsagePreviewPositionSpacingRelationsRef = React.useRef<DefinedPositionRelativeRelation[]>([]);
   const textAutoSizePointerHandledRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -17203,7 +18365,7 @@ export default function TemplateEditWorkspace({
     return readRelativeAnchorTargetLabel(config, previewRef.current);
   }, [primarySelectedFrameGroupId, renderedPreviewHtml]);
   const primaryRelativeImpactGroups = React.useMemo(() => {
-    if (selectionPanelTab !== 'metadata' || !primarySelectedFrameGroupId || !previewRef.current) {
+    if (selectionPanelTab !== 'position' || !primarySelectedFrameGroupId || !previewRef.current) {
       return [];
     }
 
@@ -17664,8 +18826,21 @@ export default function TemplateEditWorkspace({
       return;
     }
 
+    if (templateUsagePreviewBuildRafRef.current != null) {
+      window.cancelAnimationFrame(templateUsagePreviewBuildRafRef.current);
+      templateUsagePreviewBuildRafRef.current = null;
+    }
+
+    if (templateUsagePreviewBuildTimeoutRef.current != null) {
+      window.clearTimeout(templateUsagePreviewBuildTimeoutRef.current);
+      templateUsagePreviewBuildTimeoutRef.current = null;
+    }
+
     if (templateUsagePreviewMode) {
       pendingPreviewViewportResetRef.current = true;
+      templateUsagePreviewBuildIdRef.current += 1;
+      templateUsagePreviewBuildSourceHtmlRef.current = '';
+      templateUsagePreviewInitialShrinkGuardPendingRef.current = false;
       if (templateUsagePreviewRenderSnapshotRef.current.trim()) {
         setPreviewHtml(templateUsagePreviewRenderSnapshotRef.current);
       }
@@ -17686,22 +18861,59 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    const editorDraftHtml = syncDraftPreviewHtmlRef({ recordHistory: false });
+    syncFormControlMarkup(root);
+    const liveEditorDraftHtml = extractEditorHtml(root).trim();
+    const editorDraftHtml = liveEditorDraftHtml || draftPreviewHtmlRef.current.trim() || renderedPreviewHtml.trim();
+    draftPreviewHtmlRef.current = editorDraftHtml;
     templateUsagePreviewEditorDraftSnapshotRef.current = editorDraftHtml;
-    templateUsagePreviewRenderSnapshotRef.current = extractPreviewRenderHtml(root);
-    const runtimeHtml = buildTemplateUsagePreviewHtml(root);
+    templateUsagePreviewRenderSnapshotRef.current = renderedPreviewHtml;
+    templateUsagePreviewBuildSourceHtmlRef.current = editorDraftHtml;
+    templateUsagePreviewInitialShrinkGuardPendingRef.current = usagePreviewPreventInitialValueClearShrink;
+    templateUsagePreviewBuildIdRef.current += 1;
+    const buildId = templateUsagePreviewBuildIdRef.current;
 
-    if (!runtimeHtml.trim()) {
-      setMessage('실제 사용 미리보기를 만들 수 없습니다.');
-      return;
-    }
-
-    setBoxCreationMode(false);
+    root.setAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR, 'true');
+    root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, 'false');
+    root.setAttribute('data-frame-create-mode', 'false');
     pendingPreviewViewportResetRef.current = true;
-    setTemplateUsagePreviewHtml(runtimeHtml);
-    setTemplateUsagePreviewMode(true);
-    setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
-  }, [documentMode, readMode, renderedPreviewHtml, syncDraftPreviewHtmlRef, templateUsagePreviewMode]);
+    templateUsagePreviewBuildRafRef.current = window.requestAnimationFrame(() => {
+      templateUsagePreviewBuildRafRef.current = null;
+      templateUsagePreviewBuildTimeoutRef.current = window.setTimeout(() => {
+        templateUsagePreviewBuildTimeoutRef.current = null;
+
+        if (buildId !== templateUsagePreviewBuildIdRef.current) {
+          return;
+        }
+
+        const runtimeHtml = buildTemplateUsagePreviewHtml(editorDraftHtml, {
+          stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
+          preventInitialValueClearShrink: usagePreviewPreventInitialValueClearShrink,
+          measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+          measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
+        });
+
+        if (buildId !== templateUsagePreviewBuildIdRef.current || !runtimeHtml.trim()) {
+          return;
+        }
+
+        React.startTransition(() => {
+          setBoxCreationMode(false);
+          setTemplateUsagePreviewHtml(runtimeHtml);
+          setTemplateUsagePreviewMode(true);
+          setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
+        });
+      }, 80);
+    });
+  }, [
+    documentMode,
+    readMode,
+    renderedPreviewHtml,
+    templateUsagePreviewMode,
+    usagePreviewMeasurePeerClusterHeightTargets,
+    usagePreviewMeasurePeerClusterWidthTargets,
+    usagePreviewPreventInitialValueClearShrink,
+    usagePreviewStabilizeInitialLayout,
+  ]);
 
   React.useEffect(() => {
     if (!documentMode && !readMode) {
@@ -17736,37 +18948,22 @@ export default function TemplateEditWorkspace({
       clearTemplateUsagePreviewAttachmentStateStore(root);
       documentAttachmentStateSourceKeyRef.current = sourceKey;
     }
-
-    Object.entries(activeInitialDraftAttachmentFilesByValueKey).forEach(([contextKey, files]) => {
-      seedTemplateUsagePreviewAttachmentStateByContext(root, contextKey, files || [], documentAttachmentApiPath.trim());
-    });
-
-    getTemplateUsagePreviewAttachmentStateStore(root).forEach((state, contextKey) => {
-      if (activeInitialDraftAttachmentFilesByValueKey[contextKey]) {
-        return;
-      }
-
-      if (state.apiPath !== documentAttachmentApiPath.trim()) {
-        setTemplateUsagePreviewAttachmentState(root, contextKey, {
-          ...state,
-          apiPath: documentAttachmentApiPath.trim(),
-        });
-      }
-    });
-
-    getAttachmentControlsFromRoot(root).forEach((control) => {
-      renderTemplateUsagePreviewAttachmentControl(control);
-    });
-  }, [
-    activeInitialDraft?.draftKey,
-    activeInitialDraftAttachmentFilesByValueKey,
-    documentAttachmentApiPath,
-    previewSurfaceNodeVersion,
-    templateUsagePreviewActive,
-  ]);
+  }, [activeInitialDraft?.draftKey, documentAttachmentApiPath, templateUsagePreviewActive]);
 
   React.useEffect(() => {
     return () => {
+      templateUsagePreviewBuildIdRef.current += 1;
+      if (templateUsagePreviewBuildRafRef.current != null) {
+        window.cancelAnimationFrame(templateUsagePreviewBuildRafRef.current);
+        templateUsagePreviewBuildRafRef.current = null;
+      }
+
+      if (templateUsagePreviewBuildTimeoutRef.current != null) {
+        window.clearTimeout(templateUsagePreviewBuildTimeoutRef.current);
+        templateUsagePreviewBuildTimeoutRef.current = null;
+      }
+      templateUsagePreviewInitialShrinkGuardPendingRef.current = false;
+
       const root = previewRef.current;
 
       if (root) {
@@ -17784,6 +18981,12 @@ export default function TemplateEditWorkspace({
       preserveValueText: true,
       readOnly: readMode,
       editableValueKeys: normalizedEditableValueKeys,
+      initialAttachmentFilesByValueKey: activeInitialDraftAttachmentFilesByValueKey,
+      documentAttachmentApiPath: documentAttachmentApiPath.trim(),
+      stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
+      preventInitialValueClearShrink: usagePreviewPreventInitialValueClearShrink,
+      measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+      measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
     });
 
     if (!runtimeHtml.trim()) {
@@ -17791,7 +18994,20 @@ export default function TemplateEditWorkspace({
     }
 
     setTemplateUsagePreviewHtml(runtimeHtml);
-  }, [documentMode, normalizedEditableValueKeys, previewSurfaceNodeVersion, readMode, renderedPreviewHtml, templateUsagePreviewHtml]);
+  }, [
+    activeInitialDraftAttachmentFilesByValueKey,
+    documentAttachmentApiPath,
+    documentMode,
+    normalizedEditableValueKeys,
+    previewSurfaceNodeVersion,
+    readMode,
+    renderedPreviewHtml,
+    templateUsagePreviewHtml,
+    usagePreviewMeasurePeerClusterHeightTargets,
+    usagePreviewMeasurePeerClusterWidthTargets,
+    usagePreviewPreventInitialValueClearShrink,
+    usagePreviewStabilizeInitialLayout,
+  ]);
 
   React.useEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current || readMode) {
@@ -17799,33 +19015,96 @@ export default function TemplateEditWorkspace({
     }
 
     return attachTemplateUsagePreviewRuntimeHandlers(previewRef.current, {
+      enableInitialAutoSize: usagePreviewEnableInitialAutoSize,
+      preventRuntimeAutoSizeShrink: usagePreviewPreventRuntimeAutoSizeShrink,
+      measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+      measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
       onAutoSizeLayoutChange: (root, layoutOptions) => {
         templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root, layoutOptions);
       },
     });
-  }, [readMode, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+  }, [
+    documentMode,
+    readMode,
+    surfaceRenderedPreviewHtml,
+    templateUsagePreviewActive,
+    usagePreviewEnableInitialAutoSize,
+    usagePreviewMeasurePeerClusterHeightTargets,
+    usagePreviewMeasurePeerClusterWidthTargets,
+    usagePreviewPreventRuntimeAutoSizeShrink,
+  ]);
 
   React.useLayoutEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current) {
       return;
     }
 
-    previewRef.current.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readMode ? 'true' : 'false');
+    const root = previewRef.current;
+    root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readMode ? 'true' : 'false');
 
     if (readMode) {
-      applyTemplateUsagePreviewReadOnlyState(previewRef.current);
-      getAttachmentControlsFromRoot(previewRef.current).forEach((control) => {
+      applyTemplateUsagePreviewReadOnlyState(root);
+      getAttachmentControlsFromRoot(root).forEach((control) => {
         renderTemplateUsagePreviewAttachmentControl(control);
       });
-      previewRef.current
+      root
         .querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`)
         .forEach((control) => {
           renderTemplateUsagePreviewSignatureControl(control);
         });
-      return;
+    } else {
+      applyTemplateUsagePreviewFieldEditability(root, normalizedEditableValueKeys);
     }
 
-    applyTemplateUsagePreviewFieldEditability(previewRef.current, normalizedEditableValueKeys);
+    const correctTextOverflow = () => {
+      const previewValueAutoHeightFrameGroupIds = Array.from(
+        new Set(
+          collectFrameSelectionAnchors(root)
+            .filter((frameNode) => readFrameAutoHeightBox(frameNode))
+            .map((frameNode) => getFrameGroupId(frameNode).trim())
+            .filter(Boolean)
+        )
+      );
+
+      if (previewValueAutoHeightFrameGroupIds.length <= 0) {
+        return;
+      }
+
+      const overflowResult = applyTemplateAutoHeightTextOverflowCorrections(root, previewValueAutoHeightFrameGroupIds);
+
+      if (overflowResult.changedCount <= 0) {
+        return;
+      }
+
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+        focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+        axes: ['height'],
+      });
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, {
+        focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+      });
+      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      snapTemplateUsagePreviewFrameEdges(root, {
+        focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+        axes: ['height'],
+      });
+      root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+        updatePageInnerMinHeight(pageInner);
+      });
+      materializeFrameBandTableGeometryInContainer(root);
+    };
+    correctTextOverflow();
+    const overflowCorrectionFrame = window.requestAnimationFrame(correctTextOverflow);
+
+    if (readMode) {
+      return () => {
+        window.cancelAnimationFrame(overflowCorrectionFrame);
+      };
+    }
+
+    return () => {
+      window.cancelAnimationFrame(overflowCorrectionFrame);
+    };
   }, [normalizedEditableValueKeys, readMode, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
 
   const persistTemplateDraftHtml = React.useCallback(
@@ -19245,6 +20524,7 @@ export default function TemplateEditWorkspace({
     positionBoxGroupByFrameGroupId,
     positionBoxGroupById,
     positionBoxGroups,
+    resolvePositionGroupWrapperElement,
     readPositionGroupWrapperRect,
     readFrameMoveRect,
     readSingleFrameGroupId,
@@ -19422,7 +20702,8 @@ export default function TemplateEditWorkspace({
         );
         const targetNodes = relationConfiguredTargetFrameGroupIds
           .map((frameGroupId) => frameNodeById.get(frameGroupId) || null)
-          .filter((node): node is HTMLElement => Boolean(node));
+          .filter((node): node is HTMLElement => Boolean(node))
+          .filter((node) => !resolveFrameLayoutShell(node).hasAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR));
 
         if (targetNodes.length <= 0) {
           return;
@@ -19516,12 +20797,47 @@ export default function TemplateEditWorkspace({
               ? relation.anchorFrameGroupId
               : relation.anchorPageCornerId;
 
+        if (relation.targetKind === 'group') {
+          const targetWrapper = resolvePositionGroupWrapperElement(targetPageInner, relation.targetGroupId);
+
+          if (targetWrapper) {
+            const currentConfig =
+              readStoredRelativeAnchorConfig(targetWrapper) ||
+              readFrameRelativeAnchorConfig(targetWrapper, targetPageInner);
+            const hasSameAnchorIdentity =
+              Boolean(currentConfig) &&
+              currentConfig.anchorKind === relationAnchorKind &&
+              String(currentConfig.anchorId || '').trim() === String(relationAnchorId || '').trim();
+            const preferredPins = resolvePreferredRelativeAnchorPins(targetRect, anchorRect);
+            const nextConfig = buildRelativeAnchorConfigFromRect({
+              frameRect: {
+                ...targetRect,
+                top: targetRect.top + deltaY,
+              },
+              anchorRect,
+              anchorKind: relationAnchorKind,
+              anchorId: relationAnchorId,
+              preferredAnchorX: hasSameAnchorIdentity ? currentConfig?.anchorX : preferredPins.preferredAnchorX,
+              preferredAnchorY: hasSameAnchorIdentity ? currentConfig?.anchorY : preferredPins.preferredAnchorY,
+            });
+
+            applyFramePositionMode(targetWrapper, 'relative', targetPageInner);
+            writeFrameRelativeAnchorAttrs(targetWrapper, nextConfig);
+            changed = true;
+            return;
+          }
+        }
+
         relationConfiguredTargetFrameGroupIds.forEach((targetFrameGroupId) => {
           const targetNode = frameNodeById.get(targetFrameGroupId) || null;
           const nodePageInner = targetNode?.closest<HTMLElement>('.page-inner') || null;
           const nodeRect = targetNode ? readFrameMoveRect(targetNode) : null;
 
           if (!targetNode || !nodePageInner || !nodeRect || nodePageInner !== targetPageInner) {
+            return;
+          }
+
+          if (resolveFrameLayoutShell(targetNode).hasAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR)) {
             return;
           }
 
@@ -19564,9 +20880,16 @@ export default function TemplateEditWorkspace({
     },
 	    []
 	  );
+  React.useEffect(() => {
+    if (!templateUsagePreviewActive) {
+      templateUsagePreviewPositionSpacingRelationsRef.current = positionSpacingSettingRelations;
+    }
+  }, [positionSpacingSettingRelations, templateUsagePreviewActive]);
+
   const applyPreservedPositionSpacingRelations = React.useCallback(
-    (root: HTMLElement) => {
-      const preservedSpacingRelations = positionSpacingSettingRelations
+    (root: HTMLElement, relationsOverride?: DefinedPositionRelativeRelation[]) => {
+      const sourceRelations = relationsOverride || positionSpacingSettingRelations;
+      const preservedSpacingRelations = sourceRelations
         .filter((relation) => relation.anchorKind !== 'page-corner')
         .map((relation) => ({
           relation,
@@ -19583,12 +20906,46 @@ export default function TemplateEditWorkspace({
   );
   const applyTemplateAutoSizeBoxesWithPreservedLayout = React.useCallback(
     (root: HTMLElement, frameGroupIds?: string[], options: TemplateAutoSizeApplyOptions = {}) => {
+      const focusedFrameGroupIds = frameGroupIds?.map((frameGroupId) => frameGroupId.trim()).filter(Boolean) || [];
       const autoSizeResult = applyTemplateAutoSizeBoxes(root, frameGroupIds, {
         ...options,
         applyRelativeAnchors: false,
+        measurePeerClusterHeightTargets: options.measurePeerClusterHeightTargets,
+        measurePeerClusterWidthTargets: options.measurePeerClusterWidthTargets,
       });
 
       if (autoSizeResult.changedCount <= 0) {
+        const overflowResult = applyTemplateAutoHeightTextOverflowCorrections(root, focusedFrameGroupIds, {
+          measurePeerClusterHeightTargets: options.measurePeerClusterHeightTargets,
+        });
+
+        if (overflowResult.changedCount > 0) {
+          const overflowFrameGroupIdSet = new Set(
+            overflowResult.changedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+          );
+          const overflowSourceKeys = new Set(
+            collectFrameSelectionAnchors(root)
+              .filter((node) => overflowFrameGroupIdSet.has(getFrameGroupId(node).trim()))
+              .map(
+                (node) =>
+                  node.closest<HTMLElement>('.v102-frame-band')?.getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR)?.trim() || ''
+              )
+              .filter(Boolean)
+          );
+
+          syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+            ...(overflowSourceKeys.size > 0 ? { sourceKeys: overflowSourceKeys } : {}),
+            focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+            axes: ['height'],
+          });
+
+          return {
+            changedCount: overflowResult.changedCount,
+            skippedCount: autoSizeResult.skippedCount + overflowResult.skippedCount,
+            changedFrameGroupIds: overflowResult.changedFrameGroupIds,
+          };
+        }
+
         return autoSizeResult;
       }
 
@@ -19605,10 +20962,47 @@ export default function TemplateEditWorkspace({
           )
           .filter(Boolean)
       );
-      syncTemplateUsagePreviewNormalizedBandPeerBounds(
-        root,
-        affectedSourceKeys.size > 0 ? { sourceKeys: affectedSourceKeys } : undefined
-      );
+      const changedAxes = new Set<'height' | 'width'>();
+      collectFrameSelectionAnchors(root)
+        .filter((node) => changedFrameGroupIdSet.has(getFrameGroupId(node).trim()))
+        .forEach((node) => {
+          if (options.skipHeight !== true && readFrameAutoHeightBox(node)) {
+            changedAxes.add('height');
+          }
+
+          if (options.skipWidth !== true && readFrameAutoWidthBox(node)) {
+            changedAxes.add('width');
+          }
+        });
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+        ...(affectedSourceKeys.size > 0 ? { sourceKeys: affectedSourceKeys } : {}),
+        ...(autoSizeResult.changedFrameGroupIds.length > 0 ? { focusFrameGroupIds: autoSizeResult.changedFrameGroupIds } : {}),
+        ...(changedAxes.size > 0 ? { axes: Array.from(changedAxes) } : {}),
+      });
+      const overflowResult = applyTemplateAutoHeightTextOverflowCorrections(root, autoSizeResult.changedFrameGroupIds, {
+        measurePeerClusterHeightTargets: options.measurePeerClusterHeightTargets,
+      });
+
+      if (overflowResult.changedCount > 0) {
+        const overflowFrameGroupIdSet = new Set(
+          overflowResult.changedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+        );
+        const overflowSourceKeys = new Set(
+          collectFrameSelectionAnchors(root)
+            .filter((node) => overflowFrameGroupIdSet.has(getFrameGroupId(node).trim()))
+            .map(
+              (node) =>
+                node.closest<HTMLElement>('.v102-frame-band')?.getAttribute(NORMALIZED_FRAME_BAND_SOURCE_ATTR)?.trim() || ''
+            )
+            .filter(Boolean)
+        );
+
+        syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+          ...(overflowSourceKeys.size > 0 ? { sourceKeys: overflowSourceKeys } : {}),
+          focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+          axes: ['height'],
+        });
+      }
       if (!spacingChanged) {
         applyRelativeAnchoredFrameRectsInRoot(root);
       }
@@ -19622,7 +21016,7 @@ export default function TemplateEditWorkspace({
       const autoSizedFrameGroupIds = Array.from(
         new Set(
           collectFrameSelectionAnchors(root)
-            .filter((frameNode) => readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))
+            .filter((frameNode) => readFrameAutoHeightBox(frameNode))
             .map((frameNode) => getFrameGroupId(frameNode).trim())
             .filter((frameGroupId) => Boolean(frameGroupId))
         )
@@ -19632,7 +21026,7 @@ export default function TemplateEditWorkspace({
         return { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
       }
 
-      return applyTemplateAutoSizeBoxesWithPreservedLayout(root, autoSizedFrameGroupIds);
+      return applyTemplateAutoSizeBoxesWithPreservedLayout(root, autoSizedFrameGroupIds, { skipWidth: true });
     },
     [applyTemplateAutoSizeBoxesWithPreservedLayout]
   );
@@ -19640,12 +21034,55 @@ export default function TemplateEditWorkspace({
     (root: HTMLElement, options?: TemplateUsagePreviewAutoSizeLayoutChangeOptions) => {
       const focusFrameGroupIds = options?.focusFrameGroupIds?.map((value) => value.trim()).filter(Boolean) || [];
       const focusOptions = focusFrameGroupIds.length > 0 ? { focusFrameGroupIds } : undefined;
-      applyPreservedPositionSpacingRelations(root);
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, focusOptions);
-      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, focusOptions);
-      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, focusOptions);
-      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-      snapTemplateUsagePreviewFrameEdges(root, focusOptions);
+      const { allowHeight, allowWidth } = resolveTemplateUsagePreviewLayoutAxes(options?.axes);
+      const preservedEditorSpacingRelations =
+        templateUsagePreviewPositionSpacingRelationsRef.current.length > 0
+          ? templateUsagePreviewPositionSpacingRelationsRef.current
+          : undefined;
+      const bottomGapFrameGroupIds = new Set(
+        collectFrameSelectionAnchors(root)
+          .filter((frameNode) => resolveFrameLayoutShell(frameNode).hasAttribute(TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR))
+          .map((frameNode) => getFrameGroupId(frameNode).trim())
+          .filter(Boolean)
+      );
+      const previewSpacingRelations =
+        preservedEditorSpacingRelations && bottomGapFrameGroupIds.size > 0
+          ? preservedEditorSpacingRelations.filter((relation) => {
+              const targetFrameGroupIds =
+                relation.relationConfiguredFrameGroupIds.length > 0
+                  ? relation.relationConfiguredFrameGroupIds
+                  : relation.targetConfiguredFrameGroupIds.length > 0
+                    ? relation.targetConfiguredFrameGroupIds
+                    : relation.targetFrameGroupIds;
+              return !targetFrameGroupIds.some((frameGroupId) => bottomGapFrameGroupIds.has(frameGroupId.trim()));
+            })
+          : preservedEditorSpacingRelations;
+      applyPreservedPositionSpacingRelations(root, previewSpacingRelations);
+      applyTemplateUsagePreviewGroupBottomGapAnchors(root);
+
+      if (allowHeight) {
+        applyTemplateUsagePreviewAutoHeightBoundaryFit(root, focusOptions);
+      }
+
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+        ...focusOptions,
+        axes: options?.axes,
+      });
+      applyTemplateUsagePreviewGroupBottomGapAnchors(root);
+
+      if (allowHeight) {
+        applyTemplateUsagePreviewAutoHeightBoundaryFit(root, focusOptions);
+        settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      }
+
+      if (allowHeight || allowWidth) {
+        snapTemplateUsagePreviewFrameEdges(root, {
+          ...focusOptions,
+          axes: options?.axes,
+        });
+      }
+      applyTemplateUsagePreviewGroupBottomGapAnchors(root);
+
       root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
         updatePageInnerMinHeight(pageInner);
       });
@@ -19653,32 +21090,81 @@ export default function TemplateEditWorkspace({
     [applyPreservedPositionSpacingRelations]
   );
   const applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout = React.useCallback(
-    (root: HTMLElement) => {
+    (
+      root: HTMLElement,
+      options?: {
+        preventShrink?: boolean;
+      }
+    ) => {
+      const autoSizedFrameNodes = collectFrameSelectionAnchors(root).filter(
+        (frameNode) => readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode)
+      );
       const autoSizedFrameGroupIds = Array.from(
-        new Set(
-          collectFrameSelectionAnchors(root)
-            .filter((frameNode) => readFrameAutoHeightBox(frameNode) || readFrameAutoWidthBox(frameNode))
-            .map((frameNode) => getFrameGroupId(frameNode).trim())
-            .filter((frameGroupId) => Boolean(frameGroupId))
-        )
+        new Set(autoSizedFrameNodes.map((frameNode) => getFrameGroupId(frameNode).trim()).filter((frameGroupId) => Boolean(frameGroupId)))
       );
 
       if (autoSizedFrameGroupIds.length <= 0) {
         return { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
       }
 
+      const preventShrink = options?.preventShrink === true;
       const autoSizeResult = applyTemplateAutoSizeBoxes(root, autoSizedFrameGroupIds, {
         applyRelativeAnchors: false,
+        preventShrink,
+        measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+        measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
       });
-      const boundaryFitChangedCount = applyTemplateUsagePreviewAutoHeightBoundaryFit(root);
+      const boundaryFitChangedCount = applyTemplateUsagePreviewAutoHeightBoundaryFit(root, { preventShrink });
+      const changedFrameGroupIdSet = new Set(autoSizeResult.changedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
+      autoSizedFrameNodes.forEach((frameNode) => {
+        if (Math.abs(applyTemplateUsagePreviewAttachmentAutoHeight(frameNode, { preventShrink })) > 0.5) {
+          changedFrameGroupIdSet.add(getFrameGroupId(frameNode).trim());
+        }
+      });
+      const changedFrameGroupIds = Array.from(changedFrameGroupIdSet);
+      const changedAxes = new Set<'height' | 'width'>();
 
-      if (autoSizeResult.changedCount > 0 || boundaryFitChangedCount > 0 || isTemplateUsagePreviewModeNode(root)) {
-        applyTemplateUsagePreviewPreservedSpacingRelations(root);
+      autoSizedFrameNodes.forEach((frameNode) => {
+        const frameGroupId = getFrameGroupId(frameNode).trim();
+
+        if (!frameGroupId || changedFrameGroupIdSet.size <= 0 || !changedFrameGroupIdSet.has(frameGroupId)) {
+          return;
+        }
+
+        if (readFrameAutoHeightBox(frameNode)) {
+          changedAxes.add('height');
+        }
+
+        if (readFrameAutoWidthBox(frameNode)) {
+          changedAxes.add('width');
+        }
+      });
+
+      if (boundaryFitChangedCount > 0) {
+        changedAxes.add('height');
+      }
+
+      if (autoSizeResult.changedCount > 0 || boundaryFitChangedCount > 0 || changedFrameGroupIds.length > 0) {
+        applyTemplateUsagePreviewPreservedSpacingRelations(
+          root,
+          changedAxes.size > 0
+            ? {
+                focusFrameGroupIds: changedFrameGroupIds,
+                axes: Array.from(changedAxes),
+              }
+            : changedFrameGroupIds.length > 0
+              ? { focusFrameGroupIds: changedFrameGroupIds }
+              : undefined
+        );
       }
 
       return autoSizeResult;
     },
-    [applyTemplateUsagePreviewPreservedSpacingRelations]
+    [
+      applyTemplateUsagePreviewPreservedSpacingRelations,
+      usagePreviewMeasurePeerClusterHeightTargets,
+      usagePreviewMeasurePeerClusterWidthTargets,
+    ]
   );
   React.useLayoutEffect(() => {
     templateUsagePreviewAutoSizeLayoutChangeRef.current = applyTemplateUsagePreviewPreservedSpacingRelations;
@@ -19697,11 +21183,18 @@ export default function TemplateEditWorkspace({
     }
 
     enableTemplateUsagePreviewTextControls(root);
-    applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout(root);
+
+    const preventShrink =
+      templateUsagePreviewInitialShrinkGuardPendingRef.current || usagePreviewPreventRuntimeAutoSizeShrink;
+    templateUsagePreviewInitialShrinkGuardPendingRef.current = false;
+    applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout(root, { preventShrink });
   }, [
     applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout,
+    documentMode,
+    readMode,
     surfaceRenderedPreviewHtml,
     templateUsagePreviewActive,
+    usagePreviewPreventRuntimeAutoSizeShrink,
   ]);
 	  const applyDefinedPositionRelationGapDraft = React.useCallback(
     (relation: DefinedPositionRelativeRelation, nextGapYRaw: string) => {
@@ -21571,8 +23064,10 @@ export default function TemplateEditWorkspace({
       applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
       applyFrameCanvasVisualHints(root);
       if (selectionPanelTab !== 'position') {
+        const editorAutoSizeResult = applyEditorAutoSizeBoxesWithPreservedLayout(root);
         syncPreviewSurfaceScale(root);
-        const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
+        const nextRenderHtml =
+          normalized || editorAutoSizeResult.changedCount > 0 ? extractPreviewRenderHtml(root) : '';
 
         if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
           setPreviewHtml(nextRenderHtml);
@@ -21599,8 +23094,12 @@ export default function TemplateEditWorkspace({
       ensureRelativeAnchorConfigs(root);
       normalizePositionGroupRelativeAnchors(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
+      const editorAutoSizeResult = applyEditorAutoSizeBoxesWithPreservedLayout(root);
       syncPreviewSurfaceScale(root);
-      const nextRenderHtml = normalized || materializedPositionGroups ? extractPreviewRenderHtml(root) : '';
+      const nextRenderHtml =
+        normalized || materializedPositionGroups || editorAutoSizeResult.changedCount > 0
+          ? extractPreviewRenderHtml(root)
+          : '';
 
       if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
         setPreviewHtml(nextRenderHtml);
@@ -21649,6 +23148,7 @@ export default function TemplateEditWorkspace({
       requestPreviewTextFit();
     });
   }, [
+    applyEditorAutoSizeBoxesWithPreservedLayout,
     buildLiveEdgeTopologySnapshot,
     cancelScheduledPreviewEditorState,
     edgeRoleDiagnostics.mismatchEdgeIds,
@@ -21859,6 +23359,7 @@ export default function TemplateEditWorkspace({
       syncEdgeRoleDiagnosticsState(nextEdgeRolePresentation.diagnosticsState);
     },
     [
+      applyEditorAutoSizeBoxesWithPreservedLayout,
       buildLiveEdgeTopologySnapshot,
       previewRelativeGuideFrameGroupId,
       reconcileLiveEdgeSelection,
@@ -22621,6 +24122,23 @@ export default function TemplateEditWorkspace({
       let clearedCount = 0;
       let skippedCount = 0;
 
+      if (relation.targetKind === 'group') {
+        const targetWrapper = resolvePositionGroupWrapperElement(root, relation.targetGroupId);
+        const wrapperPageInner = targetWrapper?.closest<HTMLElement>('.page-inner') || null;
+
+        if (targetWrapper && wrapperPageInner) {
+          const hadRelativeState =
+            readFramePositionMode(targetWrapper, wrapperPageInner) === 'relative' ||
+            hasFrameRelativeAnchorAttrs(targetWrapper) ||
+            hasLegacyInferredRelativeAnchorAttrs(targetWrapper);
+
+          if (hadRelativeState) {
+            applyFramePositionMode(targetWrapper, 'absolute', wrapperPageInner);
+            clearedCount += 1;
+          }
+        }
+      }
+
       targetFrameGroupIds.forEach((frameGroupId) => {
         const frameNode = resolveFrameSelectionAnchor(
           root.querySelector<HTMLElement>(
@@ -22764,9 +24282,23 @@ export default function TemplateEditWorkspace({
 
       try {
         const detail = await fetchTemplateDetail(normalizedTemplateId);
+        const sanitizedDraftHtml =
+          sanitizeTemplateCanvasHtmlGeometry(detail.template.draftHtml, {
+            preserveValueText: true,
+          }).trim() || detail.template.draftHtml;
+        const sanitizedDetail =
+          sanitizedDraftHtml === detail.template.draftHtml
+            ? detail
+            : {
+                ...detail,
+                template: {
+                  ...detail.template,
+                  draftHtml: sanitizedDraftHtml,
+                },
+              };
         applyTemplateWorkspaceDocumentState(
           templateWorkspaceStateController,
-          buildLoadedTemplateWorkspaceDocumentState(detail, normalizedTemplateId)
+          buildLoadedTemplateWorkspaceDocumentState(sanitizedDetail, normalizedTemplateId)
         );
         setMessage(`템플릿 ${normalizedTemplateId} 를 편집 모드로 불러왔습니다.`);
       } catch (error) {
@@ -22787,17 +24319,55 @@ export default function TemplateEditWorkspace({
         return;
       }
 
+      setMessage(null);
+
+      let deleteImpact: TemplateDeleteImpactResult;
+
+      try {
+        deleteImpact = await fetchTemplateDeleteImpact(templateId);
+      } catch (error) {
+        const nextMessage = error instanceof Error ? error.message : '템플릿 삭제 영향을 확인하지 못했습니다.';
+        setMessage(nextMessage);
+        return;
+      }
+
       if (typeof window !== 'undefined') {
-        const confirmed = window.confirm(`템플릿 ${templateId} 을(를) 삭제할까요?`);
+        const templateLabel = deleteImpact.template.templateName || templateId;
+        const projectLines = deleteImpact.projects.map(
+          (project) => `- ${project.site.siteName}: 템플릿 기반 문서 ${project.documentCount}개`
+        );
+        const confirmMessage =
+          deleteImpact.affectedProjectCount > 0
+            ? [
+                `템플릿 "${templateLabel}" 을(를) 삭제하면 이 템플릿으로 문서를 사용 중인 프로젝트도 함께 삭제됩니다.`,
+                '',
+                `함께 삭제될 프로젝트: ${deleteImpact.affectedProjectCount}개`,
+                ...projectLines,
+                '',
+                '함께 삭제되는 범위:',
+                '- 프로젝트 기본 정보',
+                '- 프로젝트 아래의 문서, 문서 버전, 출력본, 첨부 파일',
+                '- 요청 링크, 전자서명 기록, 사진·라벨, 발송 연결·이력',
+                '- 프로젝트/문서 구성원 접근 권한',
+                '',
+                '구성원 전화번호 인증 사용자 정보와 다른 프로젝트/문서 접근 권한은 유지됩니다.',
+                '',
+                '정말 삭제하시겠습니까?',
+              ].join('\n')
+            : [
+                `템플릿 "${templateLabel}" 을(를) 삭제할까요?`,
+                '',
+                '이 템플릿으로 생성되어 사용 중인 프로젝트 문서는 없습니다.',
+              ].join('\n');
+        const confirmed = window.confirm(confirmMessage);
+
         if (!confirmed) {
           return;
         }
       }
 
-      setMessage(null);
-
       try {
-        await deleteTemplateRecord(templateId);
+        const deleteResult = await deleteTemplateRecord(templateId);
 
         setTemplates((previous) => previous.filter((item) => item.id !== templateId));
 
@@ -22808,7 +24378,11 @@ export default function TemplateEditWorkspace({
           );
         }
 
-        setMessage(`템플릿 ${templateId} 삭제를 완료했습니다.`);
+        setMessage(
+          deleteResult.deletedProjectCount > 0
+            ? `템플릿 ${templateId} 삭제를 완료했습니다. 함께 삭제된 프로젝트 ${deleteResult.deletedProjectCount}개, 문서 ${deleteResult.deletedDocumentCount}개.`
+            : `템플릿 ${templateId} 삭제를 완료했습니다.`
+        );
       } catch (error) {
         const nextMessage = error instanceof Error ? error.message : '템플릿 삭제에 실패했습니다.';
         setMessage(nextMessage);
@@ -22848,7 +24422,14 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    const draftKey = activeInitialDraft?.draftKey?.trim() || normalizedDraftHtml;
+    const sanitizedDraftHtml =
+      sanitizeTemplateCanvasHtmlGeometry(normalizedDraftHtml, {
+        preserveValueText: true,
+        attachmentFilesByValueKey: activeInitialDraft?.attachmentFilesByValueKey,
+        documentAttachmentApiPath,
+      }).trim() || normalizedDraftHtml;
+
+    const draftKey = activeInitialDraft?.draftKey?.trim() || sanitizedDraftHtml;
 
     if (initialDraftAppliedKeyRef.current === draftKey) {
       return;
@@ -22859,7 +24440,7 @@ export default function TemplateEditWorkspace({
     applyTemplateWorkspaceDocumentState(
       templateWorkspaceStateController,
       buildInitialDraftWorkspaceDocumentState({
-        draftHtml: normalizedDraftHtml,
+        draftHtml: sanitizedDraftHtml,
         layoutResizeMode: activeInitialDraft?.layoutResizeMode,
         sourceDocumentName: activeInitialDraft?.sourceDocumentName,
         templateName: activeInitialDraft?.templateName || '',
@@ -22871,9 +24452,11 @@ export default function TemplateEditWorkspace({
   }, [
     activeInitialDraft?.draftHtml,
     activeInitialDraft?.draftKey,
+    activeInitialDraft?.attachmentFilesByValueKey,
     activeInitialDraft?.layoutResizeMode,
     activeInitialDraft?.sourceDocumentName,
     activeInitialDraft?.templateName,
+    documentAttachmentApiPath,
     suppressInitialDraftLoadedMessage,
     templateWorkspaceStateController,
   ]);
@@ -22925,6 +24508,7 @@ export default function TemplateEditWorkspace({
     surfaceRenderedPreviewHtml,
     selectionPanelTab,
     templateUsagePreviewActive,
+    templateUsagePreviewModeAttr: TEMPLATE_USAGE_PREVIEW_MODE_ATTR,
     boxCreationMode,
     boxCreationPositionMode,
     frameEdgeButtonSelector: FRAME_EDGE_BUTTON_SELECTOR,
@@ -22956,8 +24540,10 @@ export default function TemplateEditWorkspace({
       applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
       applyFrameCanvasVisualHints(root);
       if (selectionPanelTab !== 'position') {
+        const editorAutoSizeResult = applyEditorAutoSizeBoxesWithPreservedLayout(root);
         syncPreviewSurfaceScale(root);
-        const nextRenderHtml = normalized ? extractPreviewRenderHtml(root) : '';
+        const nextRenderHtml =
+          normalized || editorAutoSizeResult.changedCount > 0 ? extractPreviewRenderHtml(root) : '';
 
         if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
           setPreviewHtml(nextRenderHtml);
@@ -22984,8 +24570,12 @@ export default function TemplateEditWorkspace({
       ensureRelativeAnchorConfigs(root);
       normalizePositionGroupRelativeAnchors(root);
       applyRelativeAnchoredFrameRectsInRoot(root);
+      const editorAutoSizeResult = applyEditorAutoSizeBoxesWithPreservedLayout(root);
       syncPreviewSurfaceScale(root);
-      const nextRenderHtml = normalized || materializedPositionGroups ? extractPreviewRenderHtml(root) : '';
+      const nextRenderHtml =
+        normalized || materializedPositionGroups || editorAutoSizeResult.changedCount > 0
+          ? extractPreviewRenderHtml(root)
+          : '';
 
       if (nextRenderHtml && nextRenderHtml !== renderedPreviewHtml) {
         setPreviewHtml(nextRenderHtml);
@@ -24992,6 +26582,15 @@ export default function TemplateEditWorkspace({
           return targetMember.memberFrameEntries;
         }
 
+        const targetGroupWrapper = resolvePositionGroupWrapperElement(targetMember.pageInner, targetIdentity.id);
+        const targetGroupWrapperEntry = targetGroupWrapper
+          ? {
+              frameGroupId: targetIdentity.id,
+              node: targetGroupWrapper,
+              pageInner: targetMember.pageInner,
+              rect: targetMember.groupRect,
+            }
+          : null;
         const anchorIdentity = resolveSpacingMemberEntityIdentity(anchorMember);
         const targetMemberFrameGroupIdSet = new Set(
           targetMember.memberFrameEntries
@@ -25047,7 +26646,7 @@ export default function TemplateEditWorkspace({
         assignedTargetRelationCountByEntityKey.set(targetIdentity.key, targetRelationCount + 1);
 
         if (!hasDifferentAnchorRelation && !hasDifferentMemberAnchorConfig && targetRelationCount <= 0) {
-          return targetMember.memberFrameEntries;
+          return targetGroupWrapperEntry ? [targetGroupWrapperEntry] : targetMember.memberFrameEntries;
         }
 
         const configuredFrameGroupIds = new Set(existingTargetRelations.flatMap(resolveRelationConfiguredFrameGroupIds));
@@ -25058,7 +26657,7 @@ export default function TemplateEditWorkspace({
           targetMember.memberFrameEntries.find((memberEntry) => !configuredFrameGroupIds.has(memberEntry.frameGroupId)) || null;
         const representativeMemberEntry = unconfiguredMemberEntry || targetMember.memberFrameEntries[0] || null;
 
-        return representativeMemberEntry ? [representativeMemberEntry] : [];
+        return targetGroupWrapperEntry ? [targetGroupWrapperEntry] : representativeMemberEntry ? [representativeMemberEntry] : [];
       };
 	      const resolvedSpacingPairs = resolvePositionSpacingPairsFromOrderedMembers(orderedGroupMembers);
 
@@ -25179,9 +26778,11 @@ export default function TemplateEditWorkspace({
   const applyNewPositionSpacingPair = React.useCallback(
     (pair: PositionSpacingPairSummary) => {
       const nextGapYRaw = (positionSpacingDraftByPairKey[pair.pairKey]?.gapY || '').trim();
-      const nextGapY = Number.parseFloat(nextGapYRaw);
+      const fallbackGapY = Math.max(0, Math.round(pair.defaultGapY));
+      const resolvedGapYRaw = nextGapYRaw || String(fallbackGapY);
+      const nextGapY = Number.parseFloat(resolvedGapYRaw);
 
-      if (!nextGapYRaw || !Number.isFinite(nextGapY)) {
+      if (!Number.isFinite(nextGapY)) {
         setPositionSpacingDraftErrorByPairKey((previous) => {
           const next = { ...previous };
           delete next[pair.pairKey];
@@ -25208,7 +26809,7 @@ export default function TemplateEditWorkspace({
         [...positionOrderLockFrameGroupIds],
         {
           ...positionSpacingDraftByPairKey,
-          [pair.pairKey]: { gapY: nextGapYRaw },
+          [pair.pairKey]: { gapY: resolvedGapYRaw },
         },
         positionOrderLockSelectionKindByFrameGroupId,
         positionOrderLockSelectionGroupIdByFrameGroupId,
@@ -28292,6 +29893,7 @@ export default function TemplateEditWorkspace({
     setBoxCreationMode,
     setSelectedFrameGroupIds,
     setEdgeSelectionState,
+    syncEdgeRoleDiagnosticsState,
     applyFrameBoxSelection,
     applyFastFrameBoxSelectionVisuals,
     applyPositionGroupEditModeSelection,
@@ -28515,6 +30117,9 @@ export default function TemplateEditWorkspace({
           restoreTextInputFocus: shouldRestoreTextInputFocus,
           selectionStart,
           selectionEnd,
+          preventShrink: usagePreviewPreventRuntimeAutoSizeShrink,
+          measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+          measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
           onLayoutChange: (layoutRoot, layoutOptions) => {
             templateUsagePreviewAutoSizeLayoutChangeRef.current?.(layoutRoot, layoutOptions);
           },
@@ -28581,6 +30186,9 @@ export default function TemplateEditWorkspace({
     scheduleDeferredStylePanelSync,
     syncOpenSelectionOverlayDraftsFromCache,
     templateUsagePreviewActive,
+    usagePreviewMeasurePeerClusterHeightTargets,
+    usagePreviewMeasurePeerClusterWidthTargets,
+    usagePreviewPreventRuntimeAutoSizeShrink,
   ]);
 
   const toggleBoxCreationModeFromCanvasToolbar = React.useCallback(() => {
@@ -28770,6 +30378,73 @@ export default function TemplateEditWorkspace({
       />
     ) : null;
 
+  const closePositionSpacingPanel = React.useCallback(() => {
+    setPositionOrderLockSelectionMode(false);
+    setPositionOrderLockFrameGroupIds([]);
+    setPositionOrderLockSelectionKindByFrameGroupId({});
+    setPositionOrderLockSelectionGroupIdByFrameGroupId({});
+    setSelectedPositionSpacingSettingRelationKey('');
+    setPositionSpacingDraftByPairKey({});
+    setPositionSpacingDraftErrorByPairKey({});
+    setPositionSpacingCheckedRowKeys({});
+    setPositionSpacingBulkGapY('');
+    setPositionSpacingBulkGapError(false);
+    setPositionOrderLockCandidateFrameGroupId('');
+    setPositionOrderLockCandidateGroupId('');
+    setPositionOrderLockCandidateSelectionStage('');
+    positionGroupProxySelectionShowAllGroupsRef.current = false;
+  }, []);
+
+  const positionSpacingPanelNode =
+    selectionPanelTab === 'position' && positionOrderLockSelectionMode ? (
+      <PositionSpacingPanel
+        positionSpacingSettingRelations={positionSpacingSettingRelations}
+        positionSpacingNewPairSummaries={positionSpacingNewPairSummaries}
+        positionSpacingBulkGapY={positionSpacingBulkGapY}
+        positionSpacingBulkGapError={positionSpacingBulkGapError}
+        positionSpacingSettingRelationDisplayRows={positionSpacingSettingRelationDisplayRows}
+        definedPositionRelationGapDraftByKey={definedPositionRelationGapDraftByKey}
+        highlightedPositionSpacingSettingRelationKeySet={highlightedPositionSpacingSettingRelationKeySet}
+        positionSpacingEntityVisualByKey={positionSpacingEntityVisualByKey}
+        positionSpacingCheckedRowKeys={positionSpacingCheckedRowKeys}
+        positionSpacingDraftByPairKey={positionSpacingDraftByPairKey}
+        positionSpacingDraftErrorByPairKey={positionSpacingDraftErrorByPairKey}
+        onClose={closePositionSpacingPanel}
+        onBulkGapCommit={(nextGapY) => {
+          setPositionSpacingBulkGapY(nextGapY);
+          if (positionSpacingBulkGapError) {
+            setPositionSpacingBulkGapError(false);
+          }
+        }}
+        onApplyBulkGap={applyPositionSpacingBulkGap}
+        onCheckedRowChange={(rowKey, checked) => {
+          setPositionSpacingCheckedRowKeys((previous) => ({
+            ...previous,
+            [rowKey]: checked,
+          }));
+        }}
+        onExistingRelationSelect={selectDefinedPositionRelationEntities}
+        onExistingRelationGapCommit={applyDefinedPositionRelationGapDraft}
+        onExistingRelationDelete={deletePositionSpacingSettingRelation}
+        onNewPairGapCommit={(pair, nextGapY) => {
+          setPositionSpacingDraftByPairKey((previous) => ({
+            ...previous,
+            [pair.pairKey]: {
+              gapY: nextGapY,
+            },
+          }));
+          if (positionSpacingDraftErrorByPairKey[pair.pairKey]) {
+            setPositionSpacingDraftErrorByPairKey((previous) => {
+              const next = { ...previous };
+              delete next[pair.pairKey];
+              return next;
+            });
+          }
+        }}
+        onNewPairApply={applyNewPositionSpacingPair}
+      />
+    ) : null;
+
   const positionActionOverlayNode =
     selectionPanelTab === 'position' ? (
       <TemplatePositionActionOverlay
@@ -28789,6 +30464,7 @@ export default function TemplateEditWorkspace({
         onStartPositionGroupExcludeMode={startPositionGroupExcludeMode}
         onStartPositionGroupIncludeMode={startPositionGroupIncludeMode}
         onCancelPositionGroupEditMode={cancelPositionGroupEditMode}
+        positionSpacingPanel={positionSpacingPanelNode}
       />
     ) : null;
 
@@ -28935,9 +30611,36 @@ export default function TemplateEditWorkspace({
   const canvasActionOverlayLabel = '기능 버튼';
   const canvasActionOverlayWidthClassName =
     selectionPanelTab === 'metadata' ? 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' : 'w-44 max-w-[calc(100%_-_1.5rem)]';
+  const workspaceNoticeNode =
+    topNotice || message ? (
+      <div
+        className="pointer-events-none absolute right-0 top-0 z-[160] flex w-[min(560px,calc(100%-1rem))] flex-col gap-2"
+        data-template-workspace-notice="true"
+      >
+        {topNotice ? <div className="pointer-events-auto">{topNotice}</div> : null}
+        {message ? (
+          <Card className="pointer-events-auto border-slate-200 bg-slate-50 shadow-lg">
+            <CardContent className="p-4 text-sm text-slate-700">
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 flex-1">{message}</p>
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  aria-label="알림 닫기"
+                  title="알림 닫기"
+                  onClick={() => setMessage(null)}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+    ) : null;
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
       <style>{`
         .v106-canvas-toolbar {
           container-type: inline-size;
@@ -29010,6 +30713,15 @@ export default function TemplateEditWorkspace({
         }
         .template-edit-preview::-webkit-scrollbar-track {
           background: rgba(226, 232, 240, 0.7);
+        }
+        [data-template-floating-overlay-id="style"],
+        [data-template-floating-overlay-id="style"] *,
+        [data-template-floating-overlay-id="sizeType"],
+        [data-template-floating-overlay-id="sizeType"] *,
+        [data-template-floating-overlay-id="textStyle"],
+        [data-template-floating-overlay-id="textStyle"] * {
+          animation: none !important;
+          transition: none !important;
         }
         .template-edit-preview[data-template-preview-scaled="true"] {
           min-height: 100%;
@@ -29490,11 +31202,7 @@ export default function TemplateEditWorkspace({
 	          color: rgb(100 116 139);
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] input[${TEMPLATE_USAGE_PREVIEW_FILE_INPUT_ATTR}="true"] {
-	          position: absolute;
-	          width: 1px;
-	          height: 1px;
-	          opacity: 0;
-	          pointer-events: none;
+	          display: none;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control {
 	          grid-template-rows: minmax(0, 1fr) auto;
@@ -30158,6 +31866,8 @@ export default function TemplateEditWorkspace({
 	        }
 	      `}</style>
 
+      {workspaceNoticeNode}
+
       {hideHeader ? null : (
         <TemplateEditWorkspaceHeader
           title={headerTitle}
@@ -30165,31 +31875,9 @@ export default function TemplateEditWorkspace({
         />
       )}
 
-      {topNotice}
-
-      {message ? (
-        <Card className="border-slate-200 bg-slate-50">
-          <CardContent className="p-4 text-sm text-slate-700">
-            <div className="flex items-start justify-between gap-3">
-              <p className="min-w-0 flex-1">{message}</p>
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                aria-label="알림 닫기"
-                title="알림 닫기"
-                onClick={() => setMessage(null)}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <div className={`grid items-start gap-6 ${hidePersistencePanel ? 'grid-cols-1' : 'lg:grid-cols-[420px_minmax(0,1fr)]'}`}>
         {hidePersistencePanel ? null : (
           <TemplatePersistencePanel
-            hideHeader={hideHeader}
             templateListDisplay={templateListDisplay}
             additionalControlPanels={additionalControlPanels}
             templates={templates}
@@ -30237,6 +31925,8 @@ export default function TemplateEditWorkspace({
             canvasFullscreen={canvasFullscreen}
             previewZoom={previewZoom}
             selectionPanelTab={selectionPanelTab}
+            editSettingsPanelVisible={editSettingsPanelVisible}
+            editSettingsPanelAvailable={!documentMode && !templateUsagePreviewActive && Boolean(renderedPreviewHtml.trim())}
             templateUsagePreviewMode={templateUsagePreviewActive}
             renderedPreviewHtml={renderedPreviewHtml}
             canvasInteractionMode={canvasInteractionMode}
@@ -30244,6 +31934,7 @@ export default function TemplateEditWorkspace({
             canRedoCanvasHistory={canRedoCanvasHistory}
             onUpdatePreviewZoom={updatePreviewZoom}
             onToggleCanvasFullscreen={toggleCanvasFullscreen}
+            onToggleEditSettingsPanel={toggleEditSettingsPanelVisible}
             onSelectionPanelTabChange={setSelectionPanelTab}
             onToggleTemplateUsagePreviewMode={toggleTemplateUsagePreviewMode}
             onCanvasInteractionModeChange={setCanvasInteractionMode}
@@ -30254,69 +31945,6 @@ export default function TemplateEditWorkspace({
               void saveTemplate();
             }}
           />
-		          {selectionPanelTab === 'position' && positionOrderLockSelectionMode ? (
-                <PositionSpacingPanel
-                  positionSpacingSettingRelations={positionSpacingSettingRelations}
-                  positionSpacingNewPairSummaries={positionSpacingNewPairSummaries}
-                  positionSpacingBulkGapY={positionSpacingBulkGapY}
-                  positionSpacingBulkGapError={positionSpacingBulkGapError}
-                  positionSpacingSettingRelationDisplayRows={positionSpacingSettingRelationDisplayRows}
-                  definedPositionRelationGapDraftByKey={definedPositionRelationGapDraftByKey}
-                  highlightedPositionSpacingSettingRelationKeySet={highlightedPositionSpacingSettingRelationKeySet}
-                  positionSpacingEntityVisualByKey={positionSpacingEntityVisualByKey}
-                  positionSpacingCheckedRowKeys={positionSpacingCheckedRowKeys}
-                  positionSpacingDraftByPairKey={positionSpacingDraftByPairKey}
-                  positionSpacingDraftErrorByPairKey={positionSpacingDraftErrorByPairKey}
-                  onClose={() => {
-                    setPositionOrderLockSelectionMode(false);
-                    setPositionOrderLockFrameGroupIds([]);
-                    setPositionOrderLockSelectionKindByFrameGroupId({});
-                    setPositionOrderLockSelectionGroupIdByFrameGroupId({});
-                    setSelectedPositionSpacingSettingRelationKey('');
-                    setPositionSpacingDraftByPairKey({});
-                    setPositionSpacingDraftErrorByPairKey({});
-                    setPositionSpacingCheckedRowKeys({});
-                    setPositionSpacingBulkGapY('');
-                    setPositionSpacingBulkGapError(false);
-                    setPositionOrderLockCandidateFrameGroupId('');
-                    setPositionOrderLockCandidateGroupId('');
-                    setPositionOrderLockCandidateSelectionStage('');
-                    positionGroupProxySelectionShowAllGroupsRef.current = false;
-                  }}
-                  onBulkGapCommit={(nextGapY) => {
-                    setPositionSpacingBulkGapY(nextGapY);
-                    if (positionSpacingBulkGapError) {
-                      setPositionSpacingBulkGapError(false);
-                    }
-                  }}
-                  onApplyBulkGap={applyPositionSpacingBulkGap}
-                  onCheckedRowChange={(rowKey, checked) => {
-                    setPositionSpacingCheckedRowKeys((previous) => ({
-                      ...previous,
-                      [rowKey]: checked,
-                    }));
-                  }}
-                  onExistingRelationSelect={selectDefinedPositionRelationEntities}
-                  onExistingRelationGapCommit={applyDefinedPositionRelationGapDraft}
-                  onExistingRelationDelete={deletePositionSpacingSettingRelation}
-                  onNewPairGapCommit={(pair, nextGapY) => {
-                    setPositionSpacingDraftByPairKey((previous) => ({
-                      ...previous,
-                      [pair.pairKey]: {
-                        gapY: nextGapY,
-                      },
-                    }));
-                    if (positionSpacingDraftErrorByPairKey[pair.pairKey]) {
-                      setPositionSpacingDraftErrorByPairKey((previous) => {
-                        const next = { ...previous };
-                        delete next[pair.pairKey];
-                        return next;
-                      });
-                    }
-                  }}
-                  onNewPairApply={applyNewPositionSpacingPair}
-                />
-		          ) : null}
 	          <TemplateEditPreviewSurface
               key="template-preview-stage:live"
 	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
@@ -30328,6 +31956,7 @@ export default function TemplateEditWorkspace({
 	            metadataVisualMode={templateUsagePreviewActive ? false : selectionPanelTab === 'metadata'}
 	            templateUsagePreviewMode={templateUsagePreviewActive}
 	            selectionPanelTab={selectionPanelTab}
+	            editSettingsPanelVisible={!templateUsagePreviewActive && editSettingsPanelVisible}
 	            showMetadataIcons={templateUsagePreviewActive ? false : showMetadataIcons}
 	            actionOverlay={templateUsagePreviewActive ? null : positionActionOverlayNode}
 	            actionOverlayLabel={canvasActionOverlayLabel}

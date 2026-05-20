@@ -3,6 +3,7 @@ import type {
   TemplateFrameRole,
   TemplateFrameRuntimeMode,
 } from './templateFrameEditDtos';
+import type { SiteDeleteImpactItemDto, SiteRecordDto } from './siteChecklistDtos';
 
 export type TemplateLayoutResizeMode = 'fixed' | 'grow_height' | 'grow_width';
 
@@ -198,6 +199,36 @@ export type TemplateUpdateResult = {
   template: TemplateRecordDto;
 };
 
+export type TemplateDeleteDocumentImpactDto = {
+  id: string;
+  title: string;
+  documentTypeKey: string;
+};
+
+export type TemplateDeleteTemplateImpactDto = {
+  id: string;
+  templateName: string;
+  sourceDocumentName: string | null;
+  sourceDocumentId: string | null;
+};
+
+export type TemplateDeleteProjectImpactDto = {
+  site: SiteRecordDto;
+  documentCount: number;
+  documents: TemplateDeleteDocumentImpactDto[];
+  items: SiteDeleteImpactItemDto[];
+};
+
+export type TemplateDeleteImpactResult = {
+  template: TemplateDeleteTemplateImpactDto;
+  affectedProjectCount: number;
+  affectedDocumentCount: number;
+  projects: TemplateDeleteProjectImpactDto[];
+};
+
 export type TemplateDeleteResult = {
   templateId: string;
+  deletedProjectCount: number;
+  deletedDocumentCount: number;
+  deletedProjects: TemplateDeleteProjectImpactDto[];
 };

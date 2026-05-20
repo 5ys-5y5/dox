@@ -211,7 +211,7 @@ export const SelectionSummaryOverlay = ({
         ];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+    <div className="text-sm text-slate-700">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-slate-900">{selectedPositionInfoTitle}</div>
