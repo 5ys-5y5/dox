@@ -532,6 +532,10 @@ const sanitizeTemplatePositionRelations = (relations?: TemplateSchemaPositionRel
     const anchorGroupId = String(relation.anchorGroupId || '').trim() || null;
     const anchorFrameGroupId = String(relation.anchorFrameGroupId || '').trim() || null;
     const anchorPageCornerId = String(relation.anchorPageCornerId || '').trim() || null;
+    const sourceEdgeY =
+      relation.sourceEdgeY === 'top' || relation.sourceEdgeY === 'bottom' ? relation.sourceEdgeY : null;
+    const targetEdgeY =
+      relation.targetEdgeY === 'top' || relation.targetEdgeY === 'bottom' ? relation.targetEdgeY : null;
     const gapYPx =
       relation.gapYPx == null ? null : Number.isFinite(Number(relation.gapYPx)) ? Number(relation.gapYPx) : null;
     const sortOrder = Number.parseInt(String(relation.sortOrder ?? index), 10);
@@ -549,6 +553,8 @@ const sanitizeTemplatePositionRelations = (relations?: TemplateSchemaPositionRel
       anchorGroupId,
       anchorFrameGroupId,
       anchorPageCornerId,
+      sourceEdgeY,
+      targetEdgeY,
       gapYPx,
       sortOrder: Number.isFinite(sortOrder) && sortOrder >= 0 ? sortOrder : index,
       relationSnapshot:

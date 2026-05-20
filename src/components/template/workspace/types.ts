@@ -211,6 +211,8 @@ export type TemplateFrameRelativeAnchorConfig = {
   anchorId: TemplateFrameRelativeAnchorId;
   anchorX: TemplateFrameRelativeHorizontalPin;
   anchorY: TemplateFrameRelativeVerticalPin;
+  sourceEdgeY?: TemplateFrameRelativeVerticalPin;
+  targetEdgeY?: TemplateFrameRelativeVerticalPin;
   offsetX: number;
   offsetY: number;
 };

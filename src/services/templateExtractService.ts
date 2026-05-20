@@ -72,6 +72,8 @@ const EXTRACT_POSITION_ATTR_NAMES = [
   'data-template-frame-relative-anchor-id',
   'data-template-frame-relative-anchor-x',
   'data-template-frame-relative-anchor-y',
+  'data-template-frame-relative-anchor-source-edge-y',
+  'data-template-frame-relative-anchor-target-edge-y',
   'data-template-frame-relative-offset-x',
   'data-template-frame-relative-offset-y',
 ];

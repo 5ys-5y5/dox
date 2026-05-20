@@ -25,6 +25,8 @@ const FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kin
 const FRAME_RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
 const FRAME_RELATIVE_ANCHOR_X_ATTR = 'data-template-frame-relative-anchor-x';
 const FRAME_RELATIVE_ANCHOR_Y_ATTR = 'data-template-frame-relative-anchor-y';
+const FRAME_RELATIVE_ANCHOR_SOURCE_EDGE_Y_ATTR = 'data-template-frame-relative-anchor-source-edge-y';
+const FRAME_RELATIVE_ANCHOR_TARGET_EDGE_Y_ATTR = 'data-template-frame-relative-anchor-target-edge-y';
 const FRAME_RELATIVE_OFFSET_X_ATTR = 'data-template-frame-relative-offset-x';
 const FRAME_RELATIVE_OFFSET_Y_ATTR = 'data-template-frame-relative-offset-y';
 const FRAME_RELATION_SELECTION_ATTR = 'data-template-frame-relation-selection';
@@ -91,6 +93,8 @@ const buildPositionSnapshot = (node: HTMLElement) => ({
   anchorId: readAttr(node, FRAME_RELATIVE_ANCHOR_ID_ATTR) || null,
   anchorX: readAttr(node, FRAME_RELATIVE_ANCHOR_X_ATTR) || null,
   anchorY: readAttr(node, FRAME_RELATIVE_ANCHOR_Y_ATTR) || null,
+  sourceEdgeY: readAttr(node, FRAME_RELATIVE_ANCHOR_SOURCE_EDGE_Y_ATTR) || null,
+  targetEdgeY: readAttr(node, FRAME_RELATIVE_ANCHOR_TARGET_EDGE_Y_ATTR) || null,
   offsetX: parseNumber(readAttr(node, FRAME_RELATIVE_OFFSET_X_ATTR)),
   offsetY: parseNumber(readAttr(node, FRAME_RELATIVE_OFFSET_Y_ATTR)),
   positionGroupId: readAttr(node, FRAME_POSITION_GROUP_ID_ATTR) || null,
@@ -188,6 +192,10 @@ const buildPositionRelationInputs = (frames: TemplateSchemaFrameInput[]): Templa
       return [];
     }
 
+    const sourceEdgeY =
+      position.sourceEdgeY === 'top' || position.sourceEdgeY === 'bottom' ? position.sourceEdgeY : null;
+    const targetEdgeY =
+      position.targetEdgeY === 'top' || position.targetEdgeY === 'bottom' ? position.targetEdgeY : null;
     const relation: TemplateSchemaPositionRelationInput = {
       relationKey: `frame:${frame.frameGroupId}:relative`,
       targetKind: 'frame',
@@ -197,6 +205,8 @@ const buildPositionRelationInputs = (frames: TemplateSchemaFrameInput[]): Templa
       anchorGroupId: anchorKind === 'group' ? anchorId : null,
       anchorFrameGroupId: anchorKind === 'frame' ? anchorId : null,
       anchorPageCornerId: anchorKind === 'page-corner' ? anchorId : null,
+      sourceEdgeY,
+      targetEdgeY,
       gapYPx: typeof position.offsetY === 'number' ? position.offsetY : null,
       sortOrder,
       relationSnapshot: {

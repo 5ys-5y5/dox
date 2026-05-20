@@ -199,14 +199,13 @@ export const buildDefinedPositionRelativeRelations = (args: {
         return null;
       }
 
-      const gapYPx =
+      const verticalRelation =
         targetRect && anchorRect
-          ? Math.round(
-              targetConfig.anchorY === 'bottom'
-                ? targetRect.top - (anchorRect.top + anchorRect.height)
-                : anchorRect.top - (targetRect.top + targetRect.height)
-            )
-          : Math.round(targetConfig.offsetY);
+          ? resolveRelativeRelationVerticalGap(targetConfig, targetRect, anchorRect)
+          : {
+              anchorY: targetConfig.anchorY,
+              gapYPx: Math.round(targetConfig.offsetY),
+            };
 
       return {
         key: `${targetKind}:${targetGroupId || targetFrameGroupId}:${anchorKind}:${anchorGroupId || anchorFrameGroupId || targetConfig.anchorId}`,
@@ -221,8 +220,8 @@ export const buildDefinedPositionRelativeRelations = (args: {
         anchorGroupId,
         anchorFrameGroupId,
         anchorFrameGroupIds,
-        anchorY: targetConfig.anchorY,
-        gapYPx,
+        anchorY: verticalRelation.anchorY,
+        gapYPx: verticalRelation.gapYPx,
         targetSortTop: targetRect.top,
       };
     })
@@ -254,6 +253,43 @@ export const buildDefinedPositionRelativeRelations = (args: {
   return Array.from(mergedByKey.values())
     .sort((left, right) => left.targetSortTop - right.targetSortTop)
     .map(({ targetSortTop: _targetSortTop, ...relation }) => relation);
+};
+
+const resolveRelativeRelationVerticalGap = (
+  targetConfig: TemplateFrameRelativeAnchorConfig,
+  targetRect: FrameNodeRect,
+  anchorRect: FrameNodeRect
+) => {
+  const sourceEdgeY = targetConfig.sourceEdgeY || targetConfig.anchorY;
+  const targetEdgeY =
+    targetConfig.targetEdgeY ||
+    (sourceEdgeY === 'bottom' ? ('top' as const) : ('bottom' as const));
+  const anchorTop = anchorRect.top;
+  const anchorBottom = anchorRect.top + anchorRect.height;
+  const targetTop = targetRect.top;
+  const targetBottom = targetRect.top + targetRect.height;
+
+  if (sourceEdgeY === 'bottom' && targetEdgeY === 'top') {
+    return {
+      anchorY: 'bottom' as const,
+      gapYPx: Math.round(targetTop - anchorBottom),
+    };
+  }
+
+  if (sourceEdgeY === 'top' && targetEdgeY === 'bottom') {
+    return {
+      anchorY: 'top' as const,
+      gapYPx: Math.round(anchorTop - targetBottom),
+    };
+  }
+
+  return {
+    anchorY: targetConfig.anchorY,
+    gapYPx:
+      targetConfig.anchorY === 'bottom'
+        ? Math.round(targetTop - anchorBottom)
+        : Math.round(anchorTop - targetBottom),
+  };
 };
 
 export const focusDefinedPositionRelativeRelations = (args: {
@@ -1282,14 +1318,13 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
       }
 
       seenRelationKeys.add(relationKey);
-      const gapYPx =
+      const verticalRelation =
         targetRect && anchorRect
-          ? Math.round(
-              targetConfig.anchorY === 'bottom'
-                ? targetRect.top - (anchorRect.top + anchorRect.height)
-                : anchorRect.top - (targetRect.top + targetRect.height)
-            )
-          : Math.round(targetConfig.offsetY);
+          ? resolveRelativeRelationVerticalGap(targetConfig, targetRect, anchorRect)
+          : {
+              anchorY: targetConfig.anchorY,
+              gapYPx: Math.round(targetConfig.offsetY),
+            };
 
       return {
         key: relationKey,
@@ -1305,8 +1340,8 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
         anchorGroupId,
         anchorFrameGroupId,
         anchorFrameGroupIds,
-        anchorY: targetConfig.anchorY,
-        gapYPx,
+        anchorY: verticalRelation.anchorY,
+        gapYPx: verticalRelation.gapYPx,
       } as DefinedPositionRelativeRelation;
     })
     .filter((relation: DefinedPositionRelativeRelation | null): relation is DefinedPositionRelativeRelation => Boolean(relation));
@@ -1385,10 +1420,7 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
       }
 
       seenRelationKeys.add(relationKey);
-      const gapYPx =
-        targetConfig.anchorY === 'bottom'
-          ? Math.round(targetRect.top - (anchorRect.top + anchorRect.height))
-          : Math.round(anchorRect.top - (targetRect.top + targetRect.height));
+      const verticalRelation = resolveRelativeRelationVerticalGap(targetConfig, targetRect, anchorRect);
 
       return {
         key: relationKey,
@@ -1404,8 +1436,8 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
         anchorGroupId,
         anchorFrameGroupId,
         anchorFrameGroupIds,
-        anchorY: targetConfig.anchorY,
-        gapYPx,
+        anchorY: verticalRelation.anchorY,
+        gapYPx: verticalRelation.gapYPx,
       } as DefinedPositionRelativeRelation;
     })
     .filter((relation: DefinedPositionRelativeRelation | null): relation is DefinedPositionRelativeRelation => Boolean(relation));

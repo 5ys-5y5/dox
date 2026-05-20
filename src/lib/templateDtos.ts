@@ -51,6 +51,8 @@ export type TemplateSchemaPositionRelationInput = {
   anchorGroupId?: string | null;
   anchorFrameGroupId?: string | null;
   anchorPageCornerId?: string | null;
+  sourceEdgeY?: 'top' | 'bottom' | null;
+  targetEdgeY?: 'top' | 'bottom' | null;
   gapYPx?: number | null;
   sortOrder?: number | null;
   relationSnapshot?: Record<string, unknown>;
