@@ -1833,6 +1833,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
         applyFrameBoxSelection,
         applyShiftMergedPositionEntitySelection,
         getNextFrameSelection,
+        clearFrameSelection,
         edgePressStateRef,
         setSelectedFrameGroupIds,
         setEdgeSelectionState,
@@ -2093,6 +2094,24 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                 }
               : undefined
           );
+          if (deferredPreviewEditorStateRef.current) {
+            deferredPreviewEditorStateRef.current = false;
+            schedulePreviewEditorState();
+          }
+          return;
+        }
+
+        const isPlainEmptyPageClick =
+          !event.shiftKey &&
+          !marqueeSelectionState.anchorFrameGroupId &&
+          !marqueeSelectionState.positionShiftClickFallbackEntry &&
+          marqueeSelectionState.baseSelectionIds.length <= 0 &&
+          (marqueeSelectionState.baseProxySelections?.length || 0) <= 0 &&
+          (marqueeSelectionState.clickSelectionIds?.length || 0) <= 0 &&
+          (marqueeSelectionState.clickProxySelections?.length || 0) <= 0;
+
+        if (isPlainEmptyPageClick) {
+          clearFrameSelection();
           if (deferredPreviewEditorStateRef.current) {
             deferredPreviewEditorStateRef.current = false;
             schedulePreviewEditorState();

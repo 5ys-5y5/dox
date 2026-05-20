@@ -12546,6 +12546,125 @@ const readTemplateUsagePreviewSignatureModeValue = (control: HTMLElement, runtim
   return '-';
 };
 
+const TEMPLATE_USAGE_SIGNATURE_TEXT_STYLE_PROPERTIES = [
+  'font-size',
+  'font-family',
+  'font-style',
+  'font-weight',
+  'line-height',
+  'letter-spacing',
+  'color',
+  'text-align',
+  'white-space',
+] as const;
+
+const resolveTemplateUsageSignatureFrameAlignment = (control: HTMLElement) => {
+  const frameNode =
+    resolveFrameSelectionAnchor(control.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)) ||
+    control.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR);
+  const halign =
+    frameNode?.getAttribute('data-template-frame-halign')?.trim().toLowerCase() ||
+    (frameNode?.classList.contains('halign-center')
+      ? 'center'
+      : frameNode?.classList.contains('halign-right')
+        ? 'right'
+        : frameNode?.classList.contains('halign-left')
+          ? 'left'
+          : '');
+  const valign =
+    frameNode?.getAttribute('data-template-frame-valign')?.trim().toLowerCase() ||
+    (frameNode?.classList.contains('valign-middle')
+      ? 'middle'
+      : frameNode?.classList.contains('valign-bottom')
+        ? 'bottom'
+        : frameNode?.classList.contains('valign-top')
+          ? 'top'
+          : '');
+  const computedStyle = getComputedStyle(control);
+  const textAlign = readComputedOrInlineStyleValue(control, computedStyle, 'text-align').toLowerCase();
+  const verticalAlign = readComputedOrInlineStyleValue(control, computedStyle, 'vertical-align').toLowerCase();
+  const horizontalSource = halign || textAlign;
+  const verticalSource = valign || verticalAlign;
+
+  return {
+    horizontalJustify:
+      horizontalSource === 'center'
+        ? 'center'
+        : horizontalSource === 'right' || horizontalSource === 'end'
+          ? 'flex-end'
+          : 'flex-start',
+    textAlign:
+      horizontalSource === 'center'
+        ? 'center'
+        : horizontalSource === 'right' || horizontalSource === 'end'
+          ? 'right'
+          : horizontalSource === 'start'
+            ? 'start'
+            : 'left',
+    verticalAlign:
+      verticalSource === 'middle' || verticalSource === 'center'
+        ? 'center'
+        : verticalSource === 'bottom' || verticalSource === 'end'
+          ? 'flex-end'
+          : 'flex-start',
+  };
+};
+
+const applyTemplateUsageSignatureTextPresentation = (
+  control: HTMLElement,
+  target: HTMLElement,
+  options?: {
+    lineTarget?: boolean;
+  }
+) => {
+  const computedStyle = getComputedStyle(control);
+  const alignment = resolveTemplateUsageSignatureFrameAlignment(control);
+
+  target.style.boxSizing = 'border-box';
+  target.style.minWidth = '0px';
+  target.style.overflow = 'hidden';
+  target.style.textOverflow = 'ellipsis';
+
+  TEMPLATE_USAGE_SIGNATURE_TEXT_STYLE_PROPERTIES.forEach((propertyName) => {
+    const value = readComputedOrInlineStyleValue(control, computedStyle, propertyName);
+
+    if (value) {
+      target.style.setProperty(propertyName, value);
+    }
+  });
+
+  target.style.textAlign = alignment.textAlign;
+
+  if (!options?.lineTarget) {
+    target.style.width = '100%';
+  }
+};
+
+const applyTemplateUsageSignatureInfoPresentation = (control: HTMLElement, info: HTMLElement) => {
+  const alignment = resolveTemplateUsageSignatureFrameAlignment(control);
+
+  applyTemplateUsageSignatureTextPresentation(control, info);
+  info.style.minHeight = '100%';
+  info.style.display = 'flex';
+  info.style.alignItems = alignment.verticalAlign;
+  info.style.justifyContent = alignment.horizontalJustify;
+};
+
+const applyTemplateUsageSignatureHistoryPresentation = (control: HTMLElement, historyContainer: HTMLElement) => {
+  const alignment = resolveTemplateUsageSignatureFrameAlignment(control);
+
+  applyTemplateUsageSignatureTextPresentation(control, historyContainer);
+  historyContainer.style.minHeight = '100%';
+  historyContainer.style.display = 'grid';
+  historyContainer.style.alignContent = alignment.verticalAlign;
+  historyContainer.style.justifyItems =
+    alignment.horizontalJustify === 'center' ? 'center' : alignment.horizontalJustify === 'flex-end' ? 'end' : 'start';
+  historyContainer.querySelectorAll<HTMLElement>('.v106-template-usage-signature-history-line').forEach((line) => {
+    applyTemplateUsageSignatureTextPresentation(control, line, { lineTarget: true });
+    line.style.maxWidth = '100%';
+  });
+};
+
 const renderTemplateUsagePreviewSignatureControl = (control: HTMLElement) => {
   ensureTemplateUsagePreviewSignatureState(control);
 
@@ -12576,9 +12695,10 @@ const renderTemplateUsagePreviewSignatureControl = (control: HTMLElement) => {
           line.className = 'v106-template-usage-signature-history-line';
           line.textContent = `${formatTemplateUsagePreviewSignedAt(entry.at)} · ${entry.message}`;
           historyContainer.appendChild(line);
-        });
+      });
     }
 
+    applyTemplateUsageSignatureHistoryPresentation(control, historyContainer);
     control.appendChild(historyContainer);
     return;
   }
@@ -12592,6 +12712,7 @@ const renderTemplateUsagePreviewSignatureControl = (control: HTMLElement) => {
     const info = document.createElement('div');
     info.className = 'v106-template-usage-signature-info';
     info.textContent = readTemplateUsagePreviewSignatureModeValue(control, runtimeMode);
+    applyTemplateUsageSignatureInfoPresentation(control, info);
     control.appendChild(info);
     return;
   }
@@ -13365,8 +13486,8 @@ const prepareTemplateUsageSignatureControl = (
     )
   );
   ensureTemplateUsagePreviewSignatureState(control);
-  renderTemplateUsagePreviewSignatureControl(control);
-  replaceFrameContentTarget(node, control);
+  const mountedControl = replaceFrameContentTarget(node, control);
+  renderTemplateUsagePreviewSignatureControl(mountedControl);
 };
 
 const prepareTemplateUsagePreviewValueBox = (

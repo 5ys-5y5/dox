@@ -40,6 +40,7 @@ export const useMetadataConnectionActions = (options: UseMetadataConnectionActio
       rawFrameNodeSelector,
       resolveNextFrameMetadata,
       getFrameNodes,
+      getFrameGroupId,
       readFrameParentGroupId,
       clearTransientCanvasOverlays,
       setFrameMetadataDraft,
@@ -65,7 +66,7 @@ export const useMetadataConnectionActions = (options: UseMetadataConnectionActio
 
     const existingTargetFrameGroupIds = getFrameNodes(root)
       .filter((node: HTMLElement) => readFrameParentGroupId(node) === sourceKeyFrameGroupId)
-      .map((node: HTMLElement) => node.getAttribute('data-template-frame-group') || '')
+      .map((node: HTMLElement) => getFrameGroupId(node))
       .filter(Boolean);
 
     clearTransientCanvasOverlays();
@@ -318,6 +319,7 @@ export const useMetadataConnectionActions = (options: UseMetadataConnectionActio
       selectedFrameGroupIdsRef,
       setMessage,
       getFrameNodes,
+      getFrameGroupId,
       readFrameRole,
       readFrameParentGroupId,
       formatIssueList,
@@ -350,7 +352,7 @@ export const useMetadataConnectionActions = (options: UseMetadataConnectionActio
 
     const frameNodeById = new Map(
       getFrameNodes(root)
-        .map((node: HTMLElement) => [node.getAttribute('data-template-frame-group') || '', node] as const)
+        .map((node: HTMLElement) => [getFrameGroupId(node), node] as const)
         .filter(([frameGroupId]: readonly [string, HTMLElement]) => Boolean(frameGroupId))
     );
     const allSelectedEntries = activeSelectionIds.map((frameGroupId: string) => {
@@ -473,6 +475,7 @@ export const useMetadataConnectionActions = (options: UseMetadataConnectionActio
       metadataVirtualConnectionDraft,
       normalizeVirtualDefinitionId,
       getFrameNodes,
+      getFrameGroupId,
       virtualFrameDefinitions,
       setMetadataVirtualConnectionDraft,
       readFrameRole,
@@ -511,7 +514,7 @@ export const useMetadataConnectionActions = (options: UseMetadataConnectionActio
 
     const frameNodeById = new Map(
       getFrameNodes(root)
-        .map((node: HTMLElement) => [node.getAttribute('data-template-frame-group') || '', node] as const)
+        .map((node: HTMLElement) => [getFrameGroupId(node), node] as const)
         .filter(([frameGroupId]: readonly [string, HTMLElement]) => Boolean(frameGroupId))
     );
     const selectedEntries = activeSelectionIds

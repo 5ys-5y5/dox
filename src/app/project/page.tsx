@@ -8,6 +8,7 @@ import {
   FileImage,
   FileStack,
   FolderKanban,
+  Link2,
   Plus,
   RefreshCcw,
   Signature,
@@ -84,6 +85,7 @@ type ProjectListRow = {
   source: string;
   selected?: boolean;
   onClick?: () => void;
+  linkAction?: ProjectListAction;
   action?: ProjectListAction;
 };
 type ApiErrorDebug = Partial<
@@ -325,6 +327,35 @@ const getMemberAccessErrorMessage = (error: unknown, fallbackMessage: string) =>
   return message;
 };
 
+const copyTextToClipboard = async (text: string) => {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.opacity = '0';
+
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    const copied = document.execCommand('copy');
+
+    if (!copied) {
+      throw new Error('copy command failed');
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
+
 function RoleSegmentedButtons<TValue extends string>({
   value,
   options,
@@ -453,6 +484,19 @@ const PROJECT_INFO_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   },
 ];
 
+const PROJECT_INFO_LIST_LINK_COLUMN: MejaiScrollTableColumn = {
+  key: 'linkAction',
+  label: '링크',
+  width: 48,
+  minWidth: 48,
+  maxWidth: 48,
+  align: 'center',
+  sticky: 'right',
+  clampLines: 1,
+  headerClassName: 'shadow-[-1px_0_0_0_rgba(226,232,240,1)]',
+  cellClassName: 'shadow-[-1px_0_0_0_rgba(226,232,240,1)]',
+};
+
 const PROJECT_INFO_LIST_ACTION_COLUMN: MejaiScrollTableColumn = {
   key: 'action',
   label: '삭제',
@@ -526,8 +570,14 @@ function ProjectInfoList({
   maxBodyHeightClassName?: string;
   minTableWidth?: number;
 }) {
+  const hasLinkColumn = items.some((item) => Boolean(item.linkAction));
   const hasActionColumn = items.some((item) => Boolean(item.action));
-  const columns = hasActionColumn ? [...PROJECT_INFO_LIST_COLUMNS, PROJECT_INFO_LIST_ACTION_COLUMN] : PROJECT_INFO_LIST_COLUMNS;
+  const columns = [
+    ...PROJECT_INFO_LIST_COLUMNS,
+    ...(hasLinkColumn ? [PROJECT_INFO_LIST_LINK_COLUMN] : []),
+    ...(hasActionColumn ? [PROJECT_INFO_LIST_ACTION_COLUMN] : []),
+  ];
+  const resolvedMinTableWidth = minTableWidth || 662 + (hasLinkColumn ? 48 : 0);
   const rows: MejaiScrollTableRow[] = items.map((item) => ({
     key: item.key,
     selected: item.selected,
@@ -543,6 +593,25 @@ function ProjectInfoList({
       ),
       summary: item.summary,
       source: item.source,
+      linkAction: item.linkAction ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          title={item.linkAction.title}
+          aria-label={item.linkAction.ariaLabel}
+          disabled={item.linkAction.disabled}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            item.linkAction?.onClick(event);
+          }}
+        >
+          {item.linkAction.icon}
+        </Button>
+      ) : null,
       action: item.action ? (
         <Button
           type="button"
@@ -571,7 +640,7 @@ function ProjectInfoList({
       rows={rows}
       emptyMessage={emptyMessage || '표시할 항목이 없습니다.'}
       maxHeightClassName={maxBodyHeightClassName}
-      minTableWidth={minTableWidth || 662}
+      minTableWidth={resolvedMinTableWidth}
     />
   );
 }

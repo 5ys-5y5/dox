@@ -301,6 +301,24 @@ export function MejaiScrollTable({
 
     return sum + toPixelNumber(column.width ?? column.minWidth ?? column.maxWidth);
   }, 0);
+  let runningStickyRightOffsetPx = 0;
+  const stickyRightOffsetsByKey = columns.reduceRight<Record<string, number>>((offsets, column) => {
+    if (column.sticky !== 'right') {
+      return offsets;
+    }
+
+    offsets[column.key] = runningStickyRightOffsetPx;
+    runningStickyRightOffsetPx += toPixelNumber(column.width ?? column.minWidth ?? column.maxWidth);
+    return offsets;
+  }, {});
+  const getColumnStickyStyle = (column: MejaiScrollTableColumn): React.CSSProperties | undefined => {
+    if (column.sticky !== 'right') {
+      return undefined;
+    }
+
+    const right = stickyRightOffsetsByKey[column.key] ?? 0;
+    return { right };
+  };
   const columnDefs = showIndexColumn
     ? [{ key: '__index__', width: normalizedIndexWidth, minWidth: normalizedIndexWidth, maxWidth: normalizedIndexWidth }, ...columns]
     : columns;
@@ -482,6 +500,7 @@ export function MejaiScrollTable({
                     key={column.key}
                     data-mejai-col-index={showIndexColumn ? index + 1 : index}
                     title={column.headerTitle}
+                    style={getColumnStickyStyle(column)}
                     className={cn(
                       'sticky top-0 z-[1] border-b border-slate-300 bg-slate-100 px-1.5 py-1 align-top text-[10px] text-slate-700',
                       getStickyHeaderClassName(column.sticky),
@@ -508,6 +527,7 @@ export function MejaiScrollTable({
                         <td
                           key={`${row.key}-${column.key}`}
                           data-mejai-col-index={showIndexColumn ? columnIndex + 1 : columnIndex}
+                          style={getColumnStickyStyle(column)}
                           className={cn(
                             'border-b border-slate-200 px-1.5 py-1 align-middle text-[11px] text-slate-600',
                             getStickyBodyClassName(column.sticky, row),
