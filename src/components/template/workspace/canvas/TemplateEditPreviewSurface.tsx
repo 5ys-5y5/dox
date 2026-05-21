@@ -31,6 +31,8 @@ function compactOverlayRailSections(sections: Array<OverlayRailSection | null>) 
 export const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
   renderedPreviewHtml,
   canvasFullscreen,
+  canvasSurfaceHeight,
+  canvasSurfaceFillAvailableHeight = false,
   boxCreationMode,
   canvasIconScale,
   spacePanArmed,
@@ -919,10 +921,29 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     };
   };
 
+  const resolvedCanvasSurfaceHeight = String(canvasSurfaceHeight || '').trim();
+  const hasSpecifiedCanvasSurfaceHeight = !canvasFullscreen && Boolean(resolvedCanvasSurfaceHeight);
+  const canvasSurfaceSizingClassName =
+    canvasFullscreen || canvasSurfaceFillAvailableHeight
+      ? 'flex-1'
+      : hasSpecifiedCanvasSurfaceHeight
+        ? ''
+        : 'h-[70vh] max-h-[70vh]';
+  const canvasSurfaceSizingStyle = hasSpecifiedCanvasSurfaceHeight
+    ? ({ height: resolvedCanvasSurfaceHeight, maxHeight: resolvedCanvasSurfaceHeight } as React.CSSProperties)
+    : undefined;
+
   if (!renderedPreviewHtml) {
     return (
-      <CardContent className={`min-h-0 bg-slate-200 p-6 ${canvasFullscreen ? 'flex-1' : 'h-[70vh] max-h-[70vh]'}`}>
-        <div className="flex min-h-[560px] items-center justify-center text-sm text-slate-500">
+      <CardContent
+        className={`min-h-0 bg-slate-200 p-6 ${canvasSurfaceSizingClassName}`}
+        style={canvasSurfaceSizingStyle}
+      >
+        <div
+          className={`flex items-center justify-center text-sm text-slate-500 ${
+            hasSpecifiedCanvasSurfaceHeight || canvasSurfaceFillAvailableHeight ? 'h-full min-h-0' : 'min-h-[560px]'
+          }`}
+        >
           편집할 템플릿을 먼저 불러오세요.
         </div>
       </CardContent>
@@ -1013,11 +1034,11 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const overlayRailSections = selectionPanelTab === 'metadata' ? metadataOverlayRailSections : positionOverlayRailSections;
   const hasOverlayRail = editSettingsPanelVisible && overlayRailSections.length > 0;
   const overlayRailContent = overlayRailSections.map((section) => section.node);
-
   return (
     <CardContent
       ref={surfaceShellRef}
-      className={`relative min-h-0 overflow-hidden bg-slate-200 p-0 ${canvasFullscreen ? 'flex-1' : 'h-[70vh] max-h-[70vh]'}`}
+      className={`relative min-h-0 overflow-hidden bg-slate-200 p-0 ${canvasSurfaceSizingClassName}`}
+      style={canvasSurfaceSizingStyle}
     >
       <div className="flex h-full min-h-0 w-full">
         <div className="min-w-0 flex-1">

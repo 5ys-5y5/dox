@@ -9,6 +9,7 @@ type SettingToggleRowProps = {
   description?: string;
   checked: boolean;
   disabled?: boolean;
+  className?: string;
   onCheckedChange: (checked: boolean) => void;
 };
 
@@ -19,10 +20,11 @@ export function SettingToggleRow({
   description,
   checked,
   disabled = false,
+  className = '',
   onCheckedChange,
 }: SettingToggleRowProps) {
   return (
-    <div className="flex items-center justify-between gap-1.5 rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700">
+    <div className={`flex items-center justify-between gap-1.5 rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700 ${className}`}>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1 leading-3">
           {sectionLabel ? <span className="shrink-0 text-[9px] font-semibold text-slate-400">{sectionLabel}</span> : null}

@@ -3,6 +3,14 @@
 import { notFound } from 'next/navigation';
 import TemplateEditWorkspace from '../../components/template/TemplateEditWorkspace';
 import type { TemplateEditWorkspaceProps } from '../../components/template/workspace/types';
+import {
+  applyCanvasOwnerSettingsToWorkspaceProps,
+  normalizeCanvasWorkspaceMode,
+  type CanvasOwnerSettings,
+  type CanvasOwnerSettingKey,
+  type CanvasOwnerSettingSource,
+  useStoredCanvasOwnerSettings,
+} from './ownerSettings';
 
 type CanvasWorkspaceMode = NonNullable<TemplateEditWorkspaceProps['workspaceMode']>;
 
@@ -18,6 +26,9 @@ export type CanvasOwnerSurface =
 
 type CanvasOwnedWorkspaceProps = TemplateEditWorkspaceProps & {
   surface: CanvasOwnerSurface;
+  applyStoredCanvasOwnerSettings?: boolean;
+  canvasOwnerSettings?: CanvasOwnerSettings | null;
+  canvasOwnerSettingSources?: Record<CanvasOwnerSettingKey, CanvasOwnerSettingSource>;
 };
 
 type CanvasSurfacePolicy = {
@@ -57,7 +68,7 @@ const CANVAS_SURFACE_POLICIES: Record<CanvasOwnerSurface, CanvasSurfacePolicy> =
 };
 
 const resolveCanvasWorkspaceMode = (value: TemplateEditWorkspaceProps['workspaceMode']): CanvasWorkspaceMode =>
-  value === 'document' || value === 'read' ? value : 'template';
+  normalizeCanvasWorkspaceMode(value);
 
 const hasEditableValueKeys = (value: string[] | null | undefined) =>
   Array.isArray(value) && value.some((item) => String(item || '').trim().length > 0);
@@ -113,6 +124,8 @@ const validateCanvasOwnedWorkspace = (surface: CanvasOwnerSurface, props: Templa
 const resolveCanvasOwnedWorkspaceProps = ({
   surface,
   workspaceMode,
+  canvasOwnerSettings,
+  canvasOwnerSettingSources,
   ...props
 }: CanvasOwnedWorkspaceProps): TemplateEditWorkspaceProps => {
   const normalizedWorkspaceMode = resolveCanvasWorkspaceMode(workspaceMode);
@@ -125,14 +138,50 @@ const resolveCanvasOwnedWorkspaceProps = ({
       normalizedWorkspaceMode === 'template' ? props.templateNameReadOnly : (props.templateNameReadOnly ?? true),
     saveDisabled: normalizedWorkspaceMode === 'read' ? true : props.saveDisabled,
   };
+  const configuredProps = canvasOwnerSettings
+    ? applyCanvasOwnerSettingsToWorkspaceProps({
+        baseProps: normalizedProps,
+        settings: canvasOwnerSettings,
+        settingSources: canvasOwnerSettingSources,
+        workspaceMode: normalizedWorkspaceMode,
+      })
+    : normalizedProps;
 
-  if (!validateCanvasOwnedWorkspace(surface, normalizedProps)) {
+  if (!validateCanvasOwnedWorkspace(surface, configuredProps)) {
     notFound();
   }
 
-  return normalizedProps;
+  return configuredProps;
 };
 
-export function CanvasOwnedWorkspace(props: CanvasOwnedWorkspaceProps) {
-  return <TemplateEditWorkspace {...resolveCanvasOwnedWorkspaceProps(props)} />;
+export function CanvasOwnedWorkspace({
+  applyStoredCanvasOwnerSettings = true,
+  canvasOwnerSettings: explicitCanvasOwnerSettings,
+  canvasOwnerSettingSources: explicitCanvasOwnerSettingSources,
+  ...workspaceProps
+}: CanvasOwnedWorkspaceProps) {
+  const storedCanvasOwnerSettings = useStoredCanvasOwnerSettings({
+    pageId: workspaceProps.surface,
+    workspaceMode: normalizeCanvasWorkspaceMode(workspaceProps.workspaceMode),
+  });
+  const canvasOwnerSettings =
+    explicitCanvasOwnerSettings ??
+    (applyStoredCanvasOwnerSettings && storedCanvasOwnerSettings.hasStoredSettings
+      ? storedCanvasOwnerSettings.settings
+      : null);
+  const canvasOwnerSettingSources =
+    explicitCanvasOwnerSettingSources ??
+    (applyStoredCanvasOwnerSettings && storedCanvasOwnerSettings.hasStoredSettings
+      ? storedCanvasOwnerSettings.sources
+      : undefined);
+
+  return (
+    <TemplateEditWorkspace
+      {...resolveCanvasOwnedWorkspaceProps({
+        ...workspaceProps,
+        canvasOwnerSettings,
+        canvasOwnerSettingSources,
+      })}
+    />
+  );
 }

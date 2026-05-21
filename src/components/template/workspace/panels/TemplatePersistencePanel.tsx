@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/Card';
 import { Button } from '../../../ui/Button';
 import { EntityPicker } from '../../../ui/EntityPicker';
 import { Input } from '../../../ui/Input';
+import type { TemplateEditWorkspacePersistenceVisibility } from '../types';
 
 type TemplatePersistencePanelProps = {
   templateListDisplay: 'picker' | 'inline';
@@ -26,6 +27,7 @@ type TemplatePersistencePanelProps = {
   loading: boolean;
   renderedPreviewHtml: string;
   templateUsagePreviewMode: boolean;
+  visibility?: TemplateEditWorkspacePersistenceVisibility;
   onSelectTemplate: (templateId: string) => void;
   onDeleteTemplate: (option: any) => void;
   onSave: () => void;
@@ -48,12 +50,21 @@ export const TemplatePersistencePanel = ({
   loading,
   renderedPreviewHtml,
   templateUsagePreviewMode,
+  visibility,
   onSelectTemplate,
   onDeleteTemplate,
   onSave,
   onTemplateNameChange,
   onLayoutResizeModeChange,
-}: TemplatePersistencePanelProps) => (
+}: TemplatePersistencePanelProps) => {
+  const showTemplateList = visibility?.showTemplateList !== false;
+  const showTemplateNameInput = visibility?.showTemplateNameInput !== false;
+  const showLayoutResizeModeSelect = visibility?.showLayoutResizeModeSelect !== false;
+  const showSourceDocumentNameInput = visibility?.showSourceDocumentNameInput !== false;
+  const showSaveButton = visibility?.showSaveButton !== false;
+  const showFieldGrid = showTemplateNameInput || showLayoutResizeModeSelect || showSourceDocumentNameInput;
+
+  return (
   <div className="space-y-6">
     {additionalControlPanels}
     <Card className="border-slate-200">
@@ -61,6 +72,7 @@ export const TemplatePersistencePanel = ({
         <CardTitle>불러오기 및 저장</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {showTemplateList ? (
         <div className="space-y-2">
           <label className="text-sm font-medium text-slate-800">
             {templateListDisplay === 'inline' ? '템플릿 리스트' : '저장된 템플릿'}
@@ -126,12 +138,17 @@ export const TemplatePersistencePanel = ({
             />
           )}
         </div>
+        ) : null}
 
+        {showFieldGrid ? (
         <div className="grid grid-cols-2 gap-4">
+          {showTemplateNameInput ? (
           <div className="space-y-2">
             <label className="text-sm font-medium text-slate-800">템플릿 이름</label>
             <Input value={templateName} onChange={(event) => onTemplateNameChange(event.target.value)} />
           </div>
+          ) : null}
+          {showLayoutResizeModeSelect ? (
           <div className="space-y-2">
             <label className="text-sm font-medium text-slate-800">레이아웃 확장 정책</label>
             <select
@@ -144,12 +161,17 @@ export const TemplatePersistencePanel = ({
               <option value="grow_width">grow_width</option>
             </select>
           </div>
+          ) : null}
+          {showSourceDocumentNameInput ? (
           <div className="col-span-2 space-y-2">
             <label className="text-sm font-medium text-slate-800">원본 문서명</label>
             <Input value={sourceDocumentName} readOnly className="cursor-not-allowed bg-slate-50 text-slate-500" />
           </div>
+          ) : null}
         </div>
+        ) : null}
 
+        {showSaveButton ? (
         <Button
           className="h-11 min-h-11 w-full"
           onClick={onSave}
@@ -157,7 +179,9 @@ export const TemplatePersistencePanel = ({
         >
           {saving ? '저장 중...' : templateDetailTemplateId ? '현재 템플릿 저장' : '초안 저장'}
         </Button>
+        ) : null}
       </CardContent>
     </Card>
   </div>
-);
+  );
+};

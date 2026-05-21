@@ -4,7 +4,7 @@ export type MemberVerificationStatus = 'invited' | 'verified' | 'revoked';
 export type MemberInviteStatus = 'active' | 'revoked';
 export type MemberDispatchStatus = 'sent' | 'provider_not_configured' | 'failed' | 'not_required';
 
-export type SiteMemberAccessRole = 'owner' | 'manager' | 'editor' | 'viewer';
+export type SiteMemberAccessRole = 'owner' | 'manager' | 'participant' | 'editor' | 'viewer';
 export type DocumentMemberAccessRole = 'editor' | 'viewer' | 'signer';
 
 export type MemberRecordDto = {
@@ -25,6 +25,8 @@ export type MemberDispatchResultDto = {
   providerConfigured: boolean;
   sentAt: string | null;
   accessCodePreview: string | null;
+  providerMessageId: string | null;
+  providerGroupId: string | null;
 };
 
 export type SiteMemberRecordDto = {

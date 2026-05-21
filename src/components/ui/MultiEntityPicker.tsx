@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Check, ChevronDown, X } from 'lucide-react';
+import { Check, ChevronDown, Trash2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { EntityPickerOption } from './EntityPicker';
 
@@ -19,6 +19,8 @@ type MultiEntityPickerProps = {
   panelClassName?: string;
   optionLayout?: 'stacked' | 'inline';
   selectionSummary?: (selectedOptions: EntityPickerOption[]) => string;
+  onDeleteOption?: (option: EntityPickerOption) => void;
+  deleteOptionLabel?: string;
 };
 
 const getDefaultSelectionSummary = (selectedOptions: EntityPickerOption[]) => {
@@ -47,6 +49,8 @@ export function MultiEntityPicker({
   panelClassName,
   optionLayout = 'stacked',
   selectionSummary,
+  onDeleteOption,
+  deleteOptionLabel = '항목 삭제',
 }: MultiEntityPickerProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -113,8 +117,8 @@ export function MultiEntityPicker({
     <div ref={rootRef} className={cn('relative w-full', className)}>
       <div
         className={cn(
-          'group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 transition-colors focus-within:ring-1 focus-within:ring-slate-300',
-          disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-slate-400',
+          'group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:ring-1 focus-within:ring-slate-300',
+          disabled ? 'cursor-not-allowed opacity-60' : '',
           triggerClassName
         )}
       >
@@ -150,7 +154,7 @@ export function MultiEntityPicker({
               onChange([]);
               setQuery('');
             }}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
             aria-label="선택 초기화"
             title="선택 초기화"
           >
@@ -164,13 +168,13 @@ export function MultiEntityPicker({
             setQuery('');
             setOpen((current) => !current);
           }}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
           aria-label="목록 열기"
           title="목록 열기"
         >
           <ChevronDown
             aria-hidden="true"
-            className={cn('h-4 w-4 transition-transform duration-150', open ? 'rotate-180' : 'rotate-0')}
+            className="h-4 w-4"
           />
         </button>
       </div>
@@ -192,25 +196,25 @@ export function MultiEntityPicker({
                   const selected = values.includes(option.id);
 
                   return (
-                    <button
+                    <div
                       key={option.id}
-                      type="button"
                       role="option"
                       aria-selected={selected}
-                      disabled={option.disabled}
-                      onClick={() => toggleValue(option.id)}
                       className={cn(
-                        'flex w-full items-center rounded-xl border text-left transition-colors',
+                        'flex w-full items-center rounded-xl border text-left',
                         option.disabled
                           ? 'cursor-not-allowed border-transparent bg-white opacity-50'
                           : selected
                             ? 'border-slate-200 bg-slate-100'
-                            : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-white'
+                            : 'border-transparent bg-transparent'
                       )}
                     >
-                      <div
+                      <button
+                        type="button"
+                        disabled={option.disabled}
+                        onClick={() => toggleValue(option.id)}
                         className={cn(
-                          'flex min-w-0 flex-1 justify-start px-3 py-2.5 text-left',
+                          'flex min-w-0 flex-1 justify-start px-3 py-2.5 text-left disabled:cursor-not-allowed',
                           inlineOptionLayout ? 'items-center gap-2' : 'flex-col items-start'
                         )}
                       >
@@ -232,11 +236,30 @@ export function MultiEntityPicker({
                             {option.meta}
                           </span>
                         ) : null}
+                      </button>
+                      <div className="mr-1 flex shrink-0 items-center gap-1">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-md">
+                          {selected ? <Check aria-hidden="true" className="h-4 w-4 text-slate-700" /> : null}
+                        </div>
+                        {onDeleteOption ? (
+                          <button
+                            type="button"
+                            aria-label={`${deleteOptionLabel}: ${option.label}`}
+                            title={deleteOptionLabel}
+                            disabled={option.disabled}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDeleteOption(option);
+                              setOpen(false);
+                              setQuery('');
+                            }}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 aria-hidden="true" className="h-4 w-4" />
+                          </button>
+                        ) : null}
                       </div>
-                      <div className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md">
-                        {selected ? <Check aria-hidden="true" className="h-4 w-4 text-slate-700" /> : null}
-                      </div>
-                    </button>
+                    </div>
                   );
                 })
               ) : (

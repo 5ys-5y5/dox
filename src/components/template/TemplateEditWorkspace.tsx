@@ -17837,6 +17837,7 @@ export default function TemplateEditWorkspace({
   onSaveDraftHtml,
   additionalControlPanels,
   topNotice,
+  showWorkspaceMessages = true,
   suppressInitialDraftLoadedMessage = false,
   headerTitle = '템플릿 편집',
   headerDescription = '저장된 템플릿을 불러와 상자 편집 캔버스에서 수정하고 다시 저장합니다.',
@@ -17844,7 +17845,16 @@ export default function TemplateEditWorkspace({
   saveButtonLabel = '저장',
   templateNameReadOnly = false,
   saveDisabled = false,
+  defaultCanvasFullscreen = false,
+  canvasPageContainerWidth = '',
+  canvasPageContainerHeight = '',
+  canvasSpecifiedHeightEnabled = false,
+  canvasSpecifiedHeight = '',
+  canvasSpecifiedWidthEnabled = false,
+  canvasSpecifiedWidth = '',
   documentAttachmentApiPath = '',
+  canvasToolbarVisibility,
+  persistenceVisibility,
   templateUsagePreviewLayoutDebugOptions,
 }: TemplateEditWorkspaceProps) {
   const documentMode = workspaceMode === 'document';
@@ -17898,7 +17908,7 @@ export default function TemplateEditWorkspace({
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
   const [editSettingsPanelVisible, setEditSettingsPanelVisible] = React.useState(true);
-  const [canvasFullscreen, setCanvasFullscreen] = React.useState(false);
+  const [canvasFullscreen, setCanvasFullscreen] = React.useState(defaultCanvasFullscreen);
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
   const [positionRelationTargetFrameGroupId, setPositionRelationTargetFrameGroupId] = React.useState('');
   const [positionOrderLockSelectionMode, setPositionOrderLockSelectionMode] = React.useState(false);
@@ -18094,6 +18104,9 @@ export default function TemplateEditWorkspace({
     [clampPreviewZoomPercent]
   );
   React.useEffect(() => {
+    setCanvasFullscreen(defaultCanvasFullscreen);
+  }, [defaultCanvasFullscreen]);
+  React.useEffect(() => {
     if (typeof document === 'undefined') {
       return undefined;
     }
@@ -18285,12 +18298,17 @@ export default function TemplateEditWorkspace({
       return;
     }
 
+    if (!showWorkspaceMessages) {
+      setMessage(null);
+      return;
+    }
+
     const timeoutId = window.setTimeout(() => {
       setMessage(null);
     }, 5000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [message]);
+  }, [message, showWorkspaceMessages]);
   React.useEffect(() => {
     return () => {
       if (immediateSelectionPanelSyncFrameRef.current !== null) {
@@ -30953,18 +30971,50 @@ export default function TemplateEditWorkspace({
   const canvasActionOverlayLabel = '기능 버튼';
   const canvasActionOverlayWidthClassName =
     selectionPanelTab === 'metadata' ? 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' : 'w-44 max-w-[calc(100%_-_1.5rem)]';
+  const normalizeCanvasSizeValue = (value: string | undefined) => String(value || '').trim().slice(0, 80);
+  const resolvedCanvasPageContainerWidth = normalizeCanvasSizeValue(canvasPageContainerWidth);
+  const resolvedCanvasPageContainerHeight = normalizeCanvasSizeValue(canvasPageContainerHeight);
+  const resolvedCanvasSpecifiedHeight = canvasSpecifiedHeightEnabled
+    ? normalizeCanvasSizeValue(canvasSpecifiedHeight)
+    : '';
+  const resolvedCanvasSpecifiedWidth = canvasSpecifiedWidthEnabled
+    ? normalizeCanvasSizeValue(canvasSpecifiedWidth)
+    : '';
+  const effectiveCanvasPageContainerWidth = resolvedCanvasSpecifiedWidth || resolvedCanvasPageContainerWidth;
+  const hasCanvasPageContainerSize =
+    !canvasFullscreen && Boolean(effectiveCanvasPageContainerWidth || resolvedCanvasPageContainerHeight);
+  const canvasPageContainerStyle = hasCanvasPageContainerSize
+    ? ({
+        width: effectiveCanvasPageContainerWidth || undefined,
+        justifySelf: effectiveCanvasPageContainerWidth ? 'center' : undefined,
+        height: resolvedCanvasPageContainerHeight || undefined,
+        display: resolvedCanvasPageContainerHeight ? 'flex' : undefined,
+        flexDirection: resolvedCanvasPageContainerHeight ? 'column' : undefined,
+      } as React.CSSProperties)
+    : undefined;
+  const canvasCardFillContainerHeight = !canvasFullscreen && Boolean(resolvedCanvasPageContainerHeight);
+  const canvasCardStyle =
+    !canvasFullscreen && hasCanvasPageContainerSize
+      ? ({
+          width: effectiveCanvasPageContainerWidth ? '100%' : undefined,
+          height: canvasCardFillContainerHeight ? '100%' : undefined,
+        } as React.CSSProperties)
+      : undefined;
+  const visibleMessage = showWorkspaceMessages ? message : null;
   const workspaceNoticeNode =
-    topNotice || message ? (
+    topNotice || visibleMessage ? (
       <div
         className="pointer-events-none absolute right-0 top-0 z-[160] flex w-[min(560px,calc(100%-1rem))] flex-col gap-2"
         data-template-workspace-notice="true"
       >
         {topNotice ? <div className="pointer-events-auto">{topNotice}</div> : null}
-        {message ? (
-          <Card className="pointer-events-auto border-slate-200 bg-slate-50 shadow-lg">
-            <CardContent className="p-4 text-sm text-slate-700">
-              <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 flex-1">{message}</p>
+        {visibleMessage ? (
+          <Card className="pointer-events-auto h-14 max-h-14 overflow-hidden border-slate-200 bg-slate-50 shadow-lg">
+            <CardContent className="h-14 p-3 text-sm text-slate-700">
+              <div className="flex h-full min-w-0 items-center justify-between gap-3">
+                <p className="min-w-0 flex-1 truncate leading-5" title={visibleMessage}>
+                  {visibleMessage}
+                </p>
                 <button
                   type="button"
                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
@@ -32233,6 +32283,7 @@ export default function TemplateEditWorkspace({
             loading={loading}
             renderedPreviewHtml={renderedPreviewHtml}
             templateUsagePreviewMode={templateUsagePreviewMode}
+            visibility={persistenceVisibility}
             onSelectTemplate={handleSelectedTemplateChange}
             onDeleteTemplate={(option) => {
               void handleDeleteTemplateOption(option);
@@ -32246,13 +32297,14 @@ export default function TemplateEditWorkspace({
           />
         )}
 
-        <div className="min-w-0 self-start">
+        <div className="min-w-0 self-start" style={canvasPageContainerStyle}>
         <Card
           ref={stylePanelRef}
           className={`template-edit-canvas-card border-slate-200 min-w-0 overflow-hidden ${
             canvasFullscreen ? 'fixed inset-0 z-[140] m-0 flex h-dvh w-screen max-w-none flex-col rounded-none border-0' : ''
-          }`}
+          } ${canvasCardFillContainerHeight ? 'flex flex-col' : ''}`}
           data-canvas-fullscreen={canvasFullscreen ? 'true' : 'false'}
+          style={canvasCardStyle}
         >
           <TemplateEditCanvasToolbar
             documentMode={documentMode}
@@ -32274,6 +32326,7 @@ export default function TemplateEditWorkspace({
             canvasInteractionMode={canvasInteractionMode}
             canUndoCanvasHistory={canUndoCanvasHistory}
             canRedoCanvasHistory={canRedoCanvasHistory}
+            visibility={canvasToolbarVisibility}
             onUpdatePreviewZoom={updatePreviewZoom}
             onToggleCanvasFullscreen={toggleCanvasFullscreen}
             onToggleEditSettingsPanel={toggleEditSettingsPanelVisible}
@@ -32291,6 +32344,8 @@ export default function TemplateEditWorkspace({
               key="template-preview-stage:live"
 	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
               canvasFullscreen={canvasFullscreen}
+              canvasSurfaceHeight={resolvedCanvasSpecifiedHeight}
+              canvasSurfaceFillAvailableHeight={canvasCardFillContainerHeight && !resolvedCanvasSpecifiedHeight}
 	            boxCreationMode={templateUsagePreviewActive ? false : boxCreationMode}
 	            canvasIconScale={canvasIconScale}
               spacePanArmed={spacePanArmed}

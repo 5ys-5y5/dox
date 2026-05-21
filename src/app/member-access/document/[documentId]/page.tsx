@@ -11,18 +11,22 @@ import {
 import { buildDocumentAttachmentValueFilesForSave } from '../../../../components/template/workspace/persistence/documentAttachmentClient';
 import type { TemplateEditWorkspaceSaveDraftParams } from '../../../../components/template/workspace/types';
 import { CanvasOwnedWorkspace } from '../../../canvas/ownerPolicy';
-import { Badge } from '../../../../components/ui/Badge';
+import {
+  mapMemberDocumentAccessRoleToCanvasAccessRole,
+  resolveEffectiveCanvasAccessMode,
+  useStoredCanvasAccessRolePolicies,
+} from '../../../canvas/accessRolePolicy';
 import { Button } from '../../../../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/Card';
+import { MemberAccessVerificationCard } from '../../MemberAccessVerificationCard';
 import {
   extractDocumentCanvasLabelValuesFromHtml as extractDocumentLabelValuesFromHtml,
   mergeDocumentCanvasLabelValues,
   materializeDocumentCanvasHtml as materializeDocumentHtml,
-  stringifyDocumentValue,
 } from '../../../../lib/documentCanvasState';
-import type { DocumentDetailResult } from '../../../../lib/documentDtos';
 import { buildDocumentHtmlContentKey } from '../../../../lib/documentCanvasHtml';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../../../lib/documentAttachmentValues';
+import { formatMemberAccessErrorMessage } from '../../../../lib/memberAccessErrors';
 import type { MemberDocumentAccessDto } from '../../../../lib/memberAccessDtos';
 
 const formatDateTime = (value: string | null | undefined) => {
@@ -50,7 +54,6 @@ const getRoleLabel = (role: MemberDocumentAccessDto['accessRole']) => {
     case 'editor':
       return '편집 가능';
     case 'signer':
-      return '서명 가능';
     case 'viewer':
     default:
       return '열람 가능';
@@ -62,11 +65,17 @@ export default function MemberAccessDocumentPage() {
   const documentId = String(params?.documentId || '').trim();
   const [access, setAccess] = React.useState<MemberDocumentAccessDto | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [needsVerification, setNeedsVerification] = React.useState(false);
+  const [phoneNumber, setPhoneNumber] = React.useState('');
+  const [accessCode, setAccessCode] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
+  const accessRolePolicyState = useStoredCanvasAccessRolePolicies('member-access');
 
   const loadAccess = React.useCallback(async () => {
     if (!documentId) {
       setMessage('문서 ID가 없습니다.');
+      setNeedsVerification(false);
       setLoading(false);
       return;
     }
@@ -80,14 +89,26 @@ export default function MemberAccessDocumentPage() {
       const result = await response.json();
 
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || '문서 접근 정보를 불러오지 못했습니다.');
+        const errorMessage = result?.message || '문서 접근 정보를 불러오지 못했습니다.';
+
+        setAccess(null);
+        if (response.status === 401 || errorMessage.includes('인증')) {
+          setNeedsVerification(true);
+          setMessage(null);
+        } else {
+          setNeedsVerification(false);
+          setMessage(formatMemberAccessErrorMessage(errorMessage, '문서 접근 정보를 불러오지 못했습니다.'));
+        }
+        return;
       }
 
       setAccess(result.data as MemberDocumentAccessDto);
+      setNeedsVerification(false);
       setMessage(null);
     } catch (error) {
       setAccess(null);
-      setMessage(error instanceof Error ? error.message : '문서 접근 정보를 불러오지 못했습니다.');
+      setNeedsVerification(false);
+      setMessage(formatMemberAccessErrorMessage(error, '문서 접근 정보를 불러오지 못했습니다.'));
     } finally {
       setLoading(false);
     }
@@ -96,6 +117,41 @@ export default function MemberAccessDocumentPage() {
   React.useEffect(() => {
     void loadAccess();
   }, [loadAccess]);
+
+  const handleVerify = React.useCallback(async () => {
+    if (!phoneNumber.trim() || !accessCode.trim()) {
+      setMessage('휴대폰 번호와 인증번호를 모두 입력해 주세요.');
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/member-access/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: phoneNumber.trim(),
+          accessCode: accessCode.trim(),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || '구성원 인증에 실패했습니다.');
+      }
+
+      setPhoneNumber('');
+      setAccessCode('');
+      setNeedsVerification(false);
+      await loadAccess();
+    } catch (error) {
+      setMessage(formatMemberAccessErrorMessage(error, '구성원 인증에 실패했습니다.'));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [accessCode, loadAccess, phoneNumber]);
 
   const labelValues = React.useMemo<Record<string, unknown>>(() => {
     if (!access) {
@@ -112,6 +168,12 @@ export default function MemberAccessDocumentPage() {
     () => (access ? groupDocumentValueFilesByValueKey(access.detail.valueFiles) : {}),
     [access]
   );
+  const canvasAccessRole = access ? mapMemberDocumentAccessRoleToCanvasAccessRole(access.accessRole) : 'viewer';
+  const canvasAccessRolePolicy = accessRolePolicyState.policies[canvasAccessRole];
+  const canEditDocument =
+    Boolean(access) &&
+    access.accessRole === 'editor' &&
+    resolveEffectiveCanvasAccessMode(canvasAccessRole, canvasAccessRolePolicy) === 'edit';
 
   const initialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
     if (!access) {
@@ -141,7 +203,7 @@ export default function MemberAccessDocumentPage() {
 
   const handleSaveDraft = React.useCallback(
     async ({ currentHtml, attachmentDrafts }: TemplateEditWorkspaceSaveDraftParams) => {
-      if (!access || access.accessRole !== 'editor') {
+      if (!access || !canEditDocument) {
         throw new Error('이 문서는 편집 권한이 없습니다.');
       }
 
@@ -175,13 +237,13 @@ export default function MemberAccessDocumentPage() {
         successMessage: '문서를 저장했습니다.',
       };
     },
-    [access, labelValues, loadAccess]
+    [access, canEditDocument, labelValues, loadAccess]
   );
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8">
       <div className="flex flex-wrap items-center gap-3">
-        <Link href="/member-access">
+        <Link href="/member-access/document">
           <Button variant="outline" className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             목록으로
@@ -189,10 +251,17 @@ export default function MemberAccessDocumentPage() {
         </Link>
         {access ? (
           <>
-            <Badge variant={access.accessRole === 'editor' ? 'green' : 'outline'}>
+            <span
+              className="inline-flex h-6 items-center rounded-full border px-2 text-xs font-semibold"
+              style={{
+                borderColor: canvasAccessRolePolicy.accentColor,
+                backgroundColor: canvasAccessRolePolicy.backgroundColor,
+                color: canvasAccessRolePolicy.textColor,
+              }}
+            >
               <ShieldCheck className="mr-1 h-3 w-3" />
-              {getRoleLabel(access.accessRole)}
-            </Badge>
+              {canvasAccessRolePolicy.badgeLabel || getRoleLabel(access.accessRole)}
+            </span>
             <div className="text-sm text-slate-600">
               {access.detail.document.title} · 마지막 저장 {formatDateTime(access.detail.latestVersion?.createdAt)}
             </div>
@@ -210,21 +279,36 @@ export default function MemberAccessDocumentPage() {
         <Card className="border-slate-200">
           <CardContent className="p-6 text-sm text-slate-600">문서 접근 정보를 불러오는 중입니다.</CardContent>
         </Card>
+      ) : needsVerification ? (
+        <MemberAccessVerificationCard
+          title="번호 인증"
+          description="문서에 접근하려면 초대받은 휴대폰 번호와 인증번호를 입력해 주세요."
+          phoneNumber={phoneNumber}
+          accessCode={accessCode}
+          submitting={submitting}
+          onPhoneNumberChange={setPhoneNumber}
+          onAccessCodeChange={setAccessCode}
+          onSubmit={handleVerify}
+        />
       ) : access && initialDraft ? (
         <CanvasOwnedWorkspace
           surface="member-access"
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
-          workspaceMode={access.accessRole === 'editor' ? 'document' : 'read'}
+          workspaceMode={canEditDocument ? 'document' : 'read'}
           hidePersistencePanel
           headerTitle="구성원 문서 접근"
           headerDescription="초대된 권한 범위 안에서 현장 문서를 열람하거나 수정합니다."
           nameFieldLabel="문서 이름:"
-          saveButtonLabel={access.accessRole === 'editor' ? '문서 저장' : '열람 전용'}
+          saveButtonLabel={canEditDocument ? '문서 저장' : '열람 전용'}
           templateNameReadOnly
-          saveDisabled={access.accessRole !== 'editor'}
-          documentAttachmentApiPath={`/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`}
-          onSaveDraftHtml={handleSaveDraft}
+          saveDisabled={!canEditDocument}
+          documentAttachmentApiPath={
+            canEditDocument
+              ? `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`
+              : undefined
+          }
+          onSaveDraftHtml={canEditDocument ? handleSaveDraft : undefined}
         />
       ) : (
         <Card className="border-slate-200">

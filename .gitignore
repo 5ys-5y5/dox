@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .next/
+.runtime/
 node_modules/
 .venv-template-extract-v2/
 *.log

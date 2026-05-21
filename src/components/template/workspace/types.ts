@@ -625,6 +625,27 @@ export type TemplateEditWorkspaceSaveDraftResult = {
   successMessage?: string;
 };
 
+export type TemplateEditWorkspaceCanvasToolbarVisibility = {
+  showCanvasTitle?: boolean;
+  showTemplateNameInput?: boolean;
+  showSaveButton?: boolean;
+  showPreviewToggle?: boolean;
+  showInteractionModeControls?: boolean;
+  showHistoryControls?: boolean;
+  showZoomControls?: boolean;
+  showFullscreenControl?: boolean;
+  showEditSettingsToggle?: boolean;
+  showSelectionPanelTabs?: boolean;
+};
+
+export type TemplateEditWorkspacePersistenceVisibility = {
+  showTemplateList?: boolean;
+  showTemplateNameInput?: boolean;
+  showLayoutResizeModeSelect?: boolean;
+  showSourceDocumentNameInput?: boolean;
+  showSaveButton?: boolean;
+};
+
 export type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
   initialDraft?: TemplateEditWorkspaceInitialDraft | null;
@@ -639,6 +660,7 @@ export type TemplateEditWorkspaceProps = {
   ) => Promise<TemplateEditWorkspaceSaveDraftResult | void>;
   additionalControlPanels?: React.ReactNode;
   topNotice?: React.ReactNode;
+  showWorkspaceMessages?: boolean;
   suppressInitialDraftLoadedMessage?: boolean;
   headerTitle?: string;
   headerDescription?: string;
@@ -646,7 +668,16 @@ export type TemplateEditWorkspaceProps = {
   saveButtonLabel?: string;
   templateNameReadOnly?: boolean;
   saveDisabled?: boolean;
+  defaultCanvasFullscreen?: boolean;
+  canvasPageContainerWidth?: string;
+  canvasPageContainerHeight?: string;
+  canvasSpecifiedHeightEnabled?: boolean;
+  canvasSpecifiedHeight?: string;
+  canvasSpecifiedWidthEnabled?: boolean;
+  canvasSpecifiedWidth?: string;
   documentAttachmentApiPath?: string;
+  canvasToolbarVisibility?: TemplateEditWorkspaceCanvasToolbarVisibility;
+  persistenceVisibility?: TemplateEditWorkspacePersistenceVisibility;
   templateUsagePreviewLayoutDebugOptions?: {
     stabilizeInitialLayout?: boolean;
     enableInitialAutoSize?: boolean;
@@ -662,6 +693,8 @@ export type TemplateFloatingOverlayContent = React.ReactNode | (() => React.Reac
 export type TemplateEditPreviewSurfaceProps = {
   renderedPreviewHtml: string;
   canvasFullscreen: boolean;
+  canvasSurfaceHeight?: string;
+  canvasSurfaceFillAvailableHeight?: boolean;
   boxCreationMode: boolean;
   canvasIconScale: CanvasIconScale;
   spacePanArmed: boolean;

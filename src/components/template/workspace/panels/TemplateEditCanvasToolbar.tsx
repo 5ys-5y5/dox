@@ -20,6 +20,7 @@ import * as React from 'react';
 import { Button } from '../../../ui/Button';
 import { CardContent, CardHeader, CardTitle } from '../../../ui/Card';
 import { Input } from '../../../ui/Input';
+import type { TemplateEditWorkspaceCanvasToolbarVisibility } from '../types';
 
 type TemplateEditCanvasToolbarProps = {
   documentMode: boolean;
@@ -41,6 +42,7 @@ type TemplateEditCanvasToolbarProps = {
   canvasInteractionMode: 'select' | 'move';
   canUndoCanvasHistory: boolean;
   canRedoCanvasHistory: boolean;
+  visibility?: TemplateEditWorkspaceCanvasToolbarVisibility;
   onUpdatePreviewZoom: (nextValue: number | ((previous: number) => number)) => void;
   onToggleCanvasFullscreen: () => void;
   onToggleEditSettingsPanel: () => void;
@@ -103,6 +105,7 @@ export const TemplateEditCanvasToolbar = ({
   canvasInteractionMode,
   canUndoCanvasHistory,
   canRedoCanvasHistory,
+  visibility,
   onUpdatePreviewZoom,
   onToggleCanvasFullscreen,
   onToggleEditSettingsPanel,
@@ -113,16 +116,50 @@ export const TemplateEditCanvasToolbar = ({
   onRedoCanvasHistory,
   onTemplateNameChange,
   onSave,
-}: TemplateEditCanvasToolbarProps) => (
+}: TemplateEditCanvasToolbarProps) => {
+  const showCanvasTitle = visibility?.showCanvasTitle !== false;
+  const showTemplateNameInput = visibility?.showTemplateNameInput !== false;
+  const showSaveButton = visibility?.showSaveButton !== false;
+  const showPreviewToggle = visibility?.showPreviewToggle !== false;
+  const showInteractionModeControls = visibility?.showInteractionModeControls !== false;
+  const showHistoryControls = visibility?.showHistoryControls !== false;
+  const showZoomControls = visibility?.showZoomControls !== false;
+  const showFullscreenControl = visibility?.showFullscreenControl !== false;
+  const showEditSettingsToggle = visibility?.showEditSettingsToggle !== false;
+  const showSelectionPanelTabs = visibility?.showSelectionPanelTabs !== false;
+  const renderTemplateNameInput = !documentMode && !readMode && showTemplateNameInput;
+  const renderSaveButton = !readMode && showSaveButton;
+  const renderPreviewToggle = !readMode && showPreviewToggle;
+  const renderInteractionModeControls = !documentMode && !readMode && showInteractionModeControls;
+  const renderEditSettingsToggle = !documentMode && !readMode && showEditSettingsToggle;
+  const renderSelectionPanelTabs = !documentMode && !readMode && showSelectionPanelTabs;
+  const renderHistoryControls = !readMode && showHistoryControls;
+  const renderZoomControls = showZoomControls;
+  const renderFullscreenControl = showFullscreenControl;
+  const showHeaderActions = renderTemplateNameInput || renderSaveButton;
+  const showHeader = showCanvasTitle || showHeaderActions;
+  const showToolbarBody =
+    renderPreviewToggle ||
+    renderInteractionModeControls ||
+    renderHistoryControls ||
+    renderZoomControls ||
+    renderFullscreenControl ||
+    renderEditSettingsToggle ||
+    renderSelectionPanelTabs;
+
+  return (
   <>
+    {showHeader ? (
     <CardHeader className={`space-y-4 pb-3 ${canvasFullscreen ? 'shrink-0' : ''}`}>
       <div className="flex items-center gap-3">
+        {showCanvasTitle ? (
         <div className="min-w-0 shrink-0">
           <CardTitle>상자 편집 캔버스</CardTitle>
         </div>
+        ) : null}
         {readMode ? null : (
           <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
-            {documentMode ? null : (
+            {renderTemplateNameInput ? (
               <div className="relative min-w-0 max-w-[420px] flex-1">
                 <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
                   <span className="sm:hidden">이름:</span>
@@ -137,24 +174,28 @@ export const TemplateEditCanvasToolbar = ({
                   className="h-9 pl-12 sm:pl-[7.75rem]"
                 />
               </div>
-            )}
-            <Button
-              onClick={onSave}
-              disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentMode)}
-              aria-label={saving ? '저장 중...' : saveButtonLabel}
-              className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-4"
-            >
-              <Save className="h-4 w-4 shrink-0 sm:mr-1" />
-              <span className="hidden sm:inline">{saving ? '저장 중...' : saveButtonLabel}</span>
-              <span className="sr-only sm:hidden">{saving ? '저장 중...' : saveButtonLabel}</span>
-            </Button>
+            ) : null}
+            {renderSaveButton ? (
+              <Button
+                onClick={onSave}
+                disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentMode)}
+                aria-label={saving ? '저장 중...' : saveButtonLabel}
+                className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-4"
+              >
+                <Save className="h-4 w-4 shrink-0 sm:mr-1" />
+                <span className="hidden sm:inline">{saving ? '저장 중...' : saveButtonLabel}</span>
+                <span className="sr-only sm:hidden">{saving ? '저장 중...' : saveButtonLabel}</span>
+              </Button>
+            ) : null}
           </div>
         )}
       </div>
     </CardHeader>
-    {readMode ? null : (
+    ) : null}
+    {showToolbarBody ? (
       <CardContent className={`border-b border-slate-200 bg-white px-6 pb-6 pt-0 ${canvasFullscreen ? 'shrink-0' : ''}`}>
       <div className="v106-canvas-toolbar flex w-full min-w-0 flex-wrap items-stretch gap-2 md:gap-3">
+        {renderPreviewToggle ? (
         <div className={`${canvasToolbarGroupClassName} shrink-0`}>
           <button
             type="button"
@@ -169,7 +210,8 @@ export const TemplateEditCanvasToolbar = ({
             <span className="v106-canvas-toolbar-label">{documentMode ? '미리보기' : templateUsagePreviewMode ? '편집 모드' : '미리보기'}</span>
           </button>
         </div>
-        {documentMode ? null : (
+        ) : null}
+        {renderInteractionModeControls ? (
           <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
             <button
               type="button"
@@ -194,7 +236,8 @@ export const TemplateEditCanvasToolbar = ({
               <span className="v106-canvas-toolbar-label">이동</span>
             </button>
           </div>
-        )}
+        ) : null}
+        {renderHistoryControls ? (
         <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
           <button
             type="button"
@@ -221,6 +264,8 @@ export const TemplateEditCanvasToolbar = ({
             <span className="v106-canvas-toolbar-label">다시 실행</span>
           </button>
         </div>
+        ) : null}
+        {renderZoomControls ? (
         <div className="v106-canvas-toolbar-zoom-group flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 py-0">
           <button
             type="button"
@@ -258,6 +303,8 @@ export const TemplateEditCanvasToolbar = ({
             <Plus className="h-4 w-4" />
           </button>
         </div>
+        ) : null}
+        {renderFullscreenControl ? (
         <div className={`${canvasToolbarGroupClassName} shrink-0`}>
           <button
             type="button"
@@ -271,7 +318,8 @@ export const TemplateEditCanvasToolbar = ({
             <span className="v106-canvas-toolbar-label">{canvasFullscreen ? '전체 화면 종료' : '전체 화면'}</span>
           </button>
         </div>
-        {documentMode ? null : (
+        ) : null}
+        {renderEditSettingsToggle ? (
           <div className={`${canvasToolbarGroupClassName} shrink-0`}>
             <button
               type="button"
@@ -289,8 +337,8 @@ export const TemplateEditCanvasToolbar = ({
               <span className="v106-canvas-toolbar-label">편집 설정</span>
             </button>
           </div>
-        )}
-        {documentMode ? null : (
+        ) : null}
+        {renderSelectionPanelTabs ? (
           <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="상자 편집 탭">
             {([
               { key: 'position', label: '크기 및 위치', icon: Move },
@@ -315,9 +363,10 @@ export const TemplateEditCanvasToolbar = ({
               );
             })}
           </div>
-        )}
+        ) : null}
       </div>
       </CardContent>
-    )}
+    ) : null}
   </>
-);
+  );
+};
