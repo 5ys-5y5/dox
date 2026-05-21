@@ -157,6 +157,9 @@ import type {
   StyleFieldApplyState,
   StyleFieldKey,
   TableCellLayoutPosition,
+  TemplateChecklistRegistrationTarget,
+  TemplateChecklistSignatureState,
+  TemplateChecklistSignatureSubmitParams,
   TemplateEditWorkspaceInitialDraft,
   TemplateEditWorkspaceAttachmentDraft,
   TemplateEditWorkspaceProps,
@@ -9756,6 +9759,8 @@ const TEMPLATE_USAGE_PREVIEW_FILE_SEED_FILES_ATTR = 'data-template-usage-preview
 const TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROTOTYPE_ATTR = 'data-template-usage-preview-signature-prototype';
 const TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR = 'data-template-usage-preview-read-only';
 const TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR = 'data-template-usage-preview-field-key';
+const TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR = 'data-template-checklist-highlight';
+const TEMPLATE_CHECKLIST_SELECTABLE_ATTR = 'data-template-checklist-selectable';
 
 type TemplateUsagePreviewAttachmentPendingFile = {
   localId: string;
@@ -12961,6 +12966,33 @@ const clearTemplateUsagePreviewAttachmentStateStore = (root: HTMLElement) => {
   templateUsagePreviewAttachmentStateByRoot.delete(root);
 };
 
+const buildTemplateUsagePreviewSignatureRegistrationTarget = (
+  control: HTMLElement
+): TemplateChecklistRegistrationTarget => {
+  const frameNode = resolveFrameSelectionAnchor(control.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
+  const contextKey = control.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR)?.trim() || '';
+  const fieldKey =
+    control.getAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR)?.trim() ||
+    (frameNode ? readFrameValueKey(frameNode) : '');
+  const frameGroupId = frameNode ? getFrameGroupId(frameNode).trim() : '';
+  const label =
+    control.getAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR)?.trim() ||
+    (frameNode ? readFrameBoxLabel(frameNode) : '') ||
+    fieldKey ||
+    '서명';
+  const slotKey = contextKey.startsWith('parent:') ? contextKey.slice('parent:'.length) : fieldKey || frameGroupId || label;
+
+  return {
+    id: `signature:${contextKey || fieldKey || frameGroupId || label}`,
+    kind: 'signature',
+    label,
+    valueKey: fieldKey || undefined,
+    slotKey: slotKey || undefined,
+    frameGroupId: frameGroupId || undefined,
+    contextKey: contextKey || undefined,
+  };
+};
+
 const getTemplateUsagePreviewAttachmentState = (root: HTMLElement, contextKey: string) => {
   return getTemplateUsagePreviewAttachmentStateStore(root).get(contextKey.trim()) || null;
 };
@@ -14013,6 +14045,7 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     preventRuntimeAutoSizeShrink?: boolean;
     measurePeerClusterHeightTargets?: boolean;
     measurePeerClusterWidthTargets?: boolean;
+    onSignatureImageRequest?: (target: TemplateChecklistRegistrationTarget) => void;
   }
 ) => {
   type SignatureDrawState = {
@@ -14253,28 +14286,13 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       return;
     }
 
-    const context = prepareSignatureContext(canvas);
-    if (!context) {
+    if (!isChecklistSignatureImageControl(control)) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
-    canvas.setPointerCapture?.(event.pointerId);
-    const point = readCanvasPoint(canvas, event);
-    const contextKey = readRuntimeContextKey(control);
-    context.beginPath();
-    context.arc(point.x, point.y, 1.2, 0, Math.PI * 2);
-    context.fillStyle = '#0f172a';
-    context.fill();
-    activeSignatureDrawStateByPointerId.set(event.pointerId, {
-      canvas,
-      pointerId: event.pointerId,
-      lastX: point.x,
-      lastY: point.y,
-      contextKey,
-      frameNode: resolveFrameSelectionAnchor(canvas.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)),
-    });
+    options?.onSignatureImageRequest?.(buildTemplateUsagePreviewSignatureRegistrationTarget(control));
   };
   const handleSignaturePointerMove = (event: PointerEvent) => {
     const drawState = activeSignatureDrawStateByPointerId.get(event.pointerId);
@@ -14613,6 +14631,307 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     root.removeEventListener('drop', handleRuntimeDrop, true);
     activeSignatureDrawStateByPointerId.clear();
   };
+};
+
+const normalizeChecklistTargetToken = (value: string | null | undefined) =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildChecklistTargetContextCandidates = (target: TemplateChecklistRegistrationTarget | null | undefined) => {
+  if (!target) {
+    return [];
+  }
+
+  const rawKeys = [
+    target.contextKey,
+    target.slotKey,
+    target.valueKey,
+    target.frameGroupId,
+  ]
+    .map(normalizeChecklistTargetToken)
+    .filter(Boolean);
+  const candidates = new Set<string>();
+
+  rawKeys.forEach((key) => {
+    candidates.add(key);
+
+    if (!key.includes(':')) {
+      candidates.add(`parent:${key}`);
+      candidates.add(`value:${key}`);
+      candidates.add(`frame:${key}`);
+    }
+  });
+
+  return Array.from(candidates);
+};
+
+const getChecklistTargetControlType = (target: TemplateChecklistRegistrationTarget) =>
+  target.kind === 'signature' ? 'signature' : target.kind === 'photo' || target.kind === 'file' ? 'attachment' : '';
+
+const isChecklistSignatureImageControl = (control: HTMLElement) => {
+  const runtimeMode = normalizeChecklistTargetToken(control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR));
+  return !runtimeMode || runtimeMode === 'signature_image';
+};
+
+const isChecklistSignatureImageFrameNode = (node: HTMLElement) => {
+  const boxKind = readFrameBoxKind(node);
+  const runtimeMode = resolveTemplateUsagePreviewRuntimeMode(node) || (boxKind === 'signature' ? 'signature_image' : '');
+  return boxKind === 'signature' && runtimeMode === 'signature_image';
+};
+
+const collectChecklistTargetControls = (root: HTMLElement, target: TemplateChecklistRegistrationTarget | null | undefined) => {
+  if (!target) {
+    return [] as HTMLElement[];
+  }
+
+  const controlType = getChecklistTargetControlType(target);
+
+  if (!controlType) {
+    return [] as HTMLElement[];
+  }
+
+  const contextCandidates = new Set(buildChecklistTargetContextCandidates(target));
+  const fieldCandidates = new Set(
+    [target.valueKey, target.slotKey, target.frameGroupId, target.activationValueKey]
+      .map(normalizeChecklistTargetToken)
+      .filter(Boolean)
+  );
+
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="${controlType}"]`)
+  ).filter((control) => {
+    const contextKey = normalizeChecklistTargetToken(control.getAttribute(TEMPLATE_USAGE_PREVIEW_CONTEXT_KEY_ATTR));
+    const fieldKey = normalizeChecklistTargetToken(control.getAttribute(TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR));
+    const label = normalizeChecklistTargetToken(control.getAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR));
+
+    if (target.kind === 'signature' && !isChecklistSignatureImageControl(control)) {
+      return false;
+    }
+
+    return (
+      (contextKey && contextCandidates.has(contextKey)) ||
+      (fieldKey && fieldCandidates.has(fieldKey)) ||
+      (label && fieldCandidates.has(label))
+    );
+  });
+};
+
+const collectChecklistTargetFrameNodes = (root: HTMLElement, target: TemplateChecklistRegistrationTarget | null | undefined) => {
+  if (!target) {
+    return [] as HTMLElement[];
+  }
+
+  const explicitFrameCandidates = new Set(
+    [target.frameGroupId, target.valueKey, target.slotKey, target.activationValueKey, ...(target.highlightFrameGroupIds || [])]
+      .map(normalizeChecklistTargetToken)
+      .filter(Boolean)
+  );
+  const fallbackFrameCandidates = new Set(
+    [target.valueKey, target.slotKey, target.activationValueKey].map(normalizeChecklistTargetToken).filter(Boolean)
+  );
+  const controlFrameNodes = collectChecklistTargetControls(root, target)
+    .map((control) => resolveFrameSelectionAnchor(control.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)))
+    .filter((node): node is HTMLElement => Boolean(node));
+  const resolveCandidateNode = (node: HTMLElement) =>
+    resolveFrameSelectionAnchor(node.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR)) ||
+    node.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR) ||
+    node;
+  const readCandidateFrameGroupIds = (node: HTMLElement) => {
+    const closestRawFrame = node.matches(RAW_FRAME_NODE_SELECTOR)
+      ? node
+      : node.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR);
+    const anchorNode = resolveFrameSelectionAnchor(closestRawFrame);
+
+    return [
+      anchorNode ? getFrameGroupId(anchorNode) : '',
+      closestRawFrame?.getAttribute('data-template-frame-group') || '',
+      node.getAttribute('data-template-frame-group') || '',
+    ]
+      .map(normalizeChecklistTargetToken)
+      .filter(Boolean);
+  };
+  const matchesCandidate = (node: HTMLElement) => {
+    const frameGroupIds = readCandidateFrameGroupIds(node);
+    const frameRole = normalizeChecklistTargetToken(node.getAttribute('data-template-frame-role'));
+    const valueKey = normalizeChecklistTargetToken(readFrameValueKey(node));
+    const directValueKey = normalizeChecklistTargetToken(node.getAttribute('data-template-frame-value-key'));
+    const label = normalizeChecklistTargetToken(readFrameBoxLabel(node));
+
+    if (frameGroupIds.some((frameGroupId) => explicitFrameCandidates.has(frameGroupId))) {
+      return true;
+    }
+
+    if (directValueKey && fallbackFrameCandidates.has(directValueKey) && frameRole === 'value') {
+      return true;
+    }
+
+    if (explicitFrameCandidates.size > 0) {
+      return false;
+    }
+
+    if (target.kind === 'signature' && !isChecklistSignatureImageFrameNode(resolveCandidateNode(node))) {
+      return false;
+    }
+
+    return (
+      (valueKey && fallbackFrameCandidates.has(valueKey)) ||
+      (directValueKey && fallbackFrameCandidates.has(directValueKey)) ||
+      (label && fallbackFrameCandidates.has(label))
+    );
+  };
+  const directFrameNodes = Array.from(root.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR))
+    .filter((node) => matchesCandidate(node))
+    .map(resolveCandidateNode);
+  const attributeFrameNodes = Array.from(
+    root.querySelectorAll<HTMLElement>('[data-template-frame-group], [data-template-frame-value-key], [data-template-frame-input="true"]')
+  )
+    .filter((node) => !node.matches(RAW_FRAME_NODE_SELECTOR) && matchesCandidate(node))
+    .map(resolveCandidateNode);
+
+  return Array.from(new Set([...controlFrameNodes, ...directFrameNodes, ...attributeFrameNodes]));
+};
+
+const collectChecklistTargetVisualNodes = (
+  root: HTMLElement,
+  target: TemplateChecklistRegistrationTarget | null | undefined
+) => {
+  const frameNodes = collectChecklistTargetFrameNodes(root, target);
+
+  return frameNodes.length > 0 ? frameNodes : collectChecklistTargetControls(root, target);
+};
+
+const collectChecklistTargetCanvasSelectionIds = (
+  root: HTMLElement,
+  target: TemplateChecklistRegistrationTarget | null | undefined
+) => {
+  if (!target) {
+    return [] as string[];
+  }
+
+  const frameNodeById = collectFrameSelectionAnchorByIdMap(root);
+  const frameNodes = Array.from(frameNodeById.values());
+  const valueIdsByKeyId = new Map<string, string[]>();
+  const keyIdsByValueId = new Map<string, string>();
+  const addSelectionCandidate = (candidateIds: Set<string>, rawValue: string | null | undefined) => {
+    const normalizedValue = normalizeChecklistTargetToken(rawValue);
+
+    if (normalizedValue && frameNodeById.has(normalizedValue)) {
+      candidateIds.add(normalizedValue);
+    }
+  };
+
+  frameNodes.forEach((node) => {
+    const frameGroupId = getFrameGroupId(node).trim();
+    const role = readFrameRole(node);
+    const parentGroupId = readFrameParentGroupId(node).trim();
+
+    if (!frameGroupId || role !== 'value' || !parentGroupId) {
+      return;
+    }
+
+    const current = valueIdsByKeyId.get(parentGroupId) || [];
+    current.push(frameGroupId);
+    valueIdsByKeyId.set(parentGroupId, current);
+    keyIdsByValueId.set(frameGroupId, parentGroupId);
+  });
+
+  const explicitFrameCandidates = [
+    ...(target.highlightFrameGroupIds || []),
+    target.frameGroupId,
+    target.valueKey,
+    target.slotKey,
+    target.activationValueKey,
+  ].map(normalizeChecklistTargetToken);
+  const selectionCandidateIds = new Set<string>();
+
+  explicitFrameCandidates.forEach((candidate) => addSelectionCandidate(selectionCandidateIds, candidate));
+  collectChecklistTargetFrameNodes(root, target).forEach((node) => {
+    const anchorNode = resolveFrameSelectionAnchor(node) || node;
+    addSelectionCandidate(selectionCandidateIds, getFrameGroupId(anchorNode));
+  });
+
+  if (selectionCandidateIds.size === 0) {
+    const fallbackFrameCandidates = new Set(
+      [target.valueKey, target.slotKey, target.activationValueKey].map(normalizeChecklistTargetToken).filter(Boolean)
+    );
+
+    frameNodes.forEach((node) => {
+      const frameGroupId = getFrameGroupId(node).trim();
+      const valueKey = normalizeChecklistTargetToken(readFrameValueKey(node));
+      const label = normalizeChecklistTargetToken(readFrameBoxLabel(node));
+
+      if (!frameGroupId) {
+        return;
+      }
+
+      if ((valueKey && fallbackFrameCandidates.has(valueKey)) || (label && fallbackFrameCandidates.has(label))) {
+        selectionCandidateIds.add(frameGroupId);
+      }
+    });
+  }
+
+  const candidateIds = Array.from(selectionCandidateIds).filter((frameGroupId) => frameNodeById.has(frameGroupId));
+  const readRoleByFrameGroupId = (frameGroupId: string) => {
+    const node = frameNodeById.get(frameGroupId);
+    return node ? readFrameRole(node) : '';
+  };
+  const orderedExplicitKeyId =
+    explicitFrameCandidates.find((frameGroupId) => readRoleByFrameGroupId(frameGroupId) === 'key') || '';
+  const directKeyId = candidateIds.find((frameGroupId) => readRoleByFrameGroupId(frameGroupId) === 'key') || '';
+  const parentKeyId =
+    candidateIds
+      .map((frameGroupId) => keyIdsByValueId.get(frameGroupId) || '')
+      .find((frameGroupId) => Boolean(frameGroupId) && frameNodeById.has(frameGroupId)) || '';
+  const linkedKeyId =
+    explicitFrameCandidates.find((frameGroupId) => valueIdsByKeyId.has(frameGroupId)) ||
+    candidateIds.find((frameGroupId) => valueIdsByKeyId.has(frameGroupId)) ||
+    '';
+  const selectedKeyId = orderedExplicitKeyId || directKeyId || parentKeyId || linkedKeyId;
+
+  if (!selectedKeyId) {
+    return candidateIds;
+  }
+
+  const selectedIds = [selectedKeyId, ...(valueIdsByKeyId.get(selectedKeyId) || [])];
+  candidateIds.forEach((frameGroupId) => {
+    if (keyIdsByValueId.get(frameGroupId) === selectedKeyId) {
+      selectedIds.push(frameGroupId);
+    }
+  });
+
+  return Array.from(new Set(selectedIds.filter((frameGroupId) => frameNodeById.has(frameGroupId))));
+};
+
+const applyChecklistSignatureStateToRoot = (
+  root: HTMLElement,
+  state: TemplateChecklistSignatureState,
+  fallbackTarget?: TemplateChecklistRegistrationTarget | null
+) => {
+  const target: TemplateChecklistRegistrationTarget = fallbackTarget || {
+    id: state.slotKey,
+    kind: 'signature',
+    label: state.slotKey,
+    slotKey: state.slotKey,
+  };
+  const controls = collectChecklistTargetControls(root, target);
+
+  if (controls.length === 0 || !state.imageData.trim()) {
+    return;
+  }
+
+  const signedAt = state.signedAt || new Date().toISOString();
+
+  controls.forEach((control) => {
+    ensureTemplateUsagePreviewSignatureState(control);
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_STATUS_ATTR, 'signed');
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNER_NAME_ATTR, state.signerName || fallbackTarget?.signerName || '');
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_SIGNED_AT_ATTR, signedAt);
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_PROVIDER_ATTR, state.provider || DEFAULT_TEMPLATE_USAGE_SIGNATURE_PROVIDER);
+    control.setAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR, state.imageData);
+    writeTemplateUsagePreviewSignatureHistory(control, [{ at: signedAt, message: '서명 완료' }]);
+    renderTemplateUsagePreviewSignatureControl(control);
+  });
 };
 
 const readComputedVerticalBorderPx = (computedStyle: CSSStyleDeclaration) =>
@@ -17845,6 +18164,12 @@ export default function TemplateEditWorkspace({
   saveButtonLabel = '저장',
   templateNameReadOnly = false,
   saveDisabled = false,
+  checklistRegistrationTarget = null,
+  checklistSelectableTargets = [],
+  checklistSignatureStates = [],
+  onChecklistTargetActivate,
+  onChecklistSelectableTargetSelect,
+  onChecklistSignatureSubmit,
   defaultCanvasFullscreen = false,
   canvasPageContainerWidth = '',
   canvasPageContainerHeight = '',
@@ -17999,9 +18324,23 @@ export default function TemplateEditWorkspace({
   const [positionSelectionClickChainSnapshot, setPositionSelectionClickChainSnapshot] =
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
+  const checklistRegistrationTargetRef = React.useRef<TemplateChecklistRegistrationTarget | null>(null);
+  const [signatureOverlayTarget, setSignatureOverlayTarget] =
+    React.useState<TemplateChecklistRegistrationTarget | null>(null);
+  const [signatureOverlaySubmitting, setSignatureOverlaySubmitting] = React.useState(false);
+  const signatureOverlayCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const signatureOverlayDrawStateRef = React.useRef<{
+    pointerId: number;
+    lastX: number;
+    lastY: number;
+  } | null>(null);
   const [previewSurfaceNodeVersion, setPreviewSurfaceNodeVersion] = React.useState(0);
   const documentPreviewSourceKeyRef = React.useRef('');
   const documentAttachmentStateSourceKeyRef = React.useRef('');
+
+  React.useEffect(() => {
+    checklistRegistrationTargetRef.current = checklistRegistrationTarget;
+  }, [checklistRegistrationTarget]);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const bumpPositionStructureRevision = React.useCallback(() => {
     setPositionStructureRevision((previous) => previous + 1);
@@ -18368,6 +18707,8 @@ export default function TemplateEditWorkspace({
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
   const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode;
+  const checklistCanvasSelectionModeActive =
+    templateUsagePreviewActive && checklistSelectableTargets.length > 0 && Boolean(onChecklistSelectableTargetSelect);
   const surfaceRenderedPreviewHtml = templateUsagePreviewActive
     ? templateUsagePreviewHtml || renderedPreviewHtml
     : renderedPreviewHtml;
@@ -19391,6 +19732,22 @@ export default function TemplateEditWorkspace({
       preventRuntimeAutoSizeShrink: usagePreviewPreventRuntimeAutoSizeShrink,
       measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
       measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
+      onSignatureImageRequest: (target) => {
+        const activeTarget = checklistRegistrationTargetRef.current;
+
+        if (activeTarget?.kind === 'signature') {
+          const activeContextCandidates = new Set(buildChecklistTargetContextCandidates(activeTarget));
+          const clickedContextCandidates = buildChecklistTargetContextCandidates(target);
+
+          if (clickedContextCandidates.some((candidate) => activeContextCandidates.has(candidate))) {
+            setSignatureOverlayTarget(activeTarget);
+          }
+
+          return;
+        }
+
+        setSignatureOverlayTarget(target);
+      },
       onAutoSizeLayoutChange: (root, layoutOptions) => {
         templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root, layoutOptions);
       },
@@ -19405,6 +19762,360 @@ export default function TemplateEditWorkspace({
     usagePreviewMeasurePeerClusterWidthTargets,
     usagePreviewPreventRuntimeAutoSizeShrink,
   ]);
+
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
+    if (!templateUsagePreviewActive || !root) {
+      return undefined;
+    }
+
+    const clearHighlight = () => {
+      root.querySelectorAll<HTMLElement>(`[${TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR}="true"]`).forEach((node) => {
+        node.removeAttribute(TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR);
+      });
+    };
+    clearHighlight();
+
+    if (!checklistRegistrationTarget || checklistCanvasSelectionModeActive) {
+      return clearHighlight;
+    }
+
+    const targetNodes = collectChecklistTargetVisualNodes(root, checklistRegistrationTarget);
+    const uniqueTargetNodes = Array.from(new Set(targetNodes));
+
+    uniqueTargetNodes.forEach((node) => {
+      node.setAttribute(TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR, 'true');
+    });
+
+    return clearHighlight;
+  }, [checklistCanvasSelectionModeActive, checklistRegistrationTarget, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+
+  React.useEffect(() => {
+    const root = previewRef.current;
+
+    if (!templateUsagePreviewActive || !root || checklistSelectableTargets.length === 0 || !onChecklistSelectableTargetSelect) {
+      return undefined;
+    }
+
+    const clearSelectable = () => {
+      root.querySelectorAll<HTMLElement>(`[${TEMPLATE_CHECKLIST_SELECTABLE_ATTR}="true"]`).forEach((node) => {
+        node.removeAttribute(TEMPLATE_CHECKLIST_SELECTABLE_ATTR);
+      });
+    };
+    const selectableTargets = checklistSelectableTargets
+      .map((target) => ({
+        target,
+        nodes: Array.from(new Set(collectChecklistTargetVisualNodes(root, target))),
+      }))
+      .filter((item) => item.nodes.length > 0);
+
+    clearSelectable();
+    selectableTargets.forEach((item) => {
+      item.nodes.forEach((node) => {
+        node.setAttribute(TEMPLATE_CHECKLIST_SELECTABLE_ATTR, 'true');
+      });
+    });
+
+    const findMatchedSelectableTarget = (eventTarget: HTMLElement) => {
+      const candidates = selectableTargets.flatMap((item) =>
+        item.nodes
+          .filter((node) => node === eventTarget || node.contains(eventTarget))
+          .map((node) => ({ item, node }))
+      );
+
+      candidates.sort((left, right) => {
+        const leftExactScore = left.node === eventTarget ? 0 : 1;
+        const rightExactScore = right.node === eventTarget ? 0 : 1;
+
+        if (leftExactScore !== rightExactScore) {
+          return leftExactScore - rightExactScore;
+        }
+
+        const leftRect = left.node.getBoundingClientRect();
+        const rightRect = right.node.getBoundingClientRect();
+
+        return leftRect.width * leftRect.height - rightRect.width * rightRect.height;
+      });
+
+      return candidates[0]?.item || null;
+    };
+
+    const stopSelectablePointerDefault = (event: PointerEvent | MouseEvent) => {
+      const eventTarget = event.target instanceof HTMLElement ? event.target : null;
+
+      if (!eventTarget) {
+        return;
+      }
+
+      const matchedTarget = findMatchedSelectableTarget(eventTarget);
+
+      if (!matchedTarget) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    const handleSelectableTargetClick = (event: MouseEvent) => {
+      const eventTarget = event.target instanceof HTMLElement ? event.target : null;
+
+      if (!eventTarget) {
+        return;
+      }
+
+      const matchedTarget = findMatchedSelectableTarget(eventTarget);
+
+      if (!matchedTarget) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      onChecklistSelectableTargetSelect(matchedTarget.target);
+    };
+
+    root.addEventListener('pointerdown', stopSelectablePointerDefault, true);
+    root.addEventListener('mousedown', stopSelectablePointerDefault, true);
+    root.addEventListener('click', handleSelectableTargetClick, true);
+
+    return () => {
+      root.removeEventListener('pointerdown', stopSelectablePointerDefault, true);
+      root.removeEventListener('mousedown', stopSelectablePointerDefault, true);
+      root.removeEventListener('click', handleSelectableTargetClick, true);
+      clearSelectable();
+    };
+  }, [checklistSelectableTargets, onChecklistSelectableTargetSelect, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+
+  React.useEffect(() => {
+    const root = previewRef.current;
+
+    if (!templateUsagePreviewActive || !root) {
+      return undefined;
+    }
+
+    const handleChecklistTargetClick = (event: MouseEvent) => {
+      const target = checklistRegistrationTargetRef.current;
+      const eventTarget = event.target instanceof HTMLElement ? event.target : null;
+
+      if (!target || !eventTarget) {
+        return;
+      }
+
+      const controls = collectChecklistTargetControls(root, target);
+      const frameNodes = collectChecklistTargetFrameNodes(root, target);
+      const clickedTarget = [...controls, ...frameNodes].some((node) => node === eventTarget || node.contains(eventTarget));
+
+      if (!clickedTarget) {
+        return;
+      }
+
+      if (target.kind === 'value') {
+        onChecklistTargetActivate?.(target);
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (target.kind === 'signature') {
+        setSignatureOverlayTarget(target);
+        return;
+      }
+
+      onChecklistTargetActivate?.(target);
+    };
+
+    root.addEventListener('click', handleChecklistTargetClick, true);
+
+    return () => {
+      root.removeEventListener('click', handleChecklistTargetClick, true);
+    };
+  }, [onChecklistTargetActivate, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
+    if (!templateUsagePreviewActive || !root) {
+      return;
+    }
+
+    checklistSignatureStates.forEach((state) => {
+      applyChecklistSignatureStateToRoot(root, state);
+    });
+  }, [checklistSignatureStates, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+
+  React.useEffect(() => {
+    if (!signatureOverlayTarget || !signatureOverlayCanvasRef.current) {
+      return;
+    }
+
+    const canvas = signatureOverlayCanvasRef.current;
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      return;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }, [signatureOverlayTarget]);
+
+  const readSignatureOverlayPoint = React.useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / Math.max(1, rect.width);
+    const scaleY = canvas.height / Math.max(1, rect.height);
+
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+  }, []);
+
+  const prepareSignatureOverlayContext = React.useCallback((canvas: HTMLCanvasElement) => {
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      return null;
+    }
+
+    context.strokeStyle = '#0f172a';
+    context.fillStyle = '#0f172a';
+    context.lineWidth = 4;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+
+    return context;
+  }, []);
+
+  const handleSignatureOverlayPointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (signatureOverlaySubmitting) {
+        return;
+      }
+
+      const canvas = event.currentTarget;
+      const context = prepareSignatureOverlayContext(canvas);
+
+      if (!context) {
+        return;
+      }
+
+      event.preventDefault();
+      canvas.setPointerCapture?.(event.pointerId);
+      const point = readSignatureOverlayPoint(event);
+      context.beginPath();
+      context.arc(point.x, point.y, 1.8, 0, Math.PI * 2);
+      context.fill();
+      signatureOverlayDrawStateRef.current = {
+        pointerId: event.pointerId,
+        lastX: point.x,
+        lastY: point.y,
+      };
+    },
+    [prepareSignatureOverlayContext, readSignatureOverlayPoint, signatureOverlaySubmitting]
+  );
+
+  const handleSignatureOverlayPointerMove = React.useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      const drawState = signatureOverlayDrawStateRef.current;
+
+      if (!drawState || drawState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const context = prepareSignatureOverlayContext(event.currentTarget);
+
+      if (!context) {
+        return;
+      }
+
+      event.preventDefault();
+      const point = readSignatureOverlayPoint(event);
+      context.beginPath();
+      context.moveTo(drawState.lastX, drawState.lastY);
+      context.lineTo(point.x, point.y);
+      context.stroke();
+      signatureOverlayDrawStateRef.current = {
+        ...drawState,
+        lastX: point.x,
+        lastY: point.y,
+      };
+    },
+    [prepareSignatureOverlayContext, readSignatureOverlayPoint]
+  );
+
+  const handleSignatureOverlayPointerEnd = React.useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const drawState = signatureOverlayDrawStateRef.current;
+
+    if (!drawState || drawState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    signatureOverlayDrawStateRef.current = null;
+  }, []);
+
+  const handleClearSignatureOverlay = React.useCallback(() => {
+    const canvas = signatureOverlayCanvasRef.current;
+    const context = canvas?.getContext('2d') || null;
+
+    if (!canvas || !context) {
+      return;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }, []);
+
+  const handleSubmitSignatureOverlay = React.useCallback(async () => {
+    const target = signatureOverlayTarget;
+    const canvas = signatureOverlayCanvasRef.current;
+
+    if (!target || !canvas || signatureOverlaySubmitting) {
+      return;
+    }
+
+    const imageData = canvas.toDataURL('image/png');
+    const root = previewRef.current;
+
+    setSignatureOverlaySubmitting(true);
+
+    try {
+      if (target.requestId) {
+        await onChecklistSignatureSubmit?.({ target, imageData } satisfies TemplateChecklistSignatureSubmitParams);
+      }
+
+      if (root) {
+        applyChecklistSignatureStateToRoot(
+          root,
+          {
+            slotKey: target.slotKey || target.valueKey || target.contextKey || target.id,
+            imageData,
+            signerName: target.signerName || null,
+            signedAt: new Date().toISOString(),
+            provider: DEFAULT_TEMPLATE_USAGE_SIGNATURE_PROVIDER,
+          },
+          target
+        );
+      }
+
+      setSignatureOverlayTarget(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '서명 등록에 실패했습니다.');
+    } finally {
+      setSignatureOverlaySubmitting(false);
+    }
+  }, [onChecklistSignatureSubmit, signatureOverlaySubmitting, signatureOverlayTarget]);
 
   React.useLayoutEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current) {
@@ -23726,6 +24437,51 @@ export default function TemplateEditWorkspace({
       visibleMetadataReviewIssues,
     ]
   );
+
+  React.useLayoutEffect(() => {
+    const root = previewRef.current;
+
+    if (!checklistCanvasSelectionModeActive || !root) {
+      return;
+    }
+
+    const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+    const nextSelectedFrameGroupIds = collectChecklistTargetCanvasSelectionIds(root, checklistRegistrationTarget);
+
+    syncPreviewSurfaceSelectionPanelTabAttr(root, 'metadata');
+    root.setAttribute('data-metadata-visual-mode', 'true');
+    syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
+    applyPreviewEditPermissions(root, 'metadata', textCanvasEditModeActiveRef.current);
+    clearPositionOnlyEditorUi(root);
+    applyFrameCanvasVisualHints(root);
+    applyFastFrameSelectionUi(root, nextSelectedFrameGroupIds, [], collectFrameSelectionAnchorByIdMap(root));
+    applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
+    applyPositionImpactGroupSelectionUi(root, 'metadata', nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
+    applyDefinedPositionRelativeRelationUi(root, 'metadata', highlightedDefinedPositionRelativeRelations);
+    applyPositionSpacingGuideUi(root, 'metadata', positionSpacingGuideRelations);
+    applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+    selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
+    edgeSelectionStateRef.current = emptyEdgeSelection;
+    setSelectedFrameGroupIds((current) =>
+      stringArraysEqual(current, nextSelectedFrameGroupIds) ? current : nextSelectedFrameGroupIds
+    );
+    setEdgeSelectionState(emptyEdgeSelection);
+    syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
+
+    if (selectionPanelTab !== 'metadata') {
+      setSelectionPanelTab('metadata');
+    }
+  }, [
+    checklistCanvasSelectionModeActive,
+    checklistRegistrationTarget,
+    highlightedDefinedPositionRelativeRelations,
+    positionRelationAnchorFrameGroupId,
+    positionSpacingGuideRelations,
+    selectionPanelTab,
+    surfaceRenderedPreviewHtml,
+    syncEdgeRoleDiagnosticsState,
+    visibleMetadataReviewIssues,
+  ]);
 
   const applyRuntimeSelectionVisuals = React.useCallback(
     (nextSelectedFrameGroupIds: string[], nextEdgeSelectionState: TemplateEdgeSelectionStateDto) => {
@@ -31106,6 +31862,15 @@ export default function TemplateEditWorkspace({
         .template-edit-preview::-webkit-scrollbar-track {
           background: rgba(226, 232, 240, 0.7);
         }
+        .template-edit-preview [${TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR}="true"] {
+          z-index: 2147483000 !important;
+          outline: 3px solid rgb(37 99 235) !important;
+          outline-offset: 3px !important;
+          box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.16) !important;
+        }
+        .template-edit-preview [${TEMPLATE_CHECKLIST_SELECTABLE_ATTR}="true"] {
+          cursor: pointer !important;
+        }
         [data-template-floating-overlay-id="style"],
         [data-template-floating-overlay-id="style"] *,
         [data-template-floating-overlay-id="sizeType"],
@@ -31644,7 +32409,7 @@ export default function TemplateEditWorkspace({
 	          border-radius: 0;
 	          background: transparent;
 	          touch-action: none;
-	          cursor: crosshair;
+	          cursor: pointer;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control[${TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR}="signature_image"] .v106-template-usage-signature-canvas {
 	          position: absolute;
@@ -31662,11 +32427,7 @@ export default function TemplateEditWorkspace({
 	          cursor: pointer;
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-signature-control[${TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR}="signature_image"] .v106-template-usage-signature-clear {
-	          position: absolute;
-	          right: 6px;
-	          top: 6px;
-	          z-index: 2;
-	          justify-self: auto;
+	          display: none;
 	        }
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-frame-input="true"],
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="muted"] [data-template-edit-scope],
@@ -32350,7 +33111,13 @@ export default function TemplateEditWorkspace({
 	            canvasIconScale={canvasIconScale}
               spacePanArmed={spacePanArmed}
               spacePanDragging={spacePanDragging}
-	            metadataVisualMode={templateUsagePreviewActive ? false : selectionPanelTab === 'metadata'}
+              metadataVisualMode={
+                checklistCanvasSelectionModeActive
+                  ? selectionPanelTab === 'metadata'
+                  : templateUsagePreviewActive
+                    ? false
+                    : selectionPanelTab === 'metadata'
+              }
 	            templateUsagePreviewMode={templateUsagePreviewActive}
 	            selectionPanelTab={selectionPanelTab}
 	            editSettingsPanelVisible={!templateUsagePreviewActive && editSettingsPanelVisible}
@@ -32398,6 +33165,64 @@ export default function TemplateEditWorkspace({
         </Card>
       </div>
     </div>
+    {signatureOverlayTarget ? (
+      <div
+        className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${signatureOverlayTarget.label || '서명'} 등록`}
+      >
+        <div className="flex h-[66vh] w-[66vw] min-w-[320px] max-w-5xl flex-col rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-slate-950">
+                {signatureOverlayTarget.label || '서명'} 등록
+              </div>
+              <div className="mt-1 text-xs text-slate-500">흰색 영역에 서명한 뒤 등록합니다.</div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setSignatureOverlayTarget(null)}
+              disabled={signatureOverlaySubmitting}
+            >
+              취소
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 py-4">
+            <canvas
+              ref={signatureOverlayCanvasRef}
+              width={900}
+              height={420}
+              className="h-full w-full rounded-lg border border-slate-300 bg-white"
+              aria-label="서명 입력"
+              onPointerDown={handleSignatureOverlayPointerDown}
+              onPointerMove={handleSignatureOverlayPointerMove}
+              onPointerUp={handleSignatureOverlayPointerEnd}
+              onPointerCancel={handleSignatureOverlayPointerEnd}
+            />
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={handleClearSignatureOverlay}
+              disabled={signatureOverlaySubmitting}
+            >
+              지우기
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handleSubmitSignatureOverlay()}
+              disabled={signatureOverlaySubmitting}
+            >
+              {signatureOverlaySubmitting ? '등록 중...' : '등록'}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     </div>
   );
 }

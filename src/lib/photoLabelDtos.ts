@@ -112,7 +112,7 @@ export type PhotoListItemDto = {
 };
 
 export type PhotoLabelRequirementInput = {
-  labelKey: string;
+  labelKey?: string | null;
   labelName: string;
   description?: string | null;
   documentTypeKey?: string | null;

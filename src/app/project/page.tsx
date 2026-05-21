@@ -19,8 +19,14 @@ import {
   materializeTemplateCanvasHtmlForPersistence,
   type TemplateEditWorkspaceInitialDraft,
 } from '../../components/template/TemplateEditWorkspace';
+import { DocumentsOwnerWorkspace } from '../documents/_owner';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
-import type { TemplateEditWorkspaceSaveDraftParams } from '../../components/template/workspace/types';
+import type {
+  TemplateChecklistRegistrationTarget,
+  TemplateChecklistSignatureState,
+  TemplateChecklistSignatureSubmitParams,
+  TemplateEditWorkspaceSaveDraftParams,
+} from '../../components/template/workspace/types';
 import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -36,19 +42,27 @@ import {
   materializeDocumentCanvasHtml as materializeDocumentHtml,
   stringifyDocumentValue,
 } from '../../lib/documentCanvasState';
-import type { DocumentCreateResult, DocumentDeleteResult, DocumentDetailResult, DocumentListItem } from '../../lib/documentDtos';
+import type {
+  DocumentCreateResult,
+  DocumentDeleteResult,
+  DocumentDetailResult,
+  DocumentListItem,
+  DocumentValueFileDto,
+  DocumentValueFileInput,
+} from '../../lib/documentDtos';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import { formatMemberAccessErrorMessage as getMemberAccessErrorMessage } from '../../lib/memberAccessErrors';
 import type {
   DocumentMemberAccessRole,
   DocumentMemberRecordDto,
+  MemberAccessSessionDto,
   MemberDispatchResultDto,
   MemberVerificationStatus,
   SiteMemberAccessRole,
   SiteMemberInviteResult,
   SiteMemberRecordDto,
 } from '../../lib/memberAccessDtos';
-import type { PhotoListItemDto } from '../../lib/photoLabelDtos';
+import type { PhotoListItemDto, SitePhotoLabelGapSummaryDto } from '../../lib/photoLabelDtos';
 import type {
   SiteChecklistSummaryDto,
   SiteCreateResult,
@@ -83,20 +97,33 @@ type ProjectListRow = {
   label: string;
   statusLabel: string;
   statusVariant: ProjectListStatusVariant;
+  statusContent?: React.ReactNode;
   summary: string;
   source: React.ReactNode;
+  checklistTypeLabel?: string;
+  targetLabel?: string;
+  assigneeLabel?: string;
+  completedAtLabel?: string;
   contact?: string;
   roleLabel?: string;
   roleContent?: React.ReactNode;
   documentsContent?: React.ReactNode;
   lastVerifiedAt?: string;
+  signatureSlotLabel?: string;
+  signatureSignerName?: string;
+  signatureSignerPhoneNumber?: string;
+  signatureRequestedAt?: string;
+  signatureSignedAt?: string;
+  signatureExpiresAt?: string;
   savedAt?: string;
   templateLabel?: React.ReactNode;
   capturedAt?: string;
   evidenceLabel?: string;
   selected?: boolean;
   onClick?: () => void;
+  expandedContent?: React.ReactNode;
   documentLinkAction?: ProjectListAction;
+  registerAction?: ProjectListAction;
   action?: ProjectListAction;
 };
 type ProjectDashboardSiteSummary = {
@@ -113,14 +140,68 @@ type ProjectDashboardTodoItem = {
   statusVariant: ProjectListStatusVariant;
   summary: string;
 };
-type ManagedSiteMemberAccessRole = 'owner' | 'manager' | 'participant';
-type ManagedDocumentMemberAccessRole = 'editor' | 'viewer';
+type DocumentChecklistTab = 'signature' | 'photo' | 'file' | 'value';
+type DocumentSignatureSlotOption = {
+  slotKey: string;
+  label: string;
+  signatureBoxCount: number;
+};
+type TagComboboxOption = {
+  id: string;
+  label: string;
+  meta?: string;
+  keywords?: string[];
+};
+type ProjectChecklistLinkedPosition = {
+  key: string;
+  label: string;
+  valueKey: string;
+  slotKey: string;
+  frameGroupId: string;
+  contextKey: string;
+  boxKind: 'signature' | 'attachment' | 'text' | 'image';
+};
+type DocumentFileRequirement = {
+  id: string;
+  documentId: string;
+  title: string;
+  fileNameKeyword: string;
+  requiredCount: number;
+  createdAt: string;
+  linkedPosition?: ProjectChecklistLinkedPosition | null;
+};
+type PendingChecklistRegistration =
+  | {
+      kind: 'photo';
+      requirementId: string;
+      tagKey: string;
+      tagName: string;
+      linkedPosition?: ProjectChecklistLinkedPosition | null;
+    }
+  | {
+      kind: 'file';
+      requirementId: string;
+      tagName: string;
+      linkedPosition?: ProjectChecklistLinkedPosition | null;
+    };
+type ManagedSiteMemberAccessRole = 'manager' | 'participant';
+type ManagedDocumentMemberAccessRole = DocumentMemberAccessRole;
 type MemberDocumentAccessDraft = {
   documentIds: string[];
   accessRole: ManagedDocumentMemberAccessRole;
 };
 type ApiErrorDebug = Partial<
-  Record<'versions' | 'artifacts' | 'valueFiles' | 'photoEvidence' | 'templateLink' | 'valueEntries', string>
+  Record<
+    | 'versions'
+    | 'artifacts'
+    | 'valueFiles'
+    | 'photoEvidence'
+    | 'templateLink'
+    | 'valueEntries'
+    | 'signatureEvidence'
+    | 'photoRequirements',
+    string
+  >
 >;
 
 class ApiFetchError extends Error {
@@ -201,8 +282,24 @@ const PHOTO_EVIDENCE_STATUS_LABELS: Record<DocumentDetailResult['photoEvidence']
   missing: '누락',
 };
 
+const SIGNATURE_EVIDENCE_STATUS_LABELS: Record<DocumentDetailResult['signatureEvidence'][number]['status'], string> = {
+  not_requested: '요청 전',
+  pending: '서명 대기',
+  authenticating: '인증 중',
+  completed: '서명 완료',
+  expired: '기한 만료',
+  failed: '실패',
+};
+
+const PHOTO_REQUIREMENT_STATUS_LABELS: Record<DocumentDetailResult['photoRequirements'][number]['status'], string> = {
+  not_required: '해당 없음',
+  covered: '충족',
+  review_needed: '검토 필요',
+  missing: '누락',
+};
+
 const SITE_MEMBER_ROLE_LABELS: Record<SiteMemberAccessRole, string> = {
-  owner: '소유자',
+  owner: '관리자',
   manager: '관리자',
   participant: '참여자',
   editor: '참여자',
@@ -212,7 +309,7 @@ const SITE_MEMBER_ROLE_LABELS: Record<SiteMemberAccessRole, string> = {
 const DOCUMENT_MEMBER_ROLE_LABELS: Record<DocumentMemberAccessRole, string> = {
   editor: '편집',
   viewer: '보기',
-  signer: '보기',
+  signer: '서명',
 };
 
 const DOCUMENT_CONNECTED_INFO_LABELS = {
@@ -226,7 +323,6 @@ const DOCUMENT_CONNECTED_INFO_LABELS = {
 } as const;
 
 const SITE_MEMBER_ROLE_OPTIONS: Array<{ value: ManagedSiteMemberAccessRole; label: string }> = [
-  { value: 'owner', label: '소유자' },
   { value: 'manager', label: '관리자' },
   { value: 'participant', label: '참여자' },
 ];
@@ -234,11 +330,12 @@ const SITE_MEMBER_ROLE_OPTIONS: Array<{ value: ManagedSiteMemberAccessRole; labe
 const DOCUMENT_MEMBER_ROLE_OPTIONS: Array<{ value: ManagedDocumentMemberAccessRole; label: string }> = [
   { value: 'viewer', label: '보기' },
   { value: 'editor', label: '편집' },
+  { value: 'signer', label: '서명' },
 ];
 
 const getManagedSiteMemberRole = (role: SiteMemberAccessRole): ManagedSiteMemberAccessRole => {
   if (role === 'owner' || role === 'manager') {
-    return role;
+    return 'manager';
   }
 
   return 'participant';
@@ -246,11 +343,11 @@ const getManagedSiteMemberRole = (role: SiteMemberAccessRole): ManagedSiteMember
 
 const hasFullDocumentAccessBySiteRole = (role: SiteMemberAccessRole | ManagedSiteMemberAccessRole) => {
   const managedRole = getManagedSiteMemberRole(role);
-  return managedRole === 'owner' || managedRole === 'manager';
+  return managedRole === 'manager';
 };
 
 const getManagedDocumentMemberRole = (role: DocumentMemberAccessRole): ManagedDocumentMemberAccessRole =>
-  role === 'editor' ? 'editor' : 'viewer';
+  role === 'editor' || role === 'signer' ? role : 'viewer';
 
 const formatDate = (value: string | null | undefined) => {
   if (!value) return '-';
@@ -293,6 +390,306 @@ const getPhotoStatusLabel = (status: PhotoListItemDto['photo']['status']) => PHO
 const getPhotoEvidenceStatusLabel = (status: DocumentDetailResult['photoEvidence']['status']) =>
   PHOTO_EVIDENCE_STATUS_LABELS[status] || status;
 
+const getSignatureEvidenceStatusLabel = (status: DocumentDetailResult['signatureEvidence'][number]['status']) =>
+  SIGNATURE_EVIDENCE_STATUS_LABELS[status] || status;
+
+const getSignatureEvidenceStatusVariant = (
+  status: DocumentDetailResult['signatureEvidence'][number]['status']
+): ProjectListStatusVariant => {
+  switch (status) {
+    case 'completed':
+      return 'green';
+    case 'pending':
+    case 'authenticating':
+    case 'not_requested':
+      return 'amber';
+    case 'expired':
+    case 'failed':
+      return 'red';
+    default:
+      return 'outline';
+  }
+};
+
+const getPhotoRequirementStatusLabel = (status: DocumentDetailResult['photoRequirements'][number]['status']) =>
+  PHOTO_REQUIREMENT_STATUS_LABELS[status] || status;
+
+const getPhotoRequirementStatusVariant = (
+  status: DocumentDetailResult['photoRequirements'][number]['status']
+): ProjectListStatusVariant => {
+  switch (status) {
+    case 'covered':
+      return 'green';
+    case 'review_needed':
+      return 'amber';
+    case 'missing':
+      return 'red';
+    case 'not_required':
+      return 'slate';
+    default:
+      return 'outline';
+  }
+};
+
+const countMatches = (value: string, pattern: RegExp) => Array.from(value.matchAll(pattern)).length;
+const SIGNATURE_BOX_SELECTOR = [
+  '[data-template-box-kind="signature"]',
+  '[data-template-frame-box-kind-visual="signature"]',
+  '[data-template-usage-preview-control="signature"]',
+  '[data-template-usage-preview-runtime-mode^="signature_"]',
+].join(', ');
+
+const normalizeSignatureSlotText = (value: string | null | undefined) =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const readSignatureSlotKeyFromElement = (element: Element) =>
+  normalizeSignatureSlotText(
+    element.getAttribute('data-template-frame-parent-group') ||
+      element.getAttribute('data-template-usage-preview-field-key') ||
+      element.getAttribute('data-template-frame-value-key') ||
+      element.getAttribute('data-template-frame-label') ||
+      element.closest('[data-template-frame-parent-group]')?.getAttribute('data-template-frame-parent-group') ||
+      element.closest('[data-template-frame-value-key]')?.getAttribute('data-template-frame-value-key') ||
+      element.closest('[data-template-frame-label]')?.getAttribute('data-template-frame-label')
+  );
+
+const readElementReadableText = (element: Element | null | undefined) =>
+  normalizeSignatureSlotText(
+    element?.getAttribute('data-template-frame-extracted-text') ||
+      element?.getAttribute('data-template-frame-source-text') ||
+      element?.textContent ||
+      ''
+  );
+
+const findFrameGroupElement = (root: ParentNode, frameGroupId: string) => {
+  const normalizedFrameGroupId = normalizeSignatureSlotText(frameGroupId);
+
+  if (!normalizedFrameGroupId) {
+    return null;
+  }
+
+  return (
+    Array.from(root.querySelectorAll<HTMLElement>('[data-template-frame-group]')).find(
+      (element) => normalizeSignatureSlotText(element.getAttribute('data-template-frame-group')) === normalizedFrameGroupId
+    ) || null
+  );
+};
+
+const getDocumentSignatureSlots = (html: string): DocumentSignatureSlotOption[] => {
+  if (!html.trim() || typeof DOMParser === 'undefined') {
+    return [];
+  }
+
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const slotsByKey = new Map<string, { labels: Set<string>; controlKeys: Set<string> }>();
+
+  Array.from(document.querySelectorAll<HTMLElement>(SIGNATURE_BOX_SELECTOR)).forEach((element, index) => {
+    const slotKey = readSignatureSlotKeyFromElement(element);
+
+    if (!slotKey) {
+      return;
+    }
+
+    const frameGroupId = normalizeSignatureSlotText(element.getAttribute('data-template-frame-group'));
+    const frameLabel = normalizeSignatureSlotText(element.getAttribute('data-template-frame-label'));
+    const runtimeMode = normalizeSignatureSlotText(
+      element.getAttribute('data-template-runtime-mode') || element.getAttribute('data-template-usage-preview-runtime-mode')
+    );
+    const controlKey = runtimeMode || frameGroupId || frameLabel || `${slotKey}:signature:${index}`;
+    const keyFrame = findFrameGroupElement(document, slotKey);
+    const keyFrameText = readElementReadableText(keyFrame);
+    const valueKey = normalizeSignatureSlotText(element.getAttribute('data-template-frame-value-key'));
+    const ownLabel = readElementReadableText(element);
+    const slot = slotsByKey.get(slotKey) || { labels: new Set<string>(), controlKeys: new Set<string>() };
+
+    if (keyFrameText) {
+      slot.labels.add(keyFrameText);
+    }
+
+    if (valueKey && valueKey !== slotKey) {
+      slot.labels.add(valueKey);
+    }
+
+    if (ownLabel && ownLabel !== slotKey && ownLabel.length <= 60 && !ownLabel.startsWith('data:image/')) {
+      slot.labels.add(ownLabel);
+    }
+
+    slot.controlKeys.add(controlKey);
+    slotsByKey.set(slotKey, slot);
+  });
+
+  return Array.from(slotsByKey.entries()).map(([slotKey, slot]) => {
+    const label = Array.from(slot.labels).find(Boolean) || slotKey;
+
+    return {
+      slotKey,
+      label,
+      signatureBoxCount: Math.max(slot.controlKeys.size, 1),
+    };
+  });
+};
+
+const readDocumentFrameAttribute = (element: HTMLElement, attributeName: string) =>
+  normalizeSignatureSlotText(
+    element.getAttribute(attributeName) ||
+      element.querySelector<HTMLElement>('[data-template-frame-input="true"]')?.getAttribute(attributeName) ||
+      ''
+  );
+
+const buildDocumentChecklistContextKey = (element: HTMLElement, frameGroupId: string, valueKey: string) => {
+  const parentGroupId = readDocumentFrameAttribute(element, 'data-template-frame-parent-group');
+  const colorGroupId = readDocumentFrameAttribute(element, 'data-template-frame-color-group');
+
+  if (parentGroupId) {
+    return `parent:${parentGroupId}`;
+  }
+
+  if (valueKey) {
+    return `value:${valueKey}`;
+  }
+
+  if (colorGroupId) {
+    return `color:${colorGroupId}`;
+  }
+
+  return frameGroupId ? `frame:${frameGroupId}` : 'frame:unknown';
+};
+
+const getDocumentChecklistLinkedPositions = (html: string): ProjectChecklistLinkedPosition[] => {
+  if (!html.trim() || typeof DOMParser === 'undefined') {
+    return [];
+  }
+
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const positionsByKey = new Map<string, ProjectChecklistLinkedPosition>();
+
+  Array.from(document.querySelectorAll<HTMLElement>('[data-template-frame-group]')).forEach((element, index) => {
+    const frameGroupId = normalizeSignatureSlotText(element.getAttribute('data-template-frame-group'));
+
+    if (!frameGroupId) {
+      return;
+    }
+
+    const explicitValueKey = readDocumentFrameAttribute(element, 'data-template-frame-value-key');
+    const label = readDocumentFrameAttribute(element, 'data-template-frame-label') ||
+      readElementReadableText(element) ||
+      explicitValueKey ||
+      frameGroupId;
+    const boxKind = readDocumentFrameAttribute(element, 'data-template-box-kind');
+    const visualBoxKind = readDocumentFrameAttribute(element, 'data-template-frame-box-kind-visual');
+    const runtimeMode = readDocumentFrameAttribute(element, 'data-template-runtime-mode') ||
+      readDocumentFrameAttribute(element, 'data-template-usage-preview-runtime-mode');
+    const valueKey = explicitValueKey || label || frameGroupId;
+    const contextKey = buildDocumentChecklistContextKey(element, frameGroupId, valueKey);
+    const signatureRuntimeMode = runtimeMode.startsWith('signature_') ? runtimeMode : '';
+    const isSignatureImagePosition =
+      (boxKind === 'signature' || visualBoxKind === 'signature' || Boolean(signatureRuntimeMode)) &&
+      (!signatureRuntimeMode || signatureRuntimeMode === 'signature_image');
+    const normalizedBoxKind =
+      isSignatureImagePosition
+        ? 'signature'
+        : boxKind === 'attachment' || visualBoxKind === 'attachment' || runtimeMode === 'file_slot'
+          ? 'attachment'
+          : visualBoxKind === 'image'
+            ? 'image'
+            : 'text';
+    const slotKey =
+      normalizedBoxKind === 'signature'
+        ? readSignatureSlotKeyFromElement(element) || valueKey || frameGroupId
+        : '';
+    const key = `${normalizedBoxKind}:${contextKey}:${valueKey || frameGroupId}:${index}`;
+
+    positionsByKey.set(key, {
+      key,
+      label,
+      valueKey,
+      slotKey,
+      frameGroupId,
+      contextKey,
+      boxKind: normalizedBoxKind,
+    });
+  });
+
+  return Array.from(positionsByKey.values());
+};
+
+const buildPhotoRequirementLinkKey = (documentId: string, tagNameOrKey: string) =>
+  `${documentId.trim()}::${normalizeTagComboboxText(tagNameOrKey).toLowerCase()}`;
+
+const buildChecklistTargetFromPosition = ({
+  id,
+  kind,
+  label,
+  linkedPosition,
+  requestId,
+  signerName,
+}: {
+  id: string;
+  kind: TemplateChecklistRegistrationTarget['kind'];
+  label: string;
+  linkedPosition: ProjectChecklistLinkedPosition;
+  requestId?: string | null;
+  signerName?: string | null;
+}): TemplateChecklistRegistrationTarget => ({
+  id,
+  kind,
+  label,
+  valueKey: linkedPosition.valueKey || undefined,
+  slotKey: linkedPosition.slotKey || undefined,
+  frameGroupId: linkedPosition.frameGroupId || undefined,
+  contextKey: linkedPosition.contextKey || undefined,
+  requestId: requestId || undefined,
+  signerName: signerName || undefined,
+});
+
+const toDocumentValueFileInput = (
+  file: DocumentValueFileDto | DocumentValueFileInput,
+  fallbackSortOrder: number
+): DocumentValueFileInput => ({
+  valueKey: file.valueKey,
+  storageBucket: file.storageBucket,
+  storagePath: file.storagePath,
+  originalFileName: file.originalFileName,
+  mimeType: file.mimeType || null,
+  fileSizeBytes: file.fileSizeBytes ?? null,
+  sortOrder: file.sortOrder ?? fallbackSortOrder,
+  uploadedBy: file.uploadedBy || null,
+  metadata: file.metadata || {},
+});
+
+const resolveDocumentSignatureEvidenceSlot = (
+  slotKey: string | null | undefined,
+  signatureSlots: DocumentSignatureSlotOption[],
+  signatureSlotByKey: Map<string, DocumentSignatureSlotOption>
+) => {
+  const normalizedSlotKey = normalizeSignatureSlotText(slotKey);
+
+  if (normalizedSlotKey && signatureSlotByKey.has(normalizedSlotKey)) {
+    return signatureSlotByKey.get(normalizedSlotKey) || null;
+  }
+
+  if (signatureSlots.length === 1) {
+    return signatureSlots[0];
+  }
+
+  return null;
+};
+
+const getDocumentSignatureBoxCount = (html: string) => {
+  if (!html.trim()) {
+    return 0;
+  }
+
+  return Math.max(
+    countMatches(html, /data-template-box-kind=(["'])signature\1/g),
+    countMatches(html, /data-template-frame-box-kind-visual=(["'])signature\1/g),
+    countMatches(html, /data-template-usage-preview-runtime-mode=(["'])signature_[^"']*\1/g),
+    countMatches(html, /\bv106-template-usage-signature-control\b/g)
+  );
+};
+
 const isConnectedDocumentInfoKey = (key: string): key is keyof typeof DOCUMENT_CONNECTED_INFO_LABELS =>
   key in DOCUMENT_CONNECTED_INFO_LABELS;
 
@@ -320,6 +717,8 @@ const DOCUMENT_DETAIL_DEBUG_LABELS: Record<keyof ApiErrorDebug, string> = {
   photoEvidence: '사진 증빙 상태',
   templateLink: '문서 양식 연결',
   valueEntries: '기록 값',
+  signatureEvidence: '서명 요청',
+  photoRequirements: '필수 사진',
 };
 
 const formatPhoneNumber = (value: string | null | undefined) => {
@@ -335,6 +734,28 @@ const formatPhoneNumber = (value: string | null | undefined) => {
 
   return value || '-';
 };
+
+const normalizePhoneNumber = (value: string | null | undefined) => String(value || '').replace(/[^0-9]/g, '').trim();
+
+const normalizeRequiredPhotoCount = (value: string | number | null | undefined) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : 1;
+};
+
+const normalizeRequiredFileCount = (value: string | number | null | undefined) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : 1;
+};
+
+const DOCUMENT_FILE_REQUIREMENTS_STORAGE_KEY = 'project.documentFileRequirements.v1';
+const PHOTO_REQUIREMENT_LINKS_STORAGE_KEY = 'project.photoRequirementLinks.v1';
+
+const DOCUMENT_CHECKLIST_TABS: Array<{ value: DocumentChecklistTab; label: string }> = [
+  { value: 'signature', label: '서명 요청' },
+  { value: 'photo', label: '필수 사진' },
+  { value: 'file', label: '필수 파일' },
+  { value: 'value', label: '기록 값' },
+];
 
 const getMemberVerificationStatusLabel = (status: MemberVerificationStatus) => {
   switch (status) {
@@ -373,10 +794,19 @@ const formatMemberDispatchMessage = (dispatch: MemberDispatchResultDto) => {
 const buildProjectSelectionQueryKey = (siteId: string, documentId: string) =>
   `${siteId.trim()}::${documentId.trim()}`;
 
-const buildMemberAccessDocumentLinkUrl = (documentId: string) => {
+const buildMemberAccessDocumentLinkUrl = (documentId: string, phoneNumber?: string | null) => {
   const normalizedDocumentId = documentId.trim();
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  const url = new URL(
+    `/member-access/document/${encodeURIComponent(normalizedDocumentId)}`,
+    window.location.origin
+  );
 
-  return `${window.location.origin}/member-access/document/${encodeURIComponent(normalizedDocumentId)}`;
+  if (normalizedPhoneNumber) {
+    url.searchParams.set('phoneNumber', normalizedPhoneNumber);
+  }
+
+  return url.toString();
 };
 
 const copyTextToClipboard = async (text: string) => {
@@ -439,6 +869,161 @@ function RoleSegmentedButtons<TValue extends string>({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+const normalizeTagComboboxText = (value: string | null | undefined) =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildUniqueTagOptions = (options: TagComboboxOption[]) => {
+  const seen = new Set<string>();
+  const uniqueOptions: TagComboboxOption[] = [];
+
+  options.forEach((option) => {
+    const label = normalizeTagComboboxText(option.label);
+
+    if (!label) {
+      return;
+    }
+
+    const key = label.toLowerCase();
+
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    uniqueOptions.push({
+      ...option,
+      id: option.id || label,
+      label,
+    });
+  });
+
+  return uniqueOptions;
+};
+
+function TagComboboxInput({
+  value,
+  options,
+  onChange,
+  placeholder,
+  emptyMessage,
+  disabled = false,
+}: {
+  value: string;
+  options: TagComboboxOption[];
+  onChange: (value: string) => void;
+  placeholder: string;
+  emptyMessage: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const normalizedValue = normalizeTagComboboxText(value).toLowerCase();
+  const filteredOptions = React.useMemo(() => {
+    if (!normalizedValue) {
+      return options;
+    }
+
+    return options.filter((option) => {
+      const haystack = [option.label, option.meta || '', ...(option.keywords || [])].join(' ').toLowerCase();
+      return haystack.includes(normalizedValue);
+    });
+  }, [normalizedValue, options]);
+
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative w-full">
+      <div
+        className={cn(
+          'flex min-h-10 w-full items-center gap-2 rounded-md border border-input bg-white px-3 py-1 text-sm focus-within:ring-1 focus-within:ring-ring',
+          disabled ? 'cursor-not-allowed opacity-50' : ''
+        )}
+      >
+        <input
+          type="text"
+          value={value}
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setOpen(true);
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          className="h-7 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+        />
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          disabled={disabled}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+          aria-label="기존 태그 목록 열기"
+          title="기존 태그 목록 열기"
+        >
+          <ChevronDown aria-hidden="true" className="h-4 w-4" />
+        </button>
+      </div>
+
+      {open ? (
+        <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 p-2">
+          <div className="space-y-2">
+            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500">
+              기존 태그 {options.length}개
+            </div>
+            <div role="listbox" className="max-h-64 space-y-1 overflow-auto">
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="option"
+                    aria-selected={option.label.toLowerCase() === normalizedValue}
+                    onClick={() => {
+                      onChange(option.label);
+                      setOpen(false);
+                    }}
+                    className="flex w-full flex-col items-start rounded-xl border border-transparent px-3 py-2.5 text-left hover:border-slate-200 hover:bg-white"
+                  >
+                    <span className="min-w-0 truncate text-sm font-medium leading-5 text-slate-900">
+                      {option.label}
+                    </span>
+                    {option.meta ? (
+                      <span className="mt-0.5 truncate text-[11px] leading-4 text-slate-500">{option.meta}</span>
+                    ) : null}
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                  {emptyMessage}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -513,10 +1098,9 @@ const PROJECT_INFO_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   {
     key: 'status',
     label: '상태',
-    width: 76,
-    minWidth: 72,
-    maxWidth: 84,
-    align: 'center',
+    width: 112,
+    minWidth: 96,
+    maxWidth: 132,
   },
   {
     key: 'summary',
@@ -539,10 +1123,10 @@ const PROJECT_DOCUMENT_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   },
   {
     key: 'status',
-    label: '상태',
-    width: 76,
-    minWidth: 72,
-    maxWidth: 84,
+    label: '문서 상태',
+    width: 106,
+    minWidth: 96,
+    maxWidth: 122,
     align: 'center',
   },
   {
@@ -594,6 +1178,64 @@ const PROJECT_PHOTO_LIST_COLUMNS: MejaiScrollTableColumn[] = [
     width: 150,
     minWidth: 128,
     maxWidth: 190,
+    clampLines: 1,
+  },
+];
+
+const PROJECT_SIGNATURE_LIST_COLUMNS: MejaiScrollTableColumn[] = [
+  {
+    key: 'signatureSlot',
+    label: '서명 위치',
+    width: 172,
+    minWidth: 148,
+    maxWidth: 220,
+    clampLines: 2,
+  },
+  {
+    key: 'status',
+    label: '상태',
+    width: 112,
+    minWidth: 104,
+    maxWidth: 132,
+  },
+  {
+    key: 'signatureSigner',
+    label: '서명자',
+    width: 132,
+    minWidth: 116,
+    maxWidth: 164,
+    clampLines: 1,
+  },
+  {
+    key: 'signaturePhone',
+    label: '휴대폰',
+    width: 132,
+    minWidth: 116,
+    maxWidth: 156,
+    clampLines: 1,
+  },
+  {
+    key: 'signatureRequestedAt',
+    label: '요청 시각',
+    width: 150,
+    minWidth: 132,
+    maxWidth: 176,
+    clampLines: 1,
+  },
+  {
+    key: 'signatureSignedAt',
+    label: '서명 시각',
+    width: 150,
+    minWidth: 132,
+    maxWidth: 176,
+    clampLines: 1,
+  },
+  {
+    key: 'signatureExpiresAt',
+    label: '만료 시각',
+    width: 150,
+    minWidth: 132,
+    maxWidth: 176,
     clampLines: 1,
   },
 ];
@@ -668,12 +1310,83 @@ const PROJECT_MEMBER_DOCUMENT_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   },
 ];
 
+const PROJECT_CHECKLIST_LIST_COLUMNS: MejaiScrollTableColumn[] = [
+  {
+    key: 'label',
+    label: '체크 항목',
+    width: 156,
+    minWidth: 132,
+    maxWidth: 210,
+    clampLines: 2,
+  },
+  {
+    key: 'checklistType',
+    label: '유형',
+    width: 92,
+    minWidth: 82,
+    maxWidth: 112,
+    clampLines: 1,
+  },
+  {
+    key: 'target',
+    label: '대상',
+    width: 180,
+    minWidth: 148,
+    maxWidth: 240,
+    clampLines: 2,
+  },
+  {
+    key: 'assignee',
+    label: '담당자',
+    width: 128,
+    minWidth: 112,
+    maxWidth: 156,
+    clampLines: 1,
+  },
+  {
+    key: 'status',
+    label: '상태',
+    width: 108,
+    minWidth: 96,
+    maxWidth: 128,
+  },
+  {
+    key: 'summary',
+    label: '진행 내역',
+    width: 248,
+    minWidth: 212,
+    maxWidth: 320,
+    clampLines: 2,
+  },
+  {
+    key: 'completedAt',
+    label: '최근 처리',
+    width: 148,
+    minWidth: 132,
+    maxWidth: 176,
+    clampLines: 1,
+  },
+];
+
 const PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN: MejaiScrollTableColumn = {
   key: 'documentLinkAction',
   label: '문서 링크',
   width: 72,
   minWidth: 72,
   maxWidth: 72,
+  align: 'center',
+  sticky: 'right',
+  clampLines: 1,
+  headerClassName: 'border-l border-slate-200',
+  cellClassName: 'border-l border-slate-200',
+};
+
+const PROJECT_INFO_LIST_REGISTER_COLUMN: MejaiScrollTableColumn = {
+  key: 'registerAction',
+  label: '등록',
+  width: 56,
+  minWidth: 56,
+  maxWidth: 56,
   align: 'center',
   sticky: 'right',
   clampLines: 1,
@@ -880,38 +1593,49 @@ function ProjectInfoList({
   emptyMessage?: string;
   maxBodyHeightClassName?: string;
   minTableWidth?: number;
-  variant?: 'detail' | 'document' | 'photo' | 'member' | 'memberDocument';
+  variant?: 'detail' | 'document' | 'photo' | 'signature' | 'member' | 'memberDocument' | 'checklist';
 }) {
   const hasDocumentLinkColumn = items.some((item) => Boolean(item.documentLinkAction));
+  const hasRegisterColumn = items.some((item) => Boolean(item.registerAction));
   const hasActionColumn = items.some((item) => Boolean(item.action));
   const baseColumns =
     variant === 'document'
       ? PROJECT_DOCUMENT_LIST_COLUMNS
       : variant === 'photo'
         ? PROJECT_PHOTO_LIST_COLUMNS
-        : variant === 'member'
-          ? PROJECT_MEMBER_LIST_COLUMNS
-          : variant === 'memberDocument'
-            ? PROJECT_MEMBER_DOCUMENT_LIST_COLUMNS
-          : PROJECT_INFO_LIST_COLUMNS;
+        : variant === 'signature'
+          ? PROJECT_SIGNATURE_LIST_COLUMNS
+          : variant === 'member'
+            ? PROJECT_MEMBER_LIST_COLUMNS
+            : variant === 'memberDocument'
+              ? PROJECT_MEMBER_DOCUMENT_LIST_COLUMNS
+              : variant === 'checklist'
+                ? PROJECT_CHECKLIST_LIST_COLUMNS
+              : PROJECT_INFO_LIST_COLUMNS;
   const columns = [
     ...baseColumns,
     ...(hasDocumentLinkColumn ? [PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN] : []),
+    ...(hasRegisterColumn ? [PROJECT_INFO_LIST_REGISTER_COLUMN] : []),
     ...(hasActionColumn ? [PROJECT_INFO_LIST_ACTION_COLUMN] : []),
   ];
   const linkColumnWidth = hasDocumentLinkColumn ? 72 : 0;
+  const registerColumnWidth = hasRegisterColumn ? 56 : 0;
   const actionColumnWidth = hasActionColumn ? 48 : 0;
   const baseMinTableWidth =
     variant === 'document'
       ? 584
       : variant === 'photo'
         ? 556
-        : variant === 'member'
-          ? 580
-          : variant === 'memberDocument'
-            ? 400
-          : 444;
-  const resolvedMinTableWidth = minTableWidth || baseMinTableWidth + linkColumnWidth + actionColumnWidth;
+        : variant === 'signature'
+          ? 860
+          : variant === 'member'
+            ? 580
+            : variant === 'memberDocument'
+              ? 400
+              : variant === 'checklist'
+                ? 900
+              : 492;
+  const resolvedMinTableWidth = minTableWidth || baseMinTableWidth + linkColumnWidth + registerColumnWidth + actionColumnWidth;
   const renderLinkActionButton = (action: ProjectListAction | undefined) =>
     action ? (
       <ProjectListActionButton
@@ -923,15 +1647,31 @@ function ProjectInfoList({
     key: item.key,
     selected: item.selected,
     onClick: item.onClick,
+    expandedContent: item.expandedContent,
     ariaLabel: item.label,
-    title: [item.label, item.contact, item.roleLabel, item.summary].filter(Boolean).join(' / '),
+    title: [
+      item.signatureSlotLabel || item.label,
+      item.statusLabel,
+      item.signatureSignerName,
+      item.signatureRequestedAt,
+      item.signatureSignedAt,
+      item.contact,
+      item.roleLabel,
+      item.summary,
+    ]
+      .filter(Boolean)
+      .join(' / '),
     cells: {
       label: item.label,
-      status: (
+      status: item.statusContent ?? (
         <Badge variant={item.statusVariant} className="px-1.5 py-0 text-[10px] font-semibold leading-5">
           {item.statusLabel}
         </Badge>
       ),
+      checklistType: item.checklistTypeLabel || '-',
+      target: item.targetLabel || item.source,
+      assignee: item.assigneeLabel || '-',
+      completedAt: item.completedAtLabel || '-',
       summary: item.summary,
       savedAt: item.savedAt || item.summary,
       template: item.templateLabel ?? item.source,
@@ -941,7 +1681,19 @@ function ProjectInfoList({
       role: item.roleContent ?? item.roleLabel ?? '-',
       documents: item.documentsContent ?? '-',
       lastVerifiedAt: item.lastVerifiedAt || '-',
+      signatureSlot: item.signatureSlotLabel || item.label,
+      signatureSigner: item.signatureSignerName || '-',
+      signaturePhone: item.signatureSignerPhoneNumber || '-',
+      signatureRequestedAt: item.signatureRequestedAt || '-',
+      signatureSignedAt: item.signatureSignedAt || '-',
+      signatureExpiresAt: item.signatureExpiresAt || '-',
       documentLinkAction: renderLinkActionButton(item.documentLinkAction),
+      registerAction: item.registerAction ? (
+        <ProjectListActionButton
+          action={item.registerAction}
+          className="h-7 w-7 rounded-md text-blue-600 disabled:text-slate-300"
+        />
+      ) : null,
       action: item.action ? (
         <ProjectListActionButton
           action={item.action}
@@ -1009,8 +1761,52 @@ export default function ProjectPage() {
   const [deleteImpact, setDeleteImpact] = React.useState<SiteDeleteImpactDto | null>(null);
   const [selectedDocumentDetailError, setSelectedDocumentDetailError] = React.useState<string | null>(null);
   const [selectedDocumentDetailErrorDebug, setSelectedDocumentDetailErrorDebug] = React.useState<ApiErrorDebug | null>(null);
+  const [expandedDocumentStatusDocumentId, setExpandedDocumentStatusDocumentId] = React.useState('');
+  const [showSignatureRequestForm, setShowSignatureRequestForm] = React.useState(false);
+  const [signatureRequestMemberId, setSignatureRequestMemberId] = React.useState('');
+  const [signatureRequestSignerName, setSignatureRequestSignerName] = React.useState('');
+  const [signatureRequestPhoneNumber, setSignatureRequestPhoneNumber] = React.useState('');
+  const [signatureRequestSlotKey, setSignatureRequestSlotKey] = React.useState('');
+  const [signatureRequestFeedback, setSignatureRequestFeedback] = React.useState<{
+    variant: 'info' | 'error' | 'success';
+    message: string;
+  } | null>(null);
+  const [creatingSignatureRequest, setCreatingSignatureRequest] = React.useState(false);
+  const [deletingSignatureRequestId, setDeletingSignatureRequestId] = React.useState('');
+  const [showPhotoRequirementForm, setShowPhotoRequirementForm] = React.useState(false);
+  const [photoRequirementTagName, setPhotoRequirementTagName] = React.useState('');
+  const [photoRequirementCount, setPhotoRequirementCount] = React.useState('1');
+  const [photoRequirementLinkedPositionKey, setPhotoRequirementLinkedPositionKey] = React.useState('');
+  const [savingPhotoRequirement, setSavingPhotoRequirement] = React.useState(false);
+  const [photoRequirementFeedback, setPhotoRequirementFeedback] = React.useState<{
+    variant: 'info' | 'error' | 'success';
+    message: string;
+  } | null>(null);
+  const [activeDocumentChecklistTab, setActiveDocumentChecklistTab] =
+    React.useState<DocumentChecklistTab>('signature');
+  const [fileRequirementsByDocumentId, setFileRequirementsByDocumentId] = React.useState<
+    Record<string, DocumentFileRequirement[]>
+  >({});
+  const [showFileRequirementForm, setShowFileRequirementForm] = React.useState(false);
+  const [fileRequirementTitle, setFileRequirementTitle] = React.useState('');
+  const [fileRequirementCount, setFileRequirementCount] = React.useState('1');
+  const [fileRequirementLinkedPositionKey, setFileRequirementLinkedPositionKey] = React.useState('');
+  const [fileRequirementFeedback, setFileRequirementFeedback] = React.useState<{
+    variant: 'info' | 'error' | 'success';
+    message: string;
+  } | null>(null);
+  const [photoRequirementLinksByKey, setPhotoRequirementLinksByKey] = React.useState<
+    Record<string, ProjectChecklistLinkedPosition>
+  >({});
+  const [pendingChecklistRegistration, setPendingChecklistRegistration] =
+    React.useState<PendingChecklistRegistration | null>(null);
+  const [checklistRegistrationTarget, setChecklistRegistrationTarget] =
+    React.useState<TemplateChecklistRegistrationTarget | null>(null);
+  const photoRegistrationInputRef = React.useRef<HTMLInputElement | null>(null);
+  const fileRegistrationInputRef = React.useRef<HTMLInputElement | null>(null);
   const [siteMembers, setSiteMembers] = React.useState<SiteMemberRecordDto[]>([]);
   const [siteDocumentMembers, setSiteDocumentMembers] = React.useState<DocumentMemberRecordDto[]>([]);
+  const [memberAccessSession, setMemberAccessSession] = React.useState<MemberAccessSessionDto | null>(null);
   const [loadingSiteMembers, setLoadingSiteMembers] = React.useState(false);
   const [loadingSiteDocumentMembers, setLoadingSiteDocumentMembers] = React.useState(false);
   const [showAddSiteMemberForm, setShowAddSiteMemberForm] = React.useState(false);
@@ -1037,6 +1833,102 @@ export default function ProjectPage() {
     },
     []
   );
+
+  React.useEffect(() => {
+    try {
+      const rawValue = window.localStorage.getItem(DOCUMENT_FILE_REQUIREMENTS_STORAGE_KEY);
+
+      if (!rawValue) {
+        return;
+      }
+
+      const parsedValue = JSON.parse(rawValue);
+
+      if (parsedValue && !Array.isArray(parsedValue) && typeof parsedValue === 'object') {
+        setFileRequirementsByDocumentId(parsedValue as Record<string, DocumentFileRequirement[]>);
+      }
+    } catch {
+      setFileRequirementsByDocumentId({});
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        DOCUMENT_FILE_REQUIREMENTS_STORAGE_KEY,
+        JSON.stringify(fileRequirementsByDocumentId)
+      );
+    } catch {
+      // localStorage is only a client-side requirement cache. The page can continue without it.
+    }
+  }, [fileRequirementsByDocumentId]);
+
+  React.useEffect(() => {
+    try {
+      const rawValue = window.localStorage.getItem(PHOTO_REQUIREMENT_LINKS_STORAGE_KEY);
+
+      if (!rawValue) {
+        return;
+      }
+
+      const parsedValue = JSON.parse(rawValue);
+
+      if (parsedValue && !Array.isArray(parsedValue) && typeof parsedValue === 'object') {
+        setPhotoRequirementLinksByKey(parsedValue as Record<string, ProjectChecklistLinkedPosition>);
+      }
+    } catch {
+      setPhotoRequirementLinksByKey({});
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(PHOTO_REQUIREMENT_LINKS_STORAGE_KEY, JSON.stringify(photoRequirementLinksByKey));
+    } catch {
+      // localStorage is only a client-side document-position cache. The page can continue without it.
+    }
+  }, [photoRequirementLinksByKey]);
+
+  React.useEffect(() => {
+    let active = true;
+
+    void fetchSuccessData<MemberAccessSessionDto | null>('/api/member-access/session')
+      .then((session) => {
+        if (active) {
+          setMemberAccessSession(session);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setMemberAccessSession(null);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    setShowSignatureRequestForm(false);
+    setSignatureRequestMemberId('');
+    setSignatureRequestSignerName('');
+    setSignatureRequestPhoneNumber('');
+    setSignatureRequestSlotKey('');
+    setSignatureRequestFeedback(null);
+    setShowPhotoRequirementForm(false);
+    setPhotoRequirementTagName('');
+    setPhotoRequirementCount('1');
+    setPhotoRequirementLinkedPositionKey('');
+    setPhotoRequirementFeedback(null);
+    setShowFileRequirementForm(false);
+    setFileRequirementTitle('');
+    setFileRequirementCount('1');
+    setFileRequirementLinkedPositionKey('');
+    setFileRequirementFeedback(null);
+    setPendingChecklistRegistration(null);
+    setChecklistRegistrationTarget(null);
+  }, [selectedDocumentId]);
 
   React.useEffect(() => {
     const nextQueryKey = buildProjectSelectionQueryKey(requestedSiteId, requestedDocumentId);
@@ -1172,17 +2064,74 @@ export default function ProjectPage() {
     [selectedDocumentDetail]
   );
 
+  const selectedDocumentMaterializedHtml = React.useMemo(
+    () =>
+      materializeDocumentHtml({
+        linkedRenderHtml:
+          selectedDocumentDetail?.linkedTemplate?.draftHtml || selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
+        latestVersionHtml: selectedDocumentVersionSource?.htmlCanonical,
+        labelValues: selectedDocumentLabelValues,
+      }).trim(),
+    [
+      selectedDocumentDetail?.linkedTemplate?.draftHtml,
+      selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
+      selectedDocumentLabelValues,
+      selectedDocumentVersionSource?.htmlCanonical,
+    ]
+  );
+
+  const selectedDocumentSignatureBoxCount = React.useMemo(
+    () => getDocumentSignatureBoxCount(selectedDocumentMaterializedHtml),
+    [selectedDocumentMaterializedHtml]
+  );
+  const selectedDocumentSignatureSlots = React.useMemo(
+    () => getDocumentSignatureSlots(selectedDocumentMaterializedHtml),
+    [selectedDocumentMaterializedHtml]
+  );
+  const selectedDocumentSignatureSlotByKey = React.useMemo(
+    () => new Map(selectedDocumentSignatureSlots.map((slot) => [slot.slotKey, slot] as const)),
+    [selectedDocumentSignatureSlots]
+  );
+  const selectedDocumentChecklistLinkedPositions = React.useMemo(
+    () => getDocumentChecklistLinkedPositions(selectedDocumentMaterializedHtml),
+    [selectedDocumentMaterializedHtml]
+  );
+  const selectedDocumentAttachmentLinkedPositions = React.useMemo(
+    () => selectedDocumentChecklistLinkedPositions.filter((position) => position.boxKind === 'attachment'),
+    [selectedDocumentChecklistLinkedPositions]
+  );
+  const selectedDocumentChecklistLinkedPositionByKey = React.useMemo(
+    () => new Map(selectedDocumentChecklistLinkedPositions.map((position) => [position.key, position] as const)),
+    [selectedDocumentChecklistLinkedPositions]
+  );
+  const selectedDocumentChecklistSignatureStates = React.useMemo<TemplateChecklistSignatureState[]>(
+    () =>
+      (selectedDocumentDetail?.signatureEvidence || [])
+        .filter((item) => Boolean(item.signatureImagePath?.trim()))
+        .map((item) => {
+          const signatureSlot = resolveDocumentSignatureEvidenceSlot(
+            item.slotKey,
+            selectedDocumentSignatureSlots,
+            selectedDocumentSignatureSlotByKey
+          );
+
+          return {
+            slotKey: signatureSlot?.slotKey || normalizeSignatureSlotText(item.slotKey) || item.label,
+            imageData: item.signatureImagePath || '',
+            signerName: item.signerName,
+            signedAt: item.signedAt,
+            provider: '전자서명',
+          };
+        }),
+    [selectedDocumentDetail?.signatureEvidence, selectedDocumentSignatureSlotByKey, selectedDocumentSignatureSlots]
+  );
+
   const selectedDocumentInitialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
     if (!selectedDocumentId) {
       return null;
     }
 
-    const materializedHtml = materializeDocumentHtml({
-      linkedRenderHtml:
-        selectedDocumentDetail?.linkedTemplate?.draftHtml || selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
-      latestVersionHtml: selectedDocumentVersionSource?.htmlCanonical,
-      labelValues: selectedDocumentLabelValues,
-    });
+    const materializedHtml = selectedDocumentMaterializedHtml;
 
     if (!materializedHtml.trim()) {
       return null;
@@ -1205,13 +2154,11 @@ export default function ProjectPage() {
   }, [
     selectedDocumentAttachmentFilesByValueKey,
     selectedDocumentDetail?.linkedTemplate?.resolvedRevisionId,
-    selectedDocumentDetail?.linkedTemplate?.draftHtml,
-    selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
     selectedDocumentDetail?.templateLink?.lastSyncedAt,
     selectedDocumentDetail?.templateLink?.lastSyncedRevisionId,
     selectedDocumentDetail?.document.title,
     selectedDocumentId,
-    selectedDocumentLabelValues,
+    selectedDocumentMaterializedHtml,
     selectedDocumentListItem?.document.title,
     selectedDocumentVersionSource,
   ]);
@@ -1289,14 +2236,30 @@ export default function ProjectPage() {
     const photoEvidenceIssue = selectedDocumentQueryDebug?.photoEvidence?.trim() || '';
     const templateLinkIssue = selectedDocumentQueryDebug?.templateLink?.trim() || '';
     const valueEntriesIssue = selectedDocumentQueryDebug?.valueEntries?.trim() || '';
-    const effectiveDocumentHtml = materializeDocumentHtml({
-      linkedRenderHtml:
-        selectedDocumentDetail?.linkedTemplate?.draftHtml || selectedDocumentDetail?.linkedTemplate?.renderSnapshotHtml,
-      latestVersionHtml: latestVersion?.htmlCanonical,
-      labelValues: selectedDocumentLabelValues,
-    }).trim();
+    const signatureIssue = selectedDocumentQueryDebug?.signatureEvidence?.trim() || '';
+    const signatureRequestCount = selectedDocumentDetail?.signatureEvidence.length || 0;
+    const signatureCompletedCount =
+      selectedDocumentDetail?.signatureEvidence.filter((item) => item.status === 'completed').length || 0;
+    const signaturePendingCount =
+      selectedDocumentDetail?.signatureEvidence.filter((item) => item.status !== 'completed').length || 0;
+    const blockingDebugKeys = new Set<keyof ApiErrorDebug>([
+      'versions',
+      'artifacts',
+      'valueFiles',
+      'photoEvidence',
+      'templateLink',
+      'valueEntries',
+    ]);
+    const effectiveDocumentHtml = selectedDocumentMaterializedHtml;
+    const signatureBoxSummary =
+      selectedDocumentSignatureSlots.length > 0
+        ? `서명 위치 ${selectedDocumentSignatureSlots.length}곳`
+        : selectedDocumentSignatureBoxCount > 0
+          ? `서명 위치 ${selectedDocumentSignatureBoxCount}곳`
+          : '서명 위치 없음';
     const blockedByFailures = Object.entries(selectedDocumentQueryDebug || {})
       .filter((entry): entry is [keyof ApiErrorDebug, string] => Boolean(entry[1]?.trim()))
+      .filter(([key]) => blockingDebugKeys.has(key))
       .map(([key]) => DOCUMENT_DETAIL_DEBUG_LABELS[key]);
     const blockedSummary =
       blockedByFailures.length > 0
@@ -1405,6 +2368,35 @@ export default function ProjectPage() {
         source: detailAvailable ? '저장된 문서 값' : '최근 저장한 문서 값',
       },
       {
+        key: 'signature-evidence',
+        label: '서명',
+        status: detailAvailable
+          ? selectedDocumentSignatureBoxCount > 0 || signatureRequestCount > 0
+            ? 'loaded'
+            : 'missing'
+          : loadingDocumentDetail
+            ? 'loading'
+            : selectedDocumentDetailError
+              ? 'blocked'
+              : selectedDocumentSignatureBoxCount > 0
+                ? 'loaded'
+                : 'missing',
+        summary: detailAvailable
+          ? selectedDocumentSignatureBoxCount > 0 || signatureRequestCount > 0
+            ? signatureIssue
+              ? `${signatureBoxSummary} · 서명 요청 상태를 불러오지 못했습니다.`
+              : `${signatureBoxSummary} · 요청 ${signatureRequestCount}건 · 완료 ${signatureCompletedCount}건 · 대기 ${signaturePendingCount}건`
+            : '서명 위치 없음'
+          : loadingDocumentDetail
+            ? '서명 상태를 확인하는 중입니다.'
+            : selectedDocumentDetailError
+              ? blockedSummary
+              : selectedDocumentSignatureBoxCount > 0
+                ? `${signatureBoxSummary} · 요청 상태를 확인하려면 문서 상세를 다시 불러와 주세요.`
+                : '서명 위치 없음',
+        source: '서명 위치와 요청 상태',
+      },
+      {
         key: 'attachments',
         label: '첨부 파일',
         status: valueFilesIssue
@@ -1452,7 +2444,7 @@ export default function ProjectPage() {
             : selectedDocumentDetailError
                 ? blockedSummary
                 : '사진 증빙 상태를 확인할 수 없습니다.',
-        source: '사진 증빙 현황',
+        source: '사진 증빙 요구 상태',
       },
       {
         key: 'version-history',
@@ -1519,8 +2511,11 @@ export default function ProjectPage() {
     selectedDocumentLabelEntries.length,
     selectedDocumentListItem,
     selectedDocumentLabelValues,
+    selectedDocumentMaterializedHtml,
     selectedDocumentQueryDebug,
     selectedDocumentRecordedValueSummary,
+    selectedDocumentSignatureBoxCount,
+    selectedDocumentSignatureSlots.length,
     selectedDocumentVersionSource,
     selectedDocumentVersionHistorySummary,
   ]);
@@ -1537,6 +2532,1096 @@ export default function ProjectPage() {
       })),
     [selectedDocumentDetailDiagnostics]
   );
+
+  const selectedSignatureRequestSiteId = selectedDocumentDetail?.document.siteId || selectedSiteId;
+  const canDeleteSignatureRequests = React.useMemo(
+    () =>
+      Boolean(
+        selectedSignatureRequestSiteId &&
+          memberAccessSession?.accessibleSites.some(
+            (site) =>
+              site.siteId === selectedSignatureRequestSiteId &&
+              getManagedSiteMemberRole(site.accessRole) === 'manager'
+          )
+      ),
+    [memberAccessSession?.accessibleSites, selectedSignatureRequestSiteId]
+  );
+
+  const handleDeleteSignatureRequest = React.useCallback(async (
+    requestId: string,
+    signatureSlotLabel: string,
+    signerName: string,
+    signatureStatus: string
+  ) => {
+    const normalizedRequestId = requestId.trim();
+    const normalizedStatus = signatureStatus.trim().toLowerCase();
+    const deletesCompletedSignature = normalizedStatus === 'completed' || normalizedStatus === 'signed';
+    const deleteTargetLabel = deletesCompletedSignature ? '서명' : '서명 요청';
+
+    if (!normalizedRequestId || deletingSignatureRequestId || !canDeleteSignatureRequests) {
+      if (!canDeleteSignatureRequests) {
+        setMessage('서명 요청 삭제 권한이 없습니다. 관리자만 삭제할 수 있습니다.');
+      }
+      return;
+    }
+
+    const confirmed = window.confirm(
+      deletesCompletedSignature
+        ? `"${signatureSlotLabel || '서명'}" 완료 서명을 삭제하시겠습니까?\n서명자: ${signerName || '서명 대상 미지정'}\n\n완료된 서명을 삭제하면 계약서의 서명 표시와 증빙 상태에 치명적인 영향을 줄 수 있습니다. 삭제 후에는 같은 위치에 다시 서명 요청을 만들어야 할 수 있습니다.\n계속하시겠습니까?`
+        : `"${signatureSlotLabel || '서명 요청'}" 요청을 철회하고 목록에서 삭제하시겠습니까?\n서명자: ${signerName || '서명 대상 미지정'}\n삭제 후 같은 위치에 다시 서명 요청을 만들 수 있습니다.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const refreshDocumentId = selectedDocumentDetail?.document.id || selectedDocumentId.trim();
+
+    setDeletingSignatureRequestId(normalizedRequestId);
+    setSignatureRequestFeedback(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'DELETE_REQUEST',
+          requestId: normalizedRequestId,
+          contractImpactAcknowledged: deletesCompletedSignature,
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || '서명 요청 삭제에 실패했습니다.');
+      }
+
+      let refreshFailed = false;
+
+      if (refreshDocumentId) {
+        setLoadingDocumentDetail(true);
+
+        try {
+          const detail = await fetchSuccessDataWithTimeout<DocumentDetailResult>(`/api/documents/${refreshDocumentId}`);
+
+          setSelectedDocumentDetail(detail);
+          setSelectedDocumentDetailError(null);
+          setSelectedDocumentDetailErrorDebug(null);
+        } catch {
+          refreshFailed = true;
+          setSelectedDocumentDetail((current) =>
+            current
+              ? {
+                  ...current,
+                  signatureEvidence: current.signatureEvidence.filter((item) => item.requestId !== normalizedRequestId),
+                }
+              : current
+          );
+        } finally {
+          setLoadingDocumentDetail(false);
+        }
+      }
+
+      setDashboardRefreshKey((current) => current + 1);
+      setMessage(
+        refreshFailed
+          ? `"${signatureSlotLabel || deleteTargetLabel}"을 삭제했습니다. 목록 재조회는 새로고침 후 다시 확인해 주세요.`
+          : `"${signatureSlotLabel || deleteTargetLabel}"을 삭제했습니다.`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '서명 삭제에 실패했습니다.');
+    } finally {
+      setDeletingSignatureRequestId('');
+    }
+  }, [
+    canDeleteSignatureRequests,
+    deletingSignatureRequestId,
+    selectedDocumentDetail?.document.id,
+    selectedDocumentId,
+  ]);
+
+  function getSelectedDocumentIdForChecklist() {
+    return selectedDocumentDetail?.document.id || selectedDocumentListItem?.document.id || selectedDocumentId.trim();
+  }
+
+  function getSelectedLinkedPosition(positionKey: string) {
+    const normalizedKey = positionKey.trim();
+
+    if (!normalizedKey) {
+      return null;
+    }
+
+    return selectedDocumentChecklistLinkedPositionByKey.get(normalizedKey) || null;
+  }
+
+  function resolvePhotoRequirementLinkedPosition(documentId: string, tagName: string, tagKey: string) {
+    return (
+      photoRequirementLinksByKey[buildPhotoRequirementLinkKey(documentId, tagKey)] ||
+      photoRequirementLinksByKey[buildPhotoRequirementLinkKey(documentId, tagName)] ||
+      null
+    );
+  }
+
+  async function persistChecklistDocumentFiles(valueKey: string, files: File[], changeReason: string) {
+    const targetDocumentId = getSelectedDocumentIdForChecklist();
+    const normalizedValueKey = valueKey.trim();
+
+    if (!targetDocumentId) {
+      throw new Error('파일을 등록할 문서를 먼저 선택해 주세요.');
+    }
+
+    if (!selectedDocumentMaterializedHtml.trim()) {
+      throw new Error('파일을 등록할 문서 본문을 먼저 불러와 주세요.');
+    }
+
+    if (!normalizedValueKey) {
+      throw new Error('파일을 등록할 문서 연결 위치를 확인하지 못했습니다.');
+    }
+
+    if (files.length === 0) {
+      throw new Error('등록할 파일을 선택해 주세요.');
+    }
+
+    const formData = new FormData();
+    formData.set('valueKey', normalizedValueKey);
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const uploadResponse = await fetch(`/api/documents/${encodeURIComponent(targetDocumentId)}/attachments`, {
+      method: 'POST',
+      body: formData,
+    });
+    const uploadResult = await uploadResponse.json();
+
+    if (!uploadResponse.ok || !uploadResult?.success) {
+      throw new Error(uploadResult?.message || '첨부파일 업로드에 실패했습니다.');
+    }
+
+    const uploadedFiles = (uploadResult?.data?.uploads || []) as DocumentValueFileInput[];
+    const existingFiles = (selectedDocumentDetail?.valueFiles || []).map((file, index) =>
+      toDocumentValueFileInput(file, index)
+    );
+    const nextSortStart =
+      existingFiles
+        .filter((file) => file.valueKey === normalizedValueKey)
+        .reduce((maxSortOrder, file) => Math.max(maxSortOrder, file.sortOrder || 0), -1) + 1;
+    const normalizedUploads = uploadedFiles.map((file, index) => ({
+      ...toDocumentValueFileInput(file, nextSortStart + index),
+      valueKey: normalizedValueKey,
+      sortOrder: nextSortStart + index,
+      uploadedBy: file.uploadedBy || 'project-page',
+    }));
+    const nextValueFiles = [...existingFiles, ...normalizedUploads];
+    const persistedHtml = materializeTemplateCanvasHtmlForPersistence(selectedDocumentMaterializedHtml, {
+      attachmentFiles: nextValueFiles,
+    });
+    const versionResponse = await fetch(`/api/documents/${encodeURIComponent(targetDocumentId)}/version`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        htmlCanonical: persistedHtml,
+        labelValues: selectedDocumentLabelValues,
+        valueFiles: nextValueFiles,
+        changeReason,
+        createdBy: 'project-page',
+      }),
+    });
+    const versionResult = await versionResponse.json();
+
+    if (!versionResponse.ok || !versionResult?.success) {
+      throw new Error(versionResult?.message || '문서 파일 등록 내용을 저장하지 못했습니다.');
+    }
+
+    if (selectedSiteId) {
+      await syncSiteDocuments(selectedSiteId);
+    }
+
+    await loadSelectedDocumentDetail(targetDocumentId);
+    setDashboardRefreshKey((current) => current + 1);
+  }
+
+  async function refreshSelectedSitePhotos() {
+    const targetSiteId = selectedDocumentDetail?.document.siteId || selectedSiteId.trim();
+
+    if (!targetSiteId) {
+      return;
+    }
+
+    try {
+      const nextPhotos = await fetchSuccessData<PhotoListItemDto[]>(
+        `/api/photos?siteId=${encodeURIComponent(targetSiteId)}`
+      );
+      setPhotos(Array.isArray(nextPhotos) ? nextPhotos : []);
+    } catch {
+      setMessage('사진은 등록했지만 사진 목록은 새로고침 후 다시 확인해 주세요.');
+    }
+  }
+
+  async function uploadPhotoRequirementFiles(
+    registration: Extract<PendingChecklistRegistration, { kind: 'photo' }>,
+    files: File[]
+  ) {
+    const targetSiteId = selectedDocumentDetail?.document.siteId || selectedSiteId.trim();
+
+    if (!targetSiteId) {
+      throw new Error('사진을 등록할 현장을 먼저 선택해 주세요.');
+    }
+
+    if (files.length === 0) {
+      throw new Error('등록할 사진을 선택해 주세요.');
+    }
+
+    const labelKey = registration.tagKey.trim() || registration.tagName.trim();
+
+    for (const file of files) {
+      const formData = new FormData();
+      formData.set('siteId', targetSiteId);
+      formData.set('photoTitle', `${registration.tagName} · ${file.name}`);
+      formData.append('file', file);
+
+      const uploadResponse = await fetch('/api/photos/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const uploadResult = await uploadResponse.json();
+
+      if (!uploadResponse.ok || !uploadResult?.success) {
+        throw new Error(uploadResult?.message || '필수 사진 등록에 실패했습니다.');
+      }
+
+      const photoId = uploadResult?.data?.photo?.id;
+
+      if (photoId && labelKey) {
+        const labelResponse = await fetch('/api/photos/labels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            photoId,
+                manualLabels: [
+                  {
+                    labelKey,
+                    note: '문서 요청 링크 등록',
+                  },
+                ],
+          }),
+        });
+        const labelResult = await labelResponse.json();
+
+        if (!labelResponse.ok || !labelResult?.success) {
+          throw new Error(labelResult?.message || '사진 태그 등록에 실패했습니다.');
+        }
+      }
+    }
+
+    if (registration.linkedPosition?.valueKey) {
+      await persistChecklistDocumentFiles(
+        registration.linkedPosition.valueKey,
+        files,
+        `checklist-photo:${registration.tagName}`
+      );
+    } else {
+      const targetDocumentId = getSelectedDocumentIdForChecklist();
+
+      if (targetDocumentId) {
+        await loadSelectedDocumentDetail(targetDocumentId);
+      }
+    }
+
+    await refreshSelectedSitePhotos();
+    setDashboardRefreshKey((current) => current + 1);
+  }
+
+  async function uploadFileRequirementFiles(
+    registration: Extract<PendingChecklistRegistration, { kind: 'file' }>,
+    files: File[]
+  ) {
+    const valueKey = registration.linkedPosition?.valueKey || registration.tagName;
+
+    await persistChecklistDocumentFiles(valueKey, files, `checklist-file:${registration.tagName}`);
+  }
+
+  async function completePendingChecklistRegistration(files: File[]) {
+    const registration = pendingChecklistRegistration;
+
+    if (!registration) {
+      return;
+    }
+
+    if (registration.kind === 'photo') {
+      await uploadPhotoRequirementFiles(registration, files);
+      setMessage(`"${registration.tagName}" 사진을 등록했습니다.`);
+    } else {
+      await uploadFileRequirementFiles(registration, files);
+      setMessage(`"${registration.tagName}" 파일을 등록했습니다.`);
+    }
+
+    setPendingChecklistRegistration(null);
+    setChecklistRegistrationTarget(null);
+  }
+
+  function handleStartPhotoRequirementRegistration(
+    item: DocumentDetailResult['photoRequirements'][number],
+    linkedPosition: ProjectChecklistLinkedPosition | null
+  ) {
+    const registration: Extract<PendingChecklistRegistration, { kind: 'photo' }> = {
+      kind: 'photo',
+      requirementId: item.requirementId,
+      tagKey: item.tagKey,
+      tagName: item.tagName || item.tagKey,
+      linkedPosition,
+    };
+
+    setPendingChecklistRegistration(registration);
+    setMessage(null);
+
+    if (linkedPosition) {
+      setChecklistRegistrationTarget(
+        buildChecklistTargetFromPosition({
+          id: `photo:${item.requirementId}`,
+          kind: 'photo',
+          label: item.tagName || item.tagKey,
+          linkedPosition,
+        })
+      );
+      setMessage(`"${item.tagName || item.tagKey}" 사진을 등록할 문서 연결 위치를 선택해 주세요.`);
+      return;
+    }
+
+    photoRegistrationInputRef.current?.click();
+  }
+
+  function handleStartFileRequirementRegistration(requirement: DocumentFileRequirement) {
+    const linkedPosition = requirement.linkedPosition || null;
+    const registration: Extract<PendingChecklistRegistration, { kind: 'file' }> = {
+      kind: 'file',
+      requirementId: requirement.id,
+      tagName: requirement.title,
+      linkedPosition,
+    };
+
+    setPendingChecklistRegistration(registration);
+    setMessage(null);
+
+    if (linkedPosition) {
+      setChecklistRegistrationTarget(
+        buildChecklistTargetFromPosition({
+          id: `file:${requirement.id}`,
+          kind: 'file',
+          label: requirement.title,
+          linkedPosition,
+        })
+      );
+      setMessage(`"${requirement.title}" 파일을 등록할 문서 연결 위치를 선택해 주세요.`);
+      return;
+    }
+
+    fileRegistrationInputRef.current?.click();
+  }
+
+  function handleStartValueRequirementRegistration(valueKey: string) {
+    const linkedPosition =
+      selectedDocumentChecklistLinkedPositions.find(
+        (position) => position.valueKey === valueKey || position.frameGroupId === valueKey || position.label === valueKey
+      ) || null;
+
+    if (!linkedPosition) {
+      setMessage('문서에서 이동할 입력 위치를 찾지 못했습니다.');
+      return;
+    }
+
+    setChecklistRegistrationTarget(
+      buildChecklistTargetFromPosition({
+        id: `value:${valueKey}`,
+        kind: 'value',
+        label: getDocumentFieldLabel(valueKey),
+        linkedPosition,
+      })
+    );
+    setMessage(`"${getDocumentFieldLabel(valueKey)}" 입력 위치로 이동했습니다.`);
+  }
+
+  function handleChecklistTargetActivate(target: TemplateChecklistRegistrationTarget) {
+    const registration = pendingChecklistRegistration;
+
+    if (!registration) {
+      return;
+    }
+
+    if (target.kind === 'photo' && registration.kind === 'photo') {
+      photoRegistrationInputRef.current?.click();
+      return;
+    }
+
+    if (target.kind === 'file' && registration.kind === 'file') {
+      fileRegistrationInputRef.current?.click();
+    }
+  }
+
+  async function handleChecklistSignatureSubmit(params: TemplateChecklistSignatureSubmitParams) {
+    const requestId = params.target.requestId?.trim();
+    const targetDocumentId = getSelectedDocumentIdForChecklist();
+
+    if (!requestId) {
+      throw new Error('서명 요청 ID를 확인하지 못했습니다.');
+    }
+
+    if (!targetDocumentId || !selectedDocumentMaterializedHtml.trim()) {
+      throw new Error('서명할 문서 본문을 먼저 불러와 주세요.');
+    }
+
+    const response = await fetch('/api/sign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'EXECUTE',
+        requestId,
+        documentContent: selectedDocumentMaterializedHtml,
+        signatureImagePath: params.imageData,
+        allowDocumentHashMismatch: true,
+      }),
+    });
+    const result = await response.json();
+
+    if (!response.ok || !result?.success) {
+      throw new Error(result?.message || '서명 등록에 실패했습니다.');
+    }
+
+    await loadSelectedDocumentDetail(targetDocumentId);
+    setDashboardRefreshKey((current) => current + 1);
+    setChecklistRegistrationTarget(null);
+    setMessage(`"${params.target.label || '서명'}" 서명을 등록했습니다.`);
+  }
+
+  const selectedDocumentSignatureRows = React.useMemo<ProjectListRow[]>(
+    () => {
+      if (!selectedDocumentDetail) {
+        return [];
+      }
+
+      if (selectedDocumentSignatureBoxCount === 0 && selectedDocumentDetail.signatureEvidence.length === 0) {
+        return [
+          {
+            key: 'signature-box-none',
+            label: '서명',
+            statusLabel: '값 없음',
+            statusVariant: 'slate',
+            summary: '서명 위치 없음',
+            source: '문서 서명',
+            signatureSlotLabel: '서명 위치 없음',
+            signatureSignerName: '-',
+            signatureSignerPhoneNumber: '-',
+            signatureRequestedAt: '-',
+            signatureSignedAt: '-',
+            signatureExpiresAt: '-',
+          },
+        ];
+      }
+
+      return selectedDocumentDetail.signatureEvidence.map((item) => {
+        const signatureSlot = resolveDocumentSignatureEvidenceSlot(
+          item.slotKey,
+          selectedDocumentSignatureSlots,
+          selectedDocumentSignatureSlotByKey
+        );
+        const signatureSlotLabel = signatureSlot?.label || item.label || item.signerRoleName || '서명 요청';
+        const signatureSignerName = item.signerName || '서명 대상 미지정';
+        const normalizedStatus = String(item.status || '').trim().toLowerCase();
+        const signatureSlotKey = signatureSlot?.slotKey || normalizeSignatureSlotText(item.slotKey);
+        const signatureLinkedPosition =
+          selectedDocumentChecklistLinkedPositions.find(
+            (position) =>
+              position.boxKind === 'signature' &&
+              (position.slotKey === signatureSlotKey ||
+                position.valueKey === signatureSlotKey ||
+                position.frameGroupId === signatureSlotKey)
+          ) || null;
+        const canRegisterSignature =
+          normalizedStatus === 'pending' && Boolean(item.requestId) && Boolean(signatureLinkedPosition);
+        const canDeleteSignatureRequest =
+          canDeleteSignatureRequests &&
+          Boolean(item.requestId);
+        const deleteActionLabel =
+          normalizedStatus === 'completed' || normalizedStatus === 'signed' ? '서명 삭제' : '서명 요청 삭제';
+        const activityText = item.signedAt
+          ? `서명 ${formatDateTime(item.signedAt)}`
+          : item.requestedAt
+            ? `요청 ${formatDateTime(item.requestedAt)}`
+            : '요청 전';
+        const expiresText = item.expiresAt && !item.signedAt ? ` · 만료 ${formatDateTime(item.expiresAt)}` : '';
+
+        return {
+          key: `signature:${item.requestId || item.slotKey}`,
+          label: signatureSlotLabel,
+          statusLabel: getSignatureEvidenceStatusLabel(item.status),
+          statusVariant: getSignatureEvidenceStatusVariant(item.status),
+          summary: `${signatureSlotLabel} · ${item.signerName || '서명 대상 미지정'} · ${activityText}${expiresText}`,
+          source: item.required ? '필수 서명' : '서명 요청',
+          signatureSlotLabel,
+          signatureSignerName,
+          signatureSignerPhoneNumber: formatPhoneNumber(item.signerPhoneNumber),
+          signatureRequestedAt: formatDateTime(item.requestedAt),
+          signatureSignedAt: item.signedAt ? formatDateTime(item.signedAt) : '-',
+          signatureExpiresAt: item.expiresAt ? formatDateTime(item.expiresAt) : '-',
+          registerAction: {
+            title: canRegisterSignature ? '서명 등록' : '서명 대기 상태에서만 등록할 수 있습니다.',
+            ariaLabel: `${signatureSlotLabel} ${signatureSignerName} 서명 등록`,
+            icon: <Check className="h-4 w-4" />,
+            disabled: !canRegisterSignature,
+            onClick: () => {
+              if (!signatureLinkedPosition || !item.requestId) {
+                return false;
+              }
+
+              setChecklistRegistrationTarget(
+                buildChecklistTargetFromPosition({
+                  id: `signature:${item.requestId}`,
+                  kind: 'signature',
+                  label: signatureSlotLabel,
+                  linkedPosition: signatureLinkedPosition,
+                  requestId: item.requestId,
+                  signerName: signatureSignerName,
+                })
+              );
+              setMessage(`"${signatureSlotLabel}" 위치를 선택해 ${signatureSignerName} 서명을 등록해 주세요.`);
+            },
+          },
+          action: canDeleteSignatureRequest
+            ? {
+                title: deleteActionLabel,
+                ariaLabel: `${signatureSlotLabel} ${signatureSignerName} ${deleteActionLabel}`,
+                icon: <Trash2 className="h-4 w-4" />,
+                disabled: deletingSignatureRequestId === item.requestId,
+                onClick: () => {
+                  void handleDeleteSignatureRequest(item.requestId || '', signatureSlotLabel, signatureSignerName, item.status);
+                },
+              }
+            : undefined,
+        };
+      });
+    },
+    [
+      canDeleteSignatureRequests,
+      deletingSignatureRequestId,
+      handleDeleteSignatureRequest,
+      selectedDocumentDetail,
+      selectedDocumentChecklistLinkedPositions,
+      selectedDocumentSignatureBoxCount,
+      selectedDocumentSignatureSlotByKey,
+      selectedDocumentSignatureSlots,
+    ]
+  );
+
+  const selectedDocumentPhotoRequirementRows = React.useMemo<ProjectListRow[]>(
+    () => {
+      if (!selectedDocumentDetail) {
+        return [];
+      }
+
+      return selectedDocumentDetail.photoRequirements.map((item) => {
+        const linkedPosition = resolvePhotoRequirementLinkedPosition(
+          selectedDocumentDetail.document.id,
+          item.tagName,
+          item.tagKey
+        );
+        const linkedFiles = linkedPosition?.valueKey
+          ? selectedDocumentDetail.valueFiles.filter((file) => file.valueKey === linkedPosition.valueKey)
+          : [];
+        const uploadedCount = Math.max(item.uploadedCount, linkedFiles.length);
+        const missingCount = Math.max(item.requiredCount - uploadedCount, 0);
+        const effectiveStatus =
+          item.reviewPendingCount > 0
+            ? 'review_needed'
+            : uploadedCount >= item.requiredCount
+              ? 'covered'
+              : 'missing';
+
+        return {
+          key: `photo-requirement:${item.requirementId}`,
+          label: item.tagName || item.tagKey,
+          statusLabel: getPhotoRequirementStatusLabel(effectiveStatus),
+          statusVariant: getPhotoRequirementStatusVariant(effectiveStatus),
+          summary: `필수 ${item.requiredCount}건 · 등록 ${uploadedCount}건 · 검토 ${item.reviewPendingCount}건 · 누락 ${missingCount}건${
+            linkedPosition ? ` · 문서 연결 위치 ${linkedPosition.label}` : ''
+          }`,
+          source: item.sourceScope === 'document_type' ? '문서별 필수 사진' : '현장 필수 사진',
+          registerAction: {
+            title: '필수 사진 등록',
+            ariaLabel: `${item.tagName || item.tagKey} 필수 사진 등록`,
+            icon: <Plus className="h-4 w-4" />,
+            onClick: () => handleStartPhotoRequirementRegistration(item, linkedPosition),
+          },
+        };
+      });
+    },
+    [photoRequirementLinksByKey, selectedDocumentDetail, selectedDocumentChecklistLinkedPositions]
+  );
+
+  const photoRequirementTagOptions = React.useMemo(
+    () =>
+      buildUniqueTagOptions(
+        [
+          ...(selectedDocumentDetail?.photoEvidence.requirements || []).map((item) => ({
+            id: item.labelKey,
+            label: item.labelName,
+            meta: item.documentTypeKey ? '이 문서에서 사용 중' : '현장에서 사용 중',
+            keywords: [item.labelKey, item.documentTypeKey || ''],
+          })),
+          ...(selectedDocumentDetail?.photoRequirements || []).map((item) => ({
+            id: item.tagKey,
+            label: item.tagName,
+            meta: item.sourceScope === 'document_type' ? '이 문서에서 사용 중' : '현장에서 사용 중',
+            keywords: [item.tagKey, item.sourceScope],
+          })),
+        ]
+      ),
+    [selectedDocumentDetail?.photoEvidence.requirements, selectedDocumentDetail?.photoRequirements]
+  );
+
+  const selectedDocumentFileRequirements = React.useMemo(() => {
+    const targetDocumentId = selectedDocumentDetail?.document.id || selectedDocumentId.trim();
+
+    if (!targetDocumentId) {
+      return [];
+    }
+
+    return fileRequirementsByDocumentId[targetDocumentId] || [];
+  }, [fileRequirementsByDocumentId, selectedDocumentDetail?.document.id, selectedDocumentId]);
+
+  const fileRequirementTagOptions = React.useMemo(() => {
+    const storedRequirements = Object.values(fileRequirementsByDocumentId).flat();
+    const selectedFileNames = selectedDocumentDetail?.valueFiles.map((file) => file.originalFileName) || [];
+
+    return buildUniqueTagOptions([
+      ...storedRequirements.map((requirement) => ({
+        id: requirement.id,
+        label: requirement.title,
+        meta: '필수 파일 태그',
+        keywords: [requirement.fileNameKeyword],
+      })),
+      ...selectedFileNames.map((fileName) => ({
+        id: `file:${fileName}`,
+        label: fileName.replace(/\.[^.]+$/, ''),
+        meta: '등록된 파일명',
+        keywords: [fileName],
+      })),
+    ]);
+  }, [fileRequirementsByDocumentId, selectedDocumentDetail?.valueFiles]);
+
+  const selectedDocumentFileRequirementRows = React.useMemo<ProjectListRow[]>(() => {
+    if (!selectedDocumentDetail) {
+      return [];
+    }
+
+    return selectedDocumentFileRequirements.map((requirement) => {
+      const keyword = (requirement.fileNameKeyword || requirement.title).trim();
+      const linkedValueKey = requirement.linkedPosition?.valueKey.trim() || '';
+      const matchedFiles = selectedDocumentDetail.valueFiles.filter((file) => {
+        if (linkedValueKey && file.valueKey === linkedValueKey) {
+          return true;
+        }
+
+        if (!keyword) {
+          return true;
+        }
+
+        return file.valueKey === keyword || file.originalFileName.includes(keyword);
+      });
+      const latestFile = [...matchedFiles].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))[0] || null;
+      const isCovered = matchedFiles.length >= requirement.requiredCount;
+      const fileNames = matchedFiles.map((file) => file.originalFileName).filter(Boolean).join(', ');
+
+      return {
+        key: `file-requirement:${requirement.id}`,
+        label: requirement.title,
+        statusLabel: isCovered ? '충족' : '누락',
+        statusVariant: isCovered ? 'green' : 'red',
+        summary: `필수 ${requirement.requiredCount}개 · 등록 ${matchedFiles.length}개${
+          keyword ? ` · 파일 태그 ${keyword}` : ''
+        }${requirement.linkedPosition ? ` · 문서 연결 위치 ${requirement.linkedPosition.label}` : ''}${
+          fileNames ? ` · ${fileNames}` : ''
+        }`,
+        source: keyword ? `파일 태그 ${keyword}` : '파일 태그 없음',
+        completedAtLabel: latestFile ? formatDateTime(latestFile.uploadedAt) : '-',
+        registerAction: {
+          title: '필수 파일 등록',
+          ariaLabel: `${requirement.title} 필수 파일 등록`,
+          icon: <Plus className="h-4 w-4" />,
+          onClick: () => handleStartFileRequirementRegistration(requirement),
+        },
+        action: {
+          title: '필수 파일 항목 삭제',
+          ariaLabel: `${requirement.title} 필수 파일 항목 삭제`,
+          icon: <Trash2 className="h-4 w-4" />,
+          onClick: () => {
+            setFileRequirementsByDocumentId((current) => ({
+              ...current,
+              [requirement.documentId]: (current[requirement.documentId] || []).filter(
+                (item) => item.id !== requirement.id
+              ),
+            }));
+          },
+        },
+      };
+    });
+  }, [selectedDocumentDetail, selectedDocumentFileRequirements]);
+
+  const selectedDocumentValueRequirementRows = React.useMemo<ProjectListRow[]>(() => {
+    if (!selectedDocumentDetail) {
+      return [];
+    }
+
+    const valueEntryByKey = new Map(selectedDocumentDetail.valueEntries.map((entry) => [entry.valueKey, entry]));
+
+    return selectedDocumentLabelEntries.map(([valueKey, value]) => {
+      const valueEntry = valueEntryByKey.get(valueKey) || null;
+      const displayValue = stringifyDocumentValue(value) || '-';
+
+      return {
+        key: `value-requirement:${valueKey}`,
+        label: getDocumentFieldLabel(valueKey),
+        statusLabel: displayValue !== '-' ? '충족' : '누락',
+        statusVariant: displayValue !== '-' ? 'green' as const : 'red' as const,
+        summary: displayValue !== '-' ? `현재 값: ${displayValue}` : '입력된 값이 없습니다.',
+        source: '문서 입력 상자',
+        completedAtLabel: valueEntry?.updatedAt
+          ? formatDateTime(valueEntry.updatedAt)
+          : selectedDocumentVersionSource?.createdAt
+            ? formatDateTime(selectedDocumentVersionSource.createdAt)
+            : '-',
+        registerAction: {
+          title: '입력 위치로 이동',
+          ariaLabel: `${getDocumentFieldLabel(valueKey)} 입력 위치로 이동`,
+          icon: <Check className="h-4 w-4" />,
+          onClick: () => handleStartValueRequirementRegistration(valueKey),
+        },
+      };
+    });
+  }, [
+    selectedDocumentDetail,
+    selectedDocumentChecklistLinkedPositions,
+    selectedDocumentLabelEntries,
+    selectedDocumentVersionSource?.createdAt,
+  ]);
+
+  const selectedSignatureRequestMember = React.useMemo(
+    () => siteMembers.find((membership) => membership.member.id === signatureRequestMemberId) || null,
+    [signatureRequestMemberId, siteMembers]
+  );
+
+  const openSignatureRequestForm = React.useCallback(() => {
+    const defaultSlotKey =
+      selectedDocumentSignatureSlots[0]?.slotKey ||
+      selectedDocumentDetail?.signatureEvidence[0]?.slotKey ||
+      '서명';
+
+    setSignatureRequestSlotKey((current) => current.trim() || defaultSlotKey);
+    setShowSignatureRequestForm(true);
+    setSignatureRequestFeedback(null);
+    setMessage(null);
+  }, [selectedDocumentDetail?.signatureEvidence, selectedDocumentSignatureSlots]);
+
+  async function handleCreateSignatureRequest() {
+    const targetDocumentId =
+      selectedDocumentDetail?.document.id || selectedDocumentListItem?.document.id || selectedDocumentId.trim();
+    const signerName = signatureRequestSignerName.trim();
+    const phoneNumber = signatureRequestPhoneNumber.trim();
+    const signatureSlotKey = normalizeSignatureSlotText(signatureRequestSlotKey);
+    const documentContent = selectedDocumentMaterializedHtml.trim();
+
+    setSignatureRequestFeedback({ variant: 'info', message: '서명 요청 입력값을 확인하는 중입니다.' });
+    setMessage(null);
+
+    if (!targetDocumentId) {
+      setSignatureRequestFeedback({ variant: 'error', message: '서명 요청을 만들 문서를 먼저 선택해 주세요.' });
+      return;
+    }
+
+    if (!documentContent) {
+      setSignatureRequestFeedback({ variant: 'error', message: '서명 요청을 만들 문서 본문을 먼저 불러와 주세요.' });
+      return;
+    }
+
+    if (!signerName) {
+      setSignatureRequestFeedback({ variant: 'error', message: '서명할 사람의 이름을 입력해 주세요.' });
+      return;
+    }
+
+    if (!phoneNumber) {
+      setSignatureRequestFeedback({ variant: 'error', message: '서명할 사람의 휴대폰을 입력해 주세요.' });
+      return;
+    }
+
+    if (!signatureSlotKey) {
+      setSignatureRequestFeedback({ variant: 'error', message: '서명할 위치를 선택해 주세요.' });
+      return;
+    }
+
+    const selectedSignatureSlot =
+      selectedDocumentSignatureSlots.find((slot) => slot.slotKey === signatureSlotKey) || null;
+
+    if (selectedDocumentSignatureSlots.length > 0 && !selectedSignatureSlot) {
+      setSignatureRequestFeedback({ variant: 'error', message: '문서에 있는 서명 위치 중 하나를 선택해 주세요.' });
+      return;
+    }
+
+    const activeSignatureRequestForSlot =
+      selectedDocumentDetail?.signatureEvidence.find(
+        (item) => {
+          const itemSlot = resolveDocumentSignatureEvidenceSlot(
+            item.slotKey,
+            selectedDocumentSignatureSlots,
+            selectedDocumentSignatureSlotByKey
+          );
+
+          return (
+            (itemSlot?.slotKey || normalizeSignatureSlotText(item.slotKey)) === signatureSlotKey &&
+            item.status !== 'expired' &&
+            item.status !== 'failed'
+          );
+        }
+      ) || null;
+
+    if (activeSignatureRequestForSlot) {
+      const activeSignerLabel =
+        activeSignatureRequestForSlot.signerName ||
+        formatPhoneNumber(activeSignatureRequestForSlot.signerPhoneNumber) ||
+        '등록된 서명자';
+
+      setSignatureRequestFeedback({
+        variant: 'error',
+        message: `"${selectedSignatureSlot?.label || signatureSlotKey}" 서명 위치는 이미 ${activeSignerLabel}에게 배정되어 있습니다.`,
+      });
+      return;
+    }
+
+    const normalizedPhoneDigits = phoneNumber.replace(/[^0-9]/g, '');
+
+    setCreatingSignatureRequest(true);
+    setSignatureRequestFeedback({ variant: 'info', message: '서명 권한을 등록하고 요청을 만드는 중입니다.' });
+
+    try {
+      const memberResponse = await fetch('/api/member-access/document-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: targetDocumentId,
+          phoneNumber,
+          displayName: signerName,
+          accessRole: 'signer',
+        }),
+      });
+      const memberResult = await memberResponse.json();
+
+      if (!memberResponse.ok || !memberResult?.success) {
+        throw new Error(memberResult?.message || '서명 권한 등록에 실패했습니다.');
+      }
+
+      const signResponse = await fetch('/api/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'REQUEST',
+          documentId: targetDocumentId,
+          signatureSlotKey,
+          documentContent,
+          signerInfo: {
+            name: signerName,
+            phoneNumber,
+            email: `${normalizedPhoneDigits || 'signer'}@phone.local`,
+          },
+        }),
+      });
+      const signResult = await signResponse.json();
+
+      if (!signResponse.ok || !signResult?.success) {
+        throw new Error(signResult?.message || '서명 요청 생성에 실패했습니다.');
+      }
+
+      await loadSelectedDocumentDetail(targetDocumentId);
+      await loadSiteDocumentMembers(documents).catch(() => []);
+
+      setShowSignatureRequestForm(false);
+      setSignatureRequestMemberId('');
+      setSignatureRequestSignerName('');
+      setSignatureRequestPhoneNumber('');
+      setSignatureRequestSlotKey('');
+      setSignatureRequestFeedback({
+        variant: 'success',
+        message: `"${signerName}"에게 "${selectedSignatureSlot?.label || signatureSlotKey}" 서명 요청을 만들었습니다.`,
+      });
+      setMessage(`"${signerName}"에게 "${selectedSignatureSlot?.label || signatureSlotKey}" 서명 요청을 만들었습니다.`);
+    } catch (error) {
+      setSignatureRequestFeedback({
+        variant: 'error',
+        message: error instanceof Error ? error.message : '서명 요청 생성에 실패했습니다.',
+      });
+    } finally {
+      setCreatingSignatureRequest(false);
+    }
+  }
+
+  const openPhotoRequirementForm = React.useCallback(() => {
+    setShowPhotoRequirementForm(true);
+    setPhotoRequirementFeedback(null);
+    setMessage(null);
+
+    if (!photoRequirementCount.trim()) {
+      setPhotoRequirementCount('1');
+    }
+  }, [photoRequirementCount]);
+
+  async function handleCreatePhotoRequirement() {
+    const targetSiteId = selectedDocumentDetail?.document.siteId || selectedSiteId.trim();
+    const targetDocumentId = selectedDocumentDetail?.document.id || selectedDocumentId.trim();
+    const targetDocumentTypeKey = selectedDocumentDetail?.document.documentTypeKey || '';
+    const tagName = photoRequirementTagName.trim();
+    const minimumPhotoCount = normalizeRequiredPhotoCount(photoRequirementCount);
+    const linkedPosition = getSelectedLinkedPosition(photoRequirementLinkedPositionKey);
+
+    setPhotoRequirementFeedback({ variant: 'info', message: '필수 사진 항목을 확인하는 중입니다.' });
+    setMessage(null);
+
+    if (!targetSiteId) {
+      setPhotoRequirementFeedback({ variant: 'error', message: '필수 사진을 추가할 현장을 먼저 선택해 주세요.' });
+      return;
+    }
+
+    if (!targetDocumentTypeKey) {
+      setPhotoRequirementFeedback({ variant: 'error', message: '필수 사진을 연결할 문서 유형을 확인하지 못했습니다.' });
+      return;
+    }
+
+    if (!tagName) {
+      setPhotoRequirementFeedback({ variant: 'error', message: '사진 태그 이름을 입력해 주세요.' });
+      return;
+    }
+
+    if (photoRequirementLinkedPositionKey.trim() && !linkedPosition) {
+      setPhotoRequirementFeedback({ variant: 'error', message: '문서 연결 위치를 다시 선택해 주세요.' });
+      return;
+    }
+
+    setSavingPhotoRequirement(true);
+    setPhotoRequirementFeedback({ variant: 'info', message: '필수 사진 항목을 저장하는 중입니다.' });
+
+    try {
+      const gapSummary = await fetchSuccessData<SitePhotoLabelGapSummaryDto>(
+        `/api/sites/${encodeURIComponent(targetSiteId)}/photo-label-gaps`
+      );
+      const existingRequirements = (gapSummary.requirements || []).map((item) => ({
+        labelKey: item.labelKey,
+        labelName: item.labelName,
+        description: item.description,
+        documentTypeKey: item.documentTypeKey,
+        minimumPhotoCount: item.minimumPhotoCount,
+      }));
+      const nextRequirements = [
+        ...existingRequirements.filter(
+          (item) => `${item.labelName}::${item.documentTypeKey || ''}` !== `${tagName}::${targetDocumentTypeKey}`
+        ),
+        {
+          labelName: tagName,
+          description: null,
+          documentTypeKey: targetDocumentTypeKey,
+          minimumPhotoCount,
+        },
+      ];
+      const response = await fetch('/api/photos/requirements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: targetSiteId,
+          requirements: nextRequirements,
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || '필수 사진 항목 저장에 실패했습니다.');
+      }
+
+      if (targetDocumentId && linkedPosition) {
+        setPhotoRequirementLinksByKey((current) => ({
+          ...current,
+          [buildPhotoRequirementLinkKey(targetDocumentId, tagName)]: linkedPosition,
+        }));
+      }
+
+      await loadSelectedDocumentDetail(selectedDocumentDetail.document.id);
+      setDashboardRefreshKey((current) => current + 1);
+      setShowPhotoRequirementForm(false);
+      setPhotoRequirementTagName('');
+      setPhotoRequirementCount('1');
+      setPhotoRequirementLinkedPositionKey('');
+      setPhotoRequirementFeedback({ variant: 'success', message: `"${tagName}" 필수 사진 항목을 추가했습니다.` });
+      setMessage(`"${tagName}" 필수 사진 항목을 추가했습니다.`);
+    } catch (error) {
+      setPhotoRequirementFeedback({
+        variant: 'error',
+        message: error instanceof Error ? error.message : '필수 사진 항목 저장에 실패했습니다.',
+      });
+    } finally {
+      setSavingPhotoRequirement(false);
+    }
+  }
+
+  const openFileRequirementForm = React.useCallback(() => {
+    setShowFileRequirementForm(true);
+    setFileRequirementFeedback(null);
+    setMessage(null);
+
+    if (!fileRequirementCount.trim()) {
+      setFileRequirementCount('1');
+    }
+  }, [fileRequirementCount]);
+
+  function handleCreateFileRequirement() {
+    const targetDocumentId = selectedDocumentDetail?.document.id || selectedDocumentId.trim();
+    const title = fileRequirementTitle.trim();
+    const requiredCount = normalizeRequiredFileCount(fileRequirementCount);
+    const linkedPosition = getSelectedLinkedPosition(fileRequirementLinkedPositionKey);
+
+    setFileRequirementFeedback({ variant: 'info', message: '필수 파일 항목을 확인하는 중입니다.' });
+    setMessage(null);
+
+    if (!targetDocumentId) {
+      setFileRequirementFeedback({ variant: 'error', message: '필수 파일을 추가할 문서를 먼저 선택해 주세요.' });
+      return;
+    }
+
+    if (!title) {
+      setFileRequirementFeedback({ variant: 'error', message: '파일 태그 이름을 입력해 주세요.' });
+      return;
+    }
+
+    if (fileRequirementLinkedPositionKey.trim() && !linkedPosition) {
+      setFileRequirementFeedback({ variant: 'error', message: '문서 연결 위치를 다시 선택해 주세요.' });
+      return;
+    }
+
+    const requirement: DocumentFileRequirement = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      documentId: targetDocumentId,
+      title,
+      fileNameKeyword: title,
+      requiredCount,
+      createdAt: new Date().toISOString(),
+      linkedPosition,
+    };
+
+    setFileRequirementsByDocumentId((current) => ({
+      ...current,
+      [targetDocumentId]: [...(current[targetDocumentId] || []), requirement],
+    }));
+    setShowFileRequirementForm(false);
+    setFileRequirementTitle('');
+    setFileRequirementCount('1');
+    setFileRequirementLinkedPositionKey('');
+    setFileRequirementFeedback({ variant: 'success', message: `"${title}" 필수 파일 항목을 추가했습니다.` });
+    setMessage(`"${title}" 필수 파일 항목을 추가했습니다.`);
+  }
 
   const selectedPhotoDetailRows = React.useMemo<ProjectListRow[]>(
     () =>
@@ -1942,6 +4027,7 @@ export default function ProjectPage() {
     setSelectedDocumentDetail(null);
     setSelectedDocumentDetailError(null);
     setSelectedDocumentDetailErrorDebug(null);
+    setExpandedDocumentStatusDocumentId('');
     setLoadingDocumentDetail(false);
     setSelectedPhotoId('');
   }, []);
@@ -2071,6 +4157,24 @@ export default function ProjectPage() {
     [clearSelectedDocumentContext, deletingDocument, documents, selectedDocumentDetail, selectedDocumentId, selectedSiteId, syncSiteDocuments]
   );
 
+  const handleToggleDocumentStatus = React.useCallback(
+    (documentId: string) => {
+      const normalizedDocumentId = documentId.trim();
+
+      if (!normalizedDocumentId) {
+        return;
+      }
+
+      const willOpen = expandedDocumentStatusDocumentId !== normalizedDocumentId;
+      setExpandedDocumentStatusDocumentId(willOpen ? normalizedDocumentId : '');
+
+      if (willOpen) {
+        handleSelectDocument(normalizedDocumentId);
+      }
+    },
+    [expandedDocumentStatusDocumentId, handleSelectDocument]
+  );
+
   const setDocumentLinkButtonFeedback = React.useCallback((linkKey: string, state: 'idle' | 'completed') => {
     document
       .querySelectorAll<HTMLButtonElement>('[data-member-access-link-key]')
@@ -2097,7 +4201,7 @@ export default function ProjectPage() {
   );
 
   const handleCopyDocumentLink = React.useCallback(
-    async (documentId: string, documentTitle: string) => {
+    async (documentId: string, documentTitle: string, phoneNumber?: string | null) => {
       const normalizedDocumentId = documentId.trim();
       const linkKey = `${normalizedDocumentId}:member-access`;
 
@@ -2118,7 +4222,7 @@ export default function ProjectPage() {
       setMessage(null);
 
       try {
-        await copyTextToClipboard(buildMemberAccessDocumentLinkUrl(normalizedDocumentId));
+        await copyTextToClipboard(buildMemberAccessDocumentLinkUrl(normalizedDocumentId, phoneNumber));
         showDocumentLinkCopiedFeedback(linkKey);
         setMessage(`"${documentTitle || '현장 문서'}" 문서 접근 링크를 복사했습니다.`);
         return true;
@@ -2282,7 +4386,7 @@ export default function ProjectPage() {
       operationKey: string
     ) => {
       if (hasFullDocumentAccessBySiteRole(membership.accessRole)) {
-        setMessage('소유자와 관리자는 모든 문서 권한을 가지고 있습니다.');
+        setMessage('관리자는 모든 문서 권한을 가지고 있습니다.');
         return;
       }
 
@@ -2458,12 +4562,41 @@ export default function ProjectPage() {
         const linkedTemplate = item.document.templateId
           ? templates.find((template) => template.id === item.document.templateId) || null
           : null;
+        const isStatusExpanded = expandedDocumentStatusDocumentId === item.document.id;
+        const directDocumentMembers = siteDocumentMembers.filter(
+          (membership) => membership.documentId === item.document.id
+        );
+        const documentLinkPhoneNumber =
+          directDocumentMembers.find((membership) => membership.accessRole === 'signer')?.member.phoneNumber ||
+          directDocumentMembers[0]?.member.phoneNumber ||
+          null;
 
         return {
           key: item.document.id,
           label: item.document.title,
           statusLabel: getDocumentStatusLabel(item.document.status),
           statusVariant: getDocumentStatusVariant(item.document.status),
+          statusContent: (
+            <button
+              type="button"
+              className={cn(
+                'inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] font-semibold',
+                isStatusExpanded
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-700'
+              )}
+              aria-expanded={isStatusExpanded}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleToggleDocumentStatus(item.document.id);
+              }}
+            >
+              {getDocumentStatusLabel(item.document.status)}
+              <ChevronDown className={cn('h-3 w-3', isStatusExpanded ? 'rotate-180' : '')} />
+            </button>
+          ),
           summary: `버전 ${item.document.currentVersionNumber || 0}`,
           savedAt: item.latestVersion?.createdAt ? formatDateTime(item.latestVersion.createdAt) : '저장 이력 없음',
           source: item.document.templateId
@@ -2494,6 +4627,23 @@ export default function ProjectPage() {
             : '직접 추가한 문서',
           selected: item.document.id === selectedDocumentId,
           onClick: () => handleSelectDocument(item.document.id),
+          expandedContent: isStatusExpanded ? (
+            <div className="space-y-2 rounded-lg bg-white p-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 text-xs font-semibold text-slate-900">
+                  {item.document.title} 문서 상태
+                </div>
+                {loadingDocumentDetail && selectedDocumentId === item.document.id ? (
+                  <span className="shrink-0 text-[11px] text-slate-500">불러오는 중</span>
+                ) : null}
+              </div>
+              <ProjectInfoList
+                items={selectedDocumentId === item.document.id ? selectedDocumentDetailRows : []}
+                emptyMessage="문서 상태를 확인할 항목이 없습니다."
+                minTableWidth={492}
+              />
+            </div>
+          ) : undefined,
           documentLinkAction: {
             title: '문서 접근 링크 복사',
             ariaLabel: `${item.document.title} 문서 접근 링크 복사`,
@@ -2503,7 +4653,7 @@ export default function ProjectPage() {
             feedbackKey: `${item.document.id}:member-access`,
             disabled: copyingDocumentLinkKey === `${item.document.id}:member-access`,
             onClick: () => {
-              return handleCopyDocumentLink(item.document.id, item.document.title);
+              return handleCopyDocumentLink(item.document.id, item.document.title, documentLinkPhoneNumber);
             },
           },
           action: {
@@ -2525,7 +4675,12 @@ export default function ProjectPage() {
       handleCopyDocumentLink,
       handleDeleteDocument,
       handleSelectDocument,
+      handleToggleDocumentStatus,
+      expandedDocumentStatusDocumentId,
+      loadingDocumentDetail,
       selectedDocumentId,
+      selectedDocumentDetailRows,
+      siteDocumentMembers,
       templates,
     ]
   );
@@ -3182,25 +5337,10 @@ export default function ProjectPage() {
   );
 
   const hasSelectedDocumentContext = Boolean(selectedDocumentId || loadingDocumentDetail || selectedDocumentListItem);
-  const selectedDetailPanel =
-    selectedPhotoId && selectedPhoto
-      ? 'photo'
-      : hasSelectedDocumentContext
-        ? 'document'
-        : 'summary';
+  const selectedDetailPanel = hasSelectedDocumentContext ? 'document' : 'summary';
 
   return (
-    <div className="project-no-motion mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
-      <style>{`
-        .project-no-motion,
-        .project-no-motion *,
-        .project-no-motion *::before,
-        .project-no-motion *::after {
-          animation: none !important;
-          transition: none !important;
-          scroll-behavior: auto !important;
-        }
-      `}</style>
+    <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="space-y-2">
           <Badge variant="slate">현장 통합 관리</Badge>
@@ -3446,8 +5586,8 @@ export default function ProjectPage() {
             <div className="min-w-0">
               <Card className="border-slate-200">
                 <CardHeader>
-                  <CardTitle>현장 문서 · 사진·서명 · 구성원</CardTitle>
-                  <CardDescription>선택한 현장의 문서, 사진·서명, 구성원 정보를 한곳에서 관리합니다.</CardDescription>
+                  <CardTitle>현장 문서 · 구성원</CardTitle>
+                  <CardDescription>선택한 현장의 문서와 구성원 권한을 관리합니다.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-3">
@@ -3519,28 +5659,6 @@ export default function ProjectPage() {
                       <EmptyState
                         title="선택된 현장이 없습니다."
                         description="현장 리스트에서 현장을 선택하면 문서 목록을 확인할 수 있습니다."
-                      />
-                    )}
-                  </div>
-
-                  <div className="space-y-3 border-t border-slate-200 pt-6">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="text-sm font-semibold text-slate-900">사진·서명</div>
-                        <p className="text-xs text-slate-500">선택한 현장의 사진과 서명 연결 상태를 확인합니다.</p>
-                      </div>
-                      <span className="text-xs text-slate-500">사진 {photos.length}건 · 연결된 서명 없음</span>
-                    </div>
-                    {selectedSite ? (
-                      <ProjectInfoList
-                        items={photoRows}
-                        variant="photo"
-                        emptyMessage="등록된 사진이 없습니다. 연결된 전자 서명도 아직 없습니다."
-                      />
-                    ) : (
-                      <EmptyState
-                        title="선택된 현장이 없습니다."
-                        description="현장을 선택하면 사진과 서명 연결 상태를 확인할 수 있습니다."
                       />
                     )}
                   </div>
@@ -3768,8 +5886,8 @@ export default function ProjectPage() {
                 <Card className="border-slate-200">
                   <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
                     <div className="space-y-1.5">
-                      <CardTitle>선택한 문서 상세</CardTitle>
-                      <CardDescription>기록된 값, 첨부 파일, 사진 증빙, 저장 이력을 확인합니다.</CardDescription>
+                      <CardTitle>선택 문서 요청 링크 설정</CardTitle>
+                      <CardDescription>현재 문서의 요청 항목과 구성원을 정합니다.</CardDescription>
                     </div>
                     {selectedDocumentId ? (
                       <Button
@@ -3791,68 +5909,44 @@ export default function ProjectPage() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {loadingDocumentDetail ? (
-                      <div className="space-y-3">
-                        <div className="rounded-xl border border-slate-200 px-4 py-4 text-sm text-slate-500">
-                          {selectedDocumentListItem
-                            ? `"${selectedDocumentListItem.document.title}" 문서 정보를 불러오는 중입니다.`
-                            : '문서 정보를 불러오는 중입니다.'}
-                        </div>
-                        <ProjectInfoList items={selectedDocumentDetailRows} />
+                      <div className="rounded-xl border border-slate-200 px-4 py-4 text-sm text-slate-500">
+                        {selectedDocumentListItem
+                          ? `"${selectedDocumentListItem.document.title}" 문서 정보를 불러오는 중입니다.`
+                          : '문서 정보를 불러오는 중입니다.'}
                       </div>
                     ) : selectedDocumentDetail ? (
-                      <ProjectInfoList items={selectedDocumentDetailRows} />
+                      <DocumentsOwnerWorkspace
+                        initialSiteId={selectedDocumentDetail.document.siteId}
+                        lockedDocumentId={selectedDocumentDetail.document.id}
+                        hideDocumentPicker
+                        hidePageHeader
+                        embedded
+                        surface="project"
+                      />
                     ) : selectedDocumentListItem ? (
                       <div className="space-y-3">
                         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
                           문서 편집은 계속할 수 있지만, 상세 정보 일부를 불러오지 못했습니다. 새로고침 후 다시 확인해 주세요.
                         </div>
-                        <ProjectInfoList items={selectedDocumentDetailRows} />
                       </div>
                     ) : (
                       <EmptyState
                         title="선택된 문서가 없습니다."
-                        description="왼쪽의 현장 문서에서 문서를 선택하면 기록 값과 첨부 파일, 사진 증빙 상태를 함께 보여줍니다."
+                        description="왼쪽의 현장 문서에서 문서를 선택하면 요청 링크 설정을 확인할 수 있습니다."
                       />
                     )}
-                  </CardContent>
-                </Card>
-              ) : selectedDetailPanel === 'photo' && selectedPhoto ? (
-                <Card className="border-slate-200">
-                  <CardHeader>
-                    <CardTitle>선택한 사진·서명 상세</CardTitle>
-                    <CardDescription>선택한 사진 정보와 현재 연결 상태를 같은 자리에서 확인합니다.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                      <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-                        {selectedPhoto.photo.photoUrl ? (
-                          <img
-                            src={selectedPhoto.photo.photoUrl}
-                            alt={selectedPhoto.photo.photoTitle || '현장 사진'}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-slate-400">
-                            미리보기 없음
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <ProjectInfoList items={selectedPhotoDetailRows} />
-                      </div>
-                    </div>
                   </CardContent>
                 </Card>
               ) : (
                 <Card className="border-slate-200">
                   <CardHeader>
-                    <CardTitle>선택한 문서 상세</CardTitle>
-                    <CardDescription>현장 문서 또는 사진을 선택하면 상세 정보를 보여줍니다.</CardDescription>
+                    <CardTitle>선택 문서 요청 링크 설정</CardTitle>
+                    <CardDescription>현장 문서를 선택하면 요청 항목과 구성원 설정을 보여줍니다.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <EmptyState
                       title="선택된 항목이 없습니다."
-                      description="왼쪽의 현장 문서나 사진 목록에서 확인할 항목을 선택해 주세요."
+                      description="왼쪽의 현장 문서 목록에서 작업할 문서를 선택해 주세요."
                     />
                   </CardContent>
                 </Card>

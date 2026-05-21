@@ -120,8 +120,56 @@ export type DocumentPhotoEvidenceSummaryDto = {
 };
 
 export type DocumentDetailQueryDebugDto = Partial<
-  Record<'versions' | 'artifacts' | 'valueFiles' | 'photoEvidence' | 'templateLink' | 'valueEntries', string>
+  Record<
+    | 'versions'
+    | 'artifacts'
+    | 'valueFiles'
+    | 'photoEvidence'
+    | 'templateLink'
+    | 'valueEntries'
+    | 'signatureEvidence'
+    | 'photoRequirements',
+    string
+  >
 >;
+
+export type DocumentSignatureEvidenceStatus =
+  | 'not_requested'
+  | 'pending'
+  | 'authenticating'
+  | 'completed'
+  | 'expired'
+  | 'failed';
+
+export type DocumentSignatureEvidenceDto = {
+  slotKey: string;
+  label: string;
+  signerRoleName: string;
+  required: boolean;
+  requestId: string | null;
+  status: DocumentSignatureEvidenceStatus;
+  signerMemberId: string | null;
+  signerName: string | null;
+  signerPhoneNumber: string | null;
+  requestedAt: string | null;
+  signedAt: string | null;
+  expiresAt: string | null;
+  signatureImagePath: string | null;
+};
+
+export type DocumentPhotoRequirementDto = {
+  requirementId: string;
+  tagKey: string;
+  tagName: string;
+  sourceScope: 'document' | 'document_type' | 'site' | 'global';
+  requiredCount: number;
+  uploadedCount: number;
+  reviewPendingCount: number;
+  missingCount: number;
+  status: 'covered' | 'review_needed' | 'missing' | 'not_required';
+  matchedPhotoIds: string[];
+  reviewPendingPhotoIds: string[];
+};
 
 export type DocumentValueEntryDto = {
   id: string;
@@ -131,6 +179,58 @@ export type DocumentValueEntryDto = {
   displayText: string | null;
   updatedBy: string | null;
   updatedAt: string;
+};
+
+export type DocumentRequestTaskKind = 'value' | 'signature' | 'photo' | 'file';
+
+export type DocumentRequestTaskStatus = 'draft' | 'requested' | 'submitted' | 'completed' | 'revoked';
+
+export type DocumentRequestTaskInput = {
+  kind: DocumentRequestTaskKind;
+  targetKey: string;
+  targetLabel: string;
+  valueKey?: string | null;
+  slotKey?: string | null;
+  frameGroupId?: string | null;
+  requiredCount?: number | null;
+  linkedExternalId?: string | null;
+  status?: DocumentRequestTaskStatus;
+  payload?: Record<string, unknown>;
+};
+
+export type DocumentRequestTaskDto = {
+  id: string;
+  documentId: string;
+  requestLinkId: string | null;
+  assigneeMemberId: string;
+  kind: DocumentRequestTaskKind;
+  targetKey: string;
+  targetLabel: string;
+  valueKey: string | null;
+  slotKey: string | null;
+  frameGroupId: string | null;
+  requiredCount: number | null;
+  linkedExternalId: string | null;
+  status: DocumentRequestTaskStatus;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DocumentRequestTaskSaveInput = {
+  requestLinkId?: string | null;
+  assigneeMemberId: string;
+  tasks: DocumentRequestTaskInput[];
+};
+
+export type DocumentRequestTaskSaveResult = {
+  tasks: DocumentRequestTaskDto[];
+};
+
+export type DocumentRequestTaskUpdateInput = {
+  status?: DocumentRequestTaskStatus;
+  linkedExternalId?: string | null;
+  payload?: Record<string, unknown>;
 };
 
 export type DocumentTemplateLinkDto = {
@@ -172,6 +272,8 @@ export type DocumentDetailResult = {
   templateLink: DocumentTemplateLinkDto | null;
   linkedTemplate: DocumentLinkedTemplateDto | null;
   photoEvidence: DocumentPhotoEvidenceSummaryDto;
+  signatureEvidence: DocumentSignatureEvidenceDto[];
+  photoRequirements: DocumentPhotoRequirementDto[];
   queryDebug: DocumentDetailQueryDebugDto;
 };
 

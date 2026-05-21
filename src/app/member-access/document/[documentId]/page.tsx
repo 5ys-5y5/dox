@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import {
@@ -54,15 +54,87 @@ const getRoleLabel = (role: MemberDocumentAccessDto['accessRole']) => {
     case 'editor':
       return '편집 가능';
     case 'signer':
+      return '서명 가능';
     case 'viewer':
     default:
       return '열람 가능';
   }
 };
 
+const normalizePhoneNumber = (value: string | null | undefined) => String(value || '').replace(/[^0-9]/g, '').trim();
+
+const normalizeSignatureKey = (value: string | null | undefined) =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildUrlWithPhoneNumber = (path: string, phoneNumber: string) => {
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+
+  if (!normalizedPhoneNumber) {
+    return path;
+  }
+
+  const [pathname, search = ''] = path.split('?');
+  const params = new URLSearchParams(search);
+  params.set('phoneNumber', normalizedPhoneNumber);
+
+  return `${pathname}?${params.toString()}`;
+};
+
+type SignedSignatureDraft = {
+  slotKey: string;
+  imageData: string;
+};
+
+const readSignatureSlotKey = (element: Element) => {
+  const readAttribute = (target: Element | null, attributeName: string) =>
+    normalizeSignatureKey(target?.getAttribute(attributeName));
+  const frameNode = element.closest(
+    '[data-template-frame-parent-group], [data-template-frame-label], [data-template-frame-value-key]'
+  );
+
+  return (
+    readAttribute(element, 'data-template-frame-parent-group') ||
+    readAttribute(frameNode, 'data-template-frame-parent-group') ||
+    readAttribute(element, 'data-template-usage-preview-field-key') ||
+    readAttribute(element, 'data-template-frame-value-key') ||
+    readAttribute(element, 'data-template-frame-label') ||
+    readAttribute(frameNode, 'data-template-frame-value-key') ||
+    readAttribute(frameNode, 'data-template-frame-label')
+  );
+};
+
+const collectSignedSignatureDrafts = (html: string): SignedSignatureDraft[] => {
+  if (typeof DOMParser === 'undefined') {
+    return [];
+  }
+
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const draftsBySlotKey = new Map<string, SignedSignatureDraft>();
+
+  document
+    .querySelectorAll('[data-template-usage-preview-signature-status="signed"]')
+    .forEach((element) => {
+      const slotKey = readSignatureSlotKey(element);
+      const imageData = normalizeSignatureKey(element.getAttribute('data-template-usage-preview-signature-image-data'));
+
+      if (!slotKey || !imageData || draftsBySlotKey.has(slotKey)) {
+        return;
+      }
+
+      draftsBySlotKey.set(slotKey, { slotKey, imageData });
+    });
+
+  return Array.from(draftsBySlotKey.values());
+};
+
 export default function MemberAccessDocumentPage() {
   const params = useParams<{ documentId: string }>();
+  const searchParams = useSearchParams();
   const documentId = String(params?.documentId || '').trim();
+  const searchParamsText = searchParams.toString();
+  const urlPhoneNumber = normalizePhoneNumber(searchParams.get('phoneNumber') || searchParams.get('phone'));
   const [access, setAccess] = React.useState<MemberDocumentAccessDto | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [needsVerification, setNeedsVerification] = React.useState(false);
@@ -71,6 +143,10 @@ export default function MemberAccessDocumentPage() {
   const [submitting, setSubmitting] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const accessRolePolicyState = useStoredCanvasAccessRolePolicies('member-access');
+  const buildMemberDocumentApiPath = React.useCallback(
+    (path: string) => buildUrlWithPhoneNumber(path, urlPhoneNumber),
+    [urlPhoneNumber]
+  );
 
   const loadAccess = React.useCallback(async () => {
     if (!documentId) {
@@ -83,7 +159,7 @@ export default function MemberAccessDocumentPage() {
     setLoading(true);
 
     try {
-      const response = await fetch(`/api/member-access/documents/${encodeURIComponent(documentId)}`, {
+      const response = await fetch(buildMemberDocumentApiPath(`/api/member-access/documents/${encodeURIComponent(documentId)}`), {
         cache: 'no-store',
       });
       const result = await response.json();
@@ -92,7 +168,7 @@ export default function MemberAccessDocumentPage() {
         const errorMessage = result?.message || '문서 접근 정보를 불러오지 못했습니다.';
 
         setAccess(null);
-        if (response.status === 401 || errorMessage.includes('인증')) {
+        if (response.status === 401 || errorMessage.includes('인증') || (urlPhoneNumber && response.status === 403)) {
           setNeedsVerification(true);
           setMessage(null);
         } else {
@@ -102,7 +178,16 @@ export default function MemberAccessDocumentPage() {
         return;
       }
 
-      setAccess(result.data as MemberDocumentAccessDto);
+      const nextAccess = result.data as MemberDocumentAccessDto;
+      const nextPhoneNumber = normalizePhoneNumber(nextAccess.member.phoneNumber);
+
+      setAccess(nextAccess);
+      if (!urlPhoneNumber && nextPhoneNumber) {
+        const nextParams = new URLSearchParams(searchParamsText);
+        nextParams.set('phoneNumber', nextPhoneNumber);
+        window.location.replace(`/member-access/document/${encodeURIComponent(documentId)}?${nextParams.toString()}`);
+        return;
+      }
       setNeedsVerification(false);
       setMessage(null);
     } catch (error) {
@@ -112,14 +197,22 @@ export default function MemberAccessDocumentPage() {
     } finally {
       setLoading(false);
     }
-  }, [documentId]);
+  }, [buildMemberDocumentApiPath, documentId, searchParamsText, urlPhoneNumber]);
 
   React.useEffect(() => {
     void loadAccess();
   }, [loadAccess]);
 
+  React.useEffect(() => {
+    if (urlPhoneNumber) {
+      setPhoneNumber(urlPhoneNumber);
+    }
+  }, [urlPhoneNumber]);
+
   const handleVerify = React.useCallback(async () => {
-    if (!phoneNumber.trim() || !accessCode.trim()) {
+    const verificationPhoneNumber = urlPhoneNumber || phoneNumber.trim();
+
+    if (!verificationPhoneNumber || !accessCode.trim()) {
       setMessage('휴대폰 번호와 인증번호를 모두 입력해 주세요.');
       return;
     }
@@ -132,7 +225,7 @@ export default function MemberAccessDocumentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phoneNumber: phoneNumber.trim(),
+          phoneNumber: verificationPhoneNumber,
           accessCode: accessCode.trim(),
         }),
       });
@@ -151,7 +244,7 @@ export default function MemberAccessDocumentPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [accessCode, loadAccess, phoneNumber]);
+  }, [accessCode, loadAccess, phoneNumber, urlPhoneNumber]);
 
   const labelValues = React.useMemo<Record<string, unknown>>(() => {
     if (!access) {
@@ -174,6 +267,42 @@ export default function MemberAccessDocumentPage() {
     Boolean(access) &&
     access.accessRole === 'editor' &&
     resolveEffectiveCanvasAccessMode(canvasAccessRole, canvasAccessRolePolicy) === 'edit';
+  const currentMemberPhoneNumber = normalizePhoneNumber(access?.member.phoneNumber);
+  const currentMemberName = normalizeSignatureKey(access?.member.displayName);
+  const signableSignatureRequests = React.useMemo(() => {
+    if (!access || (access.accessRole !== 'signer' && access.accessRole !== 'editor')) {
+      return [];
+    }
+
+    return access.detail.signatureEvidence.filter((item) => {
+      if (!item.requestId || item.status === 'completed' || item.status === 'expired' || item.status === 'failed') {
+        return false;
+      }
+
+      const signerPhoneNumber = normalizePhoneNumber(item.signerPhoneNumber);
+      const signerName = normalizeSignatureKey(item.signerName);
+
+      if (signerPhoneNumber) {
+        return signerPhoneNumber === currentMemberPhoneNumber;
+      }
+
+      return !signerName || !currentMemberName || signerName === currentMemberName;
+    });
+  }, [access, currentMemberName, currentMemberPhoneNumber]);
+  const signerEditableValueKeys = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          signableSignatureRequests
+            .flatMap((item) => [item.slotKey, item.label, item.signerRoleName])
+            .map(normalizeSignatureKey)
+            .filter(Boolean)
+        )
+      ),
+    [signableSignatureRequests]
+  );
+  const canSignDocument = Boolean(access && access.accessRole === 'signer' && signerEditableValueKeys.length > 0);
+  const canUseDocumentWorkspace = canEditDocument || canSignDocument;
 
   const initialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
     if (!access) {
@@ -203,28 +332,105 @@ export default function MemberAccessDocumentPage() {
 
   const handleSaveDraft = React.useCallback(
     async ({ currentHtml, attachmentDrafts }: TemplateEditWorkspaceSaveDraftParams) => {
-      if (!access || !canEditDocument) {
+      if (!access || !canUseDocumentWorkspace) {
         throw new Error('이 문서는 편집 권한이 없습니다.');
+      }
+
+      const signedDrafts = collectSignedSignatureDrafts(currentHtml);
+      const pendingRequestByKey = new Map(
+        signableSignatureRequests.flatMap((request) =>
+          [request.slotKey, request.label, request.signerRoleName]
+            .map(normalizeSignatureKey)
+            .filter(Boolean)
+            .map((key) => [key, request] as const)
+        )
+      );
+      const uniqueSignableRequestKeys = new Set(
+        signableSignatureRequests.map((request) => normalizeSignatureKey(request.slotKey || request.label)).filter(Boolean)
+      );
+      const fallbackSignatureRequest =
+        signableSignatureRequests.length === 1 || uniqueSignableRequestKeys.size === 1
+          ? signableSignatureRequests[0] || null
+          : null;
+      const signatureExecutionByRequestId = new Map<
+        string,
+        { draft: SignedSignatureDraft; request: (typeof signableSignatureRequests)[number] }
+      >();
+
+      signedDrafts.forEach((draft) => {
+        const request = pendingRequestByKey.get(normalizeSignatureKey(draft.slotKey)) || fallbackSignatureRequest;
+        const requestId = String(request?.requestId || '').trim();
+
+        if (!request || !requestId || signatureExecutionByRequestId.has(requestId)) {
+          return;
+        }
+
+        signatureExecutionByRequestId.set(requestId, { draft, request });
+      });
+
+      const signatureExecutions = Array.from(signatureExecutionByRequestId.values());
+
+      if (canSignDocument && !canEditDocument && signatureExecutions.length === 0) {
+        throw new Error('완료할 서명 요청을 찾지 못했습니다. 배정된 서명 상자에 서명한 뒤 다시 저장해 주세요.');
+      }
+
+      if (signatureExecutions.length > 0) {
+        await Promise.all(
+          signatureExecutions.map(async ({ draft, request }) => {
+            const response = await fetch(
+              buildMemberDocumentApiPath(
+                `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/signatures`
+              ),
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  requestId: request.requestId,
+                  signatureImagePath: draft.imageData,
+                  consentText: `${access.member.displayName || access.member.phoneNumber}님이 ${access.detail.document.title} 문서의 ${request.label || '서명'} 항목에 서명했습니다.`,
+                }),
+              }
+            );
+            const result = await response.json();
+
+            if (!response.ok || !result?.success) {
+              throw new Error(result?.message || '서명 완료 처리에 실패했습니다.');
+            }
+          })
+        );
+      }
+
+      if (canSignDocument && !canEditDocument) {
+        await loadAccess();
+
+        return {
+          successMessage: '서명을 완료했습니다.',
+        };
       }
 
       const nextLabelValues = extractDocumentLabelValuesFromHtml(currentHtml, labelValues);
       const nextValueFiles = await buildDocumentAttachmentValueFilesForSave({
-        attachmentApiPath: `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`,
+        attachmentApiPath: buildMemberDocumentApiPath(
+          `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`
+        ),
         attachmentDrafts,
       });
       const persistedHtml = materializeTemplateCanvasHtmlForPersistence(currentHtml, {
         attachmentFiles: nextValueFiles,
       });
-      const response = await fetch(`/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/version`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          htmlCanonical: persistedHtml,
-          labelValues: nextLabelValues,
-          valueFiles: nextValueFiles,
-          changeReason: '구성원 문서 수정',
-        }),
-      });
+      const response = await fetch(
+        buildMemberDocumentApiPath(`/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/version`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            htmlCanonical: persistedHtml,
+            labelValues: nextLabelValues,
+            valueFiles: nextValueFiles,
+            changeReason: '구성원 문서 수정',
+          }),
+        }
+      );
       const result = await response.json();
 
       if (!response.ok || !result?.success) {
@@ -237,7 +443,16 @@ export default function MemberAccessDocumentPage() {
         successMessage: '문서를 저장했습니다.',
       };
     },
-    [access, canEditDocument, labelValues, loadAccess]
+    [
+      access,
+      buildMemberDocumentApiPath,
+      canEditDocument,
+      canSignDocument,
+      canUseDocumentWorkspace,
+      labelValues,
+      loadAccess,
+      signableSignatureRequests,
+    ]
   );
 
   return (
@@ -296,20 +511,23 @@ export default function MemberAccessDocumentPage() {
           canvasAccessRole={canvasAccessRole}
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
-          workspaceMode={canEditDocument ? 'document' : 'read'}
+          workspaceMode={canUseDocumentWorkspace ? 'document' : 'read'}
           hidePersistencePanel
           headerTitle="구성원 문서 접근"
           headerDescription="초대된 권한 범위 안에서 현장 문서를 열람하거나 수정합니다."
           nameFieldLabel="문서 이름:"
-          saveButtonLabel={canEditDocument ? '문서 저장' : '열람 전용'}
+          saveButtonLabel={canEditDocument ? '문서 저장' : canSignDocument ? '서명 완료' : '열람 전용'}
           templateNameReadOnly
-          saveDisabled={!canEditDocument}
+          saveDisabled={!canUseDocumentWorkspace}
+          editableValueKeys={canSignDocument && !canEditDocument ? signerEditableValueKeys : undefined}
           documentAttachmentApiPath={
             canEditDocument
-              ? `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`
+              ? buildMemberDocumentApiPath(
+                  `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`
+                )
               : undefined
           }
-          onSaveDraftHtml={canEditDocument ? handleSaveDraft : undefined}
+          onSaveDraftHtml={canUseDocumentWorkspace ? handleSaveDraft : undefined}
         />
       ) : (
         <Card className="border-slate-200">

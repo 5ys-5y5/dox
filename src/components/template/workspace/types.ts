@@ -646,6 +646,35 @@ export type TemplateEditWorkspacePersistenceVisibility = {
   showSaveButton?: boolean;
 };
 
+export type TemplateChecklistRegistrationKind = 'signature' | 'photo' | 'file' | 'value';
+
+export type TemplateChecklistRegistrationTarget = {
+  id: string;
+  kind: TemplateChecklistRegistrationKind;
+  label: string;
+  valueKey?: string;
+  slotKey?: string;
+  frameGroupId?: string;
+  contextKey?: string;
+  highlightFrameGroupIds?: string[];
+  activationValueKey?: string;
+  requestId?: string;
+  signerName?: string;
+};
+
+export type TemplateChecklistSignatureState = {
+  slotKey: string;
+  imageData: string;
+  signerName?: string | null;
+  signedAt?: string | null;
+  provider?: string | null;
+};
+
+export type TemplateChecklistSignatureSubmitParams = {
+  target: TemplateChecklistRegistrationTarget;
+  imageData: string;
+};
+
 export type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
   initialDraft?: TemplateEditWorkspaceInitialDraft | null;
@@ -668,6 +697,12 @@ export type TemplateEditWorkspaceProps = {
   saveButtonLabel?: string;
   templateNameReadOnly?: boolean;
   saveDisabled?: boolean;
+  checklistRegistrationTarget?: TemplateChecklistRegistrationTarget | null;
+  checklistSelectableTargets?: TemplateChecklistRegistrationTarget[];
+  checklistSignatureStates?: TemplateChecklistSignatureState[];
+  onChecklistTargetActivate?: (target: TemplateChecklistRegistrationTarget) => void;
+  onChecklistSelectableTargetSelect?: (target: TemplateChecklistRegistrationTarget) => void;
+  onChecklistSignatureSubmit?: (params: TemplateChecklistSignatureSubmitParams) => Promise<void> | void;
   defaultCanvasFullscreen?: boolean;
   canvasPageContainerWidth?: string;
   canvasPageContainerHeight?: string;

@@ -1,0 +1,1 @@
+ABSENT before DOCFUNC-09; file introduced by owner module implementation.

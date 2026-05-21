@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS member_access.site_memberships (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT site_memberships_member_site_key UNIQUE (member_id, site_id),
-  CONSTRAINT site_memberships_access_role_check CHECK (access_role IN ('owner', 'manager', 'participant'))
+  CONSTRAINT site_memberships_access_role_check CHECK (access_role IN ('manager', 'participant'))
 );
 
 CREATE TABLE IF NOT EXISTS member_access.document_memberships (
@@ -83,8 +83,29 @@ CREATE TABLE IF NOT EXISTS member_access.document_memberships (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT document_memberships_member_document_key UNIQUE (member_id, document_id),
-  CONSTRAINT document_memberships_access_role_check CHECK (access_role IN ('editor', 'viewer'))
+  CONSTRAINT document_memberships_access_role_check CHECK (access_role IN ('editor', 'viewer', 'signer'))
 );
+
+DO $$
+BEGIN
+  UPDATE member_access.site_memberships
+     SET access_role = 'manager'
+   WHERE access_role = 'owner';
+
+  ALTER TABLE member_access.site_memberships
+    DROP CONSTRAINT IF EXISTS site_memberships_access_role_check;
+
+  ALTER TABLE member_access.site_memberships
+    ADD CONSTRAINT site_memberships_access_role_check
+    CHECK (access_role IN ('manager', 'participant'));
+
+  ALTER TABLE member_access.document_memberships
+    DROP CONSTRAINT IF EXISTS document_memberships_access_role_check;
+
+  ALTER TABLE member_access.document_memberships
+    ADD CONSTRAINT document_memberships_access_role_check
+    CHECK (access_role IN ('editor', 'viewer', 'signer'));
+END $$;
 
 CREATE INDEX IF NOT EXISTS member_registry_phone_number_idx
   ON member_access.member_registry (phone_number);
@@ -207,7 +228,7 @@ DECLARE
   v_should_generate_access_code boolean := true;
   v_dispatch_mode text := 'send_code';
 BEGIN
-  IF p_access_role NOT IN ('owner', 'manager', 'participant') THEN
+  IF p_access_role NOT IN ('manager', 'participant') THEN
     RAISE EXCEPTION '구성원 초대 실패: 현장 권한 값이 올바르지 않습니다. (%)', p_access_role;
   END IF;
 
@@ -340,7 +361,7 @@ DECLARE
   v_should_generate_access_code boolean := true;
   v_dispatch_mode text := 'send_code';
 BEGIN
-  IF p_access_role NOT IN ('editor', 'viewer') THEN
+  IF p_access_role NOT IN ('editor', 'viewer', 'signer') THEN
     RAISE EXCEPTION '구성원 초대 실패: 문서 권한 값이 올바르지 않습니다. (%)', p_access_role;
   END IF;
 

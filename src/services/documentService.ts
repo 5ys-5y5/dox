@@ -10,6 +10,14 @@ import type {
   DocumentDetailQueryDebugDto,
   DocumentLinkedTemplateDto,
   DocumentPhotoEvidenceSummaryDto,
+  DocumentPhotoRequirementDto,
+  DocumentRequestTaskDto,
+  DocumentRequestTaskInput,
+  DocumentRequestTaskSaveInput,
+  DocumentRequestTaskSaveResult,
+  DocumentRequestTaskUpdateInput,
+  DocumentSignatureEvidenceDto,
+  DocumentSignatureEvidenceStatus,
   DocumentTemplateLinkDto,
   DocumentValueEntryDto,
   DocumentValueFileDto,
@@ -104,9 +112,29 @@ type DocumentValueEntryRow = {
   updated_at: string;
 };
 
+type DocumentRequestTaskRow = {
+  id: string;
+  document_id: string;
+  request_link_id: string | null;
+  assignee_member_id: string;
+  task_kind: DocumentRequestTaskDto['kind'];
+  target_key: string;
+  target_label: string;
+  value_key: string | null;
+  slot_key: string | null;
+  frame_group_id: string | null;
+  required_count: number | null;
+  linked_external_id: string | null;
+  status: DocumentRequestTaskDto['status'];
+  payload: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type TemplateRegistryLinkRow = {
   id: string;
   template_name: string;
+  draft_html: string | null;
   current_revision_id: string | null;
 };
 
@@ -128,6 +156,25 @@ type TemplateRevisionLinkRow = {
 type TemplateRevisionPointerRow = {
   id: string;
   revision_number: number;
+};
+
+type DocumentSignRequestRow = {
+  id: string;
+  document_id: string;
+  signature_slot_key: string | null;
+  signer_info: Record<string, unknown> | null;
+  status: string;
+  expiration_date: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type DocumentSignatureRow = {
+  id: string;
+  request_id: string;
+  signature_image_path: string | null;
+  signer_id: string | null;
+  signed_at: string | null;
 };
 
 const getSupabase = () => {
@@ -355,6 +402,57 @@ const toDocumentValueEntryDto = (row: DocumentValueEntryRow): DocumentValueEntry
   updatedBy: row.updated_by,
   updatedAt: row.updated_at,
 });
+
+const toDocumentRequestTaskDto = (row: DocumentRequestTaskRow): DocumentRequestTaskDto => ({
+  id: row.id,
+  documentId: row.document_id,
+  requestLinkId: row.request_link_id,
+  assigneeMemberId: row.assignee_member_id,
+  kind: row.task_kind,
+  targetKey: row.target_key,
+  targetLabel: row.target_label,
+  valueKey: row.value_key,
+  slotKey: row.slot_key,
+  frameGroupId: row.frame_group_id,
+  requiredCount: row.required_count,
+  linkedExternalId: row.linked_external_id,
+  status: row.status,
+  payload: row.payload || {},
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const sanitizeDocumentRequestTasks = (tasks: DocumentRequestTaskInput[]) =>
+  (Array.isArray(tasks) ? tasks : []).map((task, index) => {
+    const kind = task.kind;
+    const targetKey = String(task.targetKey || '').trim();
+    const targetLabel = String(task.targetLabel || '').trim();
+
+    if (!['value', 'signature', 'photo', 'file'].includes(kind)) {
+      throw new Error(`요청 작업 저장 실패: tasks[${index}].kind가 올바르지 않습니다.`);
+    }
+
+    if (!targetKey) {
+      throw new Error(`요청 작업 저장 실패: tasks[${index}].targetKey가 필요합니다.`);
+    }
+
+    if (!targetLabel) {
+      throw new Error(`요청 작업 저장 실패: tasks[${index}].targetLabel이 필요합니다.`);
+    }
+
+    return {
+      kind,
+      targetKey,
+      targetLabel,
+      valueKey: task.valueKey?.trim() || null,
+      slotKey: task.slotKey?.trim() || null,
+      frameGroupId: task.frameGroupId?.trim() || null,
+      requiredCount: task.requiredCount && Number.isFinite(task.requiredCount) ? Math.max(1, Math.floor(task.requiredCount)) : null,
+      linkedExternalId: task.linkedExternalId?.trim() || null,
+      status: task.status || 'requested',
+      payload: task.payload && !Array.isArray(task.payload) && typeof task.payload === 'object' ? task.payload : {},
+    };
+  });
 
 const stringifyDocumentValueEntry = (value: unknown) => {
   if (typeof value === 'string') {
@@ -683,6 +781,128 @@ const buildDocumentPhotoEvidenceSummary = (
   };
 };
 
+const buildDocumentPhotoRequirements = (
+  photoEvidence: DocumentPhotoEvidenceSummaryDto
+): DocumentPhotoRequirementDto[] =>
+  photoEvidence.requirements.map((item) => ({
+    requirementId: item.requirementId,
+    tagKey: item.labelKey,
+    tagName: item.labelName,
+    sourceScope: item.documentTypeKey ? 'document_type' : 'site',
+    requiredCount: item.minimumPhotoCount,
+    uploadedCount: item.matchedPhotoCount,
+    reviewPendingCount: item.reviewPendingCount,
+    missingCount: item.missingPhotoCount,
+    status: item.coverageStatus,
+    matchedPhotoIds: item.matchedPhotoIds,
+    reviewPendingPhotoIds: item.reviewPendingPhotoIds,
+  }));
+
+const mapSignRequestStatus = (
+  status: string | null | undefined,
+  expiresAt: string | null,
+  hasSignature: boolean
+): DocumentSignatureEvidenceStatus => {
+  if (hasSignature) {
+    return 'completed';
+  }
+
+  if (expiresAt) {
+    const expirationDate = new Date(expiresAt);
+
+    if (!Number.isNaN(expirationDate.getTime()) && expirationDate.getTime() < Date.now()) {
+      return 'expired';
+    }
+  }
+
+  switch ((status || '').trim().toLowerCase()) {
+    case 'signed':
+    case 'completed':
+      return 'completed';
+    case 'authenticating':
+    case 'authenticated':
+      return 'authenticating';
+    case 'expired':
+      return 'expired';
+    case 'failed':
+    case 'cancelled':
+    case 'canceled':
+    case 'rejected':
+      return 'failed';
+    case 'pending':
+    case 'requested':
+    case 'sent':
+    default:
+      return 'pending';
+  }
+};
+
+const getSignerName = (signerInfo: Record<string, unknown> | null | undefined) => {
+  const name = typeof signerInfo?.name === 'string' ? signerInfo.name.trim() : '';
+  const displayName = typeof signerInfo?.displayName === 'string' ? signerInfo.displayName.trim() : '';
+
+  return name || displayName || null;
+};
+
+const getSignerPhoneNumber = (signerInfo: Record<string, unknown> | null | undefined) => {
+  const phoneNumber = typeof signerInfo?.phoneNumber === 'string' ? signerInfo.phoneNumber.replace(/[^0-9]/g, '') : '';
+  const phone_number = typeof signerInfo?.phone_number === 'string' ? signerInfo.phone_number.replace(/[^0-9]/g, '') : '';
+
+  return phoneNumber || phone_number || null;
+};
+
+const getSignerInfoSignatureSlotKey = (signerInfo: Record<string, unknown> | null | undefined) => {
+  const signatureSlotKey = typeof signerInfo?.signatureSlotKey === 'string' ? signerInfo.signatureSlotKey.trim() : '';
+  const signature_slot_key = typeof signerInfo?.signature_slot_key === 'string' ? signerInfo.signature_slot_key.trim() : '';
+
+  return signatureSlotKey || signature_slot_key || null;
+};
+
+const isDeletedSignRequest = (signerInfo: Record<string, unknown> | null | undefined) => {
+  const deletedAt = typeof signerInfo?.deletedAt === 'string' ? signerInfo.deletedAt.trim() : '';
+  const deleted_at = typeof signerInfo?.deleted_at === 'string' ? signerInfo.deleted_at.trim() : '';
+
+  return Boolean(deletedAt || deleted_at || signerInfo?.deleted === true);
+};
+
+const isMissingSignatureSlotKeySchemaError = (error: unknown) => {
+  const message = error && typeof error === 'object' && 'message' in error ? String(error.message || '') : String(error || '');
+
+  return (
+    message.includes('signature_slot_key') &&
+    (message.includes('schema cache') || message.includes('does not exist'))
+  );
+};
+
+const buildSignatureEvidence = (
+  signRequests: DocumentSignRequestRow[],
+  signatures: DocumentSignatureRow[]
+): DocumentSignatureEvidenceDto[] => {
+  const signatureByRequestId = new Map(signatures.map((signature) => [signature.request_id, signature] as const));
+
+  return signRequests.filter((request) => !isDeletedSignRequest(request.signer_info)).map((request) => {
+    const signature = signatureByRequestId.get(request.id) || null;
+    const storedSlotKey = request.signature_slot_key?.trim() || getSignerInfoSignatureSlotKey(request.signer_info);
+    const slotKey = storedSlotKey || `request:${request.id}`;
+
+    return {
+      slotKey,
+      label: storedSlotKey || '서명 요청',
+      signerRoleName: storedSlotKey || '서명자',
+      required: true,
+      requestId: request.id,
+      status: mapSignRequestStatus(request.status, request.expiration_date, Boolean(signature?.signed_at)),
+      signerMemberId: signature?.signer_id || null,
+      signerName: getSignerName(request.signer_info),
+      signerPhoneNumber: getSignerPhoneNumber(request.signer_info),
+      requestedAt: request.created_at || null,
+      signedAt: signature?.signed_at || null,
+      expiresAt: request.expiration_date || null,
+      signatureImagePath: signature?.signature_image_path || null,
+    };
+  });
+};
+
 type StorageObjectRef = {
   bucket: string | null;
   path: string | null;
@@ -745,6 +965,153 @@ class DocumentDetailQueryError extends Error {
 }
 
 export const DocumentService = {
+  async saveDocumentRequestTasks(
+    documentId: string,
+    params: DocumentRequestTaskSaveInput
+  ): Promise<DocumentRequestTaskSaveResult> {
+    const normalizedDocumentId = documentId.trim();
+    const normalizedAssigneeMemberId = params.assigneeMemberId.trim();
+    const normalizedRequestLinkId = params.requestLinkId?.trim() || null;
+    const tasks = sanitizeDocumentRequestTasks(params.tasks);
+
+    if (!normalizedDocumentId) {
+      throw new Error('요청 작업 저장 실패: documentId가 필요합니다.');
+    }
+
+    if (!normalizedAssigneeMemberId) {
+      throw new Error('요청 작업 저장 실패: assigneeMemberId가 필요합니다.');
+    }
+
+    if (tasks.length === 0) {
+      throw new Error('요청 작업 저장 실패: tasks가 최소 1개 필요합니다.');
+    }
+
+    const documentsClient = documentsSchema();
+
+    if (normalizedRequestLinkId) {
+      const { error: deleteError } = await documentsClient
+        .from('document_request_tasks')
+        .delete()
+        .eq('document_id', normalizedDocumentId)
+        .eq('request_link_id', normalizedRequestLinkId);
+
+      if (deleteError) {
+        throw new Error(`요청 작업 저장 실패: 기존 작업 정리 중 오류가 발생했습니다. (${deleteError.message})`);
+      }
+    }
+
+    const { data, error } = await documentsClient
+      .from('document_request_tasks')
+      .insert(
+        tasks.map((task) => ({
+          document_id: normalizedDocumentId,
+          request_link_id: normalizedRequestLinkId,
+          assignee_member_id: normalizedAssigneeMemberId,
+          task_kind: task.kind,
+          target_key: task.targetKey,
+          target_label: task.targetLabel,
+          value_key: task.valueKey,
+          slot_key: task.slotKey,
+          frame_group_id: task.frameGroupId,
+          required_count: task.requiredCount,
+          linked_external_id: task.linkedExternalId,
+          status: task.status,
+          payload: task.payload,
+        }))
+      )
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      throw new Error(`요청 작업 저장 실패: ${error.message}`);
+    }
+
+    return {
+      tasks: ((data || []) as DocumentRequestTaskRow[]).map(toDocumentRequestTaskDto),
+    };
+  },
+
+  async listDocumentRequestTasks(query: {
+    documentId?: string | null;
+    requestLinkId?: string | null;
+  }): Promise<DocumentRequestTaskDto[]> {
+    const normalizedDocumentId = query.documentId?.trim() || '';
+    const normalizedRequestLinkId = query.requestLinkId?.trim() || '';
+
+    if (!normalizedDocumentId && !normalizedRequestLinkId) {
+      throw new Error('요청 작업 조회 실패: documentId 또는 requestLinkId가 필요합니다.');
+    }
+
+    let builder = documentsSchema()
+      .from('document_request_tasks')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (normalizedDocumentId) {
+      builder = builder.eq('document_id', normalizedDocumentId);
+    }
+
+    if (normalizedRequestLinkId) {
+      builder = builder.eq('request_link_id', normalizedRequestLinkId);
+    }
+
+    const { data, error } = await builder;
+
+    if (error) {
+      throw new Error(`요청 작업 조회 실패: ${error.message}`);
+    }
+
+    return ((data || []) as DocumentRequestTaskRow[]).map(toDocumentRequestTaskDto);
+  },
+
+  async updateDocumentRequestTask(
+    documentId: string,
+    taskId: string,
+    params: DocumentRequestTaskUpdateInput
+  ): Promise<DocumentRequestTaskDto> {
+    const normalizedDocumentId = documentId.trim();
+    const normalizedTaskId = taskId.trim();
+    const updates: Partial<DocumentRequestTaskRow> = {};
+
+    if (!normalizedDocumentId) {
+      throw new Error('요청 작업 수정 실패: documentId가 필요합니다.');
+    }
+
+    if (!normalizedTaskId) {
+      throw new Error('요청 작업 수정 실패: taskId가 필요합니다.');
+    }
+
+    if (params.status) {
+      updates.status = params.status;
+    }
+
+    if ('linkedExternalId' in params) {
+      updates.linked_external_id = params.linkedExternalId?.trim() || null;
+    }
+
+    if (params.payload) {
+      updates.payload = params.payload;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      throw new Error('요청 작업 수정 실패: 수정할 값이 없습니다.');
+    }
+
+    const { data, error } = await documentsSchema()
+      .from('document_request_tasks')
+      .update(updates)
+      .eq('document_id', normalizedDocumentId)
+      .eq('id', normalizedTaskId)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      throw new Error(`요청 작업 수정 실패: ${error?.message || '작업을 찾을 수 없습니다.'}`);
+    }
+
+    return toDocumentRequestTaskDto(data as DocumentRequestTaskRow);
+  },
+
   async createDocument(params: DocumentCreateInput): Promise<DocumentCreateResult> {
     if (!params.siteId.trim()) {
       throw new Error('문서 저장 실패: siteId가 필요합니다.');
@@ -1041,13 +1408,16 @@ export const DocumentService = {
             queryDebug.photoEvidence = `사진 증빙 상태 조회 중 오류가 발생했습니다. (${
               photoGapSummaryResponse.reason instanceof Error ? photoGapSummaryResponse.reason.message : 'unknown'
             })`;
+            queryDebug.photoRequirements = queryDebug.photoEvidence;
             return buildDocumentPhotoEvidenceSummary([]);
           })();
+    const photoRequirements = buildDocumentPhotoRequirements(photoEvidence);
     const latestVersion = document.current_version_id
       ? versions.find((item) => item.id === document.current_version_id) || versions[0] || null
       : versions[0] || null;
     const effectiveVersionId = latestVersion?.id || document.current_version_id || null;
     let valueFiles: DocumentValueFileDto[] = [];
+    let signatureEvidence: DocumentSignatureEvidenceDto[] = [];
 
     if (effectiveVersionId) {
       const { data: valueFilesData, error: valueFilesError } = await documentsClient
@@ -1063,6 +1433,48 @@ export const DocumentService = {
       } else {
         valueFiles = ((valueFilesData || []) as DocumentValueFileRow[]).map(toDocumentValueFileDto);
       }
+    }
+
+    const signRequestsResponse = await signingSchema(client)
+      .from('sign_requests')
+      .select('id, document_id, signature_slot_key, signer_info, status, expiration_date, created_at, updated_at')
+      .eq('document_id', document.id)
+      .order('created_at', { ascending: false });
+    let signRequestsData = signRequestsResponse.data as unknown[] | null;
+    let signRequestsError = signRequestsResponse.error;
+
+    if (signRequestsError && isMissingSignatureSlotKeySchemaError(signRequestsError)) {
+      const fallbackSignRequestsResponse = await signingSchema(client)
+        .from('sign_requests')
+        .select('id, document_id, signer_info, status, expiration_date, created_at, updated_at')
+        .eq('document_id', document.id)
+        .order('created_at', { ascending: false });
+
+      signRequestsData = fallbackSignRequestsResponse.data as unknown[] | null;
+      signRequestsError = fallbackSignRequestsResponse.error;
+    }
+
+    if (signRequestsError) {
+      queryDebug.signatureEvidence = `서명 요청 상태 조회 중 오류가 발생했습니다. (${signRequestsError.message})`;
+    } else {
+      const signRequests = ((signRequestsData || []) as DocumentSignRequestRow[]).filter((request) => request.id);
+      const signRequestIds = signRequests.map((request) => request.id);
+      let signatures: DocumentSignatureRow[] = [];
+
+      if (signRequestIds.length > 0) {
+        const { data: signaturesData, error: signaturesError } = await signingSchema(client)
+          .from('signatures')
+          .select('id, request_id, signature_image_path, signer_id, signed_at')
+          .in('request_id', signRequestIds);
+
+        if (signaturesError) {
+          queryDebug.signatureEvidence = `서명 완료 상태 조회 중 오류가 발생했습니다. (${signaturesError.message})`;
+        } else {
+          signatures = (signaturesData || []) as DocumentSignatureRow[];
+        }
+      }
+
+      signatureEvidence = buildSignatureEvidence(signRequests, signatures);
     }
 
     let linkedTemplate: DocumentLinkedTemplateDto | null = null;
@@ -1116,14 +1528,23 @@ export const DocumentService = {
       }
     }
 
-    if (Object.keys(queryDebug).length > 0) {
+    const blockingQueryDebug = {
+      versions: queryDebug.versions,
+      artifacts: queryDebug.artifacts,
+      valueFiles: queryDebug.valueFiles,
+      photoEvidence: queryDebug.photoEvidence,
+      templateLink: queryDebug.templateLink,
+      valueEntries: queryDebug.valueEntries,
+    };
+
+    if (Object.values(blockingQueryDebug).some((message) => Boolean(message))) {
       const failureSummary = [
-        queryDebug.versions ? '버전' : null,
-        queryDebug.artifacts ? '출력본' : null,
-        queryDebug.valueFiles ? '첨부 파일' : null,
-        queryDebug.photoEvidence ? '사진 증빙' : null,
-        queryDebug.templateLink ? '템플릿 연결' : null,
-        queryDebug.valueEntries ? '문서 값' : null,
+        blockingQueryDebug.versions ? '버전' : null,
+        blockingQueryDebug.artifacts ? '출력본' : null,
+        blockingQueryDebug.valueFiles ? '첨부 파일' : null,
+        blockingQueryDebug.photoEvidence ? '사진 증빙' : null,
+        blockingQueryDebug.templateLink ? '템플릿 연결' : null,
+        blockingQueryDebug.valueEntries ? '문서 값' : null,
       ]
         .filter(Boolean)
         .join(', ');
@@ -1144,6 +1565,8 @@ export const DocumentService = {
       templateLink,
       linkedTemplate,
       photoEvidence,
+      signatureEvidence,
+      photoRequirements,
       queryDebug,
     };
   },

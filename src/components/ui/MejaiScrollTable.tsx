@@ -29,6 +29,7 @@ export type MejaiScrollTableRow = {
   ariaLabel?: string;
   className?: string;
   onClick?: () => void;
+  expandedContent?: React.ReactNode;
 };
 
 type MejaiScrollTableProps = {
@@ -254,7 +255,7 @@ export function MejaiScrollTable({
     });
   }, []);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     updateScrollHintState();
     updateLayoutMetrics();
 
@@ -425,7 +426,7 @@ export function MejaiScrollTable({
       <div
         data-mejai-scroll-left="1"
         className={cn(
-          'pointer-events-none absolute bottom-0 left-0 top-0 z-10 flex items-center bg-gradient-to-r from-[rgba(255,255,255,0.92)] to-transparent pl-1 pr-1.5 transition-opacity duration-200',
+          'pointer-events-none absolute bottom-0 left-0 top-0 z-10 flex items-center bg-gradient-to-r from-[rgba(255,255,255,0.92)] to-transparent pl-1 pr-1.5',
           canScrollLeft ? 'opacity-100' : 'opacity-0'
         )}
       >
@@ -435,7 +436,7 @@ export function MejaiScrollTable({
       <div
         data-mejai-scroll-right="1"
         className={cn(
-          'pointer-events-none absolute bottom-0 right-0 top-0 z-10 flex items-center bg-gradient-to-l from-[rgba(255,255,255,0.92)] to-transparent pl-1.5 pr-1 transition-opacity duration-200',
+          'pointer-events-none absolute bottom-0 right-0 top-0 z-10 flex items-center bg-gradient-to-l from-[rgba(255,255,255,0.92)] to-transparent pl-1.5 pr-1',
           canScrollRight ? 'opacity-100' : 'opacity-0'
         )}
         style={stickyRightOffsetPx > 0 ? { right: stickyRightOffsetPx } : undefined}
@@ -549,14 +550,13 @@ export function MejaiScrollTable({
                   );
 
                   const sharedClassName = cn(
-                    row.onClick ? 'group cursor-pointer transition-colors hover:bg-slate-50' : '',
+                    row.onClick ? 'group cursor-pointer hover:bg-slate-50' : '',
                     row.selected ? 'bg-slate-50' : 'bg-transparent',
                     row.disabled ? 'pointer-events-none opacity-60' : '',
                     row.className
                   );
 
-                  if (row.onClick) {
-                    return (
+                  const renderedRow = row.onClick ? (
                       <tr
                         key={row.key}
                         role="button"
@@ -582,13 +582,28 @@ export function MejaiScrollTable({
                       >
                         {content}
                       </tr>
-                    );
-                  }
-
-                  return (
+                    ) : (
                     <tr key={row.key} aria-label={row.ariaLabel} title={row.title} className={sharedClassName}>
                       {content}
                     </tr>
+                  );
+
+                  if (!row.expandedContent) {
+                    return renderedRow;
+                  }
+
+                  return (
+                    <React.Fragment key={`${row.key}:expanded`}>
+                      {renderedRow}
+                      <tr className={row.selected ? 'bg-slate-50' : 'bg-transparent'}>
+                        <td
+                          colSpan={columns.length + (showIndexColumn ? 1 : 0)}
+                          className="border-b border-slate-200 px-2 py-2"
+                        >
+                          {row.expandedContent}
+                        </td>
+                      </tr>
+                    </React.Fragment>
                   );
                 })
               ) : (

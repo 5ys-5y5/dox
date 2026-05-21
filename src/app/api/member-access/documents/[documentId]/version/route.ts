@@ -10,6 +10,8 @@ type RouteContext = {
   }>;
 };
 
+const normalizePhoneNumberParam = (value: string | null) => String(value || '').replace(/[^0-9]/g, '').trim();
+
 const readRequiredMemberSession = async () => {
   const cookieStore = await cookies();
   const session = readMemberAccessSessionToken(cookieStore.get(MEMBER_ACCESS_SESSION_COOKIE_NAME)?.value);
@@ -24,8 +26,17 @@ const readRequiredMemberSession = async () => {
 export async function POST(request: Request, context: RouteContext) {
   try {
     const { documentId } = await context.params;
+    const url = new URL(request.url);
+    const requestedPhoneNumber = normalizePhoneNumberParam(url.searchParams.get('phoneNumber') || url.searchParams.get('phone'));
     const session = await readRequiredMemberSession();
     const access = await MemberAccessService.getMemberDocumentAccess(session.memberId, documentId, session.authenticatedAt);
+
+    if (requestedPhoneNumber && normalizePhoneNumberParam(access.member.phoneNumber) !== requestedPhoneNumber) {
+      return NextResponse.json(
+        { success: false, message: '이 링크는 다른 구성원 번호로 저장할 수 없습니다. 링크에 표시된 휴대폰 번호로 다시 인증해 주세요.' },
+        { status: 401 }
+      );
+    }
 
     if (access.accessRole !== 'editor') {
       return NextResponse.json({ success: false, message: '이 문서는 편집 권한이 없습니다.' }, { status: 403 });

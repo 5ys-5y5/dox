@@ -1,5 +1,6 @@
 import type {
   DocumentLinkedTemplateDto,
+  DocumentRequestTaskDto,
   DocumentTemplateLinkDto,
   DocumentValueEntryDto,
   DocumentValueFileDto,
@@ -65,6 +66,7 @@ export type RequestLinkPublicViewDto = {
   oneTimeUse: boolean;
   recipientName: string | null;
   allowedLabels: string[];
+  requestTasks: DocumentRequestTaskDto[];
   documentSummary: RequestLinkDocumentSummaryDto;
 };
 

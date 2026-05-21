@@ -1,0 +1,1 @@
+ABSENT before DOCFUNC-06 owner module; file introduced by owner module implementation.

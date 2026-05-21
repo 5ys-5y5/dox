@@ -356,7 +356,10 @@ export const RequestLinkService = {
     const currentStatus =
       requestLink.status === 'active' && isExpired(requestLink.expires_at) ? 'expired' : requestLink.status;
 
-    const detail = await DocumentService.getDocumentDetail(requestLink.document_id);
+    const [detail, requestTasks] = await Promise.all([
+      DocumentService.getDocumentDetail(requestLink.document_id),
+      DocumentService.listDocumentRequestTasks({ requestLinkId: requestLink.id }).catch(() => []),
+    ]);
     const latestVersion = detail.latestVersion;
     const allowedLabelValues = (requestLink.allowed_labels || []).reduce<Record<string, unknown>>((acc, labelKey) => {
       acc[labelKey] = latestVersion?.labelValues?.[labelKey] ?? null;
@@ -370,6 +373,7 @@ export const RequestLinkService = {
       oneTimeUse: requestLink.one_time_use,
       recipientName: requestLink.recipient_name,
       allowedLabels: requestLink.allowed_labels || [],
+      requestTasks,
       documentSummary: {
         documentId: detail.document.id,
         title: detail.document.title,

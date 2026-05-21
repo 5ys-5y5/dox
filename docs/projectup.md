@@ -1,15 +1,32 @@
-# Project Page Evidence Upgrade Design
+# Project Page Checklist Upgrade Design
+
+## 2026-05-21 구현 방향 변경
+
+`선택한 문서 상세`은 사용자 작업 화면으로 쓰지 않는다. 문서의 정상 상태를 확인하는 진단 정보는 `현장 문서` 목록의 `문서 상태` 컬럼을 눌렀을 때 해당 문서 행 하단에 표시한다.
+
+오른쪽 영역은 `선택 문서 체크 리스트`로 변경한다. 이 영역은 문서별로 실제 처리해야 하는 작업만 보여준다.
+
+- 문서 상태 진단: 문서 기본 정보, 본문, 양식 연결, 저장 값 존재 여부, 첨부파일 존재 여부, 서명 상자 존재 여부, 사진 증빙 요구 존재 여부, 버전 이력, 출력본 상태를 확인한다.
+- 문서 상태 진단 리스트에서는 서명/사진 하위 리스트를 펼치지 않는다.
+- 선택 문서 체크 리스트: 서명, 첨부파일, 사진 증빙, 문서에 기록된 값을 작업 항목으로 통합 출력한다.
+- 선택 문서 체크 리스트는 `서명 요청`, `필수 사진`, `필수 파일`, `기록 값` 탭으로 분리한다.
+- `서명 요청` 탭에서는 서명해야 하는 상자와 서명자를 정한다.
+- `필수 사진` 탭에서는 받아야 하는 사진 태그와 필수 수량을 정한다.
+- `필수 파일` 탭에서는 받아야 하는 파일명 조건과 필수 수량을 정한다.
+- `기록 값` 탭에서는 문서 입력 상자별 값 충족 여부를 확인한다.
+- 기존 `선택한 문서 상세` 안에서 서명/사진을 클릭 확장하던 구조는 제거한다.
 
 ## 목적
 
-`/project` 페이지의 `사진·서명` 영역을 독립 탭/섹션에서 제거하고, `선택한 문서 상세` 안에서 문서별 증빙 상태로 관리한다. 사용자는 문서를 선택한 뒤 문서 상세의 특정 행을 클릭해 해당 문서에 필요한 서명 요청과 필수 사진 등록 상태를 확인하고 추가할 수 있어야 한다.
+`/project` 페이지의 `사진·서명` 영역을 독립 탭/섹션에서 제거하고, 문서 상태 진단과 사용자 작업 체크리스트를 분리한다. 사용자는 `현장 문서`의 `문서 상태` 컬럼으로 문서 정상 여부를 확인하고, 오른쪽 `선택 문서 체크 리스트`에서 서명, 첨부파일, 사진 증빙, 기록 값의 진행 상태를 확인한다.
 
 핵심 원칙은 다음과 같다.
 
-- 사진과 서명은 현장 전체 목록이 아니라 선택한 문서의 증빙 상태로 표시한다.
-- `문서에 기록된 값` 행은 서명 요청/서명 상태 리스트를 연다.
-- `사진 증빙 상태` 행은 문서별 필수 사진 리스트를 연다.
-- `+` 버튼은 해당 행의 하위 리스트 안에서만 제공한다.
+- 사진과 서명은 선택 문서 체크 리스트의 작업 항목으로 표시한다.
+- `문서에 기록된 값`은 체크리스트의 기록 값 유형으로 표시한다.
+- `서명`은 서명 상자가 없어도 숨기지 않고 `서명 상자 없음`으로 표시한다.
+- `사진 증빙 상태`는 체크리스트의 사진 증빙 유형으로 표시한다.
+- `문서 상태` 진단 리스트는 하위 리스트를 열지 않는다.
 - 구성원 문서 권한은 `보기`, `편집`, `서명`을 모두 지원한다.
 - 수정 범위는 아래 화이트리스트에 있는 파일과 API로 제한한다.
 
@@ -49,6 +66,7 @@
 - 문서 본문
 - 문서 양식 연결
 - 문서에 기록된 값
+- 서명
 - 첨부 파일
 - 사진 증빙 상태
 - 버전 이력
@@ -56,7 +74,7 @@
 
 행 클릭 동작:
 
-- `문서에 기록된 값` 클릭: 아래에 `서명` 리스트 확장
+- `서명` 클릭: 아래에 `서명` 리스트 확장
 - `사진 증빙 상태` 클릭: 아래에 `필수 사진` 리스트 확장
 - 같은 행을 다시 클릭하면 접기
 - 다른 확장 가능 행을 클릭하면 기존 확장을 닫고 새 리스트 열기
@@ -65,7 +83,7 @@
 
 ### 표시 위치
 
-`선택한 문서 상세 > 문서에 기록된 값` 행 아래에 출력한다.
+`선택한 문서 상세 > 서명` 행 아래에 출력한다.
 
 ### 표시 조건
 
@@ -119,7 +137,7 @@
 
 관리 권한:
 
-- 현장 `소유자`, `관리자`만 서명 요청 생성/취소/재요청 가능
+- 현장 `관리자`만 서명 요청 생성/취소/재요청 가능
 - 참여자는 본인에게 배정된 서명 요청만 처리 가능
 
 ## 필수 사진 설계
@@ -201,7 +219,6 @@ document_photo_requirements
 
 ### 현장 권한
 
-- 소유자
 - 관리자
 - 참여자
 
@@ -310,47 +327,49 @@ type DocumentPhotoRequirementDto = {
 
 ### 1. 구성원 권한
 
-- [ ] `ManagedDocumentMemberAccessRole`에 `signer` 추가
-- [ ] 문서 권한 옵션에 `서명` 추가
-- [ ] `DOCUMENT_MEMBER_ROLE_LABELS.signer`를 `서명`으로 변경
-- [ ] `getManagedDocumentMemberRole()`에서 `signer`를 유지
-- [ ] `memberAccessService.normalizeDocumentMemberAccessRole()`에서 `signer -> viewer` 정규화 제거
-- [ ] 구성원 초대 폼에서 문서 권한 `서명` 선택 가능
-- [ ] 기존 구성원 문서 권한 수정 리스트에서 `서명` 선택 가능
+- [x] `ManagedDocumentMemberAccessRole`에 `signer` 추가
+- [x] 문서 권한 옵션에 `서명` 추가
+- [x] `DOCUMENT_MEMBER_ROLE_LABELS.signer`를 `서명`으로 변경
+- [x] `getManagedDocumentMemberRole()`에서 `signer`를 유지
+- [x] `memberAccessService.normalizeDocumentMemberAccessRole()`에서 `signer -> viewer` 정규화 제거
+- [x] 구성원 초대 폼에서 문서 권한 `서명` 선택 가능
+- [x] 기존 구성원 문서 권한 수정 리스트에서 `서명` 선택 가능
 - [ ] `서명` 권한자의 `/member-access/document/[documentId]` 접근은 read mode + 서명 요청만 허용하도록 후속 연결
 
 ### 2. `/project` 화면 구조
 
-- [ ] 왼쪽 카드 제목을 `현장 문서 · 구성원`으로 변경
-- [ ] 왼쪽 카드 설명에서 `사진·서명` 제거
-- [ ] 왼쪽 `사진·서명` 섹션 제거
-- [ ] `selectedDetailPanel === 'photo'` 흐름 제거 또는 선택 문서 상세 확장 흐름으로 대체
-- [ ] `photoRows`가 더 이상 왼쪽 독립 리스트에 직접 쓰이지 않는지 확인
+- [x] 왼쪽 카드 제목을 `현장 문서 · 구성원`으로 변경
+- [x] 왼쪽 카드 설명에서 `사진·서명` 제거
+- [x] 왼쪽 `사진·서명` 섹션 제거
+- [x] `selectedDetailPanel === 'photo'` 흐름 제거 또는 선택 문서 상세 확장 흐름으로 대체
+- [x] `photoRows`가 더 이상 왼쪽 독립 리스트에 직접 쓰이지 않는지 확인
 
 ### 3. 선택 문서 상세 확장
 
-- [ ] `selectedDocumentDetailExpandedRow` 상태 추가
-- [ ] `문서에 기록된 값` 행 클릭 시 `signature` 확장
-- [ ] `사진 증빙 상태` 행 클릭 시 `photoRequirements` 확장
-- [ ] 확장 가능한 행에 시각적 표시 추가
-- [ ] 확장 리스트는 기존 `ProjectInfoList` UI와 동일한 리스트 패턴 유지
+- [x] `selectedDocumentDetailExpandedRow` 상태 추가
+- [x] `문서에 기록된 값`과 `서명` 행 분리
+- [x] `서명` 행 클릭 시 `signature` 확장
+- [x] 서명 상자가 없어도 `서명` 행을 유지하고 `서명 상자 없음` 표시
+- [x] `사진 증빙 상태` 행 클릭 시 `photoRequirements` 확장
+- [x] 확장 가능한 행에 시각적 표시 추가
+- [x] 확장 리스트는 기존 `ProjectInfoList` UI와 동일한 리스트 패턴 유지
 
 ### 4. 서명 리스트
 
-- [ ] `selectedDocumentSignatureRows` 계산 추가
+- [x] `selectedDocumentSignatureRows` 계산 추가
 - [ ] 서명 슬롯 판별 로직 추가
 - [ ] `DocumentDetailResult.signatureEvidence`가 없을 때도 템플릿/값 기준으로 `요청 전` 표시
-- [ ] `+ 서명 요청` 버튼 추가
+- [x] `+ 서명 요청` 버튼 추가
 - [ ] 구성원 선택 모달/인라인 폼 추가
 - [ ] 구성원에 없으면 구성원 추가 + 문서 권한 `서명` 부여
 - [ ] 서명 요청 생성 후 문서 상세 재조회
 
 ### 5. 필수 사진 리스트
 
-- [ ] `selectedDocumentPhotoRequirementRows` 계산 추가
-- [ ] `photoEvidence.requirements`를 문서용 필수 사진 리스트로 변환
-- [ ] 문서별 요구사항 DTO가 추가되면 `photoRequirements`를 우선 사용
-- [ ] `+ 필수 사진` 버튼 추가
+- [x] `selectedDocumentPhotoRequirementRows` 계산 추가
+- [x] `photoEvidence.requirements`를 문서용 필수 사진 리스트로 변환
+- [x] 문서별 요구사항 DTO가 추가되면 `photoRequirements`를 우선 사용
+- [x] `+ 필수 사진` 버튼 추가
 - [ ] 사진 태그 선택/생성 UI 추가
 - [ ] 필수 수량 입력 추가
 - [ ] 적용 범위 선택 추가
@@ -358,13 +377,13 @@ type DocumentPhotoRequirementDto = {
 
 ### 6. DTO/API
 
-- [ ] `src/lib/documentDtos.ts`에 `DocumentSignatureEvidenceDto` 추가
-- [ ] `src/lib/documentDtos.ts`에 `DocumentPhotoRequirementDto` 추가
-- [ ] `DocumentDetailResult`에 `signatureEvidence`, `photoRequirements` 추가
-- [ ] `DocumentService.getDocumentDetail()`에서 서명 요청/서명 결과 조회
-- [ ] `DocumentService.getDocumentDetail()`에서 문서별 필수 사진 요구사항 조회
-- [ ] API 실패 시 `queryDebug.signatureEvidence`, `queryDebug.photoRequirements` 추가
-- [ ] 기존 응답 필드와 호환 유지
+- [x] `src/lib/documentDtos.ts`에 `DocumentSignatureEvidenceDto` 추가
+- [x] `src/lib/documentDtos.ts`에 `DocumentPhotoRequirementDto` 추가
+- [x] `DocumentDetailResult`에 `signatureEvidence`, `photoRequirements` 추가
+- [x] `DocumentService.getDocumentDetail()`에서 서명 요청/서명 결과 조회
+- [x] `DocumentService.getDocumentDetail()`에서 문서별 필수 사진 요구사항 조회
+- [x] API 실패 시 `queryDebug.signatureEvidence`, `queryDebug.photoRequirements` 추가
+- [x] 기존 응답 필드와 호환 유지
 
 ### 7. 사진 태그
 
