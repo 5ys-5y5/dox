@@ -6,6 +6,7 @@ import type { TemplateEditWorkspaceProps } from '../../components/template/works
 import {
   applyCanvasOwnerSettingsToWorkspaceProps,
   normalizeCanvasWorkspaceMode,
+  type CanvasOwnerAccessRole,
   type CanvasOwnerSettings,
   type CanvasOwnerSettingKey,
   type CanvasOwnerSettingSource,
@@ -27,6 +28,7 @@ export type CanvasOwnerSurface =
 type CanvasOwnedWorkspaceProps = TemplateEditWorkspaceProps & {
   surface: CanvasOwnerSurface;
   applyStoredCanvasOwnerSettings?: boolean;
+  canvasAccessRole?: CanvasOwnerAccessRole;
   canvasOwnerSettings?: CanvasOwnerSettings | null;
   canvasOwnerSettingSources?: Record<CanvasOwnerSettingKey, CanvasOwnerSettingSource>;
 };
@@ -49,7 +51,7 @@ const CANVAS_SURFACE_POLICIES: Record<CanvasOwnerSurface, CanvasSurfacePolicy> =
     allowedModes: ['document', 'read'],
   },
   project: {
-    allowedModes: ['document'],
+    allowedModes: ['document', 'read'],
   },
   'request-links': {
     allowedModes: ['document', 'read'],
@@ -127,7 +129,7 @@ const resolveCanvasOwnedWorkspaceProps = ({
   canvasOwnerSettings,
   canvasOwnerSettingSources,
   ...props
-}: CanvasOwnedWorkspaceProps): TemplateEditWorkspaceProps => {
+}: Omit<CanvasOwnedWorkspaceProps, 'canvasAccessRole'>): TemplateEditWorkspaceProps => {
   const normalizedWorkspaceMode = resolveCanvasWorkspaceMode(workspaceMode);
   const normalizedProps: TemplateEditWorkspaceProps = {
     ...props,
@@ -160,9 +162,11 @@ export function CanvasOwnedWorkspace({
   canvasOwnerSettingSources: explicitCanvasOwnerSettingSources,
   ...workspaceProps
 }: CanvasOwnedWorkspaceProps) {
+  const { canvasAccessRole, ...ownedWorkspaceProps } = workspaceProps;
   const storedCanvasOwnerSettings = useStoredCanvasOwnerSettings({
-    pageId: workspaceProps.surface,
-    workspaceMode: normalizeCanvasWorkspaceMode(workspaceProps.workspaceMode),
+    pageId: ownedWorkspaceProps.surface,
+    workspaceMode: normalizeCanvasWorkspaceMode(ownedWorkspaceProps.workspaceMode),
+    accessRole: canvasAccessRole,
   });
   const canvasOwnerSettings =
     explicitCanvasOwnerSettings ??
@@ -178,7 +182,7 @@ export function CanvasOwnedWorkspace({
   return (
     <TemplateEditWorkspace
       {...resolveCanvasOwnedWorkspaceProps({
-        ...workspaceProps,
+        ...ownedWorkspaceProps,
         canvasOwnerSettings,
         canvasOwnerSettingSources,
       })}

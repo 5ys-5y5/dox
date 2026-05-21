@@ -28,6 +28,9 @@ export const canvasAccessRoleLabels: Record<CanvasAccessRole, string> = {
   signer: '서명 권한자',
 };
 
+export const normalizeCanvasAccessRole = (value: string | null | undefined): CanvasAccessRole =>
+  canvasAccessRoles.includes(value as CanvasAccessRole) ? (value as CanvasAccessRole) : 'editor';
+
 export const defaultCanvasAccessRolePolicies: Record<CanvasAccessRole, CanvasAccessRolePolicy> = {
   editor: {
     accessMode: 'edit',
@@ -308,4 +311,3 @@ export const resolveEffectiveCanvasAccessMode = (
   role: CanvasAccessRole,
   policy: CanvasAccessRolePolicy
 ): CanvasAccessMode => (role === 'editor' && policy.accessMode === 'edit' ? 'edit' : 'view');
-

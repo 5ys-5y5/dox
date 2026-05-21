@@ -8,6 +8,7 @@ import type {
 } from '../../components/template/workspace/types';
 
 export type CanvasWorkspaceMode = NonNullable<TemplateEditWorkspaceProps['workspaceMode']>;
+export type CanvasOwnerAccessRole = 'editor' | 'viewer' | 'signer';
 
 export type CanvasOwnerSettings = {
   hideHeader: boolean;
@@ -58,16 +59,22 @@ export type CanvasOwnerSettings = {
 };
 
 export type CanvasOwnerSettingKey = keyof CanvasOwnerSettings;
-export type CanvasOwnerSettingSource = 'default' | 'mode' | 'page';
+export type CanvasOwnerSettingSource = 'default' | 'mode' | 'role-mode' | 'page' | 'page-role';
 export type CanvasOwnerSettingsOverrides = Partial<CanvasOwnerSettings>;
 export type CanvasOwnerSettingsStore = {
-  version: 2;
+  version: 3;
   modeSettings: Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>;
+  roleModeSettings: Partial<Record<CanvasOwnerAccessRole, Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>>>;
   pageSettings: Record<string, Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>>;
+  pageRoleSettings: Record<
+    string,
+    Partial<Record<CanvasOwnerAccessRole, Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>>>
+  >;
 };
 export type CanvasOwnerSettingsContext = {
   pageId?: string;
   workspaceMode: CanvasWorkspaceMode;
+  accessRole?: CanvasOwnerAccessRole;
 };
 
 export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
@@ -122,6 +129,7 @@ export const CANVAS_OWNER_SETTINGS_STORAGE_KEY = 'mejai.canvas.ownerSettings.v1'
 const CANVAS_OWNER_SETTINGS_EVENT_NAME = 'mejai:canvas-owner-settings-changed';
 export const canvasOwnerSettingKeys = Object.keys(defaultCanvasOwnerSettings) as CanvasOwnerSettingKey[];
 const canvasWorkspaceModes: CanvasWorkspaceMode[] = ['template', 'document', 'read'];
+const canvasOwnerAccessRoles: CanvasOwnerAccessRole[] = ['editor', 'viewer', 'signer'];
 const hasOwn = (value: object, key: PropertyKey) => Object.prototype.hasOwnProperty.call(value, key);
 const normalizeCanvasCssSizeSetting = (value: unknown, fallback = '') =>
   typeof value === 'string' ? value.trim().slice(0, 80) : fallback;
@@ -180,9 +188,11 @@ export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSetting
 };
 
 export const createEmptyCanvasOwnerSettingsStore = (): CanvasOwnerSettingsStore => ({
-  version: 2,
+  version: 3,
   modeSettings: {},
+  roleModeSettings: {},
   pageSettings: {},
+  pageRoleSettings: {},
 });
 
 export const normalizeCanvasOwnerSettingsOverrides = (value: unknown): CanvasOwnerSettingsOverrides => {
@@ -222,11 +232,13 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as {
           modeSettings?: unknown;
+          roleModeSettings?: unknown;
           pageSettings?: unknown;
+          pageRoleSettings?: unknown;
         })
       : null;
 
-  if (!candidate || (!candidate.modeSettings && !candidate.pageSettings)) {
+  if (!candidate || (!candidate.modeSettings && !candidate.roleModeSettings && !candidate.pageSettings && !candidate.pageRoleSettings)) {
     const legacyOverrides = normalizeCanvasOwnerSettingsOverrides(value);
 
     if (Object.keys(legacyOverrides).length === 0) {
@@ -234,13 +246,15 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     }
 
     return {
-      version: 2,
+      version: 3,
       modeSettings: {
         template: { ...legacyOverrides },
         document: { ...legacyOverrides },
         read: { ...legacyOverrides },
       },
+      roleModeSettings: {},
       pageSettings: {},
+      pageRoleSettings: {},
     };
   }
 
@@ -252,14 +266,47 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     candidate.pageSettings && typeof candidate.pageSettings === 'object' && !Array.isArray(candidate.pageSettings)
       ? (candidate.pageSettings as Record<string, unknown>)
       : {};
+  const roleModeSettingsCandidate =
+    candidate.roleModeSettings && typeof candidate.roleModeSettings === 'object' && !Array.isArray(candidate.roleModeSettings)
+      ? (candidate.roleModeSettings as Record<string, unknown>)
+      : {};
+  const pageRoleSettingsCandidate =
+    candidate.pageRoleSettings && typeof candidate.pageRoleSettings === 'object' && !Array.isArray(candidate.pageRoleSettings)
+      ? (candidate.pageRoleSettings as Record<string, unknown>)
+      : {};
   const modeSettings: CanvasOwnerSettingsStore['modeSettings'] = {};
+  const roleModeSettings: CanvasOwnerSettingsStore['roleModeSettings'] = {};
   const pageSettings: CanvasOwnerSettingsStore['pageSettings'] = {};
+  const pageRoleSettings: CanvasOwnerSettingsStore['pageRoleSettings'] = {};
 
   canvasWorkspaceModes.forEach((mode) => {
     const overrides = normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate[mode]);
 
     if (Object.keys(overrides).length > 0) {
       modeSettings[mode] = overrides;
+    }
+  });
+
+  canvasOwnerAccessRoles.forEach((role) => {
+    const rawRoleSettings = roleModeSettingsCandidate[role];
+
+    if (!rawRoleSettings || typeof rawRoleSettings !== 'object' || Array.isArray(rawRoleSettings)) {
+      return;
+    }
+
+    const normalizedRoleSettings: Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>> = {};
+    const roleModeSettingsByMode = rawRoleSettings as Record<string, unknown>;
+
+    canvasWorkspaceModes.forEach((mode) => {
+      const overrides = normalizeCanvasOwnerSettingsOverrides(roleModeSettingsByMode[mode]);
+
+      if (Object.keys(overrides).length > 0) {
+        normalizedRoleSettings[mode] = overrides;
+      }
+    });
+
+    if (Object.keys(normalizedRoleSettings).length > 0) {
+      roleModeSettings[role] = normalizedRoleSettings;
     }
   });
 
@@ -284,10 +331,51 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     }
   });
 
+  Object.entries(pageRoleSettingsCandidate).forEach(([pageId, rawPageRoleSettings]) => {
+    if (!rawPageRoleSettings || typeof rawPageRoleSettings !== 'object' || Array.isArray(rawPageRoleSettings)) {
+      return;
+    }
+
+    const normalizedPageId = pageId.trim();
+    const pageRoleSettingsByRole = rawPageRoleSettings as Record<string, unknown>;
+    const normalizedPageRoleSettings: Partial<
+      Record<CanvasOwnerAccessRole, Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>>
+    > = {};
+
+    canvasOwnerAccessRoles.forEach((role) => {
+      const rawRoleSettings = pageRoleSettingsByRole[role];
+
+      if (!rawRoleSettings || typeof rawRoleSettings !== 'object' || Array.isArray(rawRoleSettings)) {
+        return;
+      }
+
+      const normalizedRoleSettings: Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>> = {};
+      const roleSettingsByMode = rawRoleSettings as Record<string, unknown>;
+
+      canvasWorkspaceModes.forEach((mode) => {
+        const overrides = normalizeCanvasOwnerSettingsOverrides(roleSettingsByMode[mode]);
+
+        if (Object.keys(overrides).length > 0) {
+          normalizedRoleSettings[mode] = overrides;
+        }
+      });
+
+      if (Object.keys(normalizedRoleSettings).length > 0) {
+        normalizedPageRoleSettings[role] = normalizedRoleSettings;
+      }
+    });
+
+    if (normalizedPageId && Object.keys(normalizedPageRoleSettings).length > 0) {
+      pageRoleSettings[normalizedPageId] = normalizedPageRoleSettings;
+    }
+  });
+
   return {
-    version: 2,
+    version: 3,
     modeSettings,
+    roleModeSettings,
     pageSettings,
+    pageRoleSettings,
   };
 };
 
@@ -295,13 +383,24 @@ export const resolveCanvasOwnerSettings = (
   store: CanvasOwnerSettingsStore,
   context: CanvasOwnerSettingsContext
 ) => {
+  const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
   const workspaceMode = normalizeCanvasWorkspaceMode(context.workspaceMode);
-  const modeOverrides = store.modeSettings[workspaceMode] || {};
-  const pageOverrides = context.pageId ? store.pageSettings[context.pageId]?.[workspaceMode] || {} : {};
+  const accessRole = context.accessRole && canvasOwnerAccessRoles.includes(context.accessRole)
+    ? context.accessRole
+    : undefined;
+  const modeOverrides = normalizedStore.modeSettings[workspaceMode] || {};
+  const roleModeOverrides = accessRole ? normalizedStore.roleModeSettings[accessRole]?.[workspaceMode] || {} : {};
+  const pageOverrides = context.pageId ? normalizedStore.pageSettings[context.pageId]?.[workspaceMode] || {} : {};
+  const pageRoleOverrides =
+    context.pageId && accessRole
+      ? normalizedStore.pageRoleSettings[context.pageId]?.[accessRole]?.[workspaceMode] || {}
+      : {};
   const settings = normalizeCanvasOwnerSettings({
     ...defaultCanvasOwnerSettings,
     ...modeOverrides,
+    ...roleModeOverrides,
     ...pageOverrides,
+    ...pageRoleOverrides,
   });
   const sources = canvasOwnerSettingKeys.reduce(
     (accumulator, key) => {
@@ -314,16 +413,25 @@ export const resolveCanvasOwnerSettings = (
   Object.keys(modeOverrides).forEach((key) => {
     sources[key as CanvasOwnerSettingKey] = 'mode';
   });
+  Object.keys(roleModeOverrides).forEach((key) => {
+    sources[key as CanvasOwnerSettingKey] = 'role-mode';
+  });
   Object.keys(pageOverrides).forEach((key) => {
     sources[key as CanvasOwnerSettingKey] = 'page';
+  });
+  Object.keys(pageRoleOverrides).forEach((key) => {
+    sources[key as CanvasOwnerSettingKey] = 'page-role';
   });
 
   return {
     settings,
     sources,
     modeOverrides,
+    roleModeOverrides,
     pageOverrides,
+    pageRoleOverrides,
     workspaceMode,
+    accessRole,
   };
 };
 
@@ -333,20 +441,40 @@ export const updateCanvasOwnerSettingsStoreOverride = <K extends CanvasOwnerSett
     scope,
     pageId,
     workspaceMode,
+    accessRole,
     key,
     value,
   }: {
     scope: 'mode' | 'page';
     pageId?: string;
     workspaceMode: CanvasWorkspaceMode;
+    accessRole?: CanvasOwnerAccessRole;
     key: K;
     value: CanvasOwnerSettings[K];
   }
 ): CanvasOwnerSettingsStore => {
   const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
   const normalizedMode = normalizeCanvasWorkspaceMode(workspaceMode);
+  const normalizedAccessRole =
+    accessRole && canvasOwnerAccessRoles.includes(accessRole) ? accessRole : undefined;
 
   if (scope === 'mode') {
+    if (normalizedAccessRole) {
+      return {
+        ...normalizedStore,
+        roleModeSettings: {
+          ...normalizedStore.roleModeSettings,
+          [normalizedAccessRole]: {
+            ...(normalizedStore.roleModeSettings[normalizedAccessRole] || {}),
+            [normalizedMode]: {
+              ...(normalizedStore.roleModeSettings[normalizedAccessRole]?.[normalizedMode] || {}),
+              [key]: value,
+            },
+          },
+        },
+      };
+    }
+
     return {
       ...normalizedStore,
       modeSettings: {
@@ -363,6 +491,25 @@ export const updateCanvasOwnerSettingsStoreOverride = <K extends CanvasOwnerSett
 
   if (!normalizedPageId) {
     return normalizedStore;
+  }
+
+  if (normalizedAccessRole) {
+    return {
+      ...normalizedStore,
+      pageRoleSettings: {
+        ...normalizedStore.pageRoleSettings,
+        [normalizedPageId]: {
+          ...(normalizedStore.pageRoleSettings[normalizedPageId] || {}),
+          [normalizedAccessRole]: {
+            ...(normalizedStore.pageRoleSettings[normalizedPageId]?.[normalizedAccessRole] || {}),
+            [normalizedMode]: {
+              ...(normalizedStore.pageRoleSettings[normalizedPageId]?.[normalizedAccessRole]?.[normalizedMode] || {}),
+              [key]: value,
+            },
+          },
+        },
+      },
+    };
   }
 
   return {
@@ -439,13 +586,15 @@ export const saveCanvasOwnerSettingsStoreToStorage = (settingsStore: CanvasOwner
 export const saveCanvasOwnerSettingsToStorage = (settings: CanvasOwnerSettings) => {
   const overrides = normalizeCanvasOwnerSettingsOverrides(settings);
   const nextSettingsStore: CanvasOwnerSettingsStore = {
-    version: 2,
+    version: 3,
     modeSettings: {
       template: { ...overrides },
       document: { ...overrides },
       read: { ...overrides },
     },
+    roleModeSettings: {},
     pageSettings: {},
+    pageRoleSettings: {},
   };
 
   return saveCanvasOwnerSettingsStoreToStorage(nextSettingsStore);
@@ -490,7 +639,7 @@ export const useStoredCanvasOwnerSettings = (
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener(CANVAS_OWNER_SETTINGS_EVENT_NAME, handleSettingsEvent);
     };
-  }, [context.pageId, context.workspaceMode]);
+  }, [context.accessRole, context.pageId, context.workspaceMode]);
 
   return state;
 };
@@ -631,7 +780,12 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   return {
     ...baseProps,
     hideHeader: shouldApplySetting('hideHeader') ? settings.hideHeader : baseProps.hideHeader,
-    hidePersistencePanel: shouldApplySetting('hidePersistencePanel') ? settings.hidePersistencePanel : baseProps.hidePersistencePanel,
+    hidePersistencePanel:
+      normalizedWorkspaceMode === 'read'
+        ? true
+        : shouldApplySetting('hidePersistencePanel')
+          ? settings.hidePersistencePanel
+          : baseProps.hidePersistencePanel,
     templateListDisplay:
       normalizedWorkspaceMode === 'template'
         ? shouldApplySetting('templateListDisplay')

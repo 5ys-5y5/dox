@@ -293,6 +293,7 @@ export default function MemberAccessDocumentPage() {
       ) : access && initialDraft ? (
         <CanvasOwnedWorkspace
           surface="member-access"
+          canvasAccessRole={canvasAccessRole}
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
           workspaceMode={canEditDocument ? 'document' : 'read'}
