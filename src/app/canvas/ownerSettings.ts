@@ -3,6 +3,7 @@
 import * as React from 'react';
 import type {
   TemplateEditWorkspaceCanvasToolbarVisibility,
+  TemplateEditWorkspaceCanvasViewMode,
   TemplateEditWorkspacePersistenceVisibility,
   TemplateEditWorkspaceProps,
 } from '../../components/template/workspace/types';
@@ -10,6 +11,7 @@ import type {
 export type CanvasWorkspaceMode = NonNullable<TemplateEditWorkspaceProps['workspaceMode']>;
 export type CanvasOwnerAccessRole = 'editor' | 'viewer' | 'signer';
 export type CanvasReadModeInteractionMode = 'view-only' | 'box-selection';
+export type CanvasOwnerViewMode = TemplateEditWorkspaceCanvasViewMode;
 
 export type CanvasOwnerSettings = {
   hideHeader: boolean;
@@ -60,6 +62,7 @@ export type CanvasOwnerSettings = {
   blockPeerClusterWidthTargets: boolean;
   selectionInactiveOverlayOpacity: number;
   readModeInteractionMode: CanvasReadModeInteractionMode;
+  canvasViewMode: CanvasOwnerViewMode;
 };
 
 export type CanvasOwnerSettingKey = keyof CanvasOwnerSettings;
@@ -130,6 +133,7 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   blockPeerClusterWidthTargets: false,
   selectionInactiveOverlayOpacity: 0.5,
   readModeInteractionMode: 'view-only',
+  canvasViewMode: 'position',
 };
 
 export const CANVAS_OWNER_SETTINGS_STORAGE_KEY = 'mejai.canvas.ownerSettings.v1';
@@ -156,6 +160,11 @@ const normalizeCanvasReadModeInteractionMode = (
   value: unknown,
   fallback: CanvasReadModeInteractionMode = 'view-only'
 ): CanvasReadModeInteractionMode => (value === 'box-selection' || value === 'view-only' ? value : fallback);
+const normalizeCanvasViewMode = (
+  value: unknown,
+  fallback: CanvasOwnerViewMode = 'position'
+): CanvasOwnerViewMode =>
+  value === 'preview' || value === 'position' || value === 'metadata' ? value : fallback;
 
 export const normalizeCanvasWorkspaceMode = (value: string | null | undefined): CanvasWorkspaceMode => {
   if (value === 'document' || value === 'read') {
@@ -215,7 +224,33 @@ export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSetting
       candidate.readModeInteractionMode,
       defaultCanvasOwnerSettings.readModeInteractionMode
     ),
+    canvasViewMode: normalizeCanvasViewMode(
+      candidate.canvasViewMode,
+      defaultCanvasOwnerSettings.canvasViewMode
+    ),
   };
+};
+
+const resolveDefaultCanvasViewMode = (context: CanvasOwnerSettingsContext): CanvasOwnerViewMode => {
+  if (context.pageId === 'documents') {
+    return 'metadata';
+  }
+
+  if (context.workspaceMode === 'template') {
+    return 'position';
+  }
+
+  return 'preview';
+};
+
+const resolveDefaultCanvasReadModeInteractionMode = (
+  context: CanvasOwnerSettingsContext
+): CanvasReadModeInteractionMode => {
+  if (context.pageId === 'documents' && context.workspaceMode === 'read') {
+    return 'box-selection';
+  }
+
+  return defaultCanvasOwnerSettings.readModeInteractionMode;
 };
 
 export const createEmptyCanvasOwnerSettingsStore = (): CanvasOwnerSettingsStore => ({
@@ -426,8 +461,21 @@ export const resolveCanvasOwnerSettings = (
     context.pageId && accessRole
       ? normalizedStore.pageRoleSettings[context.pageId]?.[accessRole]?.[workspaceMode] || {}
       : {};
-  const settings = normalizeCanvasOwnerSettings({
+  const contextDefaults = normalizeCanvasOwnerSettings({
     ...defaultCanvasOwnerSettings,
+    readModeInteractionMode: resolveDefaultCanvasReadModeInteractionMode({
+      ...context,
+      workspaceMode,
+      accessRole,
+    }),
+    canvasViewMode: resolveDefaultCanvasViewMode({
+      ...context,
+      workspaceMode,
+      accessRole,
+    }),
+  });
+  const settings = normalizeCanvasOwnerSettings({
+    ...contextDefaults,
     ...modeOverrides,
     ...roleModeOverrides,
     ...pageOverrides,
@@ -815,7 +863,9 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     templateUsagePreviewLayoutDebugOptions.measurePeerClusterWidthTargets = !settings.blockPeerClusterWidthTargets;
   }
   const readModeInteractionSettingApplies =
-    normalizedWorkspaceMode === 'read' && shouldApplySetting('readModeInteractionMode');
+    normalizedWorkspaceMode === 'read' &&
+    (shouldApplySetting('readModeInteractionMode') ||
+      settings.readModeInteractionMode !== defaultCanvasOwnerSettings.readModeInteractionMode);
   const readModeInteractionProps: Partial<TemplateEditWorkspaceProps> = readModeInteractionSettingApplies
     ? settings.readModeInteractionMode === 'box-selection'
       ? {
@@ -898,6 +948,13 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     selectionInactiveOverlayOpacity: shouldApplySetting('selectionInactiveOverlayOpacity')
       ? settings.selectionInactiveOverlayOpacity
       : baseProps.selectionInactiveOverlayOpacity,
+    canvasViewMode:
+      applyDefaultSettings ||
+      !settingSources ||
+      settingSources.canvasViewMode !== 'default' ||
+      Boolean(settings.canvasViewMode)
+        ? settings.canvasViewMode
+        : baseProps.canvasViewMode,
     ...readModeInteractionProps,
   };
 };

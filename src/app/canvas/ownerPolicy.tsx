@@ -181,14 +181,10 @@ export function CanvasOwnedWorkspace({
   });
   const canvasOwnerSettings =
     explicitCanvasOwnerSettings ??
-    (applyStoredCanvasOwnerSettings && storedCanvasOwnerSettings.hasStoredSettings
-      ? storedCanvasOwnerSettings.settings
-      : null);
+    (applyStoredCanvasOwnerSettings ? storedCanvasOwnerSettings.settings : null);
   const canvasOwnerSettingSources =
     explicitCanvasOwnerSettingSources ??
-    (applyStoredCanvasOwnerSettings && storedCanvasOwnerSettings.hasStoredSettings
-      ? storedCanvasOwnerSettings.sources
-      : undefined);
+    (applyStoredCanvasOwnerSettings ? storedCanvasOwnerSettings.sources : undefined);
 
   return (
     <TemplateEditWorkspace

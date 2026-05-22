@@ -640,6 +640,8 @@ export type TemplateEditWorkspaceCanvasToolbarVisibility = {
   showSelectionPanelTabs?: boolean;
 };
 
+export type TemplateEditWorkspaceCanvasViewMode = 'preview' | 'position' | 'metadata';
+
 export type TemplateEditWorkspacePersistenceVisibility = {
   showTemplateList?: boolean;
   showTemplateNameInput?: boolean;
@@ -732,6 +734,7 @@ export type TemplateEditWorkspaceProps = {
   documentAttachmentTagColorByName?: Record<string, string>;
   selectionInactiveOverlayOpacity?: number;
   canvasTextInteractionMode?: 'default' | 'selection-only';
+  canvasViewMode?: TemplateEditWorkspaceCanvasViewMode;
   canvasToolbarVisibility?: TemplateEditWorkspaceCanvasToolbarVisibility;
   persistenceVisibility?: TemplateEditWorkspacePersistenceVisibility;
   templateUsagePreviewLayoutDebugOptions?: {

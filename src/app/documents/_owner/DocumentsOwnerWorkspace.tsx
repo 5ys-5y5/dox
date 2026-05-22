@@ -1757,6 +1757,88 @@ export function DocumentsOwnerWorkspace({
     );
   };
 
+  const renderExpirationRequestPanel = () => {
+    const assignedFieldCount = selectedFields.filter((field) => selectedFieldAssigneeByValueKey[field.valueKey]).length;
+    const totalRequestCount = selectedFields.length + mediaRequestDrafts.length;
+
+    return (
+      <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" {...documentsOwnerItem('request-link-action-panel', '요청 링크 실행 설정 패널')}>
+        <div className="flex items-center justify-between gap-3" {...documentsOwnerItem('request-link-action-panel-header', '요청 링크 실행 설정 머리글')}>
+          <div>
+            <p className="text-sm font-medium text-slate-900" {...documentsOwnerItem('request-link-action-panel-title', '요청 링크 실행 설정 제목')}>
+              만료 시각 설정
+            </p>
+            <p className="mt-1 text-xs text-slate-500" {...documentsOwnerItem('request-link-action-panel-description', '요청 링크 실행 설정 설명')}>
+              담당자별 요청 링크의 유효 시간을 정합니다.
+            </p>
+          </div>
+          <Badge variant="slate" {...documentsOwnerItem('request-link-action-count-badge', '요청 링크 실행 설정 요청 개수 배지')}>
+            {totalRequestCount}개
+          </Badge>
+        </div>
+
+        <div className="rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-600" {...documentsOwnerItem('request-link-action-summary', '요청 링크 실행 설정 요약')}>
+          상자 담당자 {assignedFieldCount}/{selectedFields.length}개 · 필수 사진/파일 {mediaRequestDrafts.length}개
+        </div>
+
+        <div className="space-y-2" {...documentsOwnerItem('request-link-expiration-field', '요청 링크 만료 시각 항목')}>
+          <label className="text-xs font-medium text-slate-700" {...documentsOwnerItem('request-link-expiration-label', '요청 링크 만료 시각 라벨')}>
+            만료 시각
+          </label>
+          <Input
+            type="datetime-local"
+            value={expiresAt}
+            onChange={(event) => setExpiresAt(event.target.value)}
+            {...documentsOwnerItem('request-link-expiration-input', '요청 링크 만료 시각 입력')}
+          />
+        </div>
+
+        <Button
+          type="button"
+          {...documentsOwnerItem('request-link-create-button', '요청 링크 만들기 버튼')}
+          onClick={() => void handleCreateRequestLink()}
+          disabled={loading}
+        >
+          요청 링크 만들기
+        </Button>
+
+        {latestCreatedRequestLinks.length > 0 ? (
+          <div
+            className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+            {...documentsOwnerItem('created-request-link-list', '방금 만든 요청 링크 목록')}
+          >
+            {latestCreatedRequestLinks.map(({ requestLink, requestUrl }) => (
+              <div
+                key={requestLink.id}
+                className="space-y-1 rounded-md border border-slate-200 bg-white p-2"
+                {...documentsOwnerItem('created-request-link-card', `방금 만든 요청 링크 - ${requestLink.recipientName || requestLink.recipientTarget || requestLink.id}`)}
+              >
+                <div className="flex flex-wrap items-center gap-2" {...documentsOwnerItem('created-request-link-card-header', '방금 만든 요청 링크 머리글')}>
+                  <Badge variant={getStatusVariant(requestLink.status)} {...documentsOwnerItem('created-request-link-status', '방금 만든 요청 링크 상태')}>
+                    {requestLink.status}
+                  </Badge>
+                  <span className="font-medium text-slate-900" {...documentsOwnerItem('created-request-link-recipient-name', '방금 만든 요청 링크 수신자 이름')}>
+                    {requestLink.recipientName || '-'}
+                  </span>
+                </div>
+                <p {...documentsOwnerItem('created-request-link-recipient-phone', '방금 만든 요청 링크 수신 번호')}>
+                  수신 번호: {formatPhoneNumber(requestLink.recipientTarget)}
+                </p>
+                <a
+                  href={requestUrl}
+                  className="break-all text-xs font-medium text-slate-700 underline underline-offset-4"
+                  {...documentsOwnerItem('created-request-link-url', '방금 만든 요청 링크 주소')}
+                >
+                  {requestUrl}
+                </a>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderDocumentSelectPanel = () => {
     if (hideDocumentPicker) {
       return null;
@@ -2049,64 +2131,7 @@ export function DocumentsOwnerWorkspace({
           ) : null}
           {activeRequestSetupStep === 'photo' ? renderMediaRequestPanel('photo') : null}
           {activeRequestSetupStep === 'file' ? renderMediaRequestPanel('file') : null}
-          {activeRequestSetupStep === 'expiration' ? (
-        <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-3" {...documentsOwnerItem('request-link-action-panel', '요청 링크 실행 설정 패널')}>
-          <div className="space-y-2" {...documentsOwnerItem('request-link-expiration-field', '요청 링크 만료 시각 항목')}>
-            <label className="text-sm font-medium text-slate-800" {...documentsOwnerItem('request-link-expiration-label', '요청 링크 만료 시각 라벨')}>
-              만료 시각
-            </label>
-            <Input
-              type="datetime-local"
-              value={expiresAt}
-              onChange={(event) => setExpiresAt(event.target.value)}
-              {...documentsOwnerItem('request-link-expiration-input', '요청 링크 만료 시각 입력')}
-            />
-          </div>
-
-          <Button
-            type="button"
-            {...documentsOwnerItem('request-link-create-button', '요청 링크 만들기 버튼')}
-            onClick={() => void handleCreateRequestLink()}
-            disabled={loading}
-          >
-            요청 링크 만들기
-          </Button>
-
-          {latestCreatedRequestLinks.length > 0 ? (
-            <div
-              className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
-              {...documentsOwnerItem('created-request-link-list', '방금 만든 요청 링크 목록')}
-            >
-              {latestCreatedRequestLinks.map(({ requestLink, requestUrl }) => (
-                <div
-                  key={requestLink.id}
-                  className="space-y-1 rounded-md border border-slate-200 bg-white p-2"
-                  {...documentsOwnerItem('created-request-link-card', `방금 만든 요청 링크 - ${requestLink.recipientName || requestLink.recipientTarget || requestLink.id}`)}
-                >
-                  <div className="flex flex-wrap items-center gap-2" {...documentsOwnerItem('created-request-link-card-header', '방금 만든 요청 링크 머리글')}>
-                    <Badge variant={getStatusVariant(requestLink.status)} {...documentsOwnerItem('created-request-link-status', '방금 만든 요청 링크 상태')}>
-                      {requestLink.status}
-                    </Badge>
-                    <span className="font-medium text-slate-900" {...documentsOwnerItem('created-request-link-recipient-name', '방금 만든 요청 링크 수신자 이름')}>
-                      {requestLink.recipientName || '-'}
-                    </span>
-                  </div>
-                  <p {...documentsOwnerItem('created-request-link-recipient-phone', '방금 만든 요청 링크 수신 번호')}>
-                    수신 번호: {formatPhoneNumber(requestLink.recipientTarget)}
-                  </p>
-                  <a
-                    href={requestUrl}
-                    className="break-all text-xs font-medium text-slate-700 underline underline-offset-4"
-                    {...documentsOwnerItem('created-request-link-url', '방금 만든 요청 링크 주소')}
-                  >
-                    {requestUrl}
-                  </a>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-          ) : null}
+          {activeRequestSetupStep === 'expiration' ? renderExpirationRequestPanel() : null}
           {renderRequestSetupNavigation()}
         </div>
       </aside>

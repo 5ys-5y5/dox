@@ -202,6 +202,18 @@ const modeLabels: Record<CanvasWorkspaceMode, string> = {
   read: '읽기 모드',
 };
 
+const canvasViewModeLabels: Record<CanvasOwnerSettings['canvasViewMode'], string> = {
+  preview: '미리보기',
+  position: '크기 및 위치',
+  metadata: '속성',
+};
+
+const canvasViewModeOptions: Array<{ value: CanvasOwnerSettings['canvasViewMode']; label: string }> = [
+  { value: 'preview', label: canvasViewModeLabels.preview },
+  { value: 'position', label: canvasViewModeLabels.position },
+  { value: 'metadata', label: canvasViewModeLabels.metadata },
+];
+
 const managedCanvasPages: ManagedCanvasPage[] = [
   {
     id: 'canvas',
@@ -304,6 +316,7 @@ type CanvasRoutePreviewProps = Partial<
     | 'canvasSpecifiedWidthEnabled'
     | 'canvasSpecifiedWidth'
     | 'canvasTextInteractionMode'
+    | 'canvasViewMode'
     | 'selectionInactiveOverlayOpacity'
     | 'showWorkspaceMessages'
     | 'suppressInitialDraftLoadedMessage'
@@ -492,13 +505,26 @@ export default function CanvasOwnerPage() {
     [pathname, router, searchParams]
   );
 
+  React.useEffect(() => {
+    const rawPageId = searchParams.get('page');
+    const rawMode = searchParams.get('mode');
+
+    if (rawPageId === selectedManagedPage.id && rawMode === workspaceMode) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set('page', selectedManagedPage.id);
+    nextParams.set('mode', workspaceMode);
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  }, [pathname, router, searchParams, selectedManagedPage.id, workspaceMode]);
+
   const handleSelectManagedPage = React.useCallback(
     (pageId: ManagedCanvasPageId) => {
       const nextPage = getManagedCanvasPage(pageId);
-      const nextMode = nextPage.allowedModes.includes(workspaceMode) ? workspaceMode : nextPage.defaultMode;
-      updateQuery({ page: nextPage.id, mode: nextMode });
+      updateQuery({ page: nextPage.id, mode: nextPage.defaultMode });
     },
-    [updateQuery, workspaceMode]
+    [updateQuery]
   );
 
   const handleSelectWorkspaceMode = React.useCallback(
@@ -510,6 +536,59 @@ export default function CanvasOwnerPage() {
       updateQuery({ mode });
     },
     [selectedManagedPage.allowedModes, updateQuery]
+  );
+
+  const handleSelectCanvasViewMode = React.useCallback(
+    (viewMode: CanvasOwnerSettings['canvasViewMode']) => {
+      const nextWorkspaceMode: CanvasWorkspaceMode =
+        viewMode === 'preview'
+          ? selectedManagedPage.allowedModes.includes('document')
+            ? 'document'
+            : selectedManagedPage.allowedModes.includes('read')
+              ? 'read'
+              : 'template'
+          : selectedManagedPage.allowedModes.includes('template')
+            ? 'template'
+            : selectedManagedPage.allowedModes.includes('read')
+              ? 'read'
+              : 'document';
+
+      setSettingsStore((previous) => {
+        const nextStore = updateCanvasOwnerSettingsStoreOverride(previous, {
+          scope: activeSettingsScope,
+          pageId: selectedManagedPage.id,
+          workspaceMode: nextWorkspaceMode,
+          accessRole: selectedCanvasAccessRole,
+          key: 'canvasViewMode',
+          value: viewMode,
+        });
+
+        if (nextWorkspaceMode !== 'read') {
+          return nextStore;
+        }
+
+        return updateCanvasOwnerSettingsStoreOverride(nextStore, {
+          scope: activeSettingsScope,
+          pageId: selectedManagedPage.id,
+          workspaceMode: nextWorkspaceMode,
+          accessRole: selectedCanvasAccessRole,
+          key: 'readModeInteractionMode',
+          value: viewMode === 'preview' ? 'view-only' : 'box-selection',
+        });
+      });
+
+      if (workspaceMode !== nextWorkspaceMode) {
+        updateQuery({ mode: nextWorkspaceMode });
+      }
+    },
+    [
+      activeSettingsScope,
+      selectedCanvasAccessRole,
+      selectedManagedPage.allowedModes,
+      selectedManagedPage.id,
+      updateQuery,
+      workspaceMode,
+    ]
   );
 
   const handleSelectAccessRole = React.useCallback(
@@ -1068,6 +1147,7 @@ export default function CanvasOwnerPage() {
 	  const previewCanvasSpecifiedWidth = previewWorkspaceProps.canvasSpecifiedWidth ?? '';
 	  const previewDocumentAttachmentApiPath = previewWorkspaceProps.documentAttachmentApiPath ?? '';
 	  const previewCanvasTextInteractionMode = previewWorkspaceProps.canvasTextInteractionMode ?? 'default';
+	  const previewCanvasViewMode = previewWorkspaceProps.canvasViewMode ?? previewSettings.canvasViewMode;
 	  const previewSelectionInactiveOverlayOpacity =
 	    previewWorkspaceProps.selectionInactiveOverlayOpacity ?? previewSettings.selectionInactiveOverlayOpacity;
 	  const previewCanvasToolbarVisibility = previewWorkspaceProps.canvasToolbarVisibility ?? effectiveCanvasToolbarVisibility;
@@ -1120,6 +1200,7 @@ export default function CanvasOwnerPage() {
     blockPeerClusterWidthTargets: 'blockPeerClusterWidthTargets',
     selectionInactiveOverlayOpacity: 'selectionInactiveOverlayOpacity',
     readModeInteractionMode: 'readModeInteractionMode',
+    canvasViewMode: 'canvasViewMode',
     preventRuntimeAutoSizeShrink: 'preventRuntimeAutoSizeShrink',
     templateNameReadOnly: 'templateNameReadOnly',
     saveDisabled: 'saveDisabled',
@@ -1756,6 +1837,12 @@ export default function CanvasOwnerPage() {
     },
     {
       section: 'TemplateEditWorkspaceProps',
+      name: 'canvasViewMode',
+      value: previewCanvasViewMode,
+      description: '상자 편집 캔버스가 미리보기, 크기 및 위치, 속성 중 어떤 뷰로 열리는지 정합니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
       name: 'canvasPageContainerWidth',
       value: previewCanvasPageContainerWidth || 'not passed',
       description: '상자 편집 캔버스가 놓이는 페이지 컨테이너 폭입니다.',
@@ -2027,6 +2114,34 @@ export default function CanvasOwnerPage() {
       })}
     </div>
   );
+  const renderCanvasViewModeButtons = () => (
+    <div className="grid gap-1.5 sm:grid-cols-3">
+      {canvasViewModeOptions.map((option) => {
+        const active = settings.canvasViewMode === option.value;
+
+        return (
+          <Button
+            key={option.value}
+            type="button"
+            variant={active ? 'default' : 'outline'}
+            className="h-auto min-h-9 justify-start px-2 py-1.5 text-left text-xs"
+            onClick={() => handleSelectCanvasViewMode(option.value)}
+          >
+            <span className="min-w-0">
+              <span className="block truncate font-semibold">{option.label}</span>
+              <span className="block truncate text-[10px] font-normal opacity-80">
+                {option.value === 'preview'
+                  ? '실제 사용 화면'
+                  : option.value === 'metadata'
+                    ? '키/밸류 속성'
+                    : '크기와 위치'}
+              </span>
+            </span>
+          </Button>
+        );
+      })}
+    </div>
+  );
   const renderManagedPageControls = () => (
     <div className="space-y-3">
       <div className="max-h-[22rem] space-y-1.5 overflow-y-auto pr-1">
@@ -2089,21 +2204,39 @@ export default function CanvasOwnerPage() {
         </div>
       </div>
       {renderWorkspaceModeButtons()}
-      <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-slate-800">기본 출력 뷰</span>
+          {renderSettingSourceBadge('canvasViewMode')}
+        </div>
+        {renderCanvasViewModeButtons()}
+      </div>
+      <p className="text-xs leading-5 text-slate-500">
+        {modeDescriptions[workspaceMode]} 기본 출력 뷰: {canvasViewModeLabels[settings.canvasViewMode]}
+      </p>
     </div>
   );
   const renderPageWorkspaceModeSettings = () => (
-    <div className="space-y-1.5">
+    <div className="space-y-3">
       <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
         <div className="flex min-w-0 items-baseline gap-1.5">
           <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">이 페이지에서 사용할 모드</div>
           <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
-            선택한 페이지의 캔버스 프리뷰와 페이지 단위 환경설정 기준 모드입니다.
+            템플릿, 문서, 읽기 모드는 페이지별 상호작용 프리셋입니다.
           </div>
         </div>
       </div>
-      {renderWorkspaceModeButtons()}
-      <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
+      <div className="space-y-1.5">
+        {renderWorkspaceModeButtons()}
+        <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-slate-800">상자 편집 캔버스 출력 뷰</span>
+          {renderSettingSourceBadge('canvasViewMode')}
+        </div>
+        {renderCanvasViewModeButtons()}
+      </div>
     </div>
   );
   const renderAccessRolePolicySettings = () => (
@@ -2741,6 +2874,7 @@ export default function CanvasOwnerPage() {
 	                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
 	                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
 	                canvasTextInteractionMode={previewCanvasTextInteractionMode}
+	                canvasViewMode={previewCanvasViewMode}
 	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
 	                canvasToolbarVisibility={previewCanvasToolbarVisibility}
 	                persistenceVisibility={previewPersistenceVisibility}
@@ -2787,6 +2921,7 @@ export default function CanvasOwnerPage() {
 	                documentAttachmentTagOptions={documentAttachmentTagOptions}
 	                documentAttachmentTagColorByName={documentAttachmentTagColorByName}
 	                canvasTextInteractionMode={previewCanvasTextInteractionMode}
+	                canvasViewMode={previewCanvasViewMode}
 	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
 	                todoPanel={canvasTodoPanel}
 	                todoButtonLabel="할 일"

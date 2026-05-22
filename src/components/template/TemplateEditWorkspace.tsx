@@ -163,6 +163,7 @@ import type {
   TemplateChecklistSignatureSubmitParams,
   TemplateEditWorkspaceInitialDraft,
   TemplateEditWorkspaceAttachmentDraft,
+  TemplateEditWorkspaceCanvasViewMode,
   TemplateEditWorkspaceProps,
   TemplateFramePositionGroupConfig,
   TemplateFramePositionMode,
@@ -374,6 +375,12 @@ import {
   FLOATING_OVERLAY_STACK_GAP_PX,
   FRAME_METADATA_DRAFT_FIELD_KEYS,
 } from './workspace/constants';
+
+const normalizeTemplateEditWorkspaceCanvasViewMode = (
+  value: TemplateEditWorkspaceCanvasViewMode | undefined
+): TemplateEditWorkspaceCanvasViewMode =>
+  value === 'preview' || value === 'position' || value === 'metadata' ? value : 'position';
+
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR = 'data-template-frame-relative-anchor-group-bottom-gap';
 
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
@@ -18319,6 +18326,7 @@ export default function TemplateEditWorkspace({
   documentAttachmentTagColorByName = {},
   selectionInactiveOverlayOpacity = 0.5,
   canvasTextInteractionMode = 'default',
+  canvasViewMode,
   canvasToolbarVisibility,
   persistenceVisibility,
   templateUsagePreviewLayoutDebugOptions,
@@ -18326,6 +18334,11 @@ export default function TemplateEditWorkspace({
   const documentMode = workspaceMode === 'document';
   const readMode = workspaceMode === 'read';
   const selectionOnlyTextInteractions = canvasTextInteractionMode === 'selection-only';
+  const normalizedCanvasViewMode = normalizeTemplateEditWorkspaceCanvasViewMode(canvasViewMode);
+  const canvasViewSelectionPanelTab: SelectionPanelTab =
+    normalizedCanvasViewMode === 'metadata' ? 'metadata' : 'position';
+  const canvasViewMetadataVisualMode = normalizedCanvasViewMode === 'metadata';
+  const canvasViewPreviewRequested = normalizedCanvasViewMode === 'preview';
   const usagePreviewStabilizeInitialLayout =
     templateUsagePreviewLayoutDebugOptions?.stabilizeInitialLayout !== false;
   const usagePreviewEnableInitialAutoSize = templateUsagePreviewLayoutDebugOptions?.enableInitialAutoSize === true;
@@ -18381,7 +18394,7 @@ export default function TemplateEditWorkspace({
   const [appearanceTargetCorners, setAppearanceTargetCorners] =
     React.useState<AppearanceCorner[]>(() => [...APPEARANCE_CORNERS]);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
-  const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
+  const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>(canvasViewSelectionPanelTab);
   const [editSettingsPanelVisible, setEditSettingsPanelVisible] = React.useState(true);
   const [canvasFullscreen, setCanvasFullscreen] = React.useState(defaultCanvasFullscreen);
   const [todoPanelVisible, setTodoPanelVisible] = React.useState(false);
@@ -18437,6 +18450,13 @@ export default function TemplateEditWorkspace({
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [spacePanArmed, setSpacePanArmed] = React.useState(false);
   const [spacePanDragging, setSpacePanDragging] = React.useState(false);
+  React.useEffect(() => {
+    if (normalizedCanvasViewMode === 'preview') {
+      return;
+    }
+
+    setSelectionPanelTab((current) => (current === canvasViewSelectionPanelTab ? current : canvasViewSelectionPanelTab));
+  }, [canvasViewSelectionPanelTab, normalizedCanvasViewMode]);
   React.useEffect(() => {
     spacePanArmedRef.current = spacePanArmed;
   }, [spacePanArmed]);
@@ -18857,7 +18877,7 @@ export default function TemplateEditWorkspace({
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode;
+  const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode || canvasViewPreviewRequested;
   const checklistCanvasSelectionModeActive =
     templateUsagePreviewActive &&
     checklistSelectableTargets.length > 0 &&
@@ -19781,6 +19801,51 @@ export default function TemplateEditWorkspace({
     usagePreviewStabilizeInitialLayout,
   ]);
 
+  React.useLayoutEffect(() => {
+    if (
+      !canvasViewPreviewRequested ||
+      documentMode ||
+      readMode ||
+      !previewRef.current ||
+      !renderedPreviewHtml.trim() ||
+      templateUsagePreviewHtml.trim()
+    ) {
+      return;
+    }
+
+    const root = previewRef.current;
+    syncFormControlMarkup(root);
+    const liveEditorDraftHtml = extractEditorHtml(root).trim();
+    const editorDraftHtml = liveEditorDraftHtml || draftPreviewHtmlRef.current.trim() || renderedPreviewHtml.trim();
+    draftPreviewHtmlRef.current = editorDraftHtml;
+    templateUsagePreviewEditorDraftSnapshotRef.current = editorDraftHtml;
+    templateUsagePreviewRenderSnapshotRef.current = renderedPreviewHtml;
+    templateUsagePreviewBuildSourceHtmlRef.current = editorDraftHtml;
+    templateUsagePreviewInitialShrinkGuardPendingRef.current = usagePreviewPreventInitialValueClearShrink;
+
+    const runtimeHtml = buildTemplateUsagePreviewHtml(editorDraftHtml, {
+      stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
+      preventInitialValueClearShrink: usagePreviewPreventInitialValueClearShrink,
+      measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+      measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
+    });
+
+    if (runtimeHtml.trim()) {
+      setBoxCreationMode(false);
+      setTemplateUsagePreviewHtml(runtimeHtml);
+    }
+  }, [
+    canvasViewPreviewRequested,
+    documentMode,
+    readMode,
+    renderedPreviewHtml,
+    templateUsagePreviewHtml,
+    usagePreviewMeasurePeerClusterHeightTargets,
+    usagePreviewMeasurePeerClusterWidthTargets,
+    usagePreviewPreventInitialValueClearShrink,
+    usagePreviewStabilizeInitialLayout,
+  ]);
+
   React.useEffect(() => {
     if (!documentMode && !readMode) {
       return;
@@ -20156,11 +20221,13 @@ export default function TemplateEditWorkspace({
 
       selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
-      syncPreviewSurfaceSelectionPanelTabAttr(root, 'metadata');
-      root.setAttribute('data-metadata-visual-mode', 'true');
+      syncPreviewSurfaceSelectionPanelTabAttr(root, canvasViewSelectionPanelTab);
+      root.setAttribute('data-metadata-visual-mode', canvasViewMetadataVisualMode ? 'true' : 'false');
       syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
-      applyPreviewEditPermissions(root, 'metadata', textCanvasEditModeActiveRef.current);
-      clearPositionOnlyEditorUi(root);
+      applyPreviewEditPermissions(root, canvasViewSelectionPanelTab, textCanvasEditModeActiveRef.current);
+      if (canvasViewSelectionPanelTab !== 'position') {
+        clearPositionOnlyEditorUi(root);
+      }
       applyFrameCanvasVisualHints(root);
       applyFastFrameSelectionUi(root, nextSelectedFrameGroupIds, [], collectFrameSelectionAnchorByIdMap(root));
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
@@ -20424,6 +20491,8 @@ export default function TemplateEditWorkspace({
       clearChecklistAvailability();
     };
   }, [
+    canvasViewMetadataVisualMode,
+    canvasViewSelectionPanelTab,
     checklistSelectableTargets,
     onChecklistSelectableTargetsSelect,
     onChecklistSelectableTargetSelect,
@@ -24984,7 +25053,11 @@ export default function TemplateEditWorkspace({
   React.useLayoutEffect(() => {
     const root = previewRef.current;
 
-    if (!checklistCanvasSelectionModeActive || !root) {
+    const canvasViewSelectionVisualModeActive =
+      templateUsagePreviewActive &&
+      (checklistCanvasSelectionModeActive || normalizedCanvasViewMode !== 'preview');
+
+    if (!canvasViewSelectionVisualModeActive || !root) {
       return;
     }
 
@@ -24993,17 +25066,19 @@ export default function TemplateEditWorkspace({
     const selectionChanged = !stringArraysEqual(selectedFrameGroupIdsRef.current, nextSelectedFrameGroupIds);
     const hasEdgeSelection = edgeSelectionStateRef.current.tokens.length > 0;
 
-    syncPreviewSurfaceSelectionPanelTabAttr(root, 'metadata');
-    root.setAttribute('data-metadata-visual-mode', 'true');
+    syncPreviewSurfaceSelectionPanelTabAttr(root, canvasViewSelectionPanelTab);
+    root.setAttribute('data-metadata-visual-mode', canvasViewMetadataVisualMode ? 'true' : 'false');
     syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
-    applyPreviewEditPermissions(root, 'metadata', textCanvasEditModeActiveRef.current);
-    clearPositionOnlyEditorUi(root);
+    applyPreviewEditPermissions(root, canvasViewSelectionPanelTab, textCanvasEditModeActiveRef.current);
+    if (canvasViewSelectionPanelTab !== 'position') {
+      clearPositionOnlyEditorUi(root);
+    }
     applyFrameCanvasVisualHints(root);
     applyFastFrameSelectionUi(root, nextSelectedFrameGroupIds, [], collectFrameSelectionAnchorByIdMap(root));
     applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
-    applyPositionImpactGroupSelectionUi(root, 'metadata', nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
-    applyDefinedPositionRelativeRelationUi(root, 'metadata', highlightedDefinedPositionRelativeRelations);
-    applyPositionSpacingGuideUi(root, 'metadata', positionSpacingGuideRelations);
+    applyPositionImpactGroupSelectionUi(root, canvasViewSelectionPanelTab, nextSelectedFrameGroupIds, positionRelationAnchorFrameGroupId);
+    applyDefinedPositionRelativeRelationUi(root, canvasViewSelectionPanelTab, highlightedDefinedPositionRelativeRelations);
+    applyPositionSpacingGuideUi(root, canvasViewSelectionPanelTab, positionSpacingGuideRelations);
     applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
 
     if (selectionChanged) {
@@ -25017,18 +25092,22 @@ export default function TemplateEditWorkspace({
       syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
     }
 
-    if (selectionPanelTab !== 'metadata') {
-      setSelectionPanelTab('metadata');
+    if (selectionPanelTab !== canvasViewSelectionPanelTab) {
+      setSelectionPanelTab(canvasViewSelectionPanelTab);
     }
   }, [
+    canvasViewMetadataVisualMode,
+    canvasViewSelectionPanelTab,
     checklistCanvasSelectionModeActive,
     checklistRegistrationTarget,
     highlightedDefinedPositionRelativeRelations,
+    normalizedCanvasViewMode,
     positionRelationAnchorFrameGroupId,
     positionSpacingGuideRelations,
     selectionPanelTab,
     surfaceRenderedPreviewHtml,
     syncEdgeRoleDiagnosticsState,
+    templateUsagePreviewActive,
     visibleMetadataReviewIssues,
   ]);
 
@@ -25053,19 +25132,23 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    syncPreviewSurfaceSelectionPanelTabAttr(root, 'metadata');
-    root.setAttribute('data-metadata-visual-mode', 'true');
+    syncPreviewSurfaceSelectionPanelTabAttr(root, canvasViewSelectionPanelTab);
+    root.setAttribute('data-metadata-visual-mode', canvasViewMetadataVisualMode ? 'true' : 'false');
     syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
-    applyPreviewEditPermissions(root, 'metadata', textCanvasEditModeActiveRef.current);
-    clearPositionOnlyEditorUi(root);
+    applyPreviewEditPermissions(root, canvasViewSelectionPanelTab, textCanvasEditModeActiveRef.current);
+    if (canvasViewSelectionPanelTab !== 'position') {
+      clearPositionOnlyEditorUi(root);
+    }
     applyFrameCanvasVisualHints(root);
     applyFastFrameSelectionUi(root, [], [], collectFrameSelectionAnchorByIdMap(root));
     applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, []);
-    applyPositionImpactGroupSelectionUi(root, 'metadata', [], positionRelationAnchorFrameGroupId);
-    applyDefinedPositionRelativeRelationUi(root, 'metadata', highlightedDefinedPositionRelativeRelations);
-    applyPositionSpacingGuideUi(root, 'metadata', positionSpacingGuideRelations);
+    applyPositionImpactGroupSelectionUi(root, canvasViewSelectionPanelTab, [], positionRelationAnchorFrameGroupId);
+    applyDefinedPositionRelativeRelationUi(root, canvasViewSelectionPanelTab, highlightedDefinedPositionRelativeRelations);
+    applyPositionSpacingGuideUi(root, canvasViewSelectionPanelTab, positionSpacingGuideRelations);
     applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
   }, [
+    canvasViewMetadataVisualMode,
+    canvasViewSelectionPanelTab,
     highlightedDefinedPositionRelativeRelations,
     positionRelationAnchorFrameGroupId,
     positionSpacingGuideRelations,
@@ -33779,11 +33862,13 @@ export default function TemplateEditWorkspace({
               spacePanArmed={spacePanArmed}
               spacePanDragging={spacePanDragging}
               metadataVisualMode={
-                checklistCanvasSelectionModeActive
-                  ? selectionPanelTab === 'metadata'
-                  : templateUsagePreviewActive
+                canvasViewMetadataVisualMode
+                  ? true
+                  : normalizedCanvasViewMode === 'preview'
                     ? false
-                    : selectionPanelTab === 'metadata'
+                    : templateUsagePreviewActive
+                      ? false
+                      : selectionPanelTab === 'metadata'
               }
               selectionInactiveOverlayOpacity={selectionInactiveOverlayOpacity}
 	            templateUsagePreviewMode={templateUsagePreviewActive}
