@@ -4,6 +4,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  ListTodo,
   Maximize2,
   Minimize2,
   Minus,
@@ -42,6 +43,10 @@ type TemplateEditCanvasToolbarProps = {
   canvasInteractionMode: 'select' | 'move';
   canUndoCanvasHistory: boolean;
   canRedoCanvasHistory: boolean;
+  todoButtonLabel?: string;
+  todoCount?: number;
+  todoPanelOpen?: boolean;
+  todoButtonDisabled?: boolean;
   visibility?: TemplateEditWorkspaceCanvasToolbarVisibility;
   onUpdatePreviewZoom: (nextValue: number | ((previous: number) => number)) => void;
   onToggleCanvasFullscreen: () => void;
@@ -53,6 +58,7 @@ type TemplateEditCanvasToolbarProps = {
   onRedoCanvasHistory: () => void;
   onTemplateNameChange: (nextName: string) => void;
   onSave: () => void;
+  onToggleTodoPanel?: () => void;
 };
 
 const canvasToolbarGroupClassName = 'min-w-0 rounded-md bg-white';
@@ -105,6 +111,10 @@ export const TemplateEditCanvasToolbar = ({
   canvasInteractionMode,
   canUndoCanvasHistory,
   canRedoCanvasHistory,
+  todoButtonLabel = '할 일',
+  todoCount = 0,
+  todoPanelOpen = false,
+  todoButtonDisabled = false,
   visibility,
   onUpdatePreviewZoom,
   onToggleCanvasFullscreen,
@@ -116,10 +126,12 @@ export const TemplateEditCanvasToolbar = ({
   onRedoCanvasHistory,
   onTemplateNameChange,
   onSave,
+  onToggleTodoPanel,
 }: TemplateEditCanvasToolbarProps) => {
   const showCanvasTitle = visibility?.showCanvasTitle !== false;
   const showTemplateNameInput = visibility?.showTemplateNameInput !== false;
   const showSaveButton = visibility?.showSaveButton !== false;
+  const showTodoButton = visibility?.showTodoButton !== false;
   const showPreviewToggle = visibility?.showPreviewToggle !== false;
   const showInteractionModeControls = visibility?.showInteractionModeControls !== false;
   const showHistoryControls = visibility?.showHistoryControls !== false;
@@ -129,6 +141,7 @@ export const TemplateEditCanvasToolbar = ({
   const showSelectionPanelTabs = visibility?.showSelectionPanelTabs !== false;
   const renderTemplateNameInput = !documentMode && !readMode && showTemplateNameInput;
   const renderSaveButton = !readMode && showSaveButton;
+  const renderTodoButton = !readMode && showTodoButton && Boolean(onToggleTodoPanel);
   const renderPreviewToggle = !readMode && showPreviewToggle;
   const renderInteractionModeControls = !documentMode && !readMode && showInteractionModeControls;
   const renderEditSettingsToggle = !documentMode && !readMode && showEditSettingsToggle;
@@ -136,7 +149,7 @@ export const TemplateEditCanvasToolbar = ({
   const renderHistoryControls = !readMode && showHistoryControls;
   const renderZoomControls = showZoomControls;
   const renderFullscreenControl = showFullscreenControl;
-  const showHeaderActions = renderTemplateNameInput || renderSaveButton;
+  const showHeaderActions = renderTemplateNameInput || renderSaveButton || renderTodoButton;
   const showHeader = showCanvasTitle || showHeaderActions;
   const showToolbarBody =
     renderPreviewToggle ||
@@ -185,6 +198,26 @@ export const TemplateEditCanvasToolbar = ({
                 <Save className="h-4 w-4 shrink-0 sm:mr-1" />
                 <span className="hidden sm:inline">{saving ? '저장 중...' : saveButtonLabel}</span>
                 <span className="sr-only sm:hidden">{saving ? '저장 중...' : saveButtonLabel}</span>
+              </Button>
+            ) : null}
+            {renderTodoButton ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onToggleTodoPanel}
+                disabled={todoButtonDisabled}
+                aria-pressed={todoPanelOpen}
+                aria-label={todoButtonLabel}
+                className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-3"
+              >
+                <ListTodo className="h-4 w-4 shrink-0 sm:mr-1" />
+                <span className="hidden sm:inline">{todoButtonLabel}</span>
+                {todoCount > 0 ? (
+                  <span className="ml-1 hidden rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white sm:inline-flex">
+                    {todoCount}
+                  </span>
+                ) : null}
+                <span className="sr-only sm:hidden">{todoButtonLabel}</span>
               </Button>
             ) : null}
           </div>

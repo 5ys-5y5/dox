@@ -39,6 +39,16 @@ const uploadDraftFiles = async (
 
   const formData = new FormData();
   formData.append('valueKey', valueKey);
+  formData.append(
+    'fileTags',
+    JSON.stringify(
+      files.map((entry) =>
+        Array.isArray(entry.tagNames)
+          ? entry.tagNames.map((tagName) => String(tagName || '').trim()).filter((tagName) => Boolean(tagName))
+          : []
+      )
+    )
+  );
   files.forEach((entry) => {
     formData.append('files', entry.file, entry.file.name);
   });

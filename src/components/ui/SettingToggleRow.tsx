@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { Badge } from './Badge';
 import { Button } from './Button';
 
 type SettingToggleRowProps = {
@@ -34,18 +33,17 @@ export function SettingToggleRow({
         {description ? <div className="mt-0.5 truncate text-[10px] leading-[11px] text-slate-500">{description}</div> : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Badge variant={checked ? 'blue' : 'slate'} className="px-1.5 py-0 text-[9px]">
-          {checked ? 'ON' : 'OFF'}
-        </Badge>
         <Button
           type="button"
           size="sm"
           variant={checked ? 'default' : 'outline'}
-          className="h-5 px-1.5 text-[10px]"
+          className="h-6 min-w-12 px-2 text-[10px]"
           disabled={disabled}
+          aria-pressed={checked}
+          aria-label={`${label} ${checked ? 'ON' : 'OFF'}`}
           onClick={() => onCheckedChange(!checked)}
         >
-          {checked ? '끄기' : '켜기'}
+          {checked ? 'ON' : 'OFF'}
         </Button>
       </div>
     </div>

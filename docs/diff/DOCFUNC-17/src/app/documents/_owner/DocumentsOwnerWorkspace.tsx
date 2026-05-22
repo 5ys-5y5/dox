@@ -1,0 +1,1445 @@
+'use client';
+
+import { usePathname, useRouter } from 'next/navigation';
+import * as React from 'react';
+import { Badge } from '../../../components/ui/Badge';
+import { Button } from '../../../components/ui/Button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
+import { EntityPicker } from '../../../components/ui/EntityPicker';
+import { Input } from '../../../components/ui/Input';
+import { CanvasOwnedWorkspace } from '../../canvas/ownerPolicy';
+import type { TemplateEditWorkspaceInitialDraft } from '../../../components/template/TemplateEditWorkspace';
+import type {
+  TemplateChecklistRegistrationTarget,
+  TemplateChecklistSelectableTargetSelectOptions,
+} from '../../../components/template/workspace/types';
+import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../../lib/documentAttachmentValues';
+import { buildDocumentHtmlContentKey } from '../../../lib/documentCanvasHtml';
+import {
+  mergeDocumentCanvasLabelValues,
+  materializeDocumentCanvasHtml as materializeDocumentHtml,
+} from '../../../lib/documentCanvasState';
+import type { DocumentDetailResult, DocumentListItem, DocumentRequestTaskInput } from '../../../lib/documentDtos';
+import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../../lib/memberAccessDtos';
+import type { SiteRecordDto } from '../../../lib/siteChecklistDtos';
+import { cn } from '../../../lib/utils';
+import { DocumentsOwnerClient } from './documentOwnerClient';
+import {
+  buildChecklistTargetForRequestableField,
+  collectDocumentRequestableFields,
+} from './documentFieldIndex';
+import type {
+  DocumentOwnerMemberOption,
+  DocumentRequestableField,
+  DocumentsOwnerRecentRequestLink,
+  DocumentsOwnerWorkspaceProps,
+} from './documentOwnerTypes';
+
+const formatDateTime = (value: string | null | undefined) => {
+  if (!value) {
+    return '-';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed);
+};
+
+const toDatetimeLocalValue = (date: Date) => {
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+};
+
+const formatPhoneNumber = (value: string | null | undefined) => {
+  const digits = (value || '').replace(/[^0-9]/g, '');
+
+  if (digits.length === 11) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+
+  return value || '';
+};
+
+const getStatusVariant = (status: string) => {
+  switch (status) {
+    case 'active':
+    case 'covered':
+    case 'completed':
+      return 'green' as const;
+    case 'draft':
+    case 'pending':
+    case 'review_needed':
+      return 'amber' as const;
+    case 'missing':
+    case 'failed':
+    case 'expired':
+    case 'revoked':
+    case 'deleted':
+      return 'red' as const;
+    default:
+      return 'slate' as const;
+  }
+};
+
+const getRequestKindLabel = (kind: DocumentRequestableField['requestKind']) => {
+  switch (kind) {
+    case 'signature':
+      return '서명 요청';
+    case 'file':
+      return '필수 파일';
+    case 'photo':
+      return '필수 사진';
+    default:
+      return '기록 값';
+  }
+};
+
+const requestKindOptions: Array<{ value: DocumentRequestableField['requestKind']; label: string }> = [
+  { value: 'value', label: '기록 값' },
+  { value: 'signature', label: '서명 요청' },
+  { value: 'photo', label: '필수 사진' },
+  { value: 'file', label: '필수 파일' },
+];
+
+const requestKindCardClasses: Record<DocumentRequestableField['requestKind'], string> = {
+  value: 'border-l-slate-400 bg-slate-50',
+  signature: 'border-l-amber-400 bg-amber-50',
+  photo: 'border-l-emerald-400 bg-emerald-50',
+  file: 'border-l-blue-400 bg-blue-50',
+};
+
+const requestKindBadgeClasses: Record<DocumentRequestableField['requestKind'], string> = {
+  value: 'bg-white text-slate-700',
+  signature: 'bg-white text-amber-700',
+  photo: 'bg-white text-emerald-700',
+  file: 'bg-white text-blue-700',
+};
+
+const isGeneratedFieldLabel = (value: string) =>
+  /^(band-\d+|status-history-\d+|field-\d+|frame-\d+)/i.test(value.trim());
+
+const normalizeFieldDisplayText = (value: string) =>
+  value
+    .replace(/\s+/g, ' ')
+    .replace(/([가-힣])\s+(?=[가-힣])/g, '$1')
+    .replace(/(텍스트|서명|첨부파일|파일|사진)?(상위 키|하위 값)$/g, '')
+    .trim();
+
+const getFieldLabel = (field: Pick<DocumentRequestableField, 'displayKeyText'>, index?: number) => {
+  const label = normalizeFieldDisplayText(field.displayKeyText);
+
+  if (!label || isGeneratedFieldLabel(label)) {
+    return typeof index === 'number' && index >= 0 ? `선택한 상자 ${index + 1}` : '선택한 상자';
+  }
+
+  return label;
+};
+
+const buildChecklistTargetForRequestableFields = (
+  fields: DocumentRequestableField[],
+  activeValueKey: string
+): TemplateChecklistRegistrationTarget | null => {
+  const uniqueFields = Array.from(new Map(fields.map((field) => [field.valueKey, field])).values());
+  const activeField = uniqueFields.find((field) => field.valueKey === activeValueKey) || uniqueFields[uniqueFields.length - 1] || null;
+
+  if (!activeField) {
+    return null;
+  }
+
+  if (uniqueFields.length <= 1) {
+    return buildChecklistTargetForRequestableField(activeField);
+  }
+
+  const activeTarget = buildChecklistTargetForRequestableField(activeField);
+  const orderedFields = [
+    activeField,
+    ...uniqueFields.filter((field) => field.valueKey !== activeField.valueKey),
+  ];
+
+  return {
+    ...activeTarget,
+    id: `selection:${orderedFields.map((field) => field.valueKey).join('|')}`,
+    label: `${uniqueFields.length}개 선택`,
+    highlightFrameGroupIds: Array.from(
+      new Set(
+        orderedFields.flatMap((field) =>
+          [field.keyFrameGroupId, field.valueFrameGroupId, field.parentGroupId, field.valueKey, field.contextKey].filter(Boolean)
+        )
+      )
+    ) as string[],
+  };
+};
+
+const buildRequestTasks = (fields: DocumentRequestableField[]): DocumentRequestTaskInput[] =>
+  fields.map((field, index) => ({
+    kind: field.requestKind,
+    targetKey: getFieldLabel(field, index),
+    targetLabel: getFieldLabel(field, index),
+    valueKey: field.valueKey,
+    slotKey: field.requestKind === 'signature' ? field.valueKey : null,
+    frameGroupId: field.valueFrameGroupId || field.keyFrameGroupId || null,
+    status: 'requested',
+    payload: {
+      currentValueText: field.currentValueText,
+      keyFrameGroupId: field.keyFrameGroupId || null,
+      valueFrameGroupId: field.valueFrameGroupId || null,
+      contextKey: field.contextKey || null,
+    },
+  }));
+
+const normalizeLookupValue = (value: string | null | undefined) =>
+  String(value || '').trim().toLowerCase();
+
+const normalizePhoneDigits = (value: string | null | undefined) =>
+  String(value || '').replace(/[^0-9]/g, '');
+
+const buildDocumentsSelectionQueryKey = (siteId: string, documentId: string) =>
+  `${siteId.trim()}::${documentId.trim()}`;
+
+const documentsOwnerItem = (item: string, name: string) => ({
+  'data-documents-owner-item': item,
+  'data-documents-owner-name': name,
+});
+
+const findExistingSignatureRequestId = (
+  detail: DocumentDetailResult | null,
+  task: DocumentRequestTaskInput,
+  member: DocumentOwnerMemberOption
+) => {
+  const taskSlotKey = normalizeLookupValue(task.slotKey || task.valueKey || task.targetKey);
+  const memberPhoneDigits = normalizePhoneDigits(member.phoneNumber);
+  const memberName = normalizeLookupValue(member.displayName);
+  const existingEvidence =
+    detail?.signatureEvidence.find((item) => {
+      const itemSlotKey = normalizeLookupValue(item.slotKey || item.label);
+      const itemPhoneDigits = normalizePhoneDigits(item.signerPhoneNumber);
+      const itemSignerName = normalizeLookupValue(item.signerName);
+      const activeStatus = item.status !== 'expired' && item.status !== 'failed';
+
+      return (
+        activeStatus &&
+        Boolean(item.requestId) &&
+        itemSlotKey === taskSlotKey &&
+        ((memberPhoneDigits && itemPhoneDigits === memberPhoneDigits) || (!memberPhoneDigits && itemSignerName === memberName))
+      );
+    }) || null;
+
+  return existingEvidence?.requestId || '';
+};
+
+const isSiteWideDocumentAccessRole = (role: string) =>
+  role === 'owner' || role === 'manager' || role === 'editor' || role === 'viewer';
+
+const createMemberOption = (
+  memberRecord: DocumentMemberRecordDto | SiteMemberRecordDto,
+  source: DocumentOwnerMemberOption['accessSource']
+): DocumentOwnerMemberOption => {
+  const member = memberRecord.member;
+  const displayName = member.displayName?.trim() || formatPhoneNumber(member.phoneNumber) || member.phoneNumber;
+  const formattedPhone = formatPhoneNumber(member.phoneNumber);
+
+  return {
+    id: member.id,
+    memberId: member.id,
+    phoneNumber: member.phoneNumber,
+    displayName,
+    accessRole: memberRecord.accessRole,
+    accessSource: source,
+    label: displayName,
+    meta: formattedPhone,
+    keywords: [displayName, member.phoneNumber, formattedPhone, member.phoneNumber.replace(/[^0-9]/g, '')],
+  };
+};
+
+const mergeMemberOptions = (
+  documentMembers: DocumentMemberRecordDto[],
+  siteMembers: SiteMemberRecordDto[]
+): DocumentOwnerMemberOption[] => {
+  const optionsByMemberId = new Map<string, DocumentOwnerMemberOption>();
+
+  siteMembers
+    .filter((membership) => isSiteWideDocumentAccessRole(membership.accessRole))
+    .forEach((membership) => {
+      const option = createMemberOption(membership, 'site');
+      optionsByMemberId.set(option.memberId, option);
+    });
+
+        documentMembers.forEach((membership) => {
+          const option = createMemberOption(membership, 'document');
+          optionsByMemberId.set(option.memberId, option);
+        });
+
+  return Array.from(optionsByMemberId.values()).sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+};
+
+const buildInitialDraft = (
+  detail: DocumentDetailResult | null,
+  labelValues: Record<string, unknown>
+): TemplateEditWorkspaceInitialDraft | null => {
+  if (!detail) {
+    return null;
+  }
+
+  const html = materializeDocumentHtml({
+    linkedRenderHtml: detail.linkedTemplate?.draftHtml || detail.linkedTemplate?.renderSnapshotHtml,
+    latestVersionHtml: detail.latestVersion?.htmlCanonical,
+    labelValues,
+  });
+
+  if (!html.trim()) {
+    return null;
+  }
+
+  return {
+    draftKey: `documents-owner:${detail.document.id}:${detail.latestVersion?.versionNumber || 0}:${buildDocumentHtmlContentKey(html)}`,
+    templateName: detail.document.title,
+    draftHtml: html,
+    sourceDocumentName: '',
+    layoutResizeMode: 'grow_height',
+    attachmentFilesByValueKey: groupDocumentValueFilesByValueKey(detail.valueFiles || []),
+  };
+};
+
+export function DocumentsOwnerWorkspace({
+  initialSiteId = '',
+  lockedDocumentId = '',
+  hideDocumentPicker = false,
+  hidePageHeader = false,
+  embedded = false,
+  surface = 'documents',
+}: DocumentsOwnerWorkspaceProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [sites, setSites] = React.useState<SiteRecordDto[]>([]);
+  const [documents, setDocuments] = React.useState<DocumentListItem[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = React.useState(initialSiteId);
+  const [selectedDocumentId, setSelectedDocumentId] = React.useState(lockedDocumentId);
+  const [selectedDocumentDetail, setSelectedDocumentDetail] = React.useState<DocumentDetailResult | null>(null);
+  const [recentRequestLinks, setRecentRequestLinks] = React.useState<DocumentsOwnerRecentRequestLink[]>([]);
+  const [documentMembers, setDocumentMembers] = React.useState<DocumentMemberRecordDto[]>([]);
+  const [siteMembers, setSiteMembers] = React.useState<SiteMemberRecordDto[]>([]);
+  const [selectedFieldKeys, setSelectedFieldKeys] = React.useState<string[]>([]);
+  const [selectedFieldKindByValueKey, setSelectedFieldKindByValueKey] = React.useState<Record<string, DocumentRequestableField['requestKind']>>({});
+  const [selectedFieldAssigneeByValueKey, setSelectedFieldAssigneeByValueKey] = React.useState<Record<string, string>>({});
+  const [selectedFieldLabelByValueKey, setSelectedFieldLabelByValueKey] = React.useState<Record<string, string>>({});
+  const [activeFieldValueKey, setActiveFieldValueKey] = React.useState('');
+  const [newMemberRegistrationFieldValueKey, setNewMemberRegistrationFieldValueKey] = React.useState('');
+  const [highlightTarget, setHighlightTarget] = React.useState<TemplateChecklistRegistrationTarget | null>(null);
+  const [newMemberName, setNewMemberName] = React.useState('');
+  const [newMemberPhone, setNewMemberPhone] = React.useState('');
+  const [expiresAt, setExpiresAt] = React.useState(() => toDatetimeLocalValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+  const [latestCreatedRequestLinks, setLatestCreatedRequestLinks] = React.useState<
+    Array<{ requestLink: DocumentsOwnerRecentRequestLink['requestLink']; requestUrl: string }>
+  >([]);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [documentListLoading, setDocumentListLoading] = React.useState(false);
+  const [documentDetailLoading, setDocumentDetailLoading] = React.useState(Boolean(lockedDocumentId));
+  const [requestContextLoading, setRequestContextLoading] = React.useState(false);
+  const [actionLoading, setActionLoading] = React.useState(false);
+  const loading = documentListLoading || documentDetailLoading || requestContextLoading || actionLoading;
+  const selectionQuerySyncRef = React.useRef('');
+  const documentListLoadSeqRef = React.useRef(0);
+  const documentContextLoadSeqRef = React.useRef(0);
+  const shouldSyncSelectionQuery = surface === 'documents' && !embedded && !hideDocumentPicker;
+
+  React.useEffect(() => {
+    if (initialSiteId) {
+      setSelectedSiteId(initialSiteId);
+    }
+  }, [initialSiteId]);
+
+  React.useEffect(() => {
+    if (lockedDocumentId) {
+      setDocumentDetailLoading(true);
+      setSelectedDocumentId(lockedDocumentId);
+    }
+  }, [lockedDocumentId]);
+
+  const siteOptions = React.useMemo(
+    () =>
+      sites.map((site) => ({
+        id: site.id,
+        label: site.siteName,
+        meta: site.id,
+        keywords: site.tradeKeys,
+      })),
+    [sites]
+  );
+
+  const documentOptions = React.useMemo(
+    () =>
+      documents.map((item) => ({
+        id: item.document.id,
+        label: item.document.title,
+        meta: item.document.documentTypeKey,
+        keywords: [item.document.documentTypeKey, item.document.status, item.document.id],
+      })),
+    [documents]
+  );
+
+  const selectedDocumentLabelValues = React.useMemo<Record<string, unknown>>(() => {
+    if (!selectedDocumentDetail?.latestVersion) {
+      return {};
+    }
+
+    return {
+      ...mergeDocumentCanvasLabelValues(
+        selectedDocumentDetail.latestVersion.labelValues || {},
+        selectedDocumentDetail.valueEntries || []
+      ),
+      ...buildDocumentAttachmentTextByValueKey(selectedDocumentDetail.valueFiles || []),
+    };
+  }, [selectedDocumentDetail]);
+
+  const selectedDocumentInitialDraft = React.useMemo(
+    () => buildInitialDraft(selectedDocumentDetail, selectedDocumentLabelValues),
+    [selectedDocumentDetail, selectedDocumentLabelValues]
+  );
+
+  const requestableFields = React.useMemo(
+    () =>
+      collectDocumentRequestableFields(
+        selectedDocumentInitialDraft?.draftHtml || selectedDocumentDetail?.latestVersion?.htmlCanonical || '',
+        selectedDocumentLabelValues
+      ),
+    [selectedDocumentDetail?.latestVersion?.htmlCanonical, selectedDocumentInitialDraft?.draftHtml, selectedDocumentLabelValues]
+  );
+
+  const selectedFields = React.useMemo(
+    () =>
+      requestableFields
+        .filter((field) => selectedFieldKeys.includes(field.valueKey))
+        .map((field) => ({
+          ...field,
+          displayKeyText: selectedFieldLabelByValueKey[field.valueKey] || field.displayKeyText,
+          requestKind: selectedFieldKindByValueKey[field.valueKey] || field.requestKind,
+        })),
+    [requestableFields, selectedFieldKeys, selectedFieldKindByValueKey, selectedFieldLabelByValueKey]
+  );
+
+  const activeSelectedField = React.useMemo(
+    () => selectedFields.find((field) => field.valueKey === activeFieldValueKey) || null,
+    [activeFieldValueKey, selectedFields]
+  );
+
+  const canvasSelectableTargets = React.useMemo(
+    () => requestableFields.map(buildChecklistTargetForRequestableField),
+    [requestableFields]
+  );
+
+  const memberOptions = React.useMemo(
+    () => mergeMemberOptions(documentMembers, siteMembers),
+    [documentMembers, siteMembers]
+  );
+
+  const loadSites = React.useCallback(async () => {
+    try {
+      setSites(await DocumentsOwnerClient.listSites());
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '현장 목록 조회에 실패했습니다.');
+    }
+  }, []);
+
+  const loadDocuments = React.useCallback(async (siteId: string) => {
+    if (!siteId || hideDocumentPicker) {
+      setDocumentListLoading(false);
+      setDocuments([]);
+      return;
+    }
+
+    const loadSeq = documentListLoadSeqRef.current + 1;
+    documentListLoadSeqRef.current = loadSeq;
+    setDocumentListLoading(true);
+
+    try {
+      const nextDocuments = await DocumentsOwnerClient.listDocuments(siteId);
+      if (documentListLoadSeqRef.current !== loadSeq) {
+        return;
+      }
+      setDocuments(nextDocuments);
+      setSelectedDocumentId((current) =>
+        nextDocuments.some((item) => item.document.id === current) ? current : nextDocuments[0]?.document.id || ''
+      );
+    } catch (error) {
+      if (documentListLoadSeqRef.current !== loadSeq) {
+        return;
+      }
+      setDocuments([]);
+      setMessage(error instanceof Error ? error.message : '문서 목록 조회에 실패했습니다.');
+    } finally {
+      if (documentListLoadSeqRef.current === loadSeq) {
+        setDocumentListLoading(false);
+      }
+    }
+  }, [hideDocumentPicker]);
+
+  const loadDocumentContext = React.useCallback(async (documentId: string) => {
+    const normalizedDocumentId = documentId.trim();
+    const loadSeq = documentContextLoadSeqRef.current + 1;
+    documentContextLoadSeqRef.current = loadSeq;
+
+    if (!normalizedDocumentId) {
+      setDocumentDetailLoading(false);
+      setRequestContextLoading(false);
+      setSelectedDocumentDetail(null);
+      setRecentRequestLinks([]);
+      setDocumentMembers([]);
+      setSiteMembers([]);
+      return;
+    }
+
+    setDocumentDetailLoading(true);
+    setRequestContextLoading(false);
+    setMessage(null);
+
+    try {
+      const detail = await DocumentsOwnerClient.getDocumentDetail(normalizedDocumentId);
+      if (documentContextLoadSeqRef.current !== loadSeq) {
+        return;
+      }
+      setSelectedDocumentDetail(detail);
+      setSelectedSiteId((current) => (current === detail.document.siteId ? current : detail.document.siteId));
+      setDocumentDetailLoading(false);
+      setRequestContextLoading(true);
+      const [requestLinks, nextDocumentMembers, nextSiteMembers] = await Promise.all([
+        DocumentsOwnerClient.listRecentRequestLinks(detail.document.siteId).catch(() => []),
+        DocumentsOwnerClient.listDocumentMembers(detail.document.id).catch(() => []),
+        DocumentsOwnerClient.listSiteMembers(detail.document.siteId).catch(() => []),
+      ]);
+
+      if (documentContextLoadSeqRef.current !== loadSeq) {
+        return;
+      }
+      setRecentRequestLinks(requestLinks.filter((item) => item.requestLink.documentId === detail.document.id));
+      setDocumentMembers(nextDocumentMembers);
+      setSiteMembers(nextSiteMembers);
+    } catch (error) {
+      if (documentContextLoadSeqRef.current !== loadSeq) {
+        return;
+      }
+      setSelectedDocumentDetail(null);
+      setMessage(error instanceof Error ? error.message : '문서 상세 조회에 실패했습니다.');
+    } finally {
+      if (documentContextLoadSeqRef.current === loadSeq) {
+        setDocumentDetailLoading(false);
+        setRequestContextLoading(false);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadSites();
+  }, [loadSites]);
+
+  React.useEffect(() => {
+    void loadDocuments(selectedSiteId);
+  }, [loadDocuments, selectedSiteId]);
+
+  React.useEffect(() => {
+    void loadDocumentContext(selectedDocumentId);
+  }, [loadDocumentContext, selectedDocumentId]);
+
+  React.useEffect(() => {
+    if (!shouldSyncSelectionQuery || typeof window === 'undefined') {
+      return;
+    }
+
+    const normalizedSiteId = (selectedDocumentDetail?.document.siteId || selectedSiteId).trim();
+    const normalizedDocumentId = selectedDocumentId.trim();
+    const nextQueryKey = buildDocumentsSelectionQueryKey(normalizedSiteId, normalizedDocumentId);
+
+    if (selectionQuerySyncRef.current === nextQueryKey) {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(window.location.search);
+    nextSearchParams.delete('siteId');
+    nextSearchParams.delete('project');
+    nextSearchParams.delete('document');
+
+    if (normalizedSiteId) {
+      nextSearchParams.set('projectId', normalizedSiteId);
+    } else {
+      nextSearchParams.delete('projectId');
+    }
+
+    if (normalizedDocumentId) {
+      nextSearchParams.set('documentId', normalizedDocumentId);
+    } else {
+      nextSearchParams.delete('documentId');
+    }
+
+    selectionQuerySyncRef.current = nextQueryKey;
+    const nextQueryString = nextSearchParams.toString();
+    const nextHref = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
+    const currentHref = `${window.location.pathname}${window.location.search}`;
+
+    if (currentHref === nextHref) {
+      return;
+    }
+
+    router.replace(nextHref, { scroll: false });
+  }, [
+    pathname,
+    router,
+    selectedDocumentDetail?.document.siteId,
+    selectedDocumentId,
+    selectedSiteId,
+    shouldSyncSelectionQuery,
+  ]);
+
+  React.useEffect(() => {
+    setSelectedFieldKeys((current) => current.filter((valueKey) => requestableFields.some((field) => field.valueKey === valueKey)));
+    setSelectedFieldKindByValueKey((current) => {
+      const nextEntries = Object.entries(current).filter(([valueKey]) =>
+        requestableFields.some((field) => field.valueKey === valueKey)
+      );
+
+      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
+    });
+    setSelectedFieldAssigneeByValueKey((current) => {
+      const nextEntries = Object.entries(current).filter(([valueKey]) =>
+        requestableFields.some((field) => field.valueKey === valueKey)
+      );
+
+      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
+    });
+  }, [requestableFields]);
+
+  React.useEffect(() => {
+    if (activeFieldValueKey && !selectedFieldKeys.includes(activeFieldValueKey)) {
+      setActiveFieldValueKey(selectedFieldKeys[selectedFieldKeys.length - 1] || '');
+    }
+  }, [activeFieldValueKey, selectedFieldKeys]);
+
+  React.useEffect(() => {
+    setHighlightTarget(buildChecklistTargetForRequestableFields(selectedFields, activeFieldValueKey));
+  }, [activeFieldValueKey, selectedFields]);
+
+  const selectedDocumentDetailLoading =
+    documentDetailLoading && Boolean(selectedDocumentId) && (!selectedDocumentDetail || selectedDocumentDetail.document.id !== selectedDocumentId);
+
+  const resolveFieldFromCanvasTarget = React.useCallback(
+    (target: TemplateChecklistRegistrationTarget) => {
+      const targetTokens = new Set(
+        [
+          target.id,
+          target.valueKey,
+          target.activationValueKey,
+          target.frameGroupId,
+          target.contextKey,
+          ...(target.highlightFrameGroupIds || []),
+        ]
+          .map((value) => value?.trim())
+          .filter((value): value is string => Boolean(value))
+      );
+
+      return (
+        requestableFields.find((item) => item.id === target.id) ||
+        requestableFields.find((item) =>
+          [item.valueKey, item.keyFrameGroupId, item.valueFrameGroupId, item.contextKey].some(
+            (value) => value && targetTokens.has(value)
+          )
+        ) ||
+        null
+      );
+    },
+    [requestableFields]
+  );
+
+  const selectFieldsFromCanvas = React.useCallback(
+    (targets: TemplateChecklistRegistrationTarget[], options?: TemplateChecklistSelectableTargetSelectOptions) => {
+      const fieldEntries = Array.from(
+        new Map(
+          targets
+            .map((target) => ({ target, field: resolveFieldFromCanvasTarget(target) }))
+            .filter((entry): entry is { target: TemplateChecklistRegistrationTarget; field: DocumentRequestableField } =>
+              Boolean(entry.field)
+            )
+            .map((entry) => [entry.field.valueKey, entry])
+        ).values()
+      );
+      const fields = fieldEntries.map((entry) => entry.field);
+
+      if (fields.length <= 0) {
+        return;
+      }
+
+      const field = fields[fields.length - 1];
+      setActiveFieldValueKey(field.valueKey);
+      setSelectedFieldKeys((current) => {
+        if (!options?.append) {
+          return fields.map((item) => item.valueKey);
+        }
+
+        const nextKeys = current.slice();
+        fields.forEach((item) => {
+          if (!nextKeys.includes(item.valueKey)) {
+            nextKeys.push(item.valueKey);
+          }
+        });
+        return nextKeys;
+      });
+      setSelectedFieldLabelByValueKey((current) => {
+        const nextValue = options?.append ? { ...current } : {};
+        fieldEntries.forEach(({ target, field }) => {
+          const targetLabel = normalizeFieldDisplayText(target.label || '');
+
+          if (targetLabel && !isGeneratedFieldLabel(targetLabel)) {
+            nextValue[field.valueKey] = targetLabel;
+          }
+        });
+        return nextValue;
+      });
+      setSelectedFieldKindByValueKey((current) => {
+        const nextValue = { ...current };
+        fields.forEach((item) => {
+          nextValue[item.valueKey] = nextValue[item.valueKey] || item.requestKind;
+        });
+        return nextValue;
+      });
+    },
+    [resolveFieldFromCanvasTarget]
+  );
+
+  const selectFieldFromCanvas = React.useCallback(
+    (target: TemplateChecklistRegistrationTarget, options?: TemplateChecklistSelectableTargetSelectOptions) => {
+      selectFieldsFromCanvas([target], options);
+    },
+    [selectFieldsFromCanvas]
+  );
+
+  const clearCanvasFieldSelection = React.useCallback(() => {
+    setSelectedFieldKeys([]);
+    setSelectedFieldLabelByValueKey({});
+    setActiveFieldValueKey('');
+    setNewMemberRegistrationFieldValueKey('');
+    setHighlightTarget(null);
+  }, []);
+
+  const changeSelectedFieldKind = React.useCallback(
+    (field: DocumentRequestableField, requestKind: DocumentRequestableField['requestKind']) => {
+      setSelectedFieldKindByValueKey((current) => ({
+        ...current,
+        [field.valueKey]: requestKind,
+      }));
+      setHighlightTarget(buildChecklistTargetForRequestableField({ ...field, requestKind }));
+    },
+    []
+  );
+
+  const assignSelectedFieldMember = React.useCallback((field: DocumentRequestableField, memberId: string) => {
+    setSelectedFieldAssigneeByValueKey((current) => ({
+      ...current,
+      [field.valueKey]: memberId,
+    }));
+  }, []);
+
+  const handleRegisterMemberForDocument = async (targetField: DocumentRequestableField | null = activeSelectedField) => {
+    const documentId = selectedDocumentDetail?.document.id || selectedDocumentId;
+    const phoneNumber = newMemberPhone.trim();
+    const displayName = newMemberName.trim();
+
+    if (!documentId) {
+      setMessage('구성원을 등록할 문서를 먼저 선택하세요.');
+      return null;
+    }
+
+    if (!phoneNumber) {
+      setMessage('등록할 구성원 번호를 입력하세요.');
+      return null;
+    }
+
+    setActionLoading(true);
+    setMessage(null);
+
+    try {
+      const result = await DocumentsOwnerClient.inviteDocumentMember({
+        documentId,
+        phoneNumber,
+        displayName: displayName || null,
+        accessRole: targetField?.requestKind === 'signature' ? 'signer' : 'editor',
+      });
+      await loadDocumentContext(documentId);
+      if (targetField) {
+        assignSelectedFieldMember(targetField, result.membership.member.id);
+      }
+      setNewMemberName('');
+      setNewMemberPhone('');
+      setNewMemberRegistrationFieldValueKey('');
+      setMessage(`${formatPhoneNumber(result.membership.member.phoneNumber)} 구성원을 현재 문서에 등록했습니다.`);
+      return result.membership.member;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '구성원 등록에 실패했습니다.');
+      return null;
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCreateRequestLink = async () => {
+    const activeDocument = selectedDocumentDetail?.document;
+
+    if (!activeDocument) {
+      setMessage('요청 링크를 만들 문서를 먼저 선택하세요.');
+      return;
+    }
+
+    if (selectedFields.length === 0) {
+      setMessage('상자 편집 캔버스에서 상자를 하나 이상 선택하세요.');
+      return;
+    }
+
+    const missingAssigneeField = selectedFields.find((field) => !selectedFieldAssigneeByValueKey[field.valueKey]);
+    if (missingAssigneeField) {
+      setActiveFieldValueKey(missingAssigneeField.valueKey);
+      setHighlightTarget(buildChecklistTargetForRequestableField(missingAssigneeField));
+      setMessage('선택한 상자마다 담당 구성원을 지정하세요.');
+      return;
+    }
+
+    const normalizedExpiresAt = new Date(expiresAt);
+    if (Number.isNaN(normalizedExpiresAt.getTime())) {
+      setMessage('만료 시각을 다시 입력하세요.');
+      return;
+    }
+
+    setActionLoading(true);
+    setMessage(null);
+
+    try {
+      const documentContent = selectedDocumentInitialDraft?.draftHtml || selectedDocumentDetail?.latestVersion?.htmlCanonical || '';
+      const fieldsByAssignee = selectedFields.reduce<Map<string, DocumentRequestableField[]>>((map, field) => {
+        const assigneeMemberId = selectedFieldAssigneeByValueKey[field.valueKey];
+        map.set(assigneeMemberId, [...(map.get(assigneeMemberId) || []), field]);
+        return map;
+      }, new Map());
+      const createdLinks: Array<{ requestLink: DocumentsOwnerRecentRequestLink['requestLink']; requestUrl: string }> = [];
+
+      for (const [assigneeMemberId, fields] of fieldsByAssignee.entries()) {
+        const targetMember = memberOptions.find((option) => option.memberId === assigneeMemberId) || null;
+
+        if (!targetMember) {
+          throw new Error('담당 구성원 정보를 찾지 못했습니다.');
+        }
+
+        const createResult = await DocumentsOwnerClient.createRequestLink({
+          documentId: activeDocument.id,
+          allowedLabels: fields.map((field) => field.valueKey),
+          recipientChannel: 'sms',
+          recipientTarget: targetMember.phoneNumber,
+          recipientName: targetMember.displayName,
+          expiresAt: normalizedExpiresAt.toISOString(),
+          requestedBy: 'documents-owner',
+        });
+        const requestTasks = await Promise.all(
+          buildRequestTasks(fields).map(async (task) => {
+            if (task.kind !== 'signature') {
+              return task;
+            }
+
+            if (!documentContent.trim()) {
+              throw new Error('서명 요청을 만들 문서 본문을 찾지 못했습니다.');
+            }
+
+            const existingRequestId = findExistingSignatureRequestId(selectedDocumentDetail, task, targetMember);
+
+            if (existingRequestId) {
+              return {
+                ...task,
+                linkedExternalId: existingRequestId,
+              };
+            }
+
+            const signRequest = await DocumentsOwnerClient.createSignatureRequest({
+              documentId: activeDocument.id,
+              signatureSlotKey: task.slotKey || task.valueKey || task.targetKey,
+              documentContent,
+              signerName: targetMember.displayName,
+              phoneNumber: targetMember.phoneNumber,
+            });
+
+            return {
+              ...task,
+              linkedExternalId: signRequest.id,
+            };
+          })
+        );
+
+        await DocumentsOwnerClient.saveRequestTasks({
+          documentId: activeDocument.id,
+          requestLinkId: createResult.requestLink.id,
+          assigneeMemberId: targetMember.memberId,
+          tasks: requestTasks,
+        });
+        const dispatchUrl = await DocumentsOwnerClient.issueDispatchUrl(createResult.requestLink.id);
+        createdLinks.push({
+          requestLink: createResult.requestLink,
+          requestUrl: `${window.location.origin}${dispatchUrl.maskedUrl}`,
+        });
+      }
+
+      setLatestCreatedRequestLinks(createdLinks);
+      await loadDocumentContext(activeDocument.id);
+      setMessage(`${createdLinks.length}명의 담당 구성원에게 보낼 요청 링크를 만들었습니다.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '요청 링크 생성에 실패했습니다.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSiteSelectionChange = React.useCallback((nextSiteId: string) => {
+    setSelectedSiteId(nextSiteId);
+    setSelectedDocumentId('');
+    setSelectedDocumentDetail(null);
+    setRecentRequestLinks([]);
+    setDocumentMembers([]);
+    setSiteMembers([]);
+    setSelectedFieldKeys([]);
+    setSelectedFieldLabelByValueKey({});
+    setActiveFieldValueKey('');
+    setNewMemberRegistrationFieldValueKey('');
+    setHighlightTarget(null);
+  }, []);
+
+  const renderDocumentSelectPanel = () => {
+    if (hideDocumentPicker) {
+      return null;
+    }
+
+    return (
+      <Card className="border-slate-200" {...documentsOwnerItem('document-select-panel', '1. 작업할 문서 고르기 패널')}>
+        <CardHeader {...documentsOwnerItem('document-select-panel-header', '작업할 문서 고르기 제목 영역')}>
+          <CardTitle {...documentsOwnerItem('document-select-panel-title', '작업할 문서 고르기 제목')}>1. 작업할 문서 고르기</CardTitle>
+          <CardDescription {...documentsOwnerItem('document-select-panel-description', '작업할 문서 고르기 설명')}>
+            현장과 문서를 고르면 아래에서 요청 링크 설정을 진행합니다.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4" {...documentsOwnerItem('document-select-panel-content', '작업할 문서 고르기 내용')}>
+          <div className="space-y-2" {...documentsOwnerItem('site-picker-field', '현장 선택 항목')}>
+            <label className="text-sm font-medium text-slate-800" {...documentsOwnerItem('site-picker-label', '현장 선택 라벨')}>
+              현장 선택
+            </label>
+            <EntityPicker
+              value={selectedSiteId}
+              options={siteOptions}
+              onChange={handleSiteSelectionChange}
+              placeholder="현장을 선택하세요"
+              emptyMessage="저장된 현장이 없습니다."
+            />
+          </div>
+          <div className="space-y-2" {...documentsOwnerItem('document-picker-field', '문서 선택 항목')}>
+            <label className="text-sm font-medium text-slate-800" {...documentsOwnerItem('document-picker-label', '문서 선택 라벨')}>
+              문서 선택
+            </label>
+            <EntityPicker
+              value={selectedDocumentId}
+              options={documentOptions}
+              onChange={setSelectedDocumentId}
+              placeholder="문서를 선택하세요"
+              emptyMessage="선택 가능한 문서가 없습니다."
+            />
+          </div>
+          {selectedDocumentDetail ? (
+            <div
+              className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+              {...documentsOwnerItem('selected-document-summary', '선택한 문서 요약')}
+            >
+              <div className="flex flex-wrap items-center gap-2" {...documentsOwnerItem('selected-document-summary-header', '선택한 문서 요약 머리글')}>
+                <Badge
+                  variant={getStatusVariant(selectedDocumentDetail.document.status)}
+                  {...documentsOwnerItem('selected-document-status', '선택한 문서 상태')}
+                >
+                  {selectedDocumentDetail.document.status}
+                </Badge>
+                <span className="font-medium text-slate-900" {...documentsOwnerItem('selected-document-title', '선택한 문서 제목')}>
+                  {selectedDocumentDetail.document.title}
+                </span>
+              </div>
+              <p className="mt-2" {...documentsOwnerItem('selected-document-type', '선택한 문서 종류')}>
+                문서 종류: {selectedDocumentDetail.document.documentTypeKey}
+              </p>
+              <p {...documentsOwnerItem('selected-document-latest-version', '선택한 문서 최신 버전')}>
+                최신 버전: {selectedDocumentDetail.latestVersion?.versionNumber || '-'}
+              </p>
+              <p {...documentsOwnerItem('selected-document-recent-link-count', '선택한 문서 최근 요청 링크 수')}>
+                최근 요청 링크: {recentRequestLinks.length}건
+              </p>
+            </div>
+          ) : selectedDocumentDetailLoading ? (
+            <div
+              className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600"
+              role="status"
+              aria-live="polite"
+              {...documentsOwnerItem('document-select-loading-state', '작업할 문서 고르기 로딩 상태')}
+            >
+              <div className="flex items-center gap-3" {...documentsOwnerItem('document-select-loading-row', '작업할 문서 고르기 로딩 줄')}>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" aria-hidden="true" />
+                <span className="font-medium text-slate-900" {...documentsOwnerItem('document-select-loading-title', '문서 로딩 중 표시')}>
+                  문서 로딩 중
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500" {...documentsOwnerItem('document-select-loading-description', '문서 로딩 설명')}>
+                선택한 문서 정보를 불러오고 있습니다.
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500" {...documentsOwnerItem('document-select-empty-state', '작업할 문서 고르기 빈 상태')}>
+              먼저 작업할 문서를 고르세요.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const renderRequestLinkSetup = () => (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]" {...documentsOwnerItem('request-link-setup-layout', '요청 링크 설정 2열 배치')}>
+      <div className="min-w-0">
+        {selectedDocumentInitialDraft ? (
+          <CanvasOwnedWorkspace
+            surface={surface === 'project' ? 'project' : 'documents'}
+            key={selectedDocumentInitialDraft.draftKey}
+            initialDraft={selectedDocumentInitialDraft}
+            workspaceMode="read"
+            canvasTextInteractionMode="selection-only"
+            hideHeader
+            hidePersistencePanel
+            suppressInitialDraftLoadedMessage
+            templateNameReadOnly
+            saveDisabled
+            checklistRegistrationTarget={highlightTarget}
+            checklistSelectableTargets={canvasSelectableTargets}
+            onChecklistSelectableTargetSelect={selectFieldFromCanvas}
+            onChecklistSelectableTargetsSelect={selectFieldsFromCanvas}
+            onChecklistSelectionClear={clearCanvasFieldSelection}
+          />
+        ) : (
+          <div
+            className="rounded-lg border border-dashed border-slate-200 px-4 py-12 text-center text-sm text-slate-500"
+            {...documentsOwnerItem('request-link-canvas-empty-state', '요청 링크 설정 문서 본문 없음 안내')}
+          >
+            표시할 문서 본문이 없습니다.
+          </div>
+        )}
+      </div>
+
+      <aside
+        className="min-w-0 space-y-4 border-t border-slate-200 pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0"
+        {...documentsOwnerItem('request-link-settings-column', '요청 링크 설정 오른쪽 설정 열')}
+      >
+        <div className="space-y-3" {...documentsOwnerItem('selected-box-panel', '선택한 상자 패널')}>
+          <div className="flex items-center justify-between gap-3" {...documentsOwnerItem('selected-box-panel-header', '선택한 상자 패널 머리글')}>
+            <div className="text-sm font-medium text-slate-900" {...documentsOwnerItem('selected-box-panel-title', '선택한 상자 패널 제목')}>
+              선택한 상자
+            </div>
+            <Badge variant="slate" {...documentsOwnerItem('selected-box-count-badge', '선택한 상자 개수 배지')}>
+              {selectedFields.length}개
+            </Badge>
+          </div>
+          <section className="space-y-3" {...documentsOwnerItem('selected-box-assignee-field', '선택한 상자 담당 구성원 목록')}>
+            <div className="space-y-1" {...documentsOwnerItem('selected-box-assignee-label', '선택한 상자 담당 구성원 목록 설명')}>
+              <p className="text-sm font-medium text-slate-800">담당 구성원</p>
+              <p className="text-xs text-slate-500">상자별로 받을 값의 종류와 책임자를 지정합니다.</p>
+            </div>
+            {selectedFields.length > 0 ? (
+              <ul
+                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                role="list"
+                {...documentsOwnerItem('selected-box-chip-list', '선택한 상자 담당 구성원 세부 목록')}
+              >
+                {selectedFields.map((field, index) => {
+                  const fieldLabel = getFieldLabel(field, index);
+                  const assignee = memberOptions.find((option) => option.memberId === selectedFieldAssigneeByValueKey[field.valueKey]) || null;
+                  const isActive = activeSelectedField?.valueKey === field.valueKey;
+                  const isRegisteringMember = newMemberRegistrationFieldValueKey === field.valueKey;
+
+                  return (
+                    <li
+                      key={field.valueKey}
+                      className={cn(
+                        'grid gap-3 border-l-4 p-3 text-sm transition-colors',
+                        requestKindCardClasses[field.requestKind],
+                        isActive ? 'ring-1 ring-inset ring-slate-900' : ''
+                      )}
+                      {...documentsOwnerItem('selected-box-chip', `선택한 상자 담당 구성원 - ${fieldLabel}`)}
+                      onClick={() => {
+                        setActiveFieldValueKey(field.valueKey);
+                      }}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 space-y-1">
+                          <p
+                            className="break-words font-semibold text-slate-950"
+                            {...documentsOwnerItem('selected-box-chip-label', `선택한 상자 키 값 - ${fieldLabel}`)}
+                          >
+                            {fieldLabel}
+                          </p>
+                          <p
+                            className="text-xs text-slate-600"
+                            {...documentsOwnerItem('selected-box-chip-current-value', `선택한 상자 현재 값 - ${fieldLabel}`)}
+                          >
+                            {field.currentValueText ? `현재 값: ${field.currentValueText}` : '입력 대기'}
+                          </p>
+                        </div>
+                        <Badge
+                          variant="slate"
+                          className={requestKindBadgeClasses[field.requestKind]}
+                          {...documentsOwnerItem('selected-box-chip-kind', `선택한 상자 요청 종류 - ${fieldLabel}`)}
+                        >
+                          {getRequestKindLabel(field.requestKind)}
+                        </Badge>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2" {...documentsOwnerItem('request-kind-button-group', `요청 종류 선택 버튼 묶음 - ${fieldLabel}`)}>
+                        {requestKindOptions.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            {...documentsOwnerItem(`request-kind-button-${option.value}`, `${fieldLabel} ${option.label} 요청 종류 버튼`)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setActiveFieldValueKey(field.valueKey);
+                              changeSelectedFieldKind(field, option.value);
+                            }}
+                            className={cn(
+                              'inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium',
+                              field.requestKind === option.value
+                                ? 'border-slate-900 bg-slate-900 text-white'
+                                : 'border-slate-300 bg-white/80 text-slate-700 hover:bg-white'
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-2" onClick={(event) => event.stopPropagation()}>
+                        <EntityPicker
+                          value={selectedFieldAssigneeByValueKey[field.valueKey] || ''}
+                          options={memberOptions}
+                          onChange={(memberId) => assignSelectedFieldMember(field, memberId)}
+                          placeholder="이 상자를 맡을 사람"
+                          searchPlaceholder="이름 또는 번호 검색"
+                          emptyMessage="현재 문서 접근 구성원이 없습니다."
+                          optionLayout="inline"
+                          allowClear
+                        />
+                        {assignee ? (
+                          <p
+                            className="text-xs text-slate-600"
+                            {...documentsOwnerItem('selected-box-assignee-summary', `선택한 상자 담당 구성원 요약 - ${fieldLabel}`)}
+                          >
+                            {assignee.label} · {assignee.meta} · {assignee.accessSource === 'document' ? '문서 권한' : '현장 권한'}
+                          </p>
+                        ) : (
+                          <p
+                            className="text-xs text-slate-600"
+                            {...documentsOwnerItem('selected-box-assignee-empty-help', `선택한 상자 담당 구성원 도움말 - ${fieldLabel}`)}
+                          >
+                            이 상자의 값을 책임지고 기록할 구성원을 지정하세요.
+                          </p>
+                        )}
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        {...documentsOwnerItem('new-member-registration-toggle-button', `새 구성원 등록 열기 버튼 - ${fieldLabel}`)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setActiveFieldValueKey(field.valueKey);
+                          setNewMemberRegistrationFieldValueKey((current) => (current === field.valueKey ? '' : field.valueKey));
+                        }}
+                      >
+                        + 새 구성원 등록
+                      </Button>
+
+                      {isRegisteringMember ? (
+                        <div
+                          className="space-y-2 rounded-md border border-slate-200 bg-white/80 p-3"
+                          {...documentsOwnerItem('new-member-registration-panel', `새 구성원 등록 패널 - ${fieldLabel}`)}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <div className="text-sm font-medium text-slate-900" {...documentsOwnerItem('new-member-registration-title', `새 구성원 등록 제목 - ${fieldLabel}`)}>
+                            새 구성원 등록
+                          </div>
+                          <Input
+                            value={newMemberName}
+                            onChange={(event) => setNewMemberName(event.target.value)}
+                            placeholder="이름"
+                            {...documentsOwnerItem('new-member-name-input', `새 구성원 이름 입력 - ${fieldLabel}`)}
+                          />
+                          <Input
+                            value={newMemberPhone}
+                            onChange={(event) => setNewMemberPhone(event.target.value)}
+                            placeholder="휴대폰 번호"
+                            inputMode="tel"
+                            {...documentsOwnerItem('new-member-phone-input', `새 구성원 휴대폰 번호 입력 - ${fieldLabel}`)}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            {...documentsOwnerItem('new-member-register-button', `선택한 상자 담당자로 등록 버튼 - ${fieldLabel}`)}
+                            onClick={() => void handleRegisterMemberForDocument(field)}
+                            disabled={loading}
+                          >
+                            등록하고 담당자로 지정
+                          </Button>
+                          <p className="text-xs text-slate-500" {...documentsOwnerItem('new-member-registration-help', `새 구성원 등록 도움말 - ${fieldLabel}`)}>
+                            새 구성원은 현재 문서에 등록되고 이 상자의 담당자로 지정됩니다.
+                          </p>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-500" {...documentsOwnerItem('selected-box-empty-state', '선택한 상자 없음 안내')}>
+                상자 편집 캔버스에서 받을 값을 선택하세요.
+              </p>
+            )}
+          </section>
+        </div>
+
+        <div className="space-y-4 border-t border-slate-200 pt-4" {...documentsOwnerItem('request-link-action-panel', '요청 링크 실행 설정 패널')}>
+          <div className="space-y-2" {...documentsOwnerItem('request-link-expiration-field', '요청 링크 만료 시각 항목')}>
+            <label className="text-sm font-medium text-slate-800" {...documentsOwnerItem('request-link-expiration-label', '요청 링크 만료 시각 라벨')}>
+              만료 시각
+            </label>
+            <Input
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(event) => setExpiresAt(event.target.value)}
+              {...documentsOwnerItem('request-link-expiration-input', '요청 링크 만료 시각 입력')}
+            />
+          </div>
+
+          <Button
+            type="button"
+            {...documentsOwnerItem('request-link-create-button', '요청 링크 만들기 버튼')}
+            onClick={() => void handleCreateRequestLink()}
+            disabled={loading}
+          >
+            요청 링크 만들기
+          </Button>
+
+          {latestCreatedRequestLinks.length > 0 ? (
+            <div
+              className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+              {...documentsOwnerItem('created-request-link-list', '방금 만든 요청 링크 목록')}
+            >
+              {latestCreatedRequestLinks.map(({ requestLink, requestUrl }) => (
+                <div
+                  key={requestLink.id}
+                  className="space-y-1 rounded-md border border-slate-200 bg-white p-2"
+                  {...documentsOwnerItem('created-request-link-card', `방금 만든 요청 링크 - ${requestLink.recipientName || requestLink.recipientTarget || requestLink.id}`)}
+                >
+                  <div className="flex flex-wrap items-center gap-2" {...documentsOwnerItem('created-request-link-card-header', '방금 만든 요청 링크 머리글')}>
+                    <Badge variant={getStatusVariant(requestLink.status)} {...documentsOwnerItem('created-request-link-status', '방금 만든 요청 링크 상태')}>
+                      {requestLink.status}
+                    </Badge>
+                    <span className="font-medium text-slate-900" {...documentsOwnerItem('created-request-link-recipient-name', '방금 만든 요청 링크 수신자 이름')}>
+                      {requestLink.recipientName || '-'}
+                    </span>
+                  </div>
+                  <p {...documentsOwnerItem('created-request-link-recipient-phone', '방금 만든 요청 링크 수신 번호')}>
+                    수신 번호: {formatPhoneNumber(requestLink.recipientTarget)}
+                  </p>
+                  <a
+                    href={requestUrl}
+                    className="break-all text-xs font-medium text-slate-700 underline underline-offset-4"
+                    {...documentsOwnerItem('created-request-link-url', '방금 만든 요청 링크 주소')}
+                  >
+                    {requestUrl}
+                  </a>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </aside>
+    </div>
+  );
+
+  const renderHistoryPanel = () => {
+    if (!selectedDocumentDetail) {
+      return null;
+    }
+
+    return (
+      <Card className="border-slate-200" {...documentsOwnerItem('document-history-panel', '이 문서 기록 패널')}>
+        <CardHeader {...documentsOwnerItem('document-history-panel-header', '이 문서 기록 제목 영역')}>
+          <CardTitle {...documentsOwnerItem('document-history-panel-title', '이 문서 기록 제목')}>
+            {hideDocumentPicker ? '이 문서 기록' : '3. 이 문서 기록'}
+          </CardTitle>
+          <CardDescription {...documentsOwnerItem('document-history-panel-description', '이 문서 기록 설명')}>
+            현재 문서의 버전과 요청 링크 기록을 확인합니다.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4" {...documentsOwnerItem('document-history-panel-content', '이 문서 기록 내용')}>
+          <div className="space-y-2" {...documentsOwnerItem('version-history-section', '버전 이력 항목')}>
+            <p className="text-sm font-medium text-slate-800" {...documentsOwnerItem('version-history-title', '버전 이력 제목')}>
+              버전 이력
+            </p>
+            {selectedDocumentDetail.versions.length > 0 ? (
+              <div className="space-y-2" {...documentsOwnerItem('version-history-list', '버전 이력 목록')}>
+                {selectedDocumentDetail.versions.map((version) => (
+                  <div
+                    key={version.id}
+                    className="rounded-lg border border-slate-200 p-3 text-sm text-slate-600"
+                    {...documentsOwnerItem('version-history-card', `버전 이력 카드 - 버전 ${version.versionNumber}`)}
+                  >
+                    <p className="font-medium text-slate-900" {...documentsOwnerItem('version-history-version-number', `버전 번호 - ${version.versionNumber}`)}>
+                      버전 {version.versionNumber}
+                    </p>
+                    <p {...documentsOwnerItem('version-history-change-reason', `버전 변경 사유 - ${version.versionNumber}`)}>
+                      변경 사유: {version.changeReason || '-'}
+                    </p>
+                    <p {...documentsOwnerItem('version-history-created-at', `버전 생성 시각 - ${version.versionNumber}`)}>
+                      생성 시각: {formatDateTime(version.createdAt)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500" {...documentsOwnerItem('version-history-empty-state', '버전 이력 없음 안내')}>
+                버전 기록이 없습니다.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2" {...documentsOwnerItem('recent-request-link-section', '최근 요청 링크 항목')}>
+            <p className="text-sm font-medium text-slate-800" {...documentsOwnerItem('recent-request-link-title', '최근 요청 링크 제목')}>
+              최근 요청 링크
+            </p>
+            {recentRequestLinks.length > 0 ? (
+              <div className="space-y-2" {...documentsOwnerItem('recent-request-link-list', '최근 요청 링크 목록')}>
+                {recentRequestLinks.map((item) => (
+                  <div
+                    key={item.requestLink.id}
+                    className="rounded-lg border border-slate-200 p-3 text-sm text-slate-600"
+                    {...documentsOwnerItem('recent-request-link-card', `최근 요청 링크 카드 - ${item.maskedRecipientTarget}`)}
+                  >
+                    <div className="flex flex-wrap items-center gap-2" {...documentsOwnerItem('recent-request-link-card-header', '최근 요청 링크 카드 머리글')}>
+                      <Badge variant={getStatusVariant(item.requestLink.status)} {...documentsOwnerItem('recent-request-link-status', '최근 요청 링크 상태')}>
+                        {item.requestLink.status}
+                      </Badge>
+                      <span className="font-medium text-slate-900" {...documentsOwnerItem('recent-request-link-recipient', '최근 요청 링크 수신자')}>
+                        {item.maskedRecipientTarget}
+                      </span>
+                    </div>
+                    <p className="mt-2" {...documentsOwnerItem('recent-request-link-channel', '최근 요청 링크 수신 채널')}>
+                      수신 채널: {item.requestLink.recipientChannel}
+                    </p>
+                    <p {...documentsOwnerItem('recent-request-link-expires-at', '최근 요청 링크 만료 시각')}>
+                      만료 시각: {formatDateTime(item.requestLink.expiresAt)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500" {...documentsOwnerItem('recent-request-link-empty-state', '최근 요청 링크 없음 안내')}>
+                최근 요청 링크가 없습니다.
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <div
+      className={cn(embedded ? 'space-y-6' : 'mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8 md:px-8')}
+      {...documentsOwnerItem('documents-owner-root', '문서 관리 페이지 루트')}
+    >
+      {hidePageHeader ? null : (
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between" {...documentsOwnerItem('documents-page-header', '문서 관리 페이지 머리글')}>
+          <div className="space-y-2" {...documentsOwnerItem('documents-page-heading-group', '문서 관리 페이지 제목 묶음')}>
+            <Badge variant="slate" {...documentsOwnerItem('documents-page-feature-badge', '문서 관리 페이지 기능 배지')}>
+              DOCFUNC
+            </Badge>
+            <h1 className="text-3xl font-semibold text-slate-950" {...documentsOwnerItem('documents-page-title', '문서 관리 페이지 제목')}>
+              서류 클라우드 관리
+            </h1>
+            <p className="max-w-3xl text-sm text-slate-600" {...documentsOwnerItem('documents-page-description', '문서 관리 페이지 설명')}>
+              문서별 요청 링크 설정과 기록을 관리합니다.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            {...documentsOwnerItem('documents-refresh-button', '문서 관리 페이지 새로고침 버튼')}
+            onClick={() => void loadDocumentContext(selectedDocumentId)}
+            disabled={loading || !selectedDocumentId}
+          >
+            새로고침
+          </Button>
+        </div>
+      )}
+
+      {message ? (
+        <Card className="border-slate-200 bg-slate-50" {...documentsOwnerItem('documents-message-panel', '문서 관리 메시지 패널')}>
+          <CardContent className="p-4 text-sm text-slate-700" {...documentsOwnerItem('documents-message-content', '문서 관리 메시지 내용')}>
+            {message}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {renderDocumentSelectPanel()}
+
+      <Card className="border-slate-200" {...documentsOwnerItem('current-work-panel', '지금 할 작업 패널')}>
+        <CardHeader {...documentsOwnerItem('current-work-panel-header', '지금 할 작업 제목 영역')}>
+          <CardTitle {...documentsOwnerItem('current-work-panel-title', '지금 할 작업 제목')}>
+            {hideDocumentPicker ? '지금 할 작업' : '2. 지금 할 작업'}
+          </CardTitle>
+          <CardDescription {...documentsOwnerItem('current-work-panel-description', '지금 할 작업 설명')}>
+            요청 링크 설정 안에서 받을 값과 받을 사람을 정합니다.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4" {...documentsOwnerItem('current-work-panel-content', '지금 할 작업 내용')}>
+          {selectedDocumentDetail ? (
+            renderRequestLinkSetup()
+          ) : selectedDocumentDetailLoading ? (
+            <div
+              className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-600"
+              role="status"
+              aria-live="polite"
+              {...documentsOwnerItem('current-work-loading-state', '지금 할 작업 로딩 상태')}
+            >
+              <span className="mx-auto block h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" aria-hidden="true" />
+              <p className="mt-3 font-medium text-slate-900" {...documentsOwnerItem('current-work-loading-title', '지금 할 작업 로딩 제목')}>
+                문서 로딩 중
+              </p>
+              <p className="mt-1 text-xs text-slate-500" {...documentsOwnerItem('current-work-loading-description', '지금 할 작업 로딩 설명')}>
+                상자 편집 캔버스를 준비하고 있습니다.
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500" {...documentsOwnerItem('current-work-empty-state', '지금 할 작업 빈 상태')}>
+              문서를 고르면 요청 링크 설정을 시작할 수 있습니다.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {renderHistoryPanel()}
+    </div>
+  );
+}

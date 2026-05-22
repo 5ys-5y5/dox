@@ -12,6 +12,8 @@ const parseLatestOnly = (value: string | null) => {
   return value !== 'false';
 };
 
+const parseListProfile = (value: string | null) => (value === 'picker' ? 'picker' : 'default');
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -20,6 +22,7 @@ export async function GET(request: Request) {
       status: searchParams.get('status') as DocumentLifecycleStatus | null,
       documentTypeKey: searchParams.get('documentTypeKey'),
       latestOnly: parseLatestOnly(searchParams.get('latestOnly')),
+      profile: parseListProfile(searchParams.get('profile')),
     });
 
     return NextResponse.json({ success: true, data: documents });

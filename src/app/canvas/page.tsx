@@ -63,7 +63,8 @@ import {
   materializeDocumentCanvasHtml,
   stringifyDocumentValue,
 } from '../../lib/documentCanvasState';
-import type { DocumentDetailResult, DocumentListItem } from '../../lib/documentDtos';
+import type { DocumentDetailResult, DocumentListItem, DocumentRequestTaskDto } from '../../lib/documentDtos';
+import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../lib/memberAccessDtos';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import type { TemplateRecordDto } from '../../lib/templateDtos';
@@ -117,6 +118,76 @@ const formatDateTime = (value: string | null | undefined) => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(parsed);
+};
+
+const canvasRequestTaskKindLabels: Record<DocumentRequestTaskDto['kind'], string> = {
+  value: '기록값',
+  signature: '서명',
+  photo: '필수 사진',
+  file: '필수 파일',
+};
+
+const normalizeCanvasTaskTagNames = (value: unknown): string[] => {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,，\n]/g)
+      : [];
+
+  return Array.from(
+    new Set(rawValues.map((tagName) => String(tagName || '').trim()).filter((tagName) => Boolean(tagName)))
+  );
+};
+
+const readCanvasTaskPayloadText = (task: DocumentRequestTaskDto, key: string) => {
+  const value = task.payload?.[key];
+
+  return typeof value === 'string' ? value.trim() : '';
+};
+
+const readCanvasTaskTagNames = (task: DocumentRequestTaskDto) =>
+  normalizeCanvasTaskTagNames(
+    task.payload?.tags ?? task.payload?.tagNames ?? readCanvasTaskPayloadText(task, 'tagName')
+  );
+
+const normalizeCanvasTaskTagColor = (value: unknown, fallback = '#10b981') => {
+  const normalizedValue = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(normalizedValue) ? normalizedValue.toLowerCase() : fallback;
+};
+
+const readCanvasTaskTagColor = (task: DocumentRequestTaskDto, tagName: string) => {
+  const tagColors = task.payload?.tagColors;
+
+  if (tagColors && typeof tagColors === 'object' && !Array.isArray(tagColors)) {
+    const value = (tagColors as Record<string, unknown>)[tagName];
+    const normalizedValue = normalizeCanvasTaskTagColor(value, '');
+
+    if (normalizedValue) {
+      return normalizedValue;
+    }
+  }
+
+  return normalizeCanvasTaskTagColor(task.payload?.tagColor, task.kind === 'file' ? '#2563eb' : '#10b981');
+};
+
+const buildCanvasMemberLabelById = (
+  documentMembers: DocumentMemberRecordDto[],
+  siteMembers: SiteMemberRecordDto[]
+) => {
+  const nextMap: Record<string, string> = {};
+
+  [...siteMembers, ...documentMembers].forEach((membership) => {
+    const member = membership.member;
+    const memberId = String(member.id || '').trim();
+
+    if (!memberId) {
+      return;
+    }
+
+    nextMap[memberId] = member.displayName?.trim() || member.phoneNumber || memberId;
+  });
+
+  return nextMap;
 };
 
 const modeDescriptions: Record<CanvasWorkspaceMode, string> = {
@@ -232,6 +303,8 @@ type CanvasRoutePreviewProps = Partial<
     | 'canvasSpecifiedHeight'
     | 'canvasSpecifiedWidthEnabled'
     | 'canvasSpecifiedWidth'
+    | 'canvasTextInteractionMode'
+    | 'selectionInactiveOverlayOpacity'
     | 'showWorkspaceMessages'
     | 'suppressInitialDraftLoadedMessage'
     | 'templateListDisplay'
@@ -255,6 +328,8 @@ export default function CanvasOwnerPage() {
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [documents, setDocuments] = React.useState<DocumentListItem[]>([]);
   const [selectedDocumentDetail, setSelectedDocumentDetail] = React.useState<DocumentDetailResult | null>(null);
+  const [documentRequestTasks, setDocumentRequestTasks] = React.useState<DocumentRequestTaskDto[]>([]);
+  const [documentTaskMemberLabelById, setDocumentTaskMemberLabelById] = React.useState<Record<string, string>>({});
   const [loadingLists, setLoadingLists] = React.useState(false);
   const [loadingDocumentDetail, setLoadingDocumentDetail] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
@@ -467,6 +542,8 @@ export default function CanvasOwnerPage() {
   React.useEffect(() => {
     if (effectiveWorkspaceMode === 'template' || !selectedDocumentId) {
       setSelectedDocumentDetail(null);
+      setDocumentRequestTasks([]);
+      setDocumentTaskMemberLabelById({});
       return;
     }
 
@@ -478,13 +555,30 @@ export default function CanvasOwnerPage() {
         const detail = await fetchSuccessData<DocumentDetailResult>(
           `/api/documents/${encodeURIComponent(selectedDocumentId)}`
         );
+        const [requestTasks, documentMembers, siteMembers] = await Promise.all([
+          fetchSuccessData<DocumentRequestTaskDto[]>(
+            `/api/documents/${encodeURIComponent(selectedDocumentId)}/request-tasks`
+          ).catch(() => []),
+          fetchSuccessData<DocumentMemberRecordDto[]>(
+            `/api/member-access/document-members?documentId=${encodeURIComponent(selectedDocumentId)}`
+          ).catch(() => []),
+          detail.document.siteId
+            ? fetchSuccessData<SiteMemberRecordDto[]>(
+                `/api/member-access/site-members?siteId=${encodeURIComponent(detail.document.siteId)}`
+              ).catch(() => [])
+            : Promise.resolve([] as SiteMemberRecordDto[]),
+        ]);
 
         if (!cancelled) {
           setSelectedDocumentDetail(detail);
+          setDocumentRequestTasks(Array.isArray(requestTasks) ? requestTasks : []);
+          setDocumentTaskMemberLabelById(buildCanvasMemberLabelById(documentMembers, siteMembers));
         }
       } catch (error) {
         if (!cancelled) {
           setSelectedDocumentDetail(null);
+          setDocumentRequestTasks([]);
+          setDocumentTaskMemberLabelById({});
           setMessage(error instanceof Error ? error.message : '문서 상세를 불러오지 못했습니다.');
         }
       } finally {
@@ -706,6 +800,100 @@ export default function CanvasOwnerPage() {
     selectedDocumentDetail
       ? `/api/documents/${encodeURIComponent(selectedDocumentDetail.document.id)}/attachments`
       : '';
+  const documentAttachmentTagOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          documentRequestTasks
+            .filter((task) => task.kind === 'photo' || task.kind === 'file')
+            .flatMap(readCanvasTaskTagNames)
+        )
+      ),
+    [documentRequestTasks]
+  );
+  const documentAttachmentTagColorByName = React.useMemo(() => {
+    const nextValue: Record<string, string> = {};
+
+    documentRequestTasks
+      .filter((task) => task.kind === 'photo' || task.kind === 'file')
+      .forEach((task) => {
+        readCanvasTaskTagNames(task).forEach((tagName) => {
+          nextValue[tagName] = readCanvasTaskTagColor(task, tagName);
+        });
+      });
+
+    return nextValue;
+  }, [documentRequestTasks]);
+  const canvasTodoPanel = React.useMemo(() => {
+    const sortedTasks = [...documentRequestTasks].sort((left, right) => {
+      const assigneeOrder = left.assigneeMemberId.localeCompare(right.assigneeMemberId, 'ko');
+
+      if (assigneeOrder !== 0) {
+        return assigneeOrder;
+      }
+
+      return left.targetLabel.localeCompare(right.targetLabel, 'ko');
+    });
+
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-950">할 일</p>
+            <p className="mt-0.5 text-xs text-slate-500">문서 담당자가 채워야 하는 값, 서명, 사진, 파일 요청입니다.</p>
+          </div>
+          <Badge variant="slate">{sortedTasks.length}개</Badge>
+        </div>
+        {sortedTasks.length === 0 ? (
+          <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-4 text-sm text-slate-500">
+            등록된 할 일이 없습니다.
+          </div>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-2">
+            {sortedTasks.map((task) => {
+              const tagNames = readCanvasTaskTagNames(task);
+              const assigneeLabel = documentTaskMemberLabelById[task.assigneeMemberId] || task.assigneeMemberId;
+              const kindVariant = task.kind === 'photo' || task.kind === 'file' ? 'green' : task.kind === 'signature' ? 'blue' : 'slate';
+
+              return (
+                <div key={task.id} className="min-w-0 rounded-md border border-slate-200 bg-white p-3">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-950">{task.targetLabel}</p>
+                      <p className="mt-1 truncate text-xs text-slate-500">{assigneeLabel}</p>
+                    </div>
+                    <Badge variant={kindVariant}>{canvasRequestTaskKindLabels[task.kind]}</Badge>
+                  </div>
+                  {task.kind === 'photo' || task.kind === 'file' ? (
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {tagNames.length > 0 ? (
+                        tagNames.map((tagName) => (
+                          <Badge
+                            key={`${task.id}:tag:${tagName}`}
+                            variant="outline"
+                            className="max-w-full truncate"
+                            style={{
+                              borderColor: readCanvasTaskTagColor(task, tagName),
+                              backgroundColor: `${readCanvasTaskTagColor(task, tagName)}1a`,
+                              color: readCanvasTaskTagColor(task, tagName),
+                            }}
+                          >
+                            {tagName}
+                          </Badge>
+                        ))
+                      ) : (
+                        <Badge variant="slate">태그 없음</Badge>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }, [documentRequestTasks, documentTaskMemberLabelById]);
   const effectiveCanvasToolbarVisibility = React.useMemo(
     () => buildCanvasToolbarVisibility(previewSettings, effectiveWorkspaceMode),
     [effectiveWorkspaceMode, previewSettings]
@@ -856,6 +1044,7 @@ export default function CanvasOwnerPage() {
 	    settings: previewSettings,
 	    settingSources: previewSettingSources,
 	    workspaceMode: effectiveWorkspaceMode,
+	    applyDefaultSettings: !routeEquivalentPreviewEnabled,
 	  });
 	  const previewHideHeader = Boolean(previewWorkspaceProps.hideHeader);
 	  const previewHidePersistencePanel = Boolean(previewWorkspaceProps.hidePersistencePanel);
@@ -878,6 +1067,9 @@ export default function CanvasOwnerPage() {
 	  const previewCanvasSpecifiedWidthEnabled = Boolean(previewWorkspaceProps.canvasSpecifiedWidthEnabled);
 	  const previewCanvasSpecifiedWidth = previewWorkspaceProps.canvasSpecifiedWidth ?? '';
 	  const previewDocumentAttachmentApiPath = previewWorkspaceProps.documentAttachmentApiPath ?? '';
+	  const previewCanvasTextInteractionMode = previewWorkspaceProps.canvasTextInteractionMode ?? 'default';
+	  const previewSelectionInactiveOverlayOpacity =
+	    previewWorkspaceProps.selectionInactiveOverlayOpacity ?? previewSettings.selectionInactiveOverlayOpacity;
 	  const previewCanvasToolbarVisibility = previewWorkspaceProps.canvasToolbarVisibility ?? effectiveCanvasToolbarVisibility;
 	  const previewPersistenceVisibility = previewWorkspaceProps.persistenceVisibility ?? effectivePersistenceVisibility;
 	  const previewTemplateUsagePreviewLayoutDebugOptions =
@@ -888,6 +1080,8 @@ export default function CanvasOwnerPage() {
 	  const previewAdditionalControlPanelsEnabled =
 	    selectedManagedPage.id === 'templates' || (!routeEquivalentPreviewEnabled && Boolean(templateExtractPanel || previewSettings.showAdditionalControlPanels));
 	  const previewTopNoticeEnabled = Boolean(previewTopNotice);
+	  const previewTodoPanelEnabled = effectiveWorkspaceMode === 'document' && Boolean(selectedDocumentInitialDraft);
+	  const previewTodoCount = previewTodoPanelEnabled ? documentRequestTasks.length : 0;
   const settingKeyByDefinitionName: Record<string, CanvasOwnerSettingKey> = {
     hideHeader: 'hideHeader',
     hidePersistencePanel: 'hidePersistencePanel',
@@ -897,6 +1091,7 @@ export default function CanvasOwnerPage() {
     'canvasToolbarVisibility.showCanvasTitle': 'showCanvasTitle',
     'canvasToolbarVisibility.showTemplateNameInput': 'showCanvasNameField',
     'canvasToolbarVisibility.showSaveButton': 'showCanvasSaveButton',
+    'canvasToolbarVisibility.showTodoButton': 'showCanvasTodoButton',
     'canvasToolbarVisibility.showPreviewToggle': 'showCanvasPreviewToggle',
     'canvasToolbarVisibility.showInteractionModeControls': 'showCanvasInteractionModeControls',
     'canvasToolbarVisibility.showHistoryControls': 'showCanvasHistoryControls',
@@ -923,6 +1118,8 @@ export default function CanvasOwnerPage() {
     preventInitialValueClearShrink: 'preventInitialValueClearShrink',
     blockPeerClusterHeightTargets: 'blockPeerClusterHeightTargets',
     blockPeerClusterWidthTargets: 'blockPeerClusterWidthTargets',
+    selectionInactiveOverlayOpacity: 'selectionInactiveOverlayOpacity',
+    readModeInteractionMode: 'readModeInteractionMode',
     preventRuntimeAutoSizeShrink: 'preventRuntimeAutoSizeShrink',
     templateNameReadOnly: 'templateNameReadOnly',
     saveDisabled: 'saveDisabled',
@@ -1040,6 +1237,16 @@ export default function CanvasOwnerPage() {
       checked: settings.showCanvasSaveButton,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showCanvasSaveButton', checked),
+    },
+    {
+      sectionKey: 'canvasEditor',
+      sectionLabel: '상자 캔버스 편집',
+      label: '할 일 버튼 표시',
+      definitionName: 'canvasToolbarVisibility.showTodoButton',
+      description: '문서 모드에서 저장 버튼 오른쪽의 할 일 버튼을 표시합니다. 템플릿/읽기 모드에서는 모드 정책상 숨겨집니다.',
+      checked: settings.showCanvasTodoButton,
+      disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasTodoButton', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1507,9 +1714,45 @@ export default function CanvasOwnerPage() {
     },
     {
       section: 'TemplateEditWorkspaceProps',
+      name: 'todoPanel',
+      value: previewTodoPanelEnabled ? 'enabled' : 'disabled',
+      description: '문서 모드에서 할 일 버튼을 누르면 출력되는 문서 요청 작업 패널입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'todoButtonLabel',
+      value: previewTodoPanelEnabled ? '할 일' : 'not passed',
+      description: '저장 버튼 오른쪽 할 일 버튼에 표시되는 문구입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'todoCount',
+      value: String(previewTodoCount),
+      description: '현재 문서에서 조회한 입력값, 서명, 사진, 파일 요청 작업 수입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
       name: 'defaultCanvasFullscreen',
       value: previewWorkspaceProps.defaultCanvasFullscreen ? 'true' : 'false',
       description: '상자 편집 캔버스의 초기 전체 화면 활성 상태입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'selectionInactiveOverlayOpacity',
+      value: `${Math.round(previewSelectionInactiveOverlayOpacity * 100)}%`,
+      description: '선택 중 비활성 상자 위에 덮는 오버레이 강도입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'readModeInteractionMode',
+      value: previewSettings.readModeInteractionMode,
+      description: '읽기 모드에서 보기만 할지, 텍스트 상호작용 없이 상자 선택을 허용할지 정하는 owner 설정입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'canvasTextInteractionMode',
+      value: previewCanvasTextInteractionMode,
+      description: 'TemplateEditWorkspace에 전달되는 텍스트 포인터 상호작용 모드입니다.',
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -1683,6 +1926,86 @@ export default function CanvasOwnerPage() {
       {(['template', 'document', 'read'] as CanvasWorkspaceMode[]).map((mode) => {
         const active = workspaceMode === mode;
         const allowed = selectedManagedPage.allowedModes.includes(mode);
+        const readModeInteractionButtonClassName = (value: CanvasOwnerSettings['readModeInteractionMode']) => {
+          const selected = settings.readModeInteractionMode === value;
+
+          if (active) {
+            return selected
+              ? 'h-7 border-white bg-white px-2 text-[10px] text-slate-950 hover:bg-white'
+              : 'h-7 border-white/70 bg-transparent px-2 text-[10px] text-white hover:bg-white/10 hover:text-white';
+          }
+
+          return selected
+            ? 'h-7 border-slate-900 bg-slate-900 px-2 text-[10px] text-white hover:bg-slate-800'
+            : 'h-7 border-slate-300 bg-white px-2 text-[10px] text-slate-700 hover:bg-slate-100';
+        };
+
+        if (mode === 'read') {
+          return (
+            <Button
+              key={mode}
+              asChild
+              variant={active ? 'default' : 'outline'}
+              className={`h-auto min-h-9 w-full justify-between gap-3 px-2 py-1.5 text-left text-xs ${
+                allowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
+              }`}
+            >
+              <div
+                role="button"
+                tabIndex={allowed ? 0 : -1}
+                aria-disabled={!allowed}
+                onClick={() => {
+                  if (allowed) {
+                    handleSelectWorkspaceMode(mode);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (!allowed || (event.key !== 'Enter' && event.key !== ' ')) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  handleSelectWorkspaceMode(mode);
+                }}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold">{modeLabels[mode]}</span>
+                  <span className="block truncate text-[10px] font-normal opacity-80">
+                    {allowed ? '이 페이지에서 사용 가능' : '이 페이지 정책에서 제외'}
+                  </span>
+                </span>
+                <span className="ml-auto flex shrink-0 items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!allowed}
+                    className={readModeInteractionButtonClassName('view-only')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      updateSetting('readModeInteractionMode', 'view-only');
+                    }}
+                  >
+                    보기만
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!allowed}
+                    className={readModeInteractionButtonClassName('box-selection')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      updateSetting('readModeInteractionMode', 'box-selection');
+                    }}
+                  >
+                    상자 선택
+                  </Button>
+                </span>
+              </div>
+            </Button>
+          );
+        }
 
         return (
           <Button
@@ -1755,10 +2078,6 @@ export default function CanvasOwnerPage() {
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <div className="text-[11px] font-semibold text-slate-800">이 페이지에서 사용할 모드</div>
-        {renderWorkspaceModeButtons()}
-      </div>
     </div>
   );
   const renderModeControls = () => (
@@ -1767,6 +2086,20 @@ export default function CanvasOwnerPage() {
         <div className="font-semibold text-slate-900">{selectedManagedPage.label}</div>
         <div className="mt-0.5 text-[10px] leading-4 text-slate-500">
           모드는 선택한 페이지의 owner policy 안에서만 변경할 수 있습니다.
+        </div>
+      </div>
+      {renderWorkspaceModeButtons()}
+      <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
+    </div>
+  );
+  const renderPageWorkspaceModeSettings = () => (
+    <div className="space-y-1.5">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">이 페이지에서 사용할 모드</div>
+          <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+            선택한 페이지의 캔버스 프리뷰와 페이지 단위 환경설정 기준 모드입니다.
+          </div>
         </div>
       </div>
       {renderWorkspaceModeButtons()}
@@ -1990,10 +2323,68 @@ export default function CanvasOwnerPage() {
               </p>
             </div>
           )}
-      </div>
+        </div>
       </div>
     </div>
   );
+  const renderCanvasSelectionOverlaySettings = () => {
+    const overlayOpacityPercent = Math.round(settings.selectionInactiveOverlayOpacity * 100);
+    const updateOverlayOpacity = (value: string) => {
+      const numericValue = Number(value);
+      const nextPercent = Number.isFinite(numericValue) ? Math.max(0, Math.min(100, numericValue)) : 50;
+
+      updateSetting('selectionInactiveOverlayOpacity', nextPercent / 100);
+    };
+
+    return (
+      <div className="space-y-1.5">
+        <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">선택 오버레이</div>
+            <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+              선택 중 비활성 상자를 덮는 흰색 오버레이 강도입니다.
+            </div>
+          </div>
+        </div>
+        <div className={`space-y-2 rounded border px-2 py-1.5 ${getModeManagedClassName('selectionInactiveOverlayOpacity')}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-800">
+                <span>비활성 상자 오버레이 강도</span>
+                {renderSettingSourceBadge('selectionInactiveOverlayOpacity')}
+              </div>
+              <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
+                0%는 오버레이 없음, 100%는 비활성 상자를 흰색으로 완전히 덮습니다.
+              </p>
+            </div>
+            <Badge variant="slate" className="shrink-0 px-2 py-0 text-[10px]">
+              {overlayOpacityPercent}%
+            </Badge>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_84px]">
+            <Input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={String(overlayOpacityPercent)}
+              onChange={(event) => updateOverlayOpacity(event.target.value)}
+              className="h-8 px-0"
+            />
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              step={5}
+              value={overlayOpacityPercent}
+              onChange={(event) => updateOverlayOpacity(event.target.value)}
+              className={compactInputClassName}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
   const renderCanvasTextSettings = () => (
     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
       <div className={getTextSettingClassName('headerTitle')}>
@@ -2286,8 +2677,10 @@ export default function CanvasOwnerPage() {
                 </div>
 		            </CardHeader>
 		            <CardContent className="space-y-3 p-4 pt-0">
-		              {renderAccessRolePolicySettings()}
-		              {renderCanvasSizeSettings()}
+			              {activeControlTab === 'page' ? renderPageWorkspaceModeSettings() : null}
+			              {renderAccessRolePolicySettings()}
+			              {renderCanvasSizeSettings()}
+		              {renderCanvasSelectionOverlaySettings()}
 		              {renderCanvasTextSettings()}
 		              {renderCanvasConfigSections()}
 	              {renderEffectiveTemplateWorkspaceProps()}
@@ -2347,6 +2740,8 @@ export default function CanvasOwnerPage() {
 	                canvasSpecifiedHeight={previewCanvasSpecifiedHeight}
 	                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
 	                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
+	                canvasTextInteractionMode={previewCanvasTextInteractionMode}
+	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
 	                canvasToolbarVisibility={previewCanvasToolbarVisibility}
 	                persistenceVisibility={previewPersistenceVisibility}
 	                templateUsagePreviewLayoutDebugOptions={previewTemplateUsagePreviewLayoutDebugOptions}
@@ -2389,6 +2784,13 @@ export default function CanvasOwnerPage() {
 	                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
 	                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
 	                documentAttachmentApiPath={previewDocumentAttachmentApiPath}
+	                documentAttachmentTagOptions={documentAttachmentTagOptions}
+	                documentAttachmentTagColorByName={documentAttachmentTagColorByName}
+	                canvasTextInteractionMode={previewCanvasTextInteractionMode}
+	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
+	                todoPanel={canvasTodoPanel}
+	                todoButtonLabel="할 일"
+	                todoCount={documentRequestTasks.length}
 	                canvasToolbarVisibility={previewCanvasToolbarVisibility}
 	                persistenceVisibility={previewPersistenceVisibility}
 	                templateUsagePreviewLayoutDebugOptions={previewTemplateUsagePreviewLayoutDebugOptions}

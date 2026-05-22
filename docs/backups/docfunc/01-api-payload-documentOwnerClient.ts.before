@@ -1,0 +1,175 @@
+import type {
+  DocumentDetailResult,
+  DocumentListItem,
+  DocumentRequestTaskInput,
+  DocumentRequestTaskSaveResult,
+} from '../../../lib/documentDtos';
+import type { DocumentMemberInviteResult, DocumentMemberRecordDto, SiteMemberRecordDto } from '../../../lib/memberAccessDtos';
+import type { EmailSendResult } from '../../../lib/messagingDtos';
+import type { RequestLinkCreateResult, RequestLinkRecipientChannel } from '../../../lib/requestLinkDtos';
+import type { SiteListResult, SiteRecordDto } from '../../../lib/siteChecklistDtos';
+import type { DocumentsOwnerRecentRequestLink } from './documentOwnerTypes';
+
+const readSuccessData = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
+  const result = await response.json();
+
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || fallbackMessage);
+  }
+
+  return result.data as T;
+};
+
+export const DocumentsOwnerClient = {
+  async listSites() {
+    const data = await readSuccessData<SiteListResult>(
+      await fetch('/api/sites', { cache: 'no-store' }),
+      '현장 목록 조회에 실패했습니다.'
+    );
+    return data.sites || [];
+  },
+
+  async listDocuments(siteId: string) {
+    const query = siteId ? `?siteId=${encodeURIComponent(siteId)}` : '';
+    return readSuccessData<DocumentListItem[]>(
+      await fetch(`/api/documents${query}`, { cache: 'no-store' }),
+      '문서 목록 조회에 실패했습니다.'
+    );
+  },
+
+  async getDocumentDetail(documentId: string) {
+    return readSuccessData<DocumentDetailResult>(
+      await fetch(`/api/documents/${encodeURIComponent(documentId)}`, { cache: 'no-store' }),
+      '문서 상세 조회에 실패했습니다.'
+    );
+  },
+
+  async listRecentRequestLinks(siteId: string) {
+    const query = siteId ? `?siteId=${encodeURIComponent(siteId)}&limit=20` : '?limit=20';
+    return readSuccessData<DocumentsOwnerRecentRequestLink[]>(
+      await fetch(`/api/request-links${query}`, { cache: 'no-store' }),
+      '요청 링크 목록 조회에 실패했습니다.'
+    );
+  },
+
+  async listDocumentMembers(documentId: string) {
+    return readSuccessData<DocumentMemberRecordDto[]>(
+      await fetch(`/api/member-access/document-members?documentId=${encodeURIComponent(documentId)}`, { cache: 'no-store' }),
+      '문서 접근 구성원 조회에 실패했습니다.'
+    );
+  },
+
+  async listSiteMembers(siteId: string) {
+    return readSuccessData<SiteMemberRecordDto[]>(
+      await fetch(`/api/member-access/site-members?siteId=${encodeURIComponent(siteId)}`, { cache: 'no-store' }),
+      '현장 구성원 조회에 실패했습니다.'
+    );
+  },
+
+  async inviteDocumentMember(params: {
+    documentId: string;
+    phoneNumber: string;
+    displayName?: string | null;
+    accessRole: 'editor' | 'viewer' | 'signer';
+  }) {
+    return readSuccessData<DocumentMemberInviteResult>(
+      await fetch('/api/member-access/document-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      }),
+      '문서 접근 권한 등록에 실패했습니다.'
+    );
+  },
+
+  async createRequestLink(params: {
+    documentId: string;
+    allowedLabels: string[];
+    recipientChannel: RequestLinkRecipientChannel;
+    recipientTarget: string;
+    recipientName?: string | null;
+    expiresAt: string;
+    requestedBy?: string | null;
+  }) {
+    return readSuccessData<RequestLinkCreateResult>(
+      await fetch('/api/request-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      }),
+      '요청 링크 생성에 실패했습니다.'
+    );
+  },
+
+  async issueDispatchUrl(requestLinkId: string) {
+    return readSuccessData<{ maskedUrl: string }>(
+      await fetch(`/api/request-links?dispatchUrlFor=${encodeURIComponent(requestLinkId)}`, { cache: 'no-store' }),
+      '요청 링크 URL 생성에 실패했습니다.'
+    );
+  },
+
+  async saveRequestTasks(params: {
+    documentId: string;
+    requestLinkId: string;
+    assigneeMemberId: string;
+    tasks: DocumentRequestTaskInput[];
+  }) {
+    return readSuccessData<DocumentRequestTaskSaveResult>(
+      await fetch(`/api/documents/${encodeURIComponent(params.documentId)}/request-tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestLinkId: params.requestLinkId,
+          assigneeMemberId: params.assigneeMemberId,
+          tasks: params.tasks,
+        }),
+      }),
+      '요청 작업 저장에 실패했습니다.'
+    );
+  },
+
+  async createSignatureRequest(params: {
+    documentId: string;
+    signatureSlotKey: string;
+    documentContent: string;
+    signerName: string;
+    phoneNumber: string;
+  }) {
+    const phoneDigits = params.phoneNumber.replace(/[^0-9]/g, '');
+
+    return readSuccessData<{ id: string }>(
+      await fetch('/api/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'REQUEST',
+          documentId: params.documentId,
+          signatureSlotKey: params.signatureSlotKey,
+          documentContent: params.documentContent,
+          signerInfo: {
+            name: params.signerName,
+            phoneNumber: params.phoneNumber,
+            email: `${phoneDigits || 'signer'}@phone.local`,
+          },
+        }),
+      }),
+      '서명 요청 생성에 실패했습니다.'
+    );
+  },
+
+  async sendEmail(params: { requestLinkId: string; to: string; subject: string; htmlBody: string }) {
+    return readSuccessData<EmailSendResult>(
+      await fetch('/api/messaging/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestLinkId: params.requestLinkId,
+          recipientTarget: params.to,
+          subject: params.subject,
+          htmlBody: params.htmlBody,
+        }),
+      }),
+      '요청 링크 이메일 발송에 실패했습니다.'
+    );
+  },
+};

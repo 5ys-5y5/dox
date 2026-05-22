@@ -601,6 +601,7 @@ export type TemplateEditWorkspaceInitialDraft = {
 export type TemplateEditWorkspaceAttachmentPendingFile = {
   localId: string;
   file: File;
+  tagNames?: string[];
 };
 
 export type TemplateEditWorkspaceAttachmentDraft = {
@@ -629,6 +630,7 @@ export type TemplateEditWorkspaceCanvasToolbarVisibility = {
   showCanvasTitle?: boolean;
   showTemplateNameInput?: boolean;
   showSaveButton?: boolean;
+  showTodoButton?: boolean;
   showPreviewToggle?: boolean;
   showInteractionModeControls?: boolean;
   showHistoryControls?: boolean;
@@ -675,6 +677,10 @@ export type TemplateChecklistSignatureSubmitParams = {
   imageData: string;
 };
 
+export type TemplateChecklistSelectableTargetSelectOptions = {
+  append?: boolean;
+};
+
 export type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
   initialDraft?: TemplateEditWorkspaceInitialDraft | null;
@@ -688,6 +694,9 @@ export type TemplateEditWorkspaceProps = {
     params: TemplateEditWorkspaceSaveDraftParams
   ) => Promise<TemplateEditWorkspaceSaveDraftResult | void>;
   additionalControlPanels?: React.ReactNode;
+  todoPanel?: React.ReactNode;
+  todoButtonLabel?: string;
+  todoCount?: number;
   topNotice?: React.ReactNode;
   showWorkspaceMessages?: boolean;
   suppressInitialDraftLoadedMessage?: boolean;
@@ -701,7 +710,15 @@ export type TemplateEditWorkspaceProps = {
   checklistSelectableTargets?: TemplateChecklistRegistrationTarget[];
   checklistSignatureStates?: TemplateChecklistSignatureState[];
   onChecklistTargetActivate?: (target: TemplateChecklistRegistrationTarget) => void;
-  onChecklistSelectableTargetSelect?: (target: TemplateChecklistRegistrationTarget) => void;
+  onChecklistSelectableTargetSelect?: (
+    target: TemplateChecklistRegistrationTarget,
+    options?: TemplateChecklistSelectableTargetSelectOptions
+  ) => void;
+  onChecklistSelectableTargetsSelect?: (
+    targets: TemplateChecklistRegistrationTarget[],
+    options?: TemplateChecklistSelectableTargetSelectOptions
+  ) => void;
+  onChecklistSelectionClear?: () => void;
   onChecklistSignatureSubmit?: (params: TemplateChecklistSignatureSubmitParams) => Promise<void> | void;
   defaultCanvasFullscreen?: boolean;
   canvasPageContainerWidth?: string;
@@ -711,6 +728,10 @@ export type TemplateEditWorkspaceProps = {
   canvasSpecifiedWidthEnabled?: boolean;
   canvasSpecifiedWidth?: string;
   documentAttachmentApiPath?: string;
+  documentAttachmentTagOptions?: string[];
+  documentAttachmentTagColorByName?: Record<string, string>;
+  selectionInactiveOverlayOpacity?: number;
+  canvasTextInteractionMode?: 'default' | 'selection-only';
   canvasToolbarVisibility?: TemplateEditWorkspaceCanvasToolbarVisibility;
   persistenceVisibility?: TemplateEditWorkspacePersistenceVisibility;
   templateUsagePreviewLayoutDebugOptions?: {
@@ -735,6 +756,7 @@ export type TemplateEditPreviewSurfaceProps = {
   spacePanArmed: boolean;
   spacePanDragging: boolean;
   metadataVisualMode: boolean;
+  selectionInactiveOverlayOpacity?: number;
   templateUsagePreviewMode: boolean;
   selectionPanelTab: SelectionPanelTab;
   editSettingsPanelVisible: boolean;

@@ -6,6 +6,7 @@ import type {
   DocumentCreateInput,
   DocumentCreateResult,
   DocumentDeleteResult,
+  DocumentDetailQuery,
   DocumentDetailResult,
   DocumentDetailQueryDebugDto,
   DocumentLinkedTemplateDto,
@@ -60,6 +61,9 @@ type DocumentVersionRow = {
   created_by: string | null;
   created_at: string;
 };
+
+type DocumentVersionSummaryRow = Omit<DocumentVersionRow, 'html_canonical' | 'label_values'> &
+  Partial<Pick<DocumentVersionRow, 'html_canonical' | 'label_values'>>;
 
 type DocumentArtifactRow = {
   id: string;
@@ -197,6 +201,19 @@ const MESSAGING_DB_SCHEMA = 'messaging';
 const BULK_OPS_DB_SCHEMA = 'bulk_ops';
 const DOCUMENT_VALUE_FILE_STORAGE_BUCKET = 'document-value-files';
 const DOCUMENT_VALUE_FILE_STORAGE_FILE_SIZE_LIMIT = 10485760;
+const DOCUMENT_VERSION_SUMMARY_SELECT = [
+  'id',
+  'document_id',
+  'version_number',
+  'html_sha256',
+  'html_hash_algorithm',
+  'html_hash_encoding',
+  'html_canonicalization',
+  'html_byte_length',
+  'change_reason',
+  'created_by',
+  'created_at',
+].join(', ');
 
 // DOCUMENTS_SCHEMA_BOUNDARY
 // 서류 클라우드 관리 도메인 테이블은 public이 아니라 documents 스키마만 사용합니다.
@@ -232,11 +249,11 @@ const toDocumentRecordDto = (row: DocumentRegistryRow): DocumentRecordDto => ({
   updatedAt: row.updated_at,
 });
 
-const toDocumentVersionDto = (row: DocumentVersionRow): DocumentVersionDto => ({
+const toDocumentVersionDto = (row: DocumentVersionSummaryRow): DocumentVersionDto => ({
   id: row.id,
   documentId: row.document_id,
   versionNumber: row.version_number,
-  htmlCanonical: row.html_canonical,
+  htmlCanonical: row.html_canonical || '',
   htmlSha256: row.html_sha256,
   htmlHashAlgorithm: row.html_hash_algorithm,
   htmlHashEncoding: row.html_hash_encoding,
@@ -1271,9 +1288,11 @@ export const DocumentService = {
 
     const documentIds = registryRows.map((row) => row.id);
 
+    const listProfile = query.profile === 'picker' ? 'picker' : 'default';
+    const versionSelect = listProfile === 'picker' ? DOCUMENT_VERSION_SUMMARY_SELECT : '*';
     const [versionResponse, artifactResponse] = await Promise.all([
       currentVersionIds.length > 0
-        ? documentsSchema(client).from('document_versions').select('*').in('id', currentVersionIds)
+        ? documentsSchema(client).from('document_versions').select(versionSelect).in('id', currentVersionIds)
         : Promise.resolve({ data: [], error: null }),
       documentsSchema(client).from('document_artifacts').select('id, document_id').in('document_id', documentIds),
     ]);
@@ -1287,7 +1306,7 @@ export const DocumentService = {
     }
 
     const versionById = new Map(
-      ((versionResponse.data || []) as DocumentVersionRow[]).map((row) => [row.id, row] as const)
+      ((versionResponse.data || []) as DocumentVersionSummaryRow[]).map((row) => [row.id, row] as const)
     );
 
     const artifactCountByDocumentId = ((artifactResponse.data || []) as Array<{ id: string; document_id: string }>)
@@ -1325,7 +1344,7 @@ export const DocumentService = {
   // DOC_CLOUD_DETAIL_API
   // 상세 조회는 document_registry 를 기준으로 최신 버전, 전체 버전 이력,
   // 출력본 메타데이터를 함께 반환합니다.
-  async getDocumentDetail(documentId: string): Promise<DocumentDetailResult> {
+  async getDocumentDetail(documentId: string, query: DocumentDetailQuery = {}): Promise<DocumentDetailResult> {
     if (!documentId.trim()) {
       throw new Error('문서 상세 조회 실패: documentId가 필요합니다.');
     }
@@ -1338,13 +1357,34 @@ export const DocumentService = {
       throw new Error(`문서 상세 조회 실패: ${documentError?.message || '문서를 찾을 수 없습니다.'}`);
     }
 
-    const [versionsResponse, artifactsResponse, photoGapSummaryResponse, templateLinkResponse, valueEntriesResponse] =
-      await Promise.allSettled([
+    const detailProfile = query.profile === 'owner-workspace' ? 'owner-workspace' : 'default';
+    const versionListSelect = detailProfile === 'owner-workspace' ? DOCUMENT_VERSION_SUMMARY_SELECT : '*';
+    const latestVersionQuery =
+      detailProfile === 'owner-workspace'
+        ? document.current_version_id
+          ? documentsClient.from('document_versions').select('*').eq('id', document.current_version_id).maybeSingle()
+          : documentsClient
+              .from('document_versions')
+              .select('*')
+              .eq('document_id', document.id)
+              .order('version_number', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+        : Promise.resolve({ data: null, error: null });
+    const [
+      versionsResponse,
+      latestVersionResponse,
+      artifactsResponse,
+      photoGapSummaryResponse,
+      templateLinkResponse,
+      valueEntriesResponse,
+    ] = await Promise.allSettled([
       documentsClient
         .from('document_versions')
-        .select('*')
+        .select(versionListSelect)
         .eq('document_id', document.id)
         .order('version_number', { ascending: false }),
+      latestVersionQuery,
       documentsClient
         .from('document_artifacts')
         .select('*')
@@ -1361,13 +1401,24 @@ export const DocumentService = {
       versionsResponse.status === 'fulfilled'
         ? versionsResponse.value
         : { data: null, error: { message: versionsResponse.reason instanceof Error ? versionsResponse.reason.message : 'unknown' } };
+    const latestVersionResponseData =
+      latestVersionResponse.status === 'fulfilled'
+        ? latestVersionResponse.value
+        : {
+            data: null,
+            error: {
+              message: latestVersionResponse.reason instanceof Error ? latestVersionResponse.reason.message : 'unknown',
+            },
+          };
     const artifactsResponseData =
       artifactsResponse.status === 'fulfilled'
         ? artifactsResponse.value
         : { data: null, error: { message: artifactsResponse.reason instanceof Error ? artifactsResponse.reason.message : 'unknown' } };
 
-    if (versionsResponseData.error) {
-      queryDebug.versions = `버전 조회 중 오류가 발생했습니다. (${versionsResponseData.error.message})`;
+    if (versionsResponseData.error || latestVersionResponseData.error) {
+      queryDebug.versions = `버전 조회 중 오류가 발생했습니다. (${
+        versionsResponseData.error?.message || latestVersionResponseData.error?.message
+      })`;
     }
 
     if (artifactsResponseData.error) {
@@ -1391,7 +1442,7 @@ export const DocumentService = {
       queryDebug.valueEntries = `문서 값 조회 중 오류가 발생했습니다. (${valueEntriesResponseData.error.message})`;
     }
 
-    const versions = ((versionsResponseData.data || []) as DocumentVersionRow[]).map(toDocumentVersionDto);
+    const versions = ((versionsResponseData.data || []) as DocumentVersionSummaryRow[]).map(toDocumentVersionDto);
     const artifacts = ((artifactsResponseData.data || []) as DocumentArtifactRow[]).map(toDocumentArtifactDto);
     const templateLink = templateLinkResponseData.data
       ? toDocumentTemplateLinkDto(templateLinkResponseData.data as DocumentTemplateLinkRow)
@@ -1412,9 +1463,16 @@ export const DocumentService = {
             return buildDocumentPhotoEvidenceSummary([]);
           })();
     const photoRequirements = buildDocumentPhotoRequirements(photoEvidence);
-    const latestVersion = document.current_version_id
-      ? versions.find((item) => item.id === document.current_version_id) || versions[0] || null
-      : versions[0] || null;
+    const latestVersion =
+      detailProfile === 'owner-workspace'
+        ? latestVersionResponseData.data
+          ? toDocumentVersionDto(latestVersionResponseData.data as DocumentVersionRow)
+          : document.current_version_id
+            ? versions.find((item) => item.id === document.current_version_id) || versions[0] || null
+            : versions[0] || null
+        : document.current_version_id
+          ? versions.find((item) => item.id === document.current_version_id) || versions[0] || null
+          : versions[0] || null;
     const effectiveVersionId = latestVersion?.id || document.current_version_id || null;
     let valueFiles: DocumentValueFileDto[] = [];
     let signatureEvidence: DocumentSignatureEvidenceDto[] = [];
@@ -1478,8 +1536,10 @@ export const DocumentService = {
     }
 
     let linkedTemplate: DocumentLinkedTemplateDto | null = null;
+    const shouldLoadLinkedTemplateHtml =
+      detailProfile !== 'owner-workspace' || !latestVersion?.htmlCanonical?.trim();
 
-    if (!queryDebug.templateLink && templateLink?.templateId) {
+    if (shouldLoadLinkedTemplateHtml && !queryDebug.templateLink && templateLink?.templateId) {
       const { data: templateRegistryData, error: templateRegistryError } = await templatesSchema(client)
         .from('template_registry')
         .select('id, template_name, draft_html, current_revision_id')

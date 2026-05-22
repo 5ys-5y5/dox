@@ -7,10 +7,15 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(_request: Request, context: RouteContext) {
+const parseDetailProfile = (value: string | null) => (value === 'owner-workspace' ? 'owner-workspace' : 'default');
+
+export async function GET(request: Request, context: RouteContext) {
   try {
     const { documentId } = await context.params;
-    const documentDetail = await DocumentService.getDocumentDetail(documentId);
+    const { searchParams } = new URL(request.url);
+    const documentDetail = await DocumentService.getDocumentDetail(documentId, {
+      profile: parseDetailProfile(searchParams.get('profile')),
+    });
 
     return NextResponse.json({ success: true, data: documentDetail });
   } catch (error: unknown) {

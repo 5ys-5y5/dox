@@ -19,6 +19,24 @@ const readFrameAttribute = (element: HTMLElement, name: string) =>
 const readText = (element: Element | null | undefined) =>
   collapseDocumentCanvasWhitespace(element?.textContent || '');
 
+const readFrameDisplayText = (element: Element | null | undefined) => {
+  if (!element) {
+    return '';
+  }
+
+  const input = element.querySelector<HTMLElement>('[data-template-frame-input="true"]');
+
+  return collapseDocumentCanvasWhitespace(
+    readAttribute(element, 'data-template-frame-source-text') ||
+      readAttribute(input, 'data-template-frame-source-text') ||
+      readAttribute(element, 'data-template-frame-extracted-text') ||
+      readAttribute(input, 'data-template-frame-extracted-text') ||
+      readText(element) ||
+      readAttribute(element, 'data-template-frame-chain-key') ||
+      readAttribute(input, 'data-template-frame-chain-key')
+  );
+};
+
 const humanizeKey = (value: string) =>
   value
     .split(/[_-]+/g)
@@ -142,7 +160,7 @@ export const collectDocumentRequestableFields = (
         : stringifyDocumentValue(labelValues[valueKey]);
       const contextText = readText(element.closest('tr, p, li, section, div, td') || valueFrame || element);
       const keyText =
-        readText(keyFrame) ||
+        readFrameDisplayText(keyFrame) ||
         readFrameAttribute(valueFrame || element, 'data-template-frame-label') ||
         collapseDocumentCanvasWhitespace(contextText.replace(currentValue, '')).replace(/[:：]\s*$/, '') ||
         humanizeKey(valueKey) ||

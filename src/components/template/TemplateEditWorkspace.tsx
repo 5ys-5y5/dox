@@ -158,6 +158,7 @@ import type {
   StyleFieldKey,
   TableCellLayoutPosition,
   TemplateChecklistRegistrationTarget,
+  TemplateChecklistSelectableTargetSelectOptions,
   TemplateChecklistSignatureState,
   TemplateChecklistSignatureSubmitParams,
   TemplateEditWorkspaceInitialDraft,
@@ -9761,12 +9762,15 @@ const TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR = 'data-template-usage-preview-read-
 const TEMPLATE_USAGE_PREVIEW_FIELD_KEY_ATTR = 'data-template-usage-preview-field-key';
 const TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR = 'data-template-checklist-highlight';
 const TEMPLATE_CHECKLIST_SELECTABLE_ATTR = 'data-template-checklist-selectable';
+const TEMPLATE_CHECKLIST_INACTIVE_ATTR = 'data-template-checklist-inactive';
+const EMPTY_TEMPLATE_USAGE_PREVIEW_ATTACHMENT_TAG_OPTIONS: string[] = [];
 
 type TemplateUsagePreviewAttachmentPendingFile = {
   localId: string;
   file: File;
   previewUrl: string;
   addedAt: string;
+  tagNames: string[];
 };
 
 type TemplateUsagePreviewAttachmentRuntimeState = {
@@ -9780,12 +9784,71 @@ const templateUsagePreviewAttachmentStateByRoot = new WeakMap<
   HTMLElement,
   Map<string, TemplateUsagePreviewAttachmentRuntimeState>
 >();
+const templateUsagePreviewAttachmentTagColorByRoot = new WeakMap<HTMLElement, Record<string, string>>();
 
 const splitTemplateUsagePreviewFileNamesText = (value: string) =>
   String(value || '')
     .split(/\r?\n/g)
     .map((line) => line.trim())
     .filter((line) => Boolean(line));
+
+const normalizeTemplateUsagePreviewAttachmentTagNames = (value: unknown): string[] => {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,，\n]/g)
+      : [];
+
+  return Array.from(
+    new Set(rawValues.map((tagName) => String(tagName || '').trim()).filter((tagName) => Boolean(tagName)))
+  );
+};
+
+const normalizeTemplateUsagePreviewAttachmentTagColor = (value: unknown, fallback = '#10b981') => {
+  const normalizedValue = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(normalizedValue) ? normalizedValue.toLowerCase() : fallback;
+};
+
+const normalizeTemplateUsagePreviewAttachmentTagColorByName = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([tagName, color]) => [
+        String(tagName || '').trim(),
+        normalizeTemplateUsagePreviewAttachmentTagColor(color, ''),
+      ])
+      .filter(([tagName, color]) => Boolean(tagName && color))
+  );
+};
+
+const readDocumentValueFileTagNames = (file: DocumentValueFileDto): string[] =>
+  normalizeTemplateUsagePreviewAttachmentTagNames(
+    file.metadata?.tags ?? file.metadata?.tagNames ?? file.metadata?.tagName ?? []
+  );
+
+const requestTemplateUsagePreviewAttachmentTagNames = (availableTagNames: string[]) => {
+  if (typeof window === 'undefined') {
+    return [] as string[];
+  }
+
+  const optionText =
+    availableTagNames.length > 0
+      ? `\n사용 가능한 태그: ${availableTagNames.join(', ')}`
+      : '\n등록된 태그가 없으면 새 태그명을 입력할 수 있습니다.';
+  const rawValue = window.prompt(
+    `첨부파일 태그를 입력하세요. 여러 개는 쉼표로 구분합니다. 비우면 태그 없음으로 등록됩니다.${optionText}`,
+    availableTagNames[0] || ''
+  );
+
+  if (rawValue === null) {
+    return [] as string[];
+  }
+
+  return normalizeTemplateUsagePreviewAttachmentTagNames(rawValue);
+};
 
 const joinTemplateUsagePreviewFileNamesText = (fileNames: string[]) =>
   fileNames.map((fileName) => String(fileName || '').trim()).filter(Boolean).join('\n');
@@ -12224,6 +12287,25 @@ const applyTemplateUsagePreviewReadOnlyState = (root: ParentNode) => {
   });
 };
 
+const applyTemplateUsagePreviewSelectionOnlyTextInteractions = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="text"]`).forEach((control) => {
+    if (control instanceof HTMLTextAreaElement || control instanceof HTMLInputElement) {
+      disableFrameTextInputEditing(control);
+      control.blur();
+    } else {
+      control.setAttribute('contenteditable', 'false');
+      control.removeAttribute('role');
+      control.tabIndex = -1;
+    }
+
+    control.style.setProperty('pointer-events', 'none', 'important');
+    control.style.setProperty('user-select', 'none', 'important');
+    control.style.setProperty('-webkit-user-select', 'none', 'important');
+    control.style.cursor = 'default';
+    control.style.caretColor = 'transparent';
+  });
+};
+
 const applyTemplateUsagePreviewFieldEditability = (root: ParentNode, editableFieldKeys?: string[] | null) => {
   const editableFieldKeySet = normalizeTemplateUsagePreviewEditableFieldKeys(editableFieldKeys);
   const globalReadOnly =
@@ -12920,7 +13002,10 @@ const cloneTemplateUsagePreviewAttachmentRuntimeState = (
 ): TemplateUsagePreviewAttachmentRuntimeState => ({
   existingFiles: state.existingFiles.map(cloneDocumentValueFileDto),
   removedExistingFileIds: [...state.removedExistingFileIds],
-  newFiles: [...state.newFiles],
+  newFiles: state.newFiles.map((file) => ({
+    ...file,
+    tagNames: [...file.tagNames],
+  })),
   apiPath: state.apiPath,
 });
 
@@ -13226,6 +13311,8 @@ const createTemplateUsagePreviewAttachmentFileCard = (params: {
   itemKind: 'existing' | 'new';
   itemId: string;
   fileName: string;
+  tagNames?: string[];
+  tagColorByName?: Record<string, string>;
   iconKind: TemplateUsagePreviewAttachmentIconKind;
   meta: string;
   deleted?: boolean;
@@ -13249,6 +13336,29 @@ const createTemplateUsagePreviewAttachmentFileCard = (params: {
   const info = document.createElement('div');
   info.className = 'v106-template-usage-file-card-info';
 
+  const tagNames = normalizeTemplateUsagePreviewAttachmentTagNames(params.tagNames || []);
+  const tagList = document.createElement('div');
+  tagList.className = 'v106-template-usage-file-card-tag-list';
+
+  if (tagNames.length > 0) {
+    tagNames.forEach((tagName) => {
+      const tagBadge = document.createElement('span');
+      const tagColor = normalizeTemplateUsagePreviewAttachmentTagColor(params.tagColorByName?.[tagName]);
+
+      tagBadge.className = 'v106-template-usage-file-card-tag';
+      tagBadge.textContent = tagName;
+      tagBadge.style.borderColor = tagColor;
+      tagBadge.style.backgroundColor = `${tagColor}1a`;
+      tagBadge.style.color = tagColor;
+      tagList.appendChild(tagBadge);
+    });
+  } else {
+    const emptyTagBadge = document.createElement('span');
+    emptyTagBadge.className = 'v106-template-usage-file-card-tag v106-template-usage-file-card-tag--empty';
+    emptyTagBadge.textContent = '태그 없음';
+    tagList.appendChild(emptyTagBadge);
+  }
+
   const fileName = document.createElement('div');
   fileName.className = 'v106-template-usage-file-card-name';
   fileName.textContent = params.fileName;
@@ -13258,6 +13368,7 @@ const createTemplateUsagePreviewAttachmentFileCard = (params: {
   meta.className = 'v106-template-usage-file-card-meta';
   meta.textContent = params.meta;
 
+  info.appendChild(tagList);
   info.appendChild(fileName);
   info.appendChild(meta);
 
@@ -13323,6 +13434,8 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
   const pendingList = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_PENDING_LIST_ATTR}="true"]`);
   const uploadBox = control.querySelector<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_FILE_UPLOAD_ATTR}="true"]`);
   const readOnly = isTemplateUsagePreviewControlReadOnly(control);
+  const root = control.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"]`);
+  const tagColorByName = root ? templateUsagePreviewAttachmentTagColorByRoot.get(root) || {} : {};
 
   if (!state || !registeredList || !pendingList || !uploadBox) {
     return;
@@ -13348,6 +13461,8 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
         itemKind: 'existing',
         itemId: file.id,
         fileName: file.originalFileName,
+        tagNames: readDocumentValueFileTagNames(file),
+        tagColorByName,
         iconKind: resolveTemplateUsagePreviewAttachmentIcon(file.originalFileName, file.mimeType),
         meta: metaText,
         deleted,
@@ -13383,6 +13498,8 @@ const renderTemplateUsagePreviewAttachmentControl = (control: HTMLElement) => {
           itemKind: 'new',
           itemId: file.localId,
           fileName: file.file.name,
+          tagNames: file.tagNames,
+          tagColorByName,
           iconKind: resolveTemplateUsagePreviewAttachmentIcon(file.file.name, file.file.type),
           meta: `${formatTemplateUsagePreviewAttachmentFileSize(file.file.size) || '-'} · 저장 대기`,
           onViewAction: 'view-new',
@@ -13650,6 +13767,7 @@ const buildTemplateUsagePreviewHtml = (
     preserveValueText?: boolean;
     readOnly?: boolean;
     editableValueKeys?: string[] | null;
+    selectionOnlyTextInteractions?: boolean;
     initialAttachmentFilesByValueKey?: Record<string, DocumentValueFileDto[]>;
     documentAttachmentApiPath?: string;
     stabilizeInitialLayout?: boolean;
@@ -13695,6 +13813,10 @@ const buildTemplateUsagePreviewHtml = (
     applyTemplateUsagePreviewReadOnlyState(container);
   } else {
     applyTemplateUsagePreviewFieldEditability(container, options?.editableValueKeys);
+  }
+
+  if (options?.selectionOnlyTextInteractions) {
+    applyTemplateUsagePreviewSelectionOnlyTextInteractions(container);
   }
 
   if (options?.stabilizeInitialLayout === false) {
@@ -13846,6 +13968,7 @@ const collectTemplateUsagePreviewAttachmentDrafts = (root: HTMLElement): Templat
       newFiles: state.newFiles.map((file) => ({
         localId: file.localId,
         file: file.file,
+        tagNames: [...file.tagNames],
       })),
     }))
     .sort((left, right) => left.valueKey.localeCompare(right.valueKey, 'ko'));
@@ -14046,8 +14169,12 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
     measurePeerClusterHeightTargets?: boolean;
     measurePeerClusterWidthTargets?: boolean;
     onSignatureImageRequest?: (target: TemplateChecklistRegistrationTarget) => void;
+    attachmentTagOptions?: string[];
+    attachmentTagColorByName?: Record<string, string>;
   }
 ) => {
+  templateUsagePreviewAttachmentTagColorByRoot.set(root, options?.attachmentTagColorByName || {});
+
   type SignatureDrawState = {
     canvas: HTMLCanvasElement;
     pointerId: number;
@@ -14202,6 +14329,8 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
       return;
     }
 
+    const tagNames = requestTemplateUsagePreviewAttachmentTagNames(options?.attachmentTagOptions || []);
+
     updateAttachmentStateByContext(contextKey, (state) => ({
       ...state,
       newFiles: [
@@ -14211,6 +14340,7 @@ const attachTemplateUsagePreviewRuntimeHandlers = (
           file,
           previewUrl: URL.createObjectURL(file),
           addedAt: new Date().toISOString(),
+          tagNames,
         })),
       ],
     }));
@@ -14876,28 +15006,30 @@ const collectChecklistTargetCanvasSelectionIds = (
     const node = frameNodeById.get(frameGroupId);
     return node ? readFrameRole(node) : '';
   };
-  const orderedExplicitKeyId =
-    explicitFrameCandidates.find((frameGroupId) => readRoleByFrameGroupId(frameGroupId) === 'key') || '';
-  const directKeyId = candidateIds.find((frameGroupId) => readRoleByFrameGroupId(frameGroupId) === 'key') || '';
-  const parentKeyId =
-    candidateIds
-      .map((frameGroupId) => keyIdsByValueId.get(frameGroupId) || '')
-      .find((frameGroupId) => Boolean(frameGroupId) && frameNodeById.has(frameGroupId)) || '';
-  const linkedKeyId =
-    explicitFrameCandidates.find((frameGroupId) => valueIdsByKeyId.has(frameGroupId)) ||
-    candidateIds.find((frameGroupId) => valueIdsByKeyId.has(frameGroupId)) ||
-    '';
-  const selectedKeyId = orderedExplicitKeyId || directKeyId || parentKeyId || linkedKeyId;
+  const selectedKeyIds = Array.from(
+    new Set(
+      [
+        ...explicitFrameCandidates.filter((frameGroupId) => readRoleByFrameGroupId(frameGroupId) === 'key'),
+        ...candidateIds.filter((frameGroupId) => readRoleByFrameGroupId(frameGroupId) === 'key'),
+        ...candidateIds.map((frameGroupId) => keyIdsByValueId.get(frameGroupId) || ''),
+        ...explicitFrameCandidates.filter((frameGroupId) => valueIdsByKeyId.has(frameGroupId)),
+        ...candidateIds.filter((frameGroupId) => valueIdsByKeyId.has(frameGroupId)),
+      ].filter((frameGroupId) => Boolean(frameGroupId) && frameNodeById.has(frameGroupId))
+    )
+  );
 
-  if (!selectedKeyId) {
+  if (selectedKeyIds.length <= 0) {
     return candidateIds;
   }
 
-  const selectedIds = [selectedKeyId, ...(valueIdsByKeyId.get(selectedKeyId) || [])];
-  candidateIds.forEach((frameGroupId) => {
-    if (keyIdsByValueId.get(frameGroupId) === selectedKeyId) {
-      selectedIds.push(frameGroupId);
-    }
+  const selectedIds: string[] = [];
+  selectedKeyIds.forEach((selectedKeyId) => {
+    selectedIds.push(selectedKeyId, ...(valueIdsByKeyId.get(selectedKeyId) || []));
+    candidateIds.forEach((frameGroupId) => {
+      if (keyIdsByValueId.get(frameGroupId) === selectedKeyId) {
+        selectedIds.push(frameGroupId);
+      }
+    });
   });
 
   return Array.from(new Set(selectedIds.filter((frameGroupId) => frameNodeById.has(frameGroupId))));
@@ -17114,7 +17246,7 @@ const appendSelectionTonedownOverlay = (
   overlay.style.width = toFrameCssPx(rect.width + 2);
   overlay.style.height = toFrameCssPx(rect.height + 2);
   overlay.style.zIndex = '30';
-  overlay.style.background = 'rgba(255, 255, 255, .5)';
+  overlay.style.background = 'rgba(255, 255, 255, var(--v106-selection-inactive-overlay-alpha, .5))';
   overlay.style.borderRadius = getComputedStyle(shell).borderRadius || '0';
 
   pageInner.appendChild(overlay);
@@ -18155,6 +18287,9 @@ export default function TemplateEditWorkspace({
   onTemplateSaved,
   onSaveDraftHtml,
   additionalControlPanels,
+  todoPanel,
+  todoButtonLabel = '할 일',
+  todoCount = 0,
   topNotice,
   showWorkspaceMessages = true,
   suppressInitialDraftLoadedMessage = false,
@@ -18169,6 +18304,8 @@ export default function TemplateEditWorkspace({
   checklistSignatureStates = [],
   onChecklistTargetActivate,
   onChecklistSelectableTargetSelect,
+  onChecklistSelectableTargetsSelect,
+  onChecklistSelectionClear,
   onChecklistSignatureSubmit,
   defaultCanvasFullscreen = false,
   canvasPageContainerWidth = '',
@@ -18178,12 +18315,17 @@ export default function TemplateEditWorkspace({
   canvasSpecifiedWidthEnabled = false,
   canvasSpecifiedWidth = '',
   documentAttachmentApiPath = '',
+  documentAttachmentTagOptions = EMPTY_TEMPLATE_USAGE_PREVIEW_ATTACHMENT_TAG_OPTIONS,
+  documentAttachmentTagColorByName = {},
+  selectionInactiveOverlayOpacity = 0.5,
+  canvasTextInteractionMode = 'default',
   canvasToolbarVisibility,
   persistenceVisibility,
   templateUsagePreviewLayoutDebugOptions,
 }: TemplateEditWorkspaceProps) {
   const documentMode = workspaceMode === 'document';
   const readMode = workspaceMode === 'read';
+  const selectionOnlyTextInteractions = canvasTextInteractionMode === 'selection-only';
   const usagePreviewStabilizeInitialLayout =
     templateUsagePreviewLayoutDebugOptions?.stabilizeInitialLayout !== false;
   const usagePreviewEnableInitialAutoSize = templateUsagePreviewLayoutDebugOptions?.enableInitialAutoSize === true;
@@ -18201,6 +18343,14 @@ export default function TemplateEditWorkspace({
         ? editableValueKeys.map((fieldKey) => String(fieldKey || '').trim()).filter((fieldKey) => Boolean(fieldKey))
         : null,
     [editableValueKeys]
+  );
+  const normalizedDocumentAttachmentTagOptions = React.useMemo(
+    () => normalizeTemplateUsagePreviewAttachmentTagNames(documentAttachmentTagOptions),
+    [documentAttachmentTagOptions]
+  );
+  const normalizedDocumentAttachmentTagColorByName = React.useMemo(
+    () => normalizeTemplateUsagePreviewAttachmentTagColorByName(documentAttachmentTagColorByName),
+    [documentAttachmentTagColorByName]
   );
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
@@ -18234,6 +18384,7 @@ export default function TemplateEditWorkspace({
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>('position');
   const [editSettingsPanelVisible, setEditSettingsPanelVisible] = React.useState(true);
   const [canvasFullscreen, setCanvasFullscreen] = React.useState(defaultCanvasFullscreen);
+  const [todoPanelVisible, setTodoPanelVisible] = React.useState(false);
   const [positionRelationAnchorFrameGroupId, setPositionRelationAnchorFrameGroupId] = React.useState('');
   const [positionRelationTargetFrameGroupId, setPositionRelationTargetFrameGroupId] = React.useState('');
   const [positionOrderLockSelectionMode, setPositionOrderLockSelectionMode] = React.useState(false);
@@ -18708,7 +18859,9 @@ export default function TemplateEditWorkspace({
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
   const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode;
   const checklistCanvasSelectionModeActive =
-    templateUsagePreviewActive && checklistSelectableTargets.length > 0 && Boolean(onChecklistSelectableTargetSelect);
+    templateUsagePreviewActive &&
+    checklistSelectableTargets.length > 0 &&
+    Boolean(onChecklistSelectableTargetSelect || onChecklistSelectableTargetsSelect);
   const surfaceRenderedPreviewHtml = templateUsagePreviewActive
     ? templateUsagePreviewHtml || renderedPreviewHtml
     : renderedPreviewHtml;
@@ -19694,6 +19847,7 @@ export default function TemplateEditWorkspace({
       preserveValueText: true,
       readOnly: readMode,
       editableValueKeys: normalizedEditableValueKeys,
+      selectionOnlyTextInteractions,
       initialAttachmentFilesByValueKey: activeInitialDraftAttachmentFilesByValueKey,
       documentAttachmentApiPath: documentAttachmentApiPath.trim(),
       stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
@@ -19715,12 +19869,21 @@ export default function TemplateEditWorkspace({
     previewSurfaceNodeVersion,
     readMode,
     renderedPreviewHtml,
+    selectionOnlyTextInteractions,
     templateUsagePreviewHtml,
     usagePreviewMeasurePeerClusterHeightTargets,
     usagePreviewMeasurePeerClusterWidthTargets,
     usagePreviewPreventInitialValueClearShrink,
     usagePreviewStabilizeInitialLayout,
   ]);
+
+  React.useEffect(() => {
+    if (!selectionOnlyTextInteractions || !previewRef.current) {
+      return;
+    }
+
+    applyTemplateUsagePreviewSelectionOnlyTextInteractions(previewRef.current);
+  }, [previewSurfaceNodeVersion, selectionOnlyTextInteractions, templateUsagePreviewHtml]);
 
   React.useEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current || readMode) {
@@ -19751,9 +19914,13 @@ export default function TemplateEditWorkspace({
       onAutoSizeLayoutChange: (root, layoutOptions) => {
         templateUsagePreviewAutoSizeLayoutChangeRef.current?.(root, layoutOptions);
       },
+      attachmentTagOptions: normalizedDocumentAttachmentTagOptions,
+      attachmentTagColorByName: normalizedDocumentAttachmentTagColorByName,
     });
   }, [
     documentMode,
+    normalizedDocumentAttachmentTagColorByName,
+    normalizedDocumentAttachmentTagOptions,
     readMode,
     surfaceRenderedPreviewHtml,
     templateUsagePreviewActive,
@@ -19794,13 +19961,44 @@ export default function TemplateEditWorkspace({
   React.useEffect(() => {
     const root = previewRef.current;
 
-    if (!templateUsagePreviewActive || !root || checklistSelectableTargets.length === 0 || !onChecklistSelectableTargetSelect) {
+    if (
+      !templateUsagePreviewActive ||
+      !root ||
+      checklistSelectableTargets.length === 0 ||
+      (!onChecklistSelectableTargetSelect && !onChecklistSelectableTargetsSelect)
+    ) {
       return undefined;
     }
 
-    const clearSelectable = () => {
+    type ChecklistSelectableMarqueeHitEntry = {
+      target: TemplateChecklistRegistrationTarget;
+      targetKey: string;
+      rect: FrameNodeRect;
+      selectionIds: string[];
+    };
+    type ChecklistSelectableMarqueeState = {
+      pointerId: number;
+      pageInner: HTMLElement;
+      scale: number;
+      origin: { x: number; y: number };
+      ghost: HTMLElement | null;
+      active: boolean;
+      append: boolean;
+      anchorTarget: TemplateChecklistRegistrationTarget | null;
+      hitEntries: ChecklistSelectableMarqueeHitEntry[] | null;
+      lastTargetKeys: string[];
+      lastTargets: TemplateChecklistRegistrationTarget[];
+    };
+
+    let marqueeState: ChecklistSelectableMarqueeState | null = null;
+    let suppressNextClick = false;
+
+    const clearChecklistAvailability = () => {
       root.querySelectorAll<HTMLElement>(`[${TEMPLATE_CHECKLIST_SELECTABLE_ATTR}="true"]`).forEach((node) => {
         node.removeAttribute(TEMPLATE_CHECKLIST_SELECTABLE_ATTR);
+      });
+      root.querySelectorAll<HTMLElement>(`[${TEMPLATE_CHECKLIST_INACTIVE_ATTR}="true"]`).forEach((node) => {
+        node.removeAttribute(TEMPLATE_CHECKLIST_INACTIVE_ATTR);
       });
     };
     const selectableTargets = checklistSelectableTargets
@@ -19810,11 +20008,20 @@ export default function TemplateEditWorkspace({
       }))
       .filter((item) => item.nodes.length > 0);
 
-    clearSelectable();
+    clearChecklistAvailability();
+    const selectableFrameNodes = new Set<HTMLElement>();
     selectableTargets.forEach((item) => {
       item.nodes.forEach((node) => {
         node.setAttribute(TEMPLATE_CHECKLIST_SELECTABLE_ATTR, 'true');
+        selectableFrameNodes.add(resolveFrameSelectionAnchor(node) || node);
       });
+    });
+    collectFrameSelectionAnchors(root).forEach((node) => {
+      if (selectableFrameNodes.has(node)) {
+        return;
+      }
+
+      node.setAttribute(TEMPLATE_CHECKLIST_INACTIVE_ATTR, 'true');
     });
 
     const findMatchedSelectableTarget = (eventTarget: HTMLElement) => {
@@ -19841,25 +20048,352 @@ export default function TemplateEditWorkspace({
       return candidates[0]?.item || null;
     };
 
-    const stopSelectablePointerDefault = (event: PointerEvent | MouseEvent) => {
+    const getTargetKey = (target: TemplateChecklistRegistrationTarget) =>
+      [
+        target.activationValueKey,
+        target.valueKey,
+        target.frameGroupId,
+        target.slotKey,
+        target.contextKey,
+        target.id,
+      ]
+        .map((value) => value?.trim())
+        .find((value) => Boolean(value)) || '';
+
+    const normalizeSelectableTargetDisplayText = (value: string) =>
+      value
+        .replace(/\s+/g, ' ')
+        .replace(/([가-힣])\s+(?=[가-힣])/g, '$1')
+        .replace(/(텍스트|서명|첨부파일|파일|사진)?(상위 키|하위 값)$/g, '')
+        .trim();
+
+    const isGeneratedSelectableTargetLabel = (value: string) =>
+      /^(band-\d+|status-history-\d+|field-\d+|frame-\d+)/i.test(value.trim());
+
+    const readSelectableTargetNodeText = (node: HTMLElement) =>
+      normalizeSelectableTargetDisplayText(
+        node.querySelector<HTMLInputElement | HTMLTextAreaElement>('[data-template-frame-input="true"]')?.value ||
+          node.textContent ||
+          ''
+      );
+
+    const resolveSelectableTargetDisplayLabel = (target: TemplateChecklistRegistrationTarget) => {
+      const targetKey = getTargetKey(target);
+      const item = selectableTargets.find((candidate) => getTargetKey(candidate.target) === targetKey) || null;
+      const keyNode =
+        item?.nodes.find((node) => readFrameRole(resolveFrameSelectionAnchor(node) || node) === 'key') ||
+        item?.nodes.find((node) => readFrameRole(resolveFrameSelectionAnchor(node) || node) === 'key_value') ||
+        null;
+      const keyText = keyNode ? readSelectableTargetNodeText(resolveFrameSelectionAnchor(keyNode) || keyNode) : '';
+      const targetLabel = normalizeSelectableTargetDisplayText(target.label || '');
+      const nextLabel = keyText || targetLabel;
+
+      if (!nextLabel || isGeneratedSelectableTargetLabel(nextLabel) || nextLabel === target.label) {
+        return target;
+      }
+
+      return {
+        ...target,
+        label: nextLabel,
+      };
+    };
+
+    const readElementRectInPageInner = (
+      element: HTMLElement,
+      pageInner: HTMLElement,
+      scale: number
+    ): FrameNodeRect | null => {
+      if (element.closest<HTMLElement>('.page-inner') !== pageInner) {
+        return null;
+      }
+
+      const elementRect = element.getBoundingClientRect();
+      const pageRect = pageInner.getBoundingClientRect();
+
+      if (elementRect.width <= 0 || elementRect.height <= 0) {
+        return null;
+      }
+
+      return {
+        left: (elementRect.left - pageRect.left) / Math.max(scale, 0.01),
+        top: (elementRect.top - pageRect.top) / Math.max(scale, 0.01),
+        width: elementRect.width / Math.max(scale, 0.01),
+        height: elementRect.height / Math.max(scale, 0.01),
+      };
+    };
+
+    const buildChecklistSelectableMarqueeHitEntries = (
+      pageInner: HTMLElement,
+      scale: number
+    ): ChecklistSelectableMarqueeHitEntry[] =>
+      selectableTargets
+        .map((item) => {
+          const rects = item.nodes
+            .map((node) => resolveFrameSelectionAnchor(node) || node)
+            .map((node) => readElementRectInPageInner(node, pageInner, scale))
+            .filter((rect): rect is FrameNodeRect => Boolean(rect));
+
+          if (rects.length <= 0) {
+            return null;
+          }
+
+          const selectionIds = collectChecklistTargetCanvasSelectionIds(root, item.target);
+          const fallbackSelectionIds = item.nodes
+            .map((node) => getFrameGroupId(resolveFrameSelectionAnchor(node) || node).trim())
+            .filter((frameGroupId) => Boolean(frameGroupId));
+
+          return {
+            target: item.target,
+            targetKey: getTargetKey(item.target),
+            rect: buildFrameRectUnion(rects),
+            selectionIds: Array.from(new Set(selectionIds.length > 0 ? selectionIds : fallbackSelectionIds)),
+          };
+        })
+        .filter((entry): entry is ChecklistSelectableMarqueeHitEntry => Boolean(entry));
+
+    const applyChecklistSelectableMarqueeVisuals = (nextSelectedFrameGroupIds: string[]) => {
+      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+
+      selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      syncPreviewSurfaceSelectionPanelTabAttr(root, 'metadata');
+      root.setAttribute('data-metadata-visual-mode', 'true');
+      syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
+      applyPreviewEditPermissions(root, 'metadata', textCanvasEditModeActiveRef.current);
+      clearPositionOnlyEditorUi(root);
+      applyFrameCanvasVisualHints(root);
+      applyFastFrameSelectionUi(root, nextSelectedFrameGroupIds, [], collectFrameSelectionAnchorByIdMap(root));
+      applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
+      syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
+    };
+
+    const emitChecklistSelectableTargets = (
+      targets: TemplateChecklistRegistrationTarget[],
+      options?: TemplateChecklistSelectableTargetSelectOptions
+    ) => {
+      if (targets.length <= 0) {
+        return;
+      }
+
+      if (onChecklistSelectableTargetsSelect) {
+        onChecklistSelectableTargetsSelect(targets.map(resolveSelectableTargetDisplayLabel), options);
+        return;
+      }
+
+      targets.forEach((target, index) => {
+        onChecklistSelectableTargetSelect?.(resolveSelectableTargetDisplayLabel(target), {
+          append: Boolean(options?.append) || index > 0,
+        });
+      });
+    };
+
+    const updateChecklistSelectableMarquee = (
+      state: ChecklistSelectableMarqueeState,
+      clientX: number,
+      clientY: number,
+      options: { force?: boolean } = {}
+    ) => {
+      const currentPoint = readPageInnerPointerPoint(state.pageInner, clientX, clientY, state.scale);
+      const nextRect = buildPointerDragRect(state.origin, currentPoint);
+
+      if (
+        !options.force &&
+        !state.active &&
+        nextRect.width < FRAME_MARQUEE_DRAG_THRESHOLD_PX &&
+        nextRect.height < FRAME_MARQUEE_DRAG_THRESHOLD_PX
+      ) {
+        return;
+      }
+
+      if (!state.active) {
+        const nextGhost = createFrameEditorGhost(FRAME_MARQUEE_GHOST_CLASS, 'contained');
+        state.pageInner.appendChild(nextGhost);
+        state.ghost = nextGhost;
+        state.active = true;
+      }
+
+      if (!state.hitEntries) {
+        state.hitEntries = buildChecklistSelectableMarqueeHitEntries(state.pageInner, state.scale);
+      }
+
+      const nextMode: FrameMarqueeSelectionMode = state.anchorTarget
+        ? 'intersected'
+        : currentPoint.x >= state.origin.x
+          ? 'contained'
+          : 'intersected';
+      state.ghost?.setAttribute('data-marquee-mode', nextMode);
+
+      if (state.ghost) {
+        writeFrameEditorGhostRect(state.ghost, nextRect);
+      }
+
+      const nextEntries = state.hitEntries.filter((entry) =>
+        nextMode === 'contained' ? rectContainsRect(nextRect, entry.rect) : rectIntersectsRect(nextRect, entry.rect)
+      );
+      const nextTargetKeys = nextEntries.map((entry) => entry.targetKey);
+
+      if (stringArraysEqual(state.lastTargetKeys, nextTargetKeys)) {
+        return;
+      }
+
+      state.lastTargetKeys = nextTargetKeys;
+      state.lastTargets = nextEntries.map((entry) => entry.target);
+      applyChecklistSelectableMarqueeVisuals(
+        Array.from(new Set(nextEntries.flatMap((entry) => entry.selectionIds).filter((frameGroupId) => Boolean(frameGroupId))))
+      );
+    };
+
+    const cleanupChecklistSelectableMarquee = () => {
+      if (marqueeState) {
+        try {
+          root.releasePointerCapture(marqueeState.pointerId);
+        } catch {
+          // Pointer capture may already be released by the browser.
+        }
+      }
+
+      if (marqueeState?.ghost) {
+        removeFrameEditorGhost(marqueeState.ghost);
+      }
+
+      marqueeState = null;
+      window.removeEventListener('pointermove', handleSelectableMarqueePointerMove, true);
+      window.removeEventListener('pointerup', handleSelectableMarqueePointerUp, true);
+      window.removeEventListener('pointercancel', handleSelectableMarqueePointerCancel, true);
+    };
+
+    const suppressClickAfterMarquee = () => {
+      suppressNextClick = true;
+      window.setTimeout(() => {
+        suppressNextClick = false;
+      }, 0);
+    };
+
+    function handleSelectableMarqueePointerMove(event: PointerEvent) {
+      const state = marqueeState;
+
+      if (!state || state.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      updateChecklistSelectableMarquee(state, event.clientX, event.clientY);
+    }
+
+    function handleSelectableMarqueePointerUp(event: PointerEvent) {
+      const state = marqueeState;
+
+      if (!state || state.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      const finalPoint = readPageInnerPointerPoint(state.pageInner, event.clientX, event.clientY, state.scale);
+      const finalRect = buildPointerDragRect(state.origin, finalPoint);
+      const shouldCommitMarquee =
+        state.active ||
+        finalRect.width >= FRAME_MARQUEE_DRAG_THRESHOLD_PX ||
+        finalRect.height >= FRAME_MARQUEE_DRAG_THRESHOLD_PX;
+
+      if (shouldCommitMarquee) {
+        updateChecklistSelectableMarquee(state, event.clientX, event.clientY, { force: true });
+        if (state.lastTargets.length > 0) {
+          emitChecklistSelectableTargets(state.lastTargets, { append: state.append });
+        } else if (!state.append && (checklistRegistrationTargetRef.current || selectedFrameGroupIdsRef.current.length > 0)) {
+          onChecklistSelectionClear?.();
+        }
+        suppressClickAfterMarquee();
+      } else if (state.anchorTarget) {
+        emitChecklistSelectableTargets([state.anchorTarget], { append: state.append });
+        suppressClickAfterMarquee();
+      } else if (!state.append && (checklistRegistrationTargetRef.current || selectedFrameGroupIdsRef.current.length > 0)) {
+        onChecklistSelectionClear?.();
+      }
+
+      cleanupChecklistSelectableMarquee();
+    }
+
+    function handleSelectableMarqueePointerCancel(event: PointerEvent) {
+      if (marqueeState?.pointerId !== event.pointerId) {
+        return;
+      }
+
+      cleanupChecklistSelectableMarquee();
+    }
+
+    const handleSelectablePointerDown = (event: PointerEvent) => {
       const eventTarget = event.target instanceof HTMLElement ? event.target : null;
 
       if (!eventTarget) {
         return;
       }
 
-      const matchedTarget = findMatchedSelectableTarget(eventTarget);
+      if (event.button !== 0) {
+        return;
+      }
 
-      if (!matchedTarget) {
+      const matchedTarget = findMatchedSelectableTarget(eventTarget);
+      const pageInner = eventTarget.closest<HTMLElement>('.page-inner');
+
+      if (!pageInner) {
+        if (!event.shiftKey && (checklistRegistrationTargetRef.current || selectedFrameGroupIdsRef.current.length > 0)) {
+          onChecklistSelectionClear?.();
+        }
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+      const scale = Math.max(0.1, previewZoomRef.current / 100);
+      marqueeState = {
+        pointerId: event.pointerId,
+        pageInner,
+        scale,
+        origin: readPageInnerPointerPoint(pageInner, event.clientX, event.clientY, scale),
+        ghost: null,
+        active: false,
+        append: event.shiftKey,
+        anchorTarget: matchedTarget?.target || null,
+        hitEntries: null,
+        lastTargetKeys: [],
+        lastTargets: [],
+      };
+
+      try {
+        root.setPointerCapture(event.pointerId);
+      } catch {
+        // Some synthetic pointer events cannot be captured; window listeners still finish the interaction.
+      }
+
+      window.addEventListener('pointermove', handleSelectableMarqueePointerMove, true);
+      window.addEventListener('pointerup', handleSelectableMarqueePointerUp, true);
+      window.addEventListener('pointercancel', handleSelectableMarqueePointerCancel, true);
+    };
+
+    const handleSelectableMouseDown = (event: MouseEvent) => {
+      const eventTarget = event.target instanceof HTMLElement ? event.target : null;
+
+      if (!eventTarget) {
+        return;
+      }
+
+      if (marqueeState || findMatchedSelectableTarget(eventTarget)) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }
     };
 
     const handleSelectableTargetClick = (event: MouseEvent) => {
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        return;
+      }
+
       const eventTarget = event.target instanceof HTMLElement ? event.target : null;
 
       if (!eventTarget) {
@@ -19875,20 +20409,29 @@ export default function TemplateEditWorkspace({
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      onChecklistSelectableTargetSelect(matchedTarget.target);
+      emitChecklistSelectableTargets([matchedTarget.target], { append: event.shiftKey });
     };
 
-    root.addEventListener('pointerdown', stopSelectablePointerDefault, true);
-    root.addEventListener('mousedown', stopSelectablePointerDefault, true);
+    root.addEventListener('pointerdown', handleSelectablePointerDown, true);
+    root.addEventListener('mousedown', handleSelectableMouseDown, true);
     root.addEventListener('click', handleSelectableTargetClick, true);
 
     return () => {
-      root.removeEventListener('pointerdown', stopSelectablePointerDefault, true);
-      root.removeEventListener('mousedown', stopSelectablePointerDefault, true);
+      root.removeEventListener('pointerdown', handleSelectablePointerDown, true);
+      root.removeEventListener('mousedown', handleSelectableMouseDown, true);
       root.removeEventListener('click', handleSelectableTargetClick, true);
-      clearSelectable();
+      cleanupChecklistSelectableMarquee();
+      clearChecklistAvailability();
     };
-  }, [checklistSelectableTargets, onChecklistSelectableTargetSelect, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+  }, [
+    checklistSelectableTargets,
+    onChecklistSelectableTargetsSelect,
+    onChecklistSelectableTargetSelect,
+    onChecklistSelectionClear,
+    surfaceRenderedPreviewHtml,
+    syncEdgeRoleDiagnosticsState,
+    templateUsagePreviewActive,
+  ]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -24447,6 +24990,8 @@ export default function TemplateEditWorkspace({
 
     const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
     const nextSelectedFrameGroupIds = collectChecklistTargetCanvasSelectionIds(root, checklistRegistrationTarget);
+    const selectionChanged = !stringArraysEqual(selectedFrameGroupIdsRef.current, nextSelectedFrameGroupIds);
+    const hasEdgeSelection = edgeSelectionStateRef.current.tokens.length > 0;
 
     syncPreviewSurfaceSelectionPanelTabAttr(root, 'metadata');
     root.setAttribute('data-metadata-visual-mode', 'true');
@@ -24460,13 +25005,17 @@ export default function TemplateEditWorkspace({
     applyDefinedPositionRelativeRelationUi(root, 'metadata', highlightedDefinedPositionRelativeRelations);
     applyPositionSpacingGuideUi(root, 'metadata', positionSpacingGuideRelations);
     applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-    selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
-    edgeSelectionStateRef.current = emptyEdgeSelection;
-    setSelectedFrameGroupIds((current) =>
-      stringArraysEqual(current, nextSelectedFrameGroupIds) ? current : nextSelectedFrameGroupIds
-    );
-    setEdgeSelectionState(emptyEdgeSelection);
-    syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
+
+    if (selectionChanged) {
+      selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
+      setSelectedFrameGroupIds(nextSelectedFrameGroupIds);
+    }
+
+    if (hasEdgeSelection) {
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      setEdgeSelectionState(emptyEdgeSelection);
+      syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
+    }
 
     if (selectionPanelTab !== 'metadata') {
       setSelectionPanelTab('metadata');
@@ -24482,6 +25031,70 @@ export default function TemplateEditWorkspace({
     syncEdgeRoleDiagnosticsState,
     visibleMetadataReviewIssues,
   ]);
+
+  const clearChecklistCanvasSelection = React.useCallback(() => {
+    const root = previewRef.current;
+    const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+    const hadFrameSelection = selectedFrameGroupIdsRef.current.length > 0;
+    const hadEdgeSelection = edgeSelectionStateRef.current.tokens.length > 0;
+
+    if (hadFrameSelection) {
+      selectedFrameGroupIdsRef.current = [];
+      setSelectedFrameGroupIds([]);
+    }
+
+    if (hadEdgeSelection) {
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      setEdgeSelectionState(emptyEdgeSelection);
+      syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
+    }
+
+    if (!root) {
+      return;
+    }
+
+    syncPreviewSurfaceSelectionPanelTabAttr(root, 'metadata');
+    root.setAttribute('data-metadata-visual-mode', 'true');
+    syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
+    applyPreviewEditPermissions(root, 'metadata', textCanvasEditModeActiveRef.current);
+    clearPositionOnlyEditorUi(root);
+    applyFrameCanvasVisualHints(root);
+    applyFastFrameSelectionUi(root, [], [], collectFrameSelectionAnchorByIdMap(root));
+    applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, []);
+    applyPositionImpactGroupSelectionUi(root, 'metadata', [], positionRelationAnchorFrameGroupId);
+    applyDefinedPositionRelativeRelationUi(root, 'metadata', highlightedDefinedPositionRelativeRelations);
+    applyPositionSpacingGuideUi(root, 'metadata', positionSpacingGuideRelations);
+    applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+  }, [
+    highlightedDefinedPositionRelativeRelations,
+    positionRelationAnchorFrameGroupId,
+    positionSpacingGuideRelations,
+    syncEdgeRoleDiagnosticsState,
+    visibleMetadataReviewIssues,
+  ]);
+
+  React.useEffect(() => {
+    if (!checklistCanvasSelectionModeActive || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleChecklistSelectionEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      if (!checklistRegistrationTargetRef.current && selectedFrameGroupIdsRef.current.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      clearChecklistCanvasSelection();
+      onChecklistSelectionClear?.();
+    };
+
+    window.addEventListener('keydown', handleChecklistSelectionEscape, true);
+    return () => window.removeEventListener('keydown', handleChecklistSelectionEscape, true);
+  }, [checklistCanvasSelectionModeActive, clearChecklistCanvasSelection, onChecklistSelectionClear]);
 
   const applyRuntimeSelectionVisuals = React.useCallback(
     (nextSelectedFrameGroupIds: string[], nextEdgeSelectionState: TemplateEdgeSelectionStateDto) => {
@@ -30990,8 +31603,9 @@ export default function TemplateEditWorkspace({
     positionActiveSelectionEntityRef,
     previewZoom,
     selectionPanelTab,
-    canvasInteractionMode,
-    templateUsagePreviewMode: templateUsagePreviewActive,
+	    canvasInteractionMode,
+	    selectionOnlyTextInteractions,
+	    templateUsagePreviewMode: templateUsagePreviewActive,
     positionOrderLockSelectionMode,
     positionOrderLockFrameGroupIds,
     positionOrderLockSelectionKindByFrameGroupId,
@@ -31162,7 +31776,7 @@ export default function TemplateEditWorkspace({
 
     const target = event.target instanceof HTMLElement ? event.target : null;
 
-    if (textCanvasEditModeActiveRef.current && target && previewRef.current) {
+    if (textCanvasEditModeActiveRef.current && !selectionOnlyTextInteractions && target && previewRef.current) {
       const clickedTextInput = resolveFrameTextInputElement(target);
 
       if (clickedTextInput && previewRef.current.contains(clickedTextInput)) {
@@ -31203,7 +31817,7 @@ export default function TemplateEditWorkspace({
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-	  }, [deleteCanvasSelectionEntity, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
+	  }, [deleteCanvasSelectionEntity, selectionOnlyTextInteractions, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
 
 	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
 	    const target = event.target instanceof HTMLElement ? event.target : null;
@@ -31871,6 +32485,18 @@ export default function TemplateEditWorkspace({
         .template-edit-preview [${TEMPLATE_CHECKLIST_SELECTABLE_ATTR}="true"] {
           cursor: pointer !important;
         }
+        .template-edit-preview [${TEMPLATE_CHECKLIST_INACTIVE_ATTR}="true"] {
+          opacity: 1 !important;
+        }
+        .template-edit-preview [${TEMPLATE_CHECKLIST_INACTIVE_ATTR}="true"]::after {
+          content: '';
+          position: absolute;
+          inset: -1px;
+          background: rgba(255, 255, 255, var(--v106-selection-inactive-overlay-alpha, .5));
+          border-radius: inherit;
+          pointer-events: none;
+          z-index: 30;
+        }
         [data-template-floating-overlay-id="style"],
         [data-template-floating-overlay-id="style"] *,
         [data-template-floating-overlay-id="sizeType"],
@@ -31957,7 +32583,7 @@ export default function TemplateEditWorkspace({
           display: block !important;
         }
         .template-edit-preview [${SELECTION_TONEDOWN_OVERLAY_ATTR}="true"] {
-          background: rgba(255, 255, 255, .6);
+          background: rgba(255, 255, 255, var(--v106-selection-inactive-overlay-alpha, .5));
           pointer-events: none;
         }
         .template-edit-preview {
@@ -32254,6 +32880,37 @@ export default function TemplateEditWorkspace({
 	          display: flex;
 	          align-items: center;
 	          gap: 6px;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-tag-list {
+	          display: flex;
+	          flex: 0 1 auto;
+	          min-width: 0;
+	          max-width: 45%;
+	          gap: 3px;
+	          overflow: hidden;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-tag {
+	          display: inline-flex;
+	          align-items: center;
+	          min-width: 0;
+	          max-width: 100%;
+	          height: 16px;
+	          padding: 0 5px;
+	          border: 1px solid rgb(16 185 129);
+	          border-radius: 999px;
+	          background: rgb(236 253 245);
+	          color: rgb(4 120 87);
+	          font-size: 10px;
+	          font-weight: 700;
+	          line-height: 1;
+	          white-space: nowrap;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
+	        }
+	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-tag--empty {
+	          border-color: rgb(203 213 225);
+	          background: rgb(241 245 249);
+	          color: rgb(100 116 139);
 	        }
 	        .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] .v106-template-usage-file-card-name {
 	          min-width: 0;
@@ -32607,7 +33264,7 @@ export default function TemplateEditWorkspace({
           content: '';
           position: absolute;
           inset: -1px;
-          background: rgba(255, 255, 255, .5);
+          background: rgba(255, 255, 255, var(--v106-selection-inactive-overlay-alpha, .5));
           border-radius: inherit;
           pointer-events: none;
           z-index: 30;
@@ -32652,7 +33309,7 @@ export default function TemplateEditWorkspace({
           content: '';
           position: absolute;
           inset: -1px;
-          background: rgba(255, 255, 255, .5);
+          background: rgba(255, 255, 255, var(--v106-selection-inactive-overlay-alpha, .5));
           border-radius: inherit;
           pointer-events: none;
           z-index: 30;
@@ -33087,6 +33744,10 @@ export default function TemplateEditWorkspace({
             canvasInteractionMode={canvasInteractionMode}
             canUndoCanvasHistory={canUndoCanvasHistory}
             canRedoCanvasHistory={canRedoCanvasHistory}
+            todoButtonLabel={todoButtonLabel}
+            todoCount={todoCount}
+            todoPanelOpen={todoPanelVisible}
+            todoButtonDisabled={!todoPanel}
             visibility={canvasToolbarVisibility}
             onUpdatePreviewZoom={updatePreviewZoom}
             onToggleCanvasFullscreen={toggleCanvasFullscreen}
@@ -33100,7 +33761,13 @@ export default function TemplateEditWorkspace({
             onSave={() => {
               void saveTemplate();
             }}
+            onToggleTodoPanel={todoPanel ? () => setTodoPanelVisible((previous) => !previous) : undefined}
           />
+          {todoPanelVisible && todoPanel ? (
+            <CardContent className={`border-b border-slate-200 bg-slate-50 px-6 py-4 ${canvasFullscreen ? 'shrink-0' : ''}`}>
+              {todoPanel}
+            </CardContent>
+          ) : null}
 	          <TemplateEditPreviewSurface
               key="template-preview-stage:live"
 	            renderedPreviewHtml={surfaceRenderedPreviewHtml}
@@ -33118,6 +33785,7 @@ export default function TemplateEditWorkspace({
                     ? false
                     : selectionPanelTab === 'metadata'
               }
+              selectionInactiveOverlayOpacity={selectionInactiveOverlayOpacity}
 	            templateUsagePreviewMode={templateUsagePreviewActive}
 	            selectionPanelTab={selectionPanelTab}
 	            editSettingsPanelVisible={!templateUsagePreviewActive && editSettingsPanelVisible}
@@ -33149,10 +33817,16 @@ export default function TemplateEditWorkspace({
             syncTemplateUsagePreviewTextControls={(root) => {
               if (readMode) {
                 applyTemplateUsagePreviewReadOnlyState(root);
+                if (selectionOnlyTextInteractions) {
+                  applyTemplateUsagePreviewSelectionOnlyTextInteractions(root);
+                }
                 return;
               }
 
               applyTemplateUsagePreviewFieldEditability(root, normalizedEditableValueKeys);
+              if (selectionOnlyTextInteractions) {
+                applyTemplateUsagePreviewSelectionOnlyTextInteractions(root);
+              }
             }}
             handlePreviewPointerDown={handlePreviewPointerDown}
             handlePreviewPointerMove={handlePreviewPointerMove}

@@ -38,6 +38,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   spacePanArmed,
   spacePanDragging,
   metadataVisualMode,
+  selectionInactiveOverlayOpacity = 0.5,
   templateUsagePreviewMode,
   selectionPanelTab,
   editSettingsPanelVisible,
@@ -827,6 +828,17 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     }),
     [renderedPreviewHtml]
   );
+  const normalizedSelectionInactiveOverlayOpacity = Math.max(
+    0,
+    Math.min(1, Number.isFinite(selectionInactiveOverlayOpacity) ? selectionInactiveOverlayOpacity : 0.5)
+  );
+  const previewSurfaceStyle = React.useMemo(
+    () =>
+      ({
+        '--v106-selection-inactive-overlay-alpha': String(normalizedSelectionInactiveOverlayOpacity),
+      }) as React.CSSProperties,
+    [normalizedSelectionInactiveOverlayOpacity]
+  );
 
   const renderFloatingOverlaySection = (
     overlayId: TemplateFloatingOverlayId,
@@ -1053,6 +1065,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             data-template-usage-preview-mode={templateUsagePreviewMode ? 'true' : 'false'}
             data-selection-panel-tab={selectionPanelTab}
             data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
+            style={previewSurfaceStyle}
             onPointerDownCapture={handlePreviewPointerDown}
             onPointerMoveCapture={handlePreviewPointerMove}
             onPointerUpCapture={handlePreviewPointerUp}

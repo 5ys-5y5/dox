@@ -242,6 +242,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
         resolveFrameSelectionAnchorAtPoint,
         selectedFrameGroupIdsRef,
         canvasInteractionMode,
+        selectionOnlyTextInteractions,
         getFrameGroupId,
         getFrameNodes,
         lockPreviewEditorStateDuringInteraction,
@@ -536,7 +537,14 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
         });
       };
 
-      if (textCanvasEditModeActiveRef.current && frameNode && !edgeButton && !resizeHandle && !event.shiftKey) {
+      if (
+        textCanvasEditModeActiveRef.current &&
+        !selectionOnlyTextInteractions &&
+        frameNode &&
+        !edgeButton &&
+        !resizeHandle &&
+        !event.shiftKey
+      ) {
         const clickedTextInput = resolveFrameTextInputElement(target);
         const isActiveTextInput =
           Boolean(clickedTextInput) &&

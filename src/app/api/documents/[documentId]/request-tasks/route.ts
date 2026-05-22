@@ -5,6 +5,9 @@ type RouteContext = {
   params: Promise<{ documentId: string }>;
 };
 
+const isMissingRequestTasksTableError = (message: string) =>
+  message.includes('document_request_tasks') && message.includes('schema cache');
+
 export async function GET(request: Request, context: RouteContext) {
   try {
     const { documentId } = await context.params;
@@ -15,6 +18,10 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ success: true, data });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+
+    if (isMissingRequestTasksTableError(message)) {
+      return NextResponse.json({ success: true, data: [] });
+    }
 
     console.error('Document Request Tasks API GET Error:', error);
 

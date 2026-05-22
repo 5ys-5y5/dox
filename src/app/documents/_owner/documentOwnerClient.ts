@@ -1,6 +1,7 @@
 import type {
   DocumentDetailResult,
   DocumentListItem,
+  DocumentRequestTaskDto,
   DocumentRequestTaskInput,
   DocumentRequestTaskSaveResult,
 } from '../../../lib/documentDtos';
@@ -30,7 +31,7 @@ export const DocumentsOwnerClient = {
   },
 
   async listDocuments(siteId: string) {
-    const query = siteId ? `?siteId=${encodeURIComponent(siteId)}` : '';
+    const query = siteId ? `?siteId=${encodeURIComponent(siteId)}&profile=picker` : '?profile=picker';
     return readSuccessData<DocumentListItem[]>(
       await fetch(`/api/documents${query}`, { cache: 'no-store' }),
       '문서 목록 조회에 실패했습니다.'
@@ -39,7 +40,7 @@ export const DocumentsOwnerClient = {
 
   async getDocumentDetail(documentId: string) {
     return readSuccessData<DocumentDetailResult>(
-      await fetch(`/api/documents/${encodeURIComponent(documentId)}`, { cache: 'no-store' }),
+      await fetch(`/api/documents/${encodeURIComponent(documentId)}?profile=owner-workspace`, { cache: 'no-store' }),
       '문서 상세 조회에 실패했습니다.'
     );
   },
@@ -63,6 +64,13 @@ export const DocumentsOwnerClient = {
     return readSuccessData<SiteMemberRecordDto[]>(
       await fetch(`/api/member-access/site-members?siteId=${encodeURIComponent(siteId)}`, { cache: 'no-store' }),
       '현장 구성원 조회에 실패했습니다.'
+    );
+  },
+
+  async listRequestTasks(documentId: string) {
+    return readSuccessData<DocumentRequestTaskDto[]>(
+      await fetch(`/api/documents/${encodeURIComponent(documentId)}/request-tasks`, { cache: 'no-store' }),
+      '요청 작업 조회에 실패했습니다.'
     );
   },
 

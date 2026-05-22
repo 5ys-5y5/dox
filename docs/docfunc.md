@@ -58,6 +58,7 @@
 | `src/app/api/sign/route.ts` | documents owner 서명 요청 생성 흐름 연결 |
 | `src/app/api/photos/**` | 필수 사진 생성/업로드 흐름 연결 |
 | `src/components/template/TemplateEditWorkspace.tsx` | key/value 쌍 하이라이트에 필요한 props/탐색만 수정 |
+| `src/components/template/workspace/canvas/useCanvasPointerHandlers.ts` | `/documents` 선택 전용 캔버스에서 텍스트 편집 진입을 막고 드래그 선택을 유지 |
 | `src/components/template/workspace/types.ts` | key/value 쌍 하이라이트 타입 확장 |
 | `src/app/canvas/ownerPolicy.tsx` | 새 workspace props가 policy를 통과해야 할 때만 수정 |
 | `src/lib/documentDtos.ts` | 문서 task DTO 타입 확장 |
@@ -72,7 +73,7 @@
 ## 절대 수정 금지
 
 - `src/services/exportService.ts`, `src/app/exports/**`, export DB SQL. `/documents`에서 출력본 흔적은 제거하지만 export 도메인 자체는 다른 페이지 소유다.
-- `src/app/canvas/page.tsx`, `src/app/canvas/ownerSettings.ts`. `/canvas` owner 설정 실험 페이지는 기준점으로만 둔다.
+- `src/app/canvas/ownerSettings.ts`. `/canvas` owner 설정 저장 구조는 기준점으로만 둔다. `src/app/canvas/page.tsx`는 DOCFUNC-18의 `할 일` 버튼 연결 범위에서만 수정한다.
 - `src/components/ui/EntityPicker.tsx`, `src/components/ui/MultiEntityPicker.tsx`. 구성원 검색은 기존 picker의 `label`, `meta`, `keywords` 인덱싱을 사용한다.
 - 패키지 설정, 빌드 설정, 린트 설정.
 - 화이트리스트 밖의 서비스/API/문서.
@@ -100,6 +101,7 @@
 | `DOCFUNC-14` | `docs/diff/DOCFUNC-14/` |
 | `DOCFUNC-15` | `docs/diff/DOCFUNC-15/` |
 | `DOCFUNC-16` | `docs/diff/DOCFUNC-16/` |
+| `DOCFUNC-17` | `docs/diff/DOCFUNC-17/` |
 
 예: `DOCFUNC-03`에서 `src/app/documents/page.tsx`와 `src/app/documents/_owner/DocumentsOwnerWorkspace.tsx`를 수정하면 각각 `docs/diff/DOCFUNC-03/src/app/documents/page.tsx`와 `docs/diff/DOCFUNC-03/src/app/documents/_owner/DocumentsOwnerWorkspace.tsx`에 백업한다.
 
@@ -134,13 +136,21 @@ import { DocumentsOwnerWorkspace } from '../documents/_owner';
 
 ## 화면 구조
 
-`/documents`는 1열 구조만 허용한다.
+`/documents`의 최상위 섹션은 1열 구조만 허용한다.
 
 1. `1. 작업할 문서 고르기`
 2. `2. 지금 할 작업`
 3. `3. 이 문서 기록`
 
-최상위 형제 레이아웃에서 `grid-cols-*`, `lg:grid-cols-*`, `xl:grid-cols-*`를 쓰지 않는다. 각 섹션은 세로로 이어지고, `2. 지금 할 작업` 내부도 `요청 링크 설정`, `상자 편집 캔버스`, `선택한 상자` 순서로 세로 배치한다.
+최상위 형제 레이아웃에서 `grid-cols-*`, `lg:grid-cols-*`, `xl:grid-cols-*`를 쓰지 않는다. 각 섹션은 세로로 이어진다.
+
+`2. 지금 할 작업` 내부는 화면이 충분히 넓을 때 2열 구조를 사용한다.
+
+- 왼쪽 열: `상자 편집 캔버스`
+- 오른쪽 열: `선택한 상자` 검색/선택 목록, `담당 구성원` 일괄 선택, `새 구성원 등록`, 요청 링크 생성 설정
+- 좁은 화면: 같은 순서로 1열 배치
+
+`상자 편집 캔버스`는 불필요한 중첩 카드 안에 넣지 않고 `2. 지금 할 작업`의 본문 그리드 첫 번째 열에 바로 둔다.
 
 ## 캔버스 선택과 하이라이트
 
@@ -166,7 +176,7 @@ type DocumentRequestableField = {
 - `data-template-frame-role="key"`는 식별 상자다.
 - `data-template-frame-role="value"`는 입력 받을 값 상자다.
 - `key_value`만 있는 경우에는 표시 텍스트를 식별자로 쓰되, 같은 frame을 key/value 하이라이트 대상으로 본다.
-- 전체 요청 가능 항목 목록은 렌더링하지 않는다.
+- 전체 요청 가능 항목 목록을 항상 펼쳐 렌더링하지 않는다. 상자 추가가 필요할 때만 검색 가능한 리스트/셀렉트 박스의 필터 결과로 보여준다.
 - `상자 편집 캔버스`에서 key 상자나 value 상자를 직접 클릭하면 key 상자와 value 상자를 함께 하이라이트한다.
 - 요청을 받은 사람의 실제 입력 권한은 value 상자에만 부여한다.
 - `CanvasOwnedWorkspace`에는 `editableValueKeys=[valueKey]` 형태로 value key만 전달한다.
@@ -195,6 +205,53 @@ type TemplateChecklistRegistrationTarget = {
 - 캔버스에서 선택한 항목은 `선택한 상자` 설정에 즉시 반영되고, 선택된 key/value 상자가 함께 하이라이트된다.
 - 선택 해제, 작업 종류 변경, 담당 구성원 지정은 `선택한 상자` 설정에서 수행한다.
 - 선택 변경 시 화면 스크롤 위치를 강제로 이동하지 않는다.
+- 일반 클릭은 기존 선택을 대체하고, `Shift + 클릭`만 선택을 누적한다.
+- 캔버스 빈 영역 드래그는 `/canvas`의 선택 박스와 같은 방식으로 여러 상자를 선택한다.
+- `Esc` 또는 캔버스 안의 상자가 아닌 영역 클릭은 선택된 상자가 없는 상태로 되돌린다.
+- `/documents`의 `상자 편집 캔버스`는 `/canvas`의 `속성` 탭처럼 텍스트 편집이 불가능해야 한다. 텍스트 컨트롤은 read-only, pointer-events none, user-select none 상태로 두어 텍스트 선택/캐럿 진입이 드래그 선택을 방해하지 않게 한다.
+
+## 선택한 상자와 담당 구성원 일괄 반영
+
+정정된 기본 흐름은 아래 2단계다.
+
+1. `상자 편집 캔버스` 또는 `선택한 상자` 검색 목록에서 복수의 상자를 선택한다.
+2. `담당 구성원` 영역 한 곳에서 구성원을 선택하고, 현재 선택된 모든 상자에 같은 구성원을 일괄 반영한다.
+
+금지하는 UI:
+
+- 선택된 상자를 칩 형태로 출력하지 않는다.
+- 각 상자 행마다 담당 구성원 picker를 두지 않는다.
+- 각 상자 행마다 `+ 새 구성원 등록` 패널을 두지 않는다.
+- 담당 구성원을 지정하기 위해 상자별로 반복 조작하게 만들지 않는다.
+
+`선택한 상자` 영역은 검색 가능한 셀렉트 박스 하나로 처리한다.
+
+- 입력창에 key 상자 텍스트를 타이핑하면 요청 가능 상자를 필터링한다.
+- 검색 인덱스는 key 상자 표시 텍스트를 우선하고, 현재 값 텍스트와 요청 종류 라벨을 보조 키로 쓸 수 있다.
+- 검색 결과에는 상자 ID를 노출하지 않는다.
+- 검색 결과 option은 `구분`, `작성자` 같은 key 상자 텍스트를 주 라벨로 보여준다.
+- 검색 결과 option에는 `기록 값`, `필수 파일`, `필수 사진`, `서명 요청` 상태를 라벨로 보여준다.
+- 검색 결과 option을 클릭하면 해당 상자가 선택 목록에 추가된다.
+- 이미 선택된 option은 셀렉트 박스 목록의 맨 위에 표시한다.
+- 캔버스에서 일반 클릭한 경우에는 기존 선택을 대체하고, `Shift + 클릭` 또는 드래그 선택한 경우에는 복수 선택을 유지한다.
+- 검색 목록에서 추가 선택한 상자도 캔버스의 선택 상태와 같은 source of truth를 사용한다.
+
+DOM 명명 설계:
+
+- 기존 칩 의미의 `selected-box-chip-list`, `selected-box-chip`은 폐기 대상이다.
+- 상자 선택 UI는 `selected-box-field-picker`만 사용한다.
+- 별도 선택 목록 DOM은 만들지 않는다.
+- 선택 패널 내 출력 순서는 `selected-box-field-picker`, `request-kind-button-group`, `selected-box-assignee-field`다.
+- `selected-box-assignee-field`는 선택된 복수 상자에 일괄 반영할 담당 구성원 영역이다.
+- `selected-box-assignee-field` 안에는 단 하나의 구성원 picker가 있어야 한다.
+- `new-member-registration-panel`은 `selected-box-assignee-field` 안에서만 열린다. 새 구성원 등록이 완료되면 현재 선택된 모든 상자의 담당 구성원으로 일괄 지정한다.
+
+상태 모델:
+
+- 선택 상태의 source of truth는 `selectedFieldKeys` 같은 단일 배열/Set이다.
+- active 상자는 하이라이트/속성 표시용이며, 담당자 배정 단위가 아니다.
+- 담당자 저장은 기존 task 저장 구조 때문에 최종적으로 field별 `assigneeMemberId`가 필요할 수 있다. 그러나 UI 조작은 한 곳의 picker에서 현재 선택된 모든 field에 같은 memberId를 쓰는 방식으로만 제공한다.
+- 선택된 상자들의 기존 담당자가 서로 다르면 picker는 `여러 담당자` 상태를 표시한다. 사용자가 새 구성원을 선택하면 혼합 상태를 덮어쓰고 모두 같은 담당자로 바꾼다.
 
 ## 요청 링크 설정
 
@@ -207,12 +264,16 @@ type TemplateChecklistRegistrationTarget = {
 - picker option은 `label=이름`, `meta=휴대폰 번호`, `keywords=[이름, 원본 번호, 숫자만 번호]`로 구성한다.
 - 이름 또는 번호 일부를 입력하면 기존 picker의 client-side 검색으로 필터링된다.
 - 출력 형식은 `이름 · 번호`다.
+- 구성원 선택은 상자별 picker가 아니라 `selected-box-assignee-field`의 단일 picker에서 수행한다.
+- 구성원 선택 결과는 현재 선택된 모든 상자에 일괄 반영한다.
 
 새 사람 등록:
 
 - `/project`의 구성원 등록 흐름을 documents owner 모듈로 옮긴다.
 - 등록 폼은 현재 문서 ID를 내부에서 고정한다.
 - 사용자가 문서를 선택하는 UI는 없다.
+- 등록 폼은 `selected-box-assignee-field` 안에서만 열린다.
+- 등록 완료 시 새 구성원은 현재 선택된 모든 상자의 담당 구성원으로 일괄 지정된다.
 - 기본 문서 권한은 요청 종류에 따라 결정한다.
 - 기록 값/파일/사진 요청은 `editor` 또는 `viewer + task permission` 중 구현 시 선택하되, 문서 저장 권한이 필요한 현재 구조에서는 `editor`를 우선한다.
 - 서명 요청은 `signer`를 우선한다.
@@ -254,7 +315,7 @@ type DocumentRequestTask = {
 - 어떤 서명 위치에 누구의 서명을 받을지 선택
 - 어떤 필수 사진 태그를 몇 장 받을지 선택
 - 어떤 필수 파일 태그를 몇 개 받을지 선택
-- 각 항목을 어느 구성원에게 요청할지 선택
+- 현재 선택된 항목 묶음을 어느 구성원에게 요청할지 선택. 서로 다른 구성원에게 나누어 요청해야 하면 선택 묶음을 바꿔 같은 일괄 배정 흐름을 반복한다.
 
 `/project`의 `선택 문서 체크 리스트`에서 가져올 흐름:
 
@@ -353,6 +414,7 @@ rg -n "고급 편집|새 문서 등록|버전 직접 추가|HTML 정본|라벨 �
 - [ ] `DOCFUNC-14` `npm run lint`를 실행한다.
 - [ ] `DOCFUNC-15` `npm run build`를 실행한다.
 - [ ] `DOCFUNC-16` 브라우저에서 `/documents`, `/project`, `/request-links/[token]` 회귀 확인을 완료한다.
+- [x] `DOCFUNC-17` `선택한 상자`를 검색 가능한 리스트/셀렉트 박스로 바꾸고, 단일 `담당 구성원` picker의 선택을 현재 선택된 모든 상자에 일괄 반영한다. 칩 UI와 상자별 담당자 picker는 없어야 한다.
 
 ## 구현 기록
 
@@ -397,6 +459,20 @@ rg -n "고급 편집|새 문서 등록|버전 직접 추가|HTML 정본|라벨 �
 - 2026-05-21: 금지 문구 검색에서 `/documents`의 `고급 편집`, `출력본 만들기`, `사진 증빙 확인` 관련 기능 문구가 나오지 않는 것을 확인했다. TypeScript `export` 키워드는 기능 흔적이 아니므로 출력본 검증 검색에서 제외했다.
 - 2026-05-21: `npm run lint`, `npm run build`를 재실행했다. lint는 동일하게 ESLint 9 설정 파일 부재로 실패했고, build는 동일하게 `.venv-template-extract-v2/bin/python` symlink가 프로젝트 root 밖을 가리키는 Turbopack 내부 오류로 실패했다.
 - 2026-05-21: 최종 부분 검증으로 `/documents`, `/project`, `/request-links/[token]`, documents request task API, request link task PATCH API를 `esbuild` 번들링했고 모두 통과했다. `git diff --check`도 통과했다.
+- 2026-05-22: `/documents?projectId=...&documentId=...` 직접 접근 불안정 원인을 브라우저에서 확인했다. 문서 목록 API가 최신 버전 HTML을 포함하고, 문서 상세 API가 전체 버전의 `html_canonical`을 모두 내려 5MB 이상 응답과 Supabase statement timeout을 만들었다.
+- 2026-05-22: `DocumentService.listDocuments`에 `profile=picker`, `getDocumentDetail`에 `profile=owner-workspace`를 추가했다. picker 목록은 버전 요약만 받고, owner workspace 상세는 최신 버전 HTML만 별도로 받아 렌더링한다.
+- 2026-05-22: `/documents` owner client가 새 profile API를 호출하도록 변경했고, URL 동기화는 현재 URL과 같으면 `router.replace`를 호출하지 않도록 막았다. 문서 상세 로딩, 요청 링크/권한 로딩, 작업 저장 로딩 상태를 분리해 직접 URL 진입 시 `문서 로딩 중`을 표시한다.
+- 2026-05-22: `TemplateEditWorkspace`에 `canvasTextInteractionMode="selection-only"`를 추가했다. `/documents`의 `상자 편집 캔버스`는 이 모드를 사용해 텍스트 컨트롤을 read-only/pointer-events none/user-select none으로 고정하고 `/canvas` 선택 UI를 그대로 사용한다.
+- 2026-05-22: `2. 지금 할 작업` 내부를 넓은 화면 2열 구조로 바꿨다. 왼쪽에 `상자 편집 캔버스`, 오른쪽에 `선택한 상자`와 `새 구성원 등록` 등 설정을 배치하고, 좁은 화면에서는 1열로 내려간다.
+- 2026-05-22: 브라우저에서 직접 검증했다. 새로고침 후 네트워크 요청은 `/api/documents?profile=picker`, `/api/documents/[id]?profile=owner-workspace`, request-links, document-members, site-members 각 1회로 안정화됐다. `profile=picker` 응답은 decoded 933B, `owner-workspace` 상세 응답은 decoded 445,677B로 확인됐다.
+- 2026-05-22: 브라우저에서 상자 일반 클릭은 선택 대체, `Shift + 클릭`은 누적, `Esc`는 선택 해제, 캔버스 빈 영역 클릭은 선택 해제, 드래그 선택은 여러 key/value 상자 선택으로 동작함을 확인했다. 텍스트 컨트롤은 read-only, pointer-events none, user-select none 상태로 확인했다.
+- 2026-05-22: `/documents` owner가 직접 렌더링하는 항목에 `data-documents-owner-item`, `data-documents-owner-name`을 부여했다. 외부에서 불러온 `상자 편집 캔버스` 자체에는 owner 이름을 부여하지 않는다.
+- 2026-05-22: 중복 선택 요약 영역을 제거하고 `selected-box-assignee-field`를 선택한 상자 담당 구성원 영역으로 유지했다. `selected-box-chip-list`는 해당 영역 안의 `ul/li` 리스트로 렌더링하며, 각 항목 라벨은 캔버스 key 상자 텍스트를 사용하고 요청 종류별 배경색을 적용한다. 새 구성원 등록은 각 선택 상자 항목 안에서 `+ 새 구성원 등록`으로 열리며, 등록 후 해당 항목 담당자로 지정된다.
+- 2026-05-22: 위 `selected-box-chip-list` 방식은 요구와 다르게 상자별 담당자 지정 UI가 되었으므로 폐기 대상이다. 다음 구현은 `DOCFUNC-17` 설계를 기준으로, 검색 가능한 상자 선택 리스트와 단일 담당 구성원 picker의 일괄 반영 흐름으로 바꾼다.
+- 2026-05-22: `DOCFUNC-17` 완료. 기존 칩 의미의 선택 목록과 상자별 담당자 picker를 제거하고, key 텍스트로 검색 가능한 상자 리스트와 선택 row 목록으로 바꿨다. `selected-box-assignee-field`에는 단일 구성원 picker와 새 구성원 등록 패널만 두며, 선택/등록 결과를 현재 선택된 모든 상자에 일괄 반영한다. 브라우저에서 `구분`, `작성자` 검색 추가, 단일 구성원 일괄 지정, 캔버스 일반 클릭 대체, `Shift+클릭` 누적을 확인했다.
+- 2026-05-22: 브라우저에서 `선택한 상자` 검색/선택/담당 구성원 항목이 전역 `section` padding 규칙 때문에 항목별 192px 위아래 패딩을 받는 것을 확인했다. owner 내부 항목을 `div`로 바꿔 해당 전역 규칙을 받지 않게 했고, computed style에서 대상 항목 padding이 모두 `0px`이며 owner 항목에 `192px` padding이 남지 않는 것을 확인했다.
+- 2026-05-22: `request-kind-button-group`를 `selected-box-panel-header` 바로 아래로 이동하고, 현재 선택된 모든 상자의 요청 종류를 일괄 변경하도록 바꿨다. 상자 선택 UI는 항상 펼친 검색 목록 대신 `selected-box-assignee-picker`와 같은 입력형 셀렉트 박스 형태로 바꿨다.
+- 2026-05-22: 별도 선택 목록 렌더링 경로를 제거했다. 선택된 상자는 `selected-box-field-picker`에서만 표시하고, picker 옵션은 선택된 항목을 맨 위로 정렬한다. 선택 패널 순서는 `selected-box-field-picker` -> `request-kind-button-group` -> `selected-box-assignee-field`이며, `request-kind-button-group`는 전체 너비 grid로 출력한다.
 
 ## 복구 연결표
 
@@ -419,15 +495,127 @@ rg -n "고급 편집|새 문서 등록|버전 직접 추가|HTML 정본|라벨 �
 | `DOCFUNC-14` | lint 실패가 새 변경에서 발생 | 직전 실패 ID 백업과 lint 로그 비교 |
 | `DOCFUNC-15` | build 실패가 새 변경에서 발생 | 직전 실패 ID 백업과 build 로그 비교 |
 | `DOCFUNC-16` | 브라우저 회귀가 발견됨 | 증상에 해당하는 `DOCFUNC-*` 백업으로 부분 복구 |
+| `DOCFUNC-17` | 선택 상자가 칩처럼 보이거나 상자별 담당자 picker가 남음 | `docs/diff/DOCFUNC-17/` |
 
 ## 완료 기준
 
-- `/documents`의 `1. 작업할 문서 고르기`, `2. 지금 할 작업`, `3. 이 문서 기록`이 1열로 배치된다.
+- `/documents`의 `1. 작업할 문서 고르기`, `2. 지금 할 작업`, `3. 이 문서 기록`이 최상위 1열로 배치된다.
+- `2. 지금 할 작업` 내부는 넓은 화면에서 왼쪽 `상자 편집 캔버스`, 오른쪽 `선택한 상자` 설정의 2열이고 좁은 화면에서만 1열이다.
 - `/documents`와 documents owner 경로에 `고급 편집`, `출력본` 관련 UI/코드 흔적이 없다.
 - 상자는 key 상자 텍스트와 value key 연결로 식별된다.
 - `상자 편집 캔버스`에서 상자를 클릭하면 key/value 상자가 함께 하이라이트된다.
+- `상자 편집 캔버스`는 텍스트 편집/텍스트 선택 없이 `/canvas` 속성 탭의 선택 UI를 사용한다.
+- `선택한 상자`는 칩 UI나 별도 선택 목록이 아니라 key 상자 텍스트로 검색 가능한 `selected-box-field-picker` 셀렉트 박스로만 표시된다.
+- 검색 목록에서 상자를 찾아 클릭하면 현재 선택 목록에 추가할 수 있다.
+- `담당 구성원`은 단일 picker로만 선택하며, 선택 결과는 현재 선택된 모든 상자에 일괄 반영된다.
+- 상자별 담당자 picker와 상자별 새 구성원 등록 패널은 존재하지 않는다.
 - 요청받은 사람은 value 상자 값만 입력할 수 있다.
 - 요청 링크 설정 안에서 값, 서명, 필수 사진, 필수 파일을 한 사람 또는 여러 사람에게 배정할 수 있다.
 - 구성원 검색은 이름과 번호로 동작하고, 새 구성원 등록은 현재 문서에 고정된다.
 - `/project`는 documents owner 코드를 import하며 동일 기능을 중복 구현하지 않는다.
 - `/canvas` owner 정책과 기존 공용 캔버스 동작은 유지된다.
+
+## DOCFUNC-18 단순 할 일/태그 요청 설계
+
+### 화이트리스트
+
+아래 파일만 수정한다. 이 목록 밖 파일은 DOCFUNC-18 구현에서 수정하지 않는다.
+
+- `docs/docfunc.md`
+- `src/app/documents/_owner/DocumentsOwnerWorkspace.tsx`
+- `src/app/documents/_owner/documentOwnerClient.ts`
+- `src/app/documents/_owner/documentOwnerTypes.ts`
+- `src/app/canvas/page.tsx`
+- `src/components/template/TemplateEditWorkspace.tsx`
+- `src/components/template/workspace/types.ts`
+- `src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx`
+- `src/components/template/workspace/persistence/documentAttachmentClient.ts`
+- `src/lib/documentDtos.ts`
+- `src/app/api/documents/[documentId]/request-tasks/route.ts`
+- `src/app/api/documents/[documentId]/attachments/route.ts`
+
+### 백업
+
+복구 지점은 `docs/diff/DOCFUNC-18/`에 같은 경로와 파일명으로 보관한다.
+
+- `docs/diff/DOCFUNC-18/docfunc.md.before`
+- `docs/diff/DOCFUNC-18/src/app/documents/_owner/DocumentsOwnerWorkspace.tsx.before`
+- `docs/diff/DOCFUNC-18/src/app/documents/_owner/documentOwnerClient.ts.before`
+- `docs/diff/DOCFUNC-18/src/app/documents/_owner/documentOwnerTypes.ts.before`
+- `docs/diff/DOCFUNC-18/src/app/canvas/page.tsx.before`
+- `docs/diff/DOCFUNC-18/src/components/template/TemplateEditWorkspace.tsx.before`
+- `docs/diff/DOCFUNC-18/src/components/template/workspace/types.ts.before`
+- `docs/diff/DOCFUNC-18/src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx.before`
+- `docs/diff/DOCFUNC-18/src/components/template/workspace/persistence/documentAttachmentClient.ts.before`
+- `docs/diff/DOCFUNC-18/src/lib/documentDtos.ts.before`
+- `docs/diff/DOCFUNC-18/src/app/api/documents/[documentId]/request-tasks/route.ts.before`
+- `docs/diff/DOCFUNC-18/src/app/api/documents/[documentId]/attachments/route.ts.before`
+
+### 구현 체크리스트
+
+- [x] `DOCFUNC-18-01` `/documents`에서 `request-kind-button-group` DOM과 request kind 변경 상태를 제거한다.
+- [x] `DOCFUNC-18-02` 상자 선택 흐름은 상자별 담당자 등록만 수행한다. 상자의 원래 종류는 바꾸지 않는다.
+- [x] `DOCFUNC-18-03` 필수 사진 요청 패널을 추가한다. 태그는 검색/생성 가능하고 담당자는 필수, 첨부파일 상자 연결은 선택이다.
+- [x] `DOCFUNC-18-04` 필수 파일 요청 패널을 추가한다. 태그는 검색/생성 가능하고 담당자는 필수, 첨부파일 상자 연결은 선택이다.
+- [x] `DOCFUNC-18-05` 요청 링크 생성 시 상자 담당자 task와 사진/파일 태그 task를 담당자별로 묶어 저장한다.
+- [x] `DOCFUNC-18-06` `/canvas`에서 문서 task를 불러오고 `문서 저장` 오른쪽에 `할 일` 버튼을 표시한다.
+- [x] `DOCFUNC-18-07` `할 일` 버튼은 현재 문서의 입력값, 서명, 사진, 파일 task를 태그 뱃지와 함께 출력한다.
+- [x] `DOCFUNC-18-08` 첨부파일 상자에 파일 추가 시 태그 입력을 받고, 등록/대기 파일 왼쪽에 태그 뱃지를 출력한다. 태그가 없으면 회색 `태그 없음`을 표시한다.
+- [x] `DOCFUNC-18-09` 첨부파일 저장 시 새 파일의 태그를 `DocumentValueFileInput.metadata.tags`에 보존한다.
+- [x] `DOCFUNC-18-10` `esbuild`, `git diff --check`, shadow 검사와 브라우저 검증을 수행한다.
+
+### 단순 사용자 흐름
+
+1. 상자 담당자 등록: 상자 선택 -> 담당 구성원 선택 -> 요청 링크 만들기.
+2. 필수 사진 등록: 사진 태그 선택 또는 생성 -> 첨부파일 상자 연결 여부 선택 -> 담당 구성원 선택 -> 요청 링크 만들기.
+3. 필수 파일 등록: 파일 태그 선택 또는 생성 -> 첨부파일 상자 연결 여부 선택 -> 담당 구성원 선택 -> 요청 링크 만들기.
+4. `/canvas`: 담당자는 `문서 저장` 오른쪽 `할 일` 버튼에서 본인에게 배정된 입력, 서명, 사진, 파일 작업을 확인한다.
+5. 첨부파일 상자: 파일 업로드 직후 태그를 입력하고, 목록에서 태그 뱃지로 확인한다.
+
+### 구현 기록
+
+- 2026-05-22: `/documents`에서 `request-kind-button-group`와 요청 종류 변경 상태를 제거했다. 상자 담당자는 단일 picker로 현재 선택 상자 전체에 일괄 반영하고, 사진/파일 요청은 태그와 선택적 첨부파일 상자, 담당 구성원으로 별도 등록한다.
+- 2026-05-22: `/canvas`가 현재 문서의 request task를 조회하고 `문서 저장` 오른쪽에 `할 일` 버튼을 표시하도록 했다. 로컬 DB에 `document_request_tasks` 테이블이 아직 없을 때 GET은 빈 목록으로 처리하고, 저장 POST 실패는 숨기지 않는다.
+- 2026-05-22: 첨부파일 업로드 직후 태그를 입력받고, 대기/등록 파일 카드 왼쪽에 태그 뱃지를 표시한다. 새 파일 태그는 업로드 API의 `fileTags`로 전달되어 `metadata.tags`에 저장된다.
+- 2026-05-22: 브라우저에서 `/documents?projectId=1b75a399-09c0-45b7-ab2a-c7cb4b7d791c&documentId=2f6d0be2-8ba5-4d69-aacf-845275a66908`를 확인했다. 제거 대상 DOM은 없고, 일반 클릭은 단일 선택, `Shift + 클릭`은 누적 선택이며 스크롤 위치가 움직이지 않았다.
+- 2026-05-22: 브라우저에서 `/canvas?mode=document&documentId=2f6d0be2-8ba5-4d69-aacf-845275a66908`를 확인했다. `할 일` 버튼은 저장 버튼 오른쪽에 있고, request task 조회는 200으로 응답했다. 파일 추가 시 `안전태그` 입력 후 대기 파일에 태그 뱃지가 출력되는 것을 확인했다.
+
+## DOCFUNC-19 단계형 요청 흐름/할 일 설정 노출
+
+### 화이트리스트
+
+아래 파일만 수정한다. 이 목록 밖 파일은 DOCFUNC-19 구현에서 수정하지 않는다.
+
+- `docs/docfunc.md`
+- `src/app/documents/_owner/DocumentsOwnerWorkspace.tsx`
+- `src/app/canvas/ownerSettings.ts`
+- `src/app/canvas/page.tsx`
+- `src/components/template/workspace/types.ts`
+- `src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx`
+
+### 백업
+
+복구 지점은 `docs/diff/DOCFUNC-19/`에 같은 경로와 파일명으로 보관한다.
+
+- `docs/diff/DOCFUNC-19/docfunc.md.before`
+- `docs/diff/DOCFUNC-19/src/app/documents/_owner/DocumentsOwnerWorkspace.tsx.before`
+- `docs/diff/DOCFUNC-19/src/app/canvas/ownerSettings.ts.before`
+- `docs/diff/DOCFUNC-19/src/app/canvas/page.tsx.before`
+- `docs/diff/DOCFUNC-19/src/components/template/workspace/types.ts.before`
+- `docs/diff/DOCFUNC-19/src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx.before`
+
+### 구현 체크리스트
+
+- [x] `DOCFUNC-19-01` `/documents`의 `2. 지금 할 작업` 오른쪽 설정 영역을 `상자에 담당자 지정 -> 필수 사진 등록 -> 필수 파일 등록 -> 만료 시각 설정` 단계 흐름으로 바꾼다.
+- [x] `DOCFUNC-19-02` 단계별 내용은 현재 단계 하나만 출력하며, 기존 사진/파일/만료 패널을 한 번에 나열하지 않는다.
+- [x] `DOCFUNC-19-03` 단계 이동에는 `이전으로 가기`, `건너뛰기`, `다음 단계`를 제공한다.
+- [x] `DOCFUNC-19-04` `/canvas` owner 설정에 `canvasToolbarVisibility.showTodoButton`을 추가하고 `상자 편집 캔버스 환경설정`에서 `할 일 버튼 표시`로 조작 가능하게 한다.
+- [x] `DOCFUNC-19-05` `TemplateEditCanvasToolbar`는 `showTodoButton` 설정을 실제 `할 일` 버튼 렌더링에 반영한다.
+- [x] `DOCFUNC-19-06` `/canvas` 전달 prop 목록에 `todoPanel`, `todoButtonLabel`, `todoCount`를 노출해 할 일 연결 상태를 확인할 수 있게 한다.
+- [x] `DOCFUNC-19-07` `git diff --check`, shadow 검사, 브라우저 검증을 수행한다.
+
+### 구현 기록
+
+- 2026-05-22: `/documents` 단계 UI를 추가하고 기존 `required-media-request-section` 동시 나열 구조를 제거했다. 브라우저에서 사진 단계로 이동했을 때 `photo-required-request-panel`만 출력되고 `selected-box-panel`, `file-required-request-panel`, `request-link-action-panel`, `required-media-request-section`은 출력되지 않음을 확인했다.
+- 2026-05-22: `/canvas?mode=document&documentId=2f6d0be2-8ba5-4d69-aacf-845275a66908`에서 `할 일 버튼 표시` 설정, `canvasToolbarVisibility.showTodoButton`, `todoPanel`, `todoButtonLabel`, `todoCount`, 저장 버튼 오른쪽 `할 일` 버튼과 빈 할 일 패널 출력을 확인했다. 콘솔 error는 없고 관련 API는 200으로 응답했다.
+- 2026-05-22: 전체 `tsc --noEmit`은 `docs/diff/2026-04-17_ENHANCE-07_templateExtractReplicaHtmlNormalizerService.before.ts`의 기존 백업 파일 문법 오류에서 중단된다. 이번 변경 파일 기준 `git diff --check`와 `node scripts/check-no-shadow-in-app.mjs`는 통과했다.

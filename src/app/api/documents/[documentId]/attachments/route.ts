@@ -7,6 +7,36 @@ type RouteContext = {
   }>;
 };
 
+const normalizeFileTagNames = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(value.map((tagName) => String(tagName || '').trim()).filter((tagName) => Boolean(tagName)))
+  );
+};
+
+const readFileTagsFromFormData = (formData: FormData) => {
+  const rawValue = formData.get('fileTags');
+
+  if (typeof rawValue !== 'string' || !rawValue.trim()) {
+    return [] as string[][];
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue);
+
+    if (!Array.isArray(parsedValue)) {
+      return [] as string[][];
+    }
+
+    return parsedValue.map(normalizeFileTagNames);
+  } catch {
+    return [] as string[][];
+  }
+};
+
 export async function GET(request: Request, context: RouteContext) {
   try {
     const { documentId } = await context.params;
@@ -34,6 +64,7 @@ export async function POST(request: Request, context: RouteContext) {
     const { documentId } = await context.params;
     const formData = await request.formData();
     const valueKey = String(formData.get('valueKey') || '');
+    const fileTags = readFileTagsFromFormData(formData);
     const files = formData
       .getAll('files')
       .filter((entry): entry is File => entry instanceof File);
@@ -46,12 +77,13 @@ export async function POST(request: Request, context: RouteContext) {
       documentId,
       valueKey,
       files: await Promise.all(
-        files.map(async (file) => ({
+        files.map(async (file, index) => ({
           originalFileName: file.name,
           mimeType: file.type || 'application/octet-stream',
           fileBytes: new Uint8Array(await file.arrayBuffer()),
           fileSizeBytes: file.size,
           uploadedBy: 'project-page',
+          metadata: { tags: fileTags[index] || [] },
         }))
       ),
     });

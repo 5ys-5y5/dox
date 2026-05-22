@@ -9,6 +9,7 @@ import type {
 
 export type CanvasWorkspaceMode = NonNullable<TemplateEditWorkspaceProps['workspaceMode']>;
 export type CanvasOwnerAccessRole = 'editor' | 'viewer' | 'signer';
+export type CanvasReadModeInteractionMode = 'view-only' | 'box-selection';
 
 export type CanvasOwnerSettings = {
   hideHeader: boolean;
@@ -20,6 +21,7 @@ export type CanvasOwnerSettings = {
   showCanvasTitle: boolean;
   showCanvasNameField: boolean;
   showCanvasSaveButton: boolean;
+  showCanvasTodoButton: boolean;
   showCanvasPreviewToggle: boolean;
   showCanvasInteractionModeControls: boolean;
   showCanvasHistoryControls: boolean;
@@ -56,6 +58,8 @@ export type CanvasOwnerSettings = {
   preventRuntimeAutoSizeShrink: boolean;
   blockPeerClusterHeightTargets: boolean;
   blockPeerClusterWidthTargets: boolean;
+  selectionInactiveOverlayOpacity: number;
+  readModeInteractionMode: CanvasReadModeInteractionMode;
 };
 
 export type CanvasOwnerSettingKey = keyof CanvasOwnerSettings;
@@ -87,6 +91,7 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   showCanvasTitle: true,
   showCanvasNameField: true,
   showCanvasSaveButton: true,
+  showCanvasTodoButton: true,
   showCanvasPreviewToggle: true,
   showCanvasInteractionModeControls: true,
   showCanvasHistoryControls: true,
@@ -123,6 +128,8 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   preventRuntimeAutoSizeShrink: false,
   blockPeerClusterHeightTargets: false,
   blockPeerClusterWidthTargets: false,
+  selectionInactiveOverlayOpacity: 0.5,
+  readModeInteractionMode: 'view-only',
 };
 
 export const CANVAS_OWNER_SETTINGS_STORAGE_KEY = 'mejai.canvas.ownerSettings.v1';
@@ -133,6 +140,22 @@ const canvasOwnerAccessRoles: CanvasOwnerAccessRole[] = ['editor', 'viewer', 'si
 const hasOwn = (value: object, key: PropertyKey) => Object.prototype.hasOwnProperty.call(value, key);
 const normalizeCanvasCssSizeSetting = (value: unknown, fallback = '') =>
   typeof value === 'string' ? value.trim().slice(0, 80) : fallback;
+const normalizeCanvasOpacitySetting = (value: unknown, fallback = 0.5) => {
+  const numericValue =
+    typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  const alphaValue = numericValue > 1 ? numericValue / 100 : numericValue;
+
+  return Math.max(0, Math.min(1, alphaValue));
+};
+const normalizeCanvasReadModeInteractionMode = (
+  value: unknown,
+  fallback: CanvasReadModeInteractionMode = 'view-only'
+): CanvasReadModeInteractionMode => (value === 'box-selection' || value === 'view-only' ? value : fallback);
 
 export const normalizeCanvasWorkspaceMode = (value: string | null | undefined): CanvasWorkspaceMode => {
   if (value === 'document' || value === 'read') {
@@ -184,6 +207,14 @@ export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSetting
       candidate.templateListDisplay === 'picker' || candidate.templateListDisplay === 'inline'
         ? candidate.templateListDisplay
         : defaultCanvasOwnerSettings.templateListDisplay,
+    selectionInactiveOverlayOpacity: normalizeCanvasOpacitySetting(
+      candidate.selectionInactiveOverlayOpacity,
+      defaultCanvasOwnerSettings.selectionInactiveOverlayOpacity
+    ),
+    readModeInteractionMode: normalizeCanvasReadModeInteractionMode(
+      candidate.readModeInteractionMode,
+      defaultCanvasOwnerSettings.readModeInteractionMode
+    ),
   };
 };
 
@@ -651,6 +682,7 @@ export const buildCanvasToolbarVisibility = (
   showCanvasTitle: settings.showCanvasTitle,
   showTemplateNameInput: settings.showCanvasNameField && workspaceMode === 'template',
   showSaveButton: settings.showCanvasSaveButton && workspaceMode !== 'read',
+  showTodoButton: settings.showCanvasTodoButton && workspaceMode === 'document',
   showPreviewToggle: settings.showCanvasPreviewToggle && workspaceMode === 'template',
   showInteractionModeControls: settings.showCanvasInteractionModeControls && workspaceMode === 'template',
   showHistoryControls: settings.showCanvasHistoryControls && workspaceMode !== 'read',
@@ -684,14 +716,17 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   settings,
   settingSources,
   workspaceMode,
+  applyDefaultSettings = false,
 }: {
   baseProps: TemplateEditWorkspaceProps;
   settings: CanvasOwnerSettings;
   settingSources?: Record<CanvasOwnerSettingKey, CanvasOwnerSettingSource>;
   workspaceMode: CanvasWorkspaceMode;
+  applyDefaultSettings?: boolean;
 }): TemplateEditWorkspaceProps => {
   const normalizedWorkspaceMode = normalizeCanvasWorkspaceMode(workspaceMode);
-  const shouldApplySetting = (key: CanvasOwnerSettingKey) => !settingSources || settingSources[key] !== 'default';
+  const shouldApplySetting = (key: CanvasOwnerSettingKey) =>
+    applyDefaultSettings || !settingSources || settingSources[key] !== 'default';
   const headerTitle = settings.headerTitle.trim() || baseProps.headerTitle;
   const headerDescription = settings.headerDescription.trim() || baseProps.headerDescription;
   const nameFieldLabel = settings.nameFieldLabel.trim() || baseProps.nameFieldLabel;
@@ -718,6 +753,9 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   }
   if (shouldApplySetting('showCanvasSaveButton')) {
     canvasToolbarVisibility.showSaveButton = settings.showCanvasSaveButton && normalizedWorkspaceMode !== 'read';
+  }
+  if (shouldApplySetting('showCanvasTodoButton')) {
+    canvasToolbarVisibility.showTodoButton = settings.showCanvasTodoButton && normalizedWorkspaceMode === 'document';
   }
   if (shouldApplySetting('showCanvasPreviewToggle')) {
     canvasToolbarVisibility.showPreviewToggle = settings.showCanvasPreviewToggle && normalizedWorkspaceMode === 'template';
@@ -776,6 +814,21 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   if (shouldApplySetting('blockPeerClusterWidthTargets')) {
     templateUsagePreviewLayoutDebugOptions.measurePeerClusterWidthTargets = !settings.blockPeerClusterWidthTargets;
   }
+  const readModeInteractionSettingApplies =
+    normalizedWorkspaceMode === 'read' && shouldApplySetting('readModeInteractionMode');
+  const readModeInteractionProps: Partial<TemplateEditWorkspaceProps> = readModeInteractionSettingApplies
+    ? settings.readModeInteractionMode === 'box-selection'
+      ? {
+          canvasTextInteractionMode: 'selection-only',
+        }
+      : {
+          canvasTextInteractionMode: 'default',
+          checklistSelectableTargets: [],
+          onChecklistSelectableTargetSelect: undefined,
+          onChecklistSelectableTargetsSelect: undefined,
+          onChecklistSelectionClear: undefined,
+        }
+    : {};
 
   return {
     ...baseProps,
@@ -842,5 +895,9 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     canvasToolbarVisibility,
     persistenceVisibility,
     templateUsagePreviewLayoutDebugOptions,
+    selectionInactiveOverlayOpacity: shouldApplySetting('selectionInactiveOverlayOpacity')
+      ? settings.selectionInactiveOverlayOpacity
+      : baseProps.selectionInactiveOverlayOpacity,
+    ...readModeInteractionProps,
   };
 };

@@ -73,6 +73,14 @@ const CANVAS_SURFACE_POLICIES: Record<CanvasOwnerSurface, CanvasSurfacePolicy> =
 const resolveCanvasWorkspaceMode = (value: TemplateEditWorkspaceProps['workspaceMode']): CanvasWorkspaceMode =>
   normalizeCanvasWorkspaceMode(value);
 
+const resolveCanvasAccessRoleForSettings = (canvasAccessRole: CanvasOwnerAccessRole | undefined): CanvasOwnerAccessRole => {
+  if (canvasAccessRole) {
+    return canvasAccessRole;
+  }
+
+  return 'editor';
+};
+
 const hasEditableValueKeys = (value: string[] | null | undefined) =>
   Array.isArray(value) && value.some((item) => String(item || '').trim().length > 0);
 
@@ -164,10 +172,12 @@ export function CanvasOwnedWorkspace({
   ...workspaceProps
 }: CanvasOwnedWorkspaceProps) {
   const { canvasAccessRole, ...ownedWorkspaceProps } = workspaceProps;
+  const normalizedWorkspaceMode = normalizeCanvasWorkspaceMode(ownedWorkspaceProps.workspaceMode);
+  const effectiveCanvasAccessRole = resolveCanvasAccessRoleForSettings(canvasAccessRole);
   const storedCanvasOwnerSettings = useStoredCanvasOwnerSettings({
     pageId: ownedWorkspaceProps.surface,
-    workspaceMode: normalizeCanvasWorkspaceMode(ownedWorkspaceProps.workspaceMode),
-    accessRole: canvasAccessRole,
+    workspaceMode: normalizedWorkspaceMode,
+    accessRole: effectiveCanvasAccessRole,
   });
   const canvasOwnerSettings =
     explicitCanvasOwnerSettings ??
