@@ -870,9 +870,11 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     ? settings.readModeInteractionMode === 'box-selection'
       ? {
           canvasTextInteractionMode: 'selection-only',
+          canvasSelectionMode: 'box',
         }
       : {
           canvasTextInteractionMode: 'default',
+          canvasSelectionMode: 'none',
           checklistSelectableTargets: [],
           onChecklistSelectableTargetSelect: undefined,
           onChecklistSelectableTargetsSelect: undefined,

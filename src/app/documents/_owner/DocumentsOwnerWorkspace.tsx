@@ -11,8 +11,9 @@ import { MultiEntityPicker } from '../../../components/ui/MultiEntityPicker';
 import { CanvasOwnedWorkspace } from '../../canvas/ownerPolicy';
 import type { TemplateEditWorkspaceInitialDraft } from '../../../components/template/TemplateEditWorkspace';
 import type {
-  TemplateChecklistRegistrationTarget,
-  TemplateChecklistSelectableTargetSelectOptions,
+  TemplateCanvasSelectablePolicy,
+  TemplateCanvasSelectedBox,
+  TemplateCanvasSelectionChangeOptions,
 } from '../../../components/template/workspace/types';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../../lib/documentAttachmentValues';
 import { buildDocumentHtmlContentKey } from '../../../lib/documentCanvasHtml';
@@ -25,10 +26,7 @@ import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../../lib/
 import type { SiteRecordDto } from '../../../lib/siteChecklistDtos';
 import { cn } from '../../../lib/utils';
 import { DocumentsOwnerClient } from './documentOwnerClient';
-import {
-  buildChecklistTargetForRequestableField,
-  collectDocumentRequestableFields,
-} from './documentFieldIndex';
+import { collectDocumentRequestableFields } from './documentFieldIndex';
 import type {
   DocumentOwnerMemberOption,
   DocumentRequestableField,
@@ -160,40 +158,48 @@ const getFieldLabel = (field: Pick<DocumentRequestableField, 'displayKeyText'>, 
   return label;
 };
 
-const buildChecklistTargetForRequestableFields = (
-  fields: DocumentRequestableField[],
-  activeValueKey: string
-): TemplateChecklistRegistrationTarget | null => {
-  const uniqueFields = Array.from(new Map(fields.map((field) => [field.valueKey, field])).values());
-  const activeField = uniqueFields.find((field) => field.valueKey === activeValueKey) || uniqueFields[uniqueFields.length - 1] || null;
-
-  if (!activeField) {
-    return null;
+const getCanvasRoleForRequestableField = (field: DocumentRequestableField): TemplateCanvasSelectedBox['role'] => {
+  if (field.requestKind === 'signature') {
+    return 'signature';
   }
 
-  if (uniqueFields.length <= 1) {
-    return buildChecklistTargetForRequestableField(activeField);
+  if (field.requestKind === 'file' || field.requestKind === 'photo') {
+    return 'attachment';
   }
 
-  const activeTarget = buildChecklistTargetForRequestableField(activeField);
-  const orderedFields = [
-    activeField,
-    ...uniqueFields.filter((field) => field.valueKey !== activeField.valueKey),
-  ];
-
-  return {
-    ...activeTarget,
-    id: `selection:${orderedFields.map((field) => field.valueKey).join('|')}`,
-    label: `${uniqueFields.length}개 선택`,
-    highlightFrameGroupIds: Array.from(
-      new Set(
-        orderedFields.flatMap((field) =>
-          [field.keyFrameGroupId, field.valueFrameGroupId, field.parentGroupId, field.valueKey, field.contextKey].filter(Boolean)
-        )
-      )
-    ) as string[],
-  };
+  return 'value';
 };
+
+const buildCanvasSelectedBoxForRequestableField = (
+  field: DocumentRequestableField,
+  index?: number
+): TemplateCanvasSelectedBox => ({
+  id: field.valueKey,
+  frameGroupId: field.keyFrameGroupId || field.valueFrameGroupId || field.valueKey,
+  role: getCanvasRoleForRequestableField(field),
+  label: getFieldLabel(field, index),
+  value: field.currentValueText || undefined,
+  valueKey: field.valueKey,
+  slotKey: field.requestKind === 'signature' || field.requestKind === 'file' ? field.valueKey : undefined,
+  contextKey: field.contextKey,
+  keyFrameGroupId: field.keyFrameGroupId || undefined,
+  valueFrameGroupId: field.valueFrameGroupId || undefined,
+  highlightFrameGroupIds: Array.from(
+    new Set(
+      [field.keyFrameGroupId, field.valueFrameGroupId, field.parentGroupId, field.valueKey, field.contextKey]
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value))
+    )
+  ),
+  requestKind:
+    field.requestKind === 'signature'
+      ? 'signature'
+      : field.requestKind === 'file'
+        ? 'file'
+        : field.requestKind === 'photo'
+          ? 'photo'
+          : 'value',
+});
 
 const buildRequestTasks = (fields: DocumentRequestableField[]): DocumentRequestTaskInput[] =>
   fields.map((field, index) => ({
@@ -490,7 +496,6 @@ export function DocumentsOwnerWorkspace({
     React.useState<DocumentsOwnerRequestSetupStepKey>('box-assignee');
   const [activeFieldValueKey, setActiveFieldValueKey] = React.useState('');
   const [newMemberRegistrationOpen, setNewMemberRegistrationOpen] = React.useState(false);
-  const [highlightTarget, setHighlightTarget] = React.useState<TemplateChecklistRegistrationTarget | null>(null);
   const [newMemberName, setNewMemberName] = React.useState('');
   const [newMemberPhone, setNewMemberPhone] = React.useState('');
   const [expiresAt, setExpiresAt] = React.useState(() => toDatetimeLocalValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
@@ -643,18 +648,29 @@ export function DocumentsOwnerWorkspace({
       .map(({ id, label, meta, keywords }) => ({ id, label, meta, keywords }));
   }, [requestableFieldRows, selectedFieldKeys]);
 
-  const canvasSelectableTargets = React.useMemo(() => {
+  const canvasSelectablePolicy = React.useMemo<TemplateCanvasSelectablePolicy>(() => {
+    const selectableFrameGroupIds = Array.from(
+      new Set(
+        requestableFields
+          .filter((field) => !activeMediaRequestKind || field.requestKind === 'file')
+          .flatMap((field) => [field.keyFrameGroupId, field.valueFrameGroupId, field.parentGroupId, field.valueKey])
+          .map((value) => value?.trim())
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+
     if (activeMediaRequestKind) {
-      return requestableFields
-        .filter((field) => field.requestKind === 'file')
-        .map(buildChecklistTargetForRequestableField);
+      return { includeRoles: ['attachment'], selectableFrameGroupIds };
     }
 
     if (activeRequestSetupStep === 'box-assignee') {
-      return requestableFields.map(buildChecklistTargetForRequestableField);
+      return {
+        includeRoles: ['key', 'value', 'signature', 'attachment', 'text', 'unknown'],
+        selectableFrameGroupIds,
+      };
     }
 
-    return [];
+    return { includeRoles: [] };
   }, [activeMediaRequestKind, activeRequestSetupStep, requestableFields]);
 
   const memberOptions = React.useMemo(
@@ -715,6 +731,18 @@ export function DocumentsOwnerWorkspace({
     const attachmentValueKey = mediaAttachmentValueKeyByKind[activeMediaRequestKind];
     return requestableFields.find((field) => field.valueKey === attachmentValueKey && field.requestKind === 'file') || null;
   }, [activeMediaRequestKind, mediaAttachmentValueKeyByKind, requestableFields]);
+
+  const selectedCanvasBoxes = React.useMemo<TemplateCanvasSelectedBox[]>(() => {
+    if (activeMediaRequestKind) {
+      return activeMediaAttachmentField ? [buildCanvasSelectedBoxForRequestableField(activeMediaAttachmentField)] : [];
+    }
+
+    if (activeRequestSetupStep === 'box-assignee') {
+      return selectedFields.map((field, index) => buildCanvasSelectedBoxForRequestableField(field, index));
+    }
+
+    return [];
+  }, [activeMediaAttachmentField, activeMediaRequestKind, activeRequestSetupStep, selectedFields]);
 
   const mediaTagOptionsByKind = React.useMemo(() => {
     const optionsByKind: Record<MediaRequestKind, Array<{ id: string; label: string; meta?: string; keywords?: string[]; color: string }>> = {
@@ -1026,40 +1054,28 @@ export function DocumentsOwnerWorkspace({
     }
   }, [selectedFields.length]);
 
-  React.useEffect(() => {
-    if (activeMediaRequestKind) {
-      setHighlightTarget(activeMediaAttachmentField ? buildChecklistTargetForRequestableField(activeMediaAttachmentField) : null);
-      return;
-    }
-
-    if (activeRequestSetupStep === 'box-assignee') {
-      setHighlightTarget(buildChecklistTargetForRequestableFields(selectedFields, activeFieldValueKey));
-      return;
-    }
-
-    setHighlightTarget(null);
-  }, [activeFieldValueKey, activeMediaAttachmentField, activeMediaRequestKind, activeRequestSetupStep, selectedFields]);
-
   const selectedDocumentDetailLoading =
     documentDetailLoading && Boolean(selectedDocumentId) && (!selectedDocumentDetail || selectedDocumentDetail.document.id !== selectedDocumentId);
 
-  const resolveFieldFromCanvasTarget = React.useCallback(
-    (target: TemplateChecklistRegistrationTarget) => {
+  const resolveFieldFromCanvasBox = React.useCallback(
+    (box: TemplateCanvasSelectedBox) => {
       const targetTokens = new Set(
         [
-          target.id,
-          target.valueKey,
-          target.activationValueKey,
-          target.frameGroupId,
-          target.contextKey,
-          ...(target.highlightFrameGroupIds || []),
+          box.id,
+          box.valueKey,
+          box.slotKey,
+          box.frameGroupId,
+          box.keyFrameGroupId,
+          box.valueFrameGroupId,
+          box.contextKey,
+          ...(box.highlightFrameGroupIds || []),
         ]
           .map((value) => value?.trim())
           .filter((value): value is string => Boolean(value))
       );
 
       return (
-        requestableFields.find((item) => item.id === target.id) ||
+        requestableFields.find((item) => item.id === box.id) ||
         requestableFields.find((item) =>
           [item.valueKey, item.keyFrameGroupId, item.valueFrameGroupId, item.contextKey].some(
             (value) => value && targetTokens.has(value)
@@ -1071,13 +1087,31 @@ export function DocumentsOwnerWorkspace({
     [requestableFields]
   );
 
-  const selectFieldsFromCanvas = React.useCallback(
-    (targets: TemplateChecklistRegistrationTarget[], options?: TemplateChecklistSelectableTargetSelectOptions) => {
+  const clearCanvasFieldSelection = React.useCallback(() => {
+    if (activeMediaRequestKind) {
+      setMediaAttachmentValueKeyByKind((current) => ({ ...current, [activeMediaRequestKind]: '' }));
+      return;
+    }
+
+    setSelectedFieldKeys([]);
+    setSelectedFieldLabelByValueKey({});
+    setCanvasFieldLabelByValueKey({});
+    setActiveFieldValueKey('');
+    setNewMemberRegistrationOpen(false);
+  }, [activeMediaRequestKind]);
+
+  const selectFieldsFromCanvasBoxes = React.useCallback(
+    (boxes: TemplateCanvasSelectedBox[], options?: TemplateCanvasSelectionChangeOptions) => {
+      if (boxes.length <= 0) {
+        clearCanvasFieldSelection();
+        return;
+      }
+
       const fieldEntries = Array.from(
         new Map(
-          targets
-            .map((target) => ({ target, field: resolveFieldFromCanvasTarget(target) }))
-            .filter((entry): entry is { target: TemplateChecklistRegistrationTarget; field: DocumentRequestableField } =>
+          boxes
+            .map((box) => ({ box, field: resolveFieldFromCanvasBox(box) }))
+            .filter((entry): entry is { box: TemplateCanvasSelectedBox; field: DocumentRequestableField } =>
               Boolean(entry.field)
             )
             .map((entry) => [entry.field.valueKey, entry])
@@ -1126,8 +1160,8 @@ export function DocumentsOwnerWorkspace({
       });
       setSelectedFieldLabelByValueKey((current) => {
         const nextValue = options?.append ? { ...current } : {};
-        fieldEntries.forEach(({ target, field }) => {
-          const targetLabel = normalizeFieldDisplayText(target.label || '');
+        fieldEntries.forEach(({ box, field }) => {
+          const targetLabel = normalizeFieldDisplayText(box.label || '');
 
           if (targetLabel && !isGeneratedFieldLabel(targetLabel)) {
             nextValue[field.valueKey] = targetLabel;
@@ -1136,30 +1170,8 @@ export function DocumentsOwnerWorkspace({
         return nextValue;
       });
     },
-    [activeMediaRequestKind, activeRequestSetupStep, resolveFieldFromCanvasTarget]
+    [activeMediaRequestKind, activeRequestSetupStep, clearCanvasFieldSelection, resolveFieldFromCanvasBox]
   );
-
-  const selectFieldFromCanvas = React.useCallback(
-    (target: TemplateChecklistRegistrationTarget, options?: TemplateChecklistSelectableTargetSelectOptions) => {
-      selectFieldsFromCanvas([target], options);
-    },
-    [selectFieldsFromCanvas]
-  );
-
-  const clearCanvasFieldSelection = React.useCallback(() => {
-    if (activeMediaRequestKind) {
-      setMediaAttachmentValueKeyByKind((current) => ({ ...current, [activeMediaRequestKind]: '' }));
-      setHighlightTarget(null);
-      return;
-    }
-
-    setSelectedFieldKeys([]);
-    setSelectedFieldLabelByValueKey({});
-    setCanvasFieldLabelByValueKey({});
-    setActiveFieldValueKey('');
-    setNewMemberRegistrationOpen(false);
-    setHighlightTarget(null);
-  }, [activeMediaRequestKind]);
 
   const handleSelectedFieldKeysChange = React.useCallback((nextValueKeys: string[]) => {
     const validValueKeys = Array.from(
@@ -1364,7 +1376,6 @@ export function DocumentsOwnerWorkspace({
     if (missingAssigneeField) {
       setActiveRequestSetupStep('box-assignee');
       setActiveFieldValueKey(missingAssigneeField.valueKey);
-      setHighlightTarget(buildChecklistTargetForRequestableField(missingAssigneeField));
       setMessage('담당 구성원을 선택한 상자 전체에 지정하세요.');
       return;
     }
@@ -1500,7 +1511,6 @@ export function DocumentsOwnerWorkspace({
     setMediaAssigneeByKind({ photo: '', file: '' });
     setActiveFieldValueKey('');
     setNewMemberRegistrationOpen(false);
-    setHighlightTarget(null);
     setActiveRequestSetupStep('box-assignee');
   }, []);
 
@@ -1944,11 +1954,10 @@ export function DocumentsOwnerWorkspace({
             suppressInitialDraftLoadedMessage
             templateNameReadOnly
             saveDisabled
-            checklistRegistrationTarget={highlightTarget}
-            checklistSelectableTargets={canvasSelectableTargets}
-            onChecklistSelectableTargetSelect={selectFieldFromCanvas}
-            onChecklistSelectableTargetsSelect={selectFieldsFromCanvas}
-            onChecklistSelectionClear={clearCanvasFieldSelection}
+            canvasSelectionMode={activeRequestSetupStep === 'expiration' ? 'none' : 'box'}
+            canvasSelectablePolicy={canvasSelectablePolicy}
+            selectedCanvasBoxes={selectedCanvasBoxes}
+            onCanvasSelectionChange={selectFieldsFromCanvasBoxes}
           />
         ) : (
           <div

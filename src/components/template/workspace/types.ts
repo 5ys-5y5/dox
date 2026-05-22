@@ -683,6 +683,40 @@ export type TemplateChecklistSelectableTargetSelectOptions = {
   append?: boolean;
 };
 
+export type TemplateCanvasSelectionMode = 'none' | 'box';
+export type TemplateCanvasSelectableRole = 'key' | 'value' | 'signature' | 'attachment' | 'text' | 'unknown';
+export type TemplateCanvasLinkedSelectionMode = 'self' | 'key-value-pair';
+
+export type TemplateCanvasSelectablePolicy = {
+  includeRoles?: TemplateCanvasSelectableRole[];
+  selectableFrameGroupIds?: string[];
+  disabledFrameGroupIds?: string[];
+  linkedSelection?: TemplateCanvasLinkedSelectionMode;
+};
+
+export type TemplateCanvasSelectedBox = {
+  id: string;
+  frameGroupId: string;
+  role: TemplateCanvasSelectableRole;
+  label: string;
+  value?: string;
+  valueKey?: string;
+  slotKey?: string;
+  contextKey?: string;
+  keyFrameGroupId?: string;
+  valueFrameGroupId?: string;
+  highlightFrameGroupIds?: string[];
+  boxKind?: TemplateFrameBoxKind | '';
+  frameRole?: TemplateFrameRole | 'group' | '';
+  runtimeMode?: TemplateFrameRuntimeMode | '';
+  requestKind?: TemplateChecklistRegistrationKind;
+};
+
+export type TemplateCanvasSelectionChangeOptions = {
+  append?: boolean;
+  source?: 'click' | 'drag' | 'programmatic' | 'clear';
+};
+
 export type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
   initialDraft?: TemplateEditWorkspaceInitialDraft | null;
@@ -735,6 +769,13 @@ export type TemplateEditWorkspaceProps = {
   selectionInactiveOverlayOpacity?: number;
   canvasTextInteractionMode?: 'default' | 'selection-only';
   canvasViewMode?: TemplateEditWorkspaceCanvasViewMode;
+  canvasSelectionMode?: TemplateCanvasSelectionMode;
+  canvasSelectablePolicy?: TemplateCanvasSelectablePolicy;
+  selectedCanvasBoxes?: TemplateCanvasSelectedBox[];
+  onCanvasSelectionChange?: (
+    boxes: TemplateCanvasSelectedBox[],
+    options?: TemplateCanvasSelectionChangeOptions
+  ) => void;
   canvasToolbarVisibility?: TemplateEditWorkspaceCanvasToolbarVisibility;
   persistenceVisibility?: TemplateEditWorkspacePersistenceVisibility;
   templateUsagePreviewLayoutDebugOptions?: {

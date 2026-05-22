@@ -9,6 +9,8 @@ import {
 } from '../../components/template/TemplateEditWorkspace';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
 import type {
+  TemplateCanvasSelectedBox,
+  TemplateCanvasSelectionChangeOptions,
   TemplateEditWorkspaceProps,
   TemplateEditWorkspaceSaveDraftParams,
 } from '../../components/template/workspace/types';
@@ -347,6 +349,7 @@ export default function CanvasOwnerPage() {
   const [loadingDocumentDetail, setLoadingDocumentDetail] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [ownerEventMessage, setOwnerEventMessage] = React.useState<string | null>(null);
+  const [previewSelectedCanvasBoxes, setPreviewSelectedCanvasBoxes] = React.useState<TemplateCanvasSelectedBox[]>([]);
   const [extractStatus, setExtractStatus] = React.useState<TemplateExtractWorkspaceStatus | null>(null);
   const [extractStatusResetKey, setExtractStatusResetKey] = React.useState(0);
   const [draftReloadNonce, setDraftReloadNonce] = React.useState(0);
@@ -505,6 +508,28 @@ export default function CanvasOwnerPage() {
     [pathname, router, searchParams]
   );
 
+  const handlePreviewCanvasSelectionChange = React.useCallback(
+    (boxes: TemplateCanvasSelectedBox[], options?: TemplateCanvasSelectionChangeOptions) => {
+      setPreviewSelectedCanvasBoxes((current) => {
+        if (!options?.append) {
+          return boxes;
+        }
+
+        const nextById = new Map(current.map((box) => [box.id, box]));
+        boxes.forEach((box) => {
+          nextById.set(box.id, box);
+        });
+        return Array.from(nextById.values());
+      });
+      setOwnerEventMessage(
+        boxes.length > 0
+          ? `상자 선택 콜백: ${boxes.map((box) => box.label || box.valueKey || box.frameGroupId).join(', ')}`
+          : '상자 선택 콜백: 선택 해제'
+      );
+    },
+    []
+  );
+
   React.useEffect(() => {
     const rawPageId = searchParams.get('page');
     const rawMode = searchParams.get('mode');
@@ -518,6 +543,10 @@ export default function CanvasOwnerPage() {
     nextParams.set('mode', workspaceMode);
     router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
   }, [pathname, router, searchParams, selectedManagedPage.id, workspaceMode]);
+
+  React.useEffect(() => {
+    setPreviewSelectedCanvasBoxes([]);
+  }, [effectiveWorkspaceMode, selectedDocumentId, selectedManagedPage.id, selectedTemplateId]);
 
   const handleSelectManagedPage = React.useCallback(
     (pageId: ManagedCanvasPageId) => {
@@ -1147,6 +1176,7 @@ export default function CanvasOwnerPage() {
 	  const previewCanvasSpecifiedWidth = previewWorkspaceProps.canvasSpecifiedWidth ?? '';
 	  const previewDocumentAttachmentApiPath = previewWorkspaceProps.documentAttachmentApiPath ?? '';
 	  const previewCanvasTextInteractionMode = previewWorkspaceProps.canvasTextInteractionMode ?? 'default';
+	  const previewCanvasSelectionMode = previewWorkspaceProps.canvasSelectionMode ?? 'none';
 	  const previewCanvasViewMode = previewWorkspaceProps.canvasViewMode ?? previewSettings.canvasViewMode;
 	  const previewSelectionInactiveOverlayOpacity =
 	    previewWorkspaceProps.selectionInactiveOverlayOpacity ?? previewSettings.selectionInactiveOverlayOpacity;
@@ -2871,10 +2901,13 @@ export default function CanvasOwnerPage() {
 	                canvasPageContainerHeight={previewCanvasPageContainerHeight}
 	                canvasSpecifiedHeightEnabled={previewCanvasSpecifiedHeightEnabled}
 	                canvasSpecifiedHeight={previewCanvasSpecifiedHeight}
-	                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
-	                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
-	                canvasTextInteractionMode={previewCanvasTextInteractionMode}
-	                canvasViewMode={previewCanvasViewMode}
+		                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
+		                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
+		                canvasTextInteractionMode={previewCanvasTextInteractionMode}
+		                canvasSelectionMode={previewCanvasSelectionMode}
+		                selectedCanvasBoxes={previewSelectedCanvasBoxes}
+		                onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
+		                canvasViewMode={previewCanvasViewMode}
 	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
 	                canvasToolbarVisibility={previewCanvasToolbarVisibility}
 	                persistenceVisibility={previewPersistenceVisibility}
@@ -2917,11 +2950,14 @@ export default function CanvasOwnerPage() {
 	                canvasSpecifiedHeight={previewCanvasSpecifiedHeight}
 	                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
 	                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
-	                documentAttachmentApiPath={previewDocumentAttachmentApiPath}
-	                documentAttachmentTagOptions={documentAttachmentTagOptions}
-	                documentAttachmentTagColorByName={documentAttachmentTagColorByName}
-	                canvasTextInteractionMode={previewCanvasTextInteractionMode}
-	                canvasViewMode={previewCanvasViewMode}
+		                documentAttachmentApiPath={previewDocumentAttachmentApiPath}
+		                documentAttachmentTagOptions={documentAttachmentTagOptions}
+		                documentAttachmentTagColorByName={documentAttachmentTagColorByName}
+		                canvasTextInteractionMode={previewCanvasTextInteractionMode}
+		                canvasSelectionMode={previewCanvasSelectionMode}
+		                selectedCanvasBoxes={previewSelectedCanvasBoxes}
+		                onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
+		                canvasViewMode={previewCanvasViewMode}
 	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
 	                todoPanel={canvasTodoPanel}
 	                todoButtonLabel="할 일"

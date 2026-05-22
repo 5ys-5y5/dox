@@ -158,6 +158,10 @@ import type {
   StyleFieldKey,
   TableCellLayoutPosition,
   TemplateChecklistRegistrationTarget,
+  TemplateCanvasSelectablePolicy,
+  TemplateCanvasSelectableRole,
+  TemplateCanvasSelectedBox,
+  TemplateCanvasSelectionChangeOptions,
   TemplateChecklistSelectableTargetSelectOptions,
   TemplateChecklistSignatureState,
   TemplateChecklistSignatureSubmitParams,
@@ -9771,6 +9775,7 @@ const TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR = 'data-template-checklist-highlight';
 const TEMPLATE_CHECKLIST_SELECTABLE_ATTR = 'data-template-checklist-selectable';
 const TEMPLATE_CHECKLIST_INACTIVE_ATTR = 'data-template-checklist-inactive';
 const EMPTY_TEMPLATE_USAGE_PREVIEW_ATTACHMENT_TAG_OPTIONS: string[] = [];
+const EMPTY_TEMPLATE_CANVAS_SELECTED_BOXES: TemplateCanvasSelectedBox[] = [];
 
 type TemplateUsagePreviewAttachmentPendingFile = {
   localId: string;
@@ -15042,6 +15047,250 @@ const collectChecklistTargetCanvasSelectionIds = (
   return Array.from(new Set(selectedIds.filter((frameGroupId) => frameNodeById.has(frameGroupId))));
 };
 
+type TemplateCanvasSelectableTargetItem = {
+  target: TemplateChecklistRegistrationTarget;
+  selectedBox: TemplateCanvasSelectedBox;
+  nodes: HTMLElement[];
+};
+
+const normalizeCanvasSelectableDisplayText = (value: string) =>
+  value
+    .replace(/\s+/g, ' ')
+    .replace(/([가-힣])\s+(?=[가-힣])/g, '$1')
+    .replace(/(텍스트|서명|첨부파일|파일|사진)?(상위 키|하위 값)$/g, '')
+    .trim();
+
+const isGeneratedCanvasSelectableLabel = (value: string) =>
+  /^(band-\d+|status-history-\d+|field-\d+|frame-\d+)/i.test(value.trim());
+
+const readCanvasSelectableNodeText = (node: HTMLElement | null | undefined) => {
+  if (!node) {
+    return '';
+  }
+
+  const input = node.querySelector<HTMLInputElement | HTMLTextAreaElement>('[data-template-frame-input="true"]');
+  const inputValue =
+    node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
+      ? node.value
+      : input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
+        ? input.value
+        : '';
+
+  return normalizeCanvasSelectableDisplayText(
+    node.getAttribute('data-template-frame-source-text') ||
+      input?.getAttribute('data-template-frame-source-text') ||
+      node.getAttribute('data-template-frame-extracted-text') ||
+      input?.getAttribute('data-template-frame-extracted-text') ||
+      inputValue ||
+      node.textContent ||
+      ''
+  );
+};
+
+const resolveCanvasSelectableRole = (metadata: ResolvedFrameMetadata): TemplateCanvasSelectableRole => {
+  if (metadata.boxKind === 'attachment' || metadata.runtimeMode === 'file_slot') {
+    return 'attachment';
+  }
+
+  if (metadata.boxKind === 'signature' || metadata.runtimeMode.startsWith('signature_')) {
+    return 'signature';
+  }
+
+  if (metadata.role === 'key') {
+    return 'key';
+  }
+
+  if (metadata.role === 'value' || metadata.role === 'key_value') {
+    return 'value';
+  }
+
+  if (metadata.boxKind === 'text') {
+    return 'text';
+  }
+
+  return 'unknown';
+};
+
+const mapCanvasSelectableRoleToChecklistKind = (
+  role: TemplateCanvasSelectableRole
+): TemplateChecklistRegistrationTarget['kind'] => {
+  if (role === 'signature') {
+    return 'signature';
+  }
+
+  if (role === 'attachment') {
+    return 'file';
+  }
+
+  return 'value';
+};
+
+const buildChecklistTargetForCanvasSelectedBox = (box: TemplateCanvasSelectedBox): TemplateChecklistRegistrationTarget => ({
+  id: box.id || box.valueKey || box.frameGroupId,
+  kind: box.requestKind || mapCanvasSelectableRoleToChecklistKind(box.role),
+  label: box.label || box.valueKey || box.frameGroupId,
+  valueKey: box.valueKey,
+  slotKey: box.slotKey,
+  frameGroupId: box.valueFrameGroupId || box.keyFrameGroupId || box.frameGroupId,
+  contextKey: box.contextKey,
+  highlightFrameGroupIds: Array.from(
+    new Set(
+      [
+        ...(box.highlightFrameGroupIds || []),
+        box.keyFrameGroupId,
+        box.valueFrameGroupId,
+        box.frameGroupId,
+        box.valueKey,
+      ]
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value))
+    )
+  ),
+  activationValueKey: box.valueKey,
+});
+
+const collectCanvasSelectedBoxCanvasSelectionIds = (root: HTMLElement, boxes: TemplateCanvasSelectedBox[]) =>
+  Array.from(
+    new Set(
+      boxes.flatMap((box) => collectChecklistTargetCanvasSelectionIds(root, buildChecklistTargetForCanvasSelectedBox(box)))
+    )
+  );
+
+const collectCanvasSelectionTargetItems = (
+  root: HTMLElement,
+  policy: TemplateCanvasSelectablePolicy | null | undefined
+): TemplateCanvasSelectableTargetItem[] => {
+  const frameNodes = collectFrameSelectionAnchors(root);
+  const frameNodeById = new Map(
+    frameNodes
+      .map((node) => [getFrameGroupId(node).trim(), node] as const)
+      .filter(([frameGroupId]) => Boolean(frameGroupId))
+  );
+  const metadataById = new Map<string, ResolvedFrameMetadata>();
+  const valueIdsByKeyId = new Map<string, string[]>();
+  const linkedSelection = policy?.linkedSelection || 'key-value-pair';
+  const includeRoleSet = Array.isArray(policy?.includeRoles)
+    ? new Set(policy.includeRoles.map((role) => String(role || '').trim()).filter(Boolean) as TemplateCanvasSelectableRole[])
+    : null;
+  const selectableFrameGroupIdSet = new Set(
+    (policy?.selectableFrameGroupIds || []).map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+  );
+  const disabledFrameGroupIdSet = new Set(
+    (policy?.disabledFrameGroupIds || []).map((frameGroupId) => frameGroupId.trim()).filter(Boolean)
+  );
+
+  frameNodeById.forEach((node, frameGroupId) => {
+    const metadata = resolveNextFrameMetadata(node, {});
+    metadataById.set(frameGroupId, metadata);
+
+    if (metadata.role === 'value' && metadata.parentGroupId && frameNodeById.has(metadata.parentGroupId)) {
+      const current = valueIdsByKeyId.get(metadata.parentGroupId) || [];
+      current.push(frameGroupId);
+      valueIdsByKeyId.set(metadata.parentGroupId, current);
+    }
+  });
+
+  const targetItemsById = new Map<string, TemplateCanvasSelectableTargetItem>();
+
+  frameNodeById.forEach((node, frameGroupId) => {
+    const metadata = metadataById.get(frameGroupId);
+
+    if (!metadata || metadata.role === 'group') {
+      return;
+    }
+
+    const linkedValueIds =
+      linkedSelection === 'key-value-pair' && metadata.role === 'key' ? valueIdsByKeyId.get(frameGroupId) || [] : [];
+    const primaryValueId = linkedValueIds[0] || '';
+    const primaryValueMetadata = primaryValueId ? metadataById.get(primaryValueId) || null : null;
+    const role = metadata.role === 'key' && primaryValueMetadata ? resolveCanvasSelectableRole(primaryValueMetadata) : resolveCanvasSelectableRole(metadata);
+
+    if (includeRoleSet && !includeRoleSet.has(role)) {
+      return;
+    }
+
+    const keyFrameGroupId =
+      linkedSelection === 'key-value-pair'
+        ? metadata.role === 'key'
+          ? frameGroupId
+          : metadata.parentGroupId && frameNodeById.has(metadata.parentGroupId)
+            ? metadata.parentGroupId
+            : ''
+        : '';
+    const valueFrameGroupId =
+      metadata.role === 'key'
+        ? primaryValueId
+        : metadata.role === 'value' || role === 'attachment' || role === 'signature'
+          ? frameGroupId
+          : '';
+    const highlightFrameGroupIds = Array.from(
+      new Set(
+        linkedSelection === 'key-value-pair'
+          ? [
+              keyFrameGroupId,
+              ...(metadata.role === 'key' ? linkedValueIds : [valueFrameGroupId || frameGroupId]),
+            ]
+          : [frameGroupId]
+      )
+    ).filter(Boolean);
+
+    if (disabledFrameGroupIdSet.size > 0 && highlightFrameGroupIds.some((id) => disabledFrameGroupIdSet.has(id))) {
+      return;
+    }
+
+    if (selectableFrameGroupIdSet.size > 0 && !highlightFrameGroupIds.some((id) => selectableFrameGroupIdSet.has(id))) {
+      return;
+    }
+
+    const keyNode = keyFrameGroupId ? frameNodeById.get(keyFrameGroupId) || null : null;
+    const valueNode = valueFrameGroupId ? frameNodeById.get(valueFrameGroupId) || null : null;
+    const selectedMetadata = primaryValueMetadata || metadata;
+    const valueKey = selectedMetadata.valueKey || metadata.valueKey || '';
+    const label =
+      readCanvasSelectableNodeText(keyNode) ||
+      readCanvasSelectableNodeText(valueNode || node) ||
+      normalizeCanvasSelectableDisplayText(metadata.label) ||
+      valueKey ||
+      frameGroupId;
+    const ownerFrameGroupId = keyFrameGroupId || valueFrameGroupId || frameGroupId;
+    const selectedBox: TemplateCanvasSelectedBox = {
+      id: valueKey || ownerFrameGroupId,
+      frameGroupId: ownerFrameGroupId,
+      role,
+      label,
+      value: readCanvasSelectableNodeText(valueNode || (metadata.role === 'value' ? node : null)) || undefined,
+      valueKey: valueKey || undefined,
+      slotKey: role === 'signature' || role === 'attachment' ? valueKey || undefined : undefined,
+      contextKey: keyFrameGroupId ? `parent:${keyFrameGroupId}` : valueKey ? `value:${valueKey}` : `frame:${frameGroupId}`,
+      keyFrameGroupId: keyFrameGroupId || undefined,
+      valueFrameGroupId: valueFrameGroupId || undefined,
+      highlightFrameGroupIds,
+      boxKind: selectedMetadata.boxKind || metadata.boxKind,
+      frameRole: selectedMetadata.role || metadata.role,
+      runtimeMode: selectedMetadata.runtimeMode || metadata.runtimeMode,
+      requestKind: mapCanvasSelectableRoleToChecklistKind(role),
+    };
+    const target = buildChecklistTargetForCanvasSelectedBox(selectedBox);
+    const nodes = Array.from(new Set(collectChecklistTargetVisualNodes(root, target)));
+
+    if (nodes.length <= 0) {
+      return;
+    }
+
+    if (targetItemsById.has(selectedBox.id)) {
+      return;
+    }
+
+    targetItemsById.set(selectedBox.id, {
+      target,
+      selectedBox,
+      nodes,
+    });
+  });
+
+  return Array.from(targetItemsById.values());
+};
+
 const applyChecklistSignatureStateToRoot = (
   root: HTMLElement,
   state: TemplateChecklistSignatureState,
@@ -18327,6 +18576,10 @@ export default function TemplateEditWorkspace({
   selectionInactiveOverlayOpacity = 0.5,
   canvasTextInteractionMode = 'default',
   canvasViewMode,
+  canvasSelectionMode = 'none',
+  canvasSelectablePolicy,
+  selectedCanvasBoxes = EMPTY_TEMPLATE_CANVAS_SELECTED_BOXES,
+  onCanvasSelectionChange,
   canvasToolbarVisibility,
   persistenceVisibility,
   templateUsagePreviewLayoutDebugOptions,
@@ -18496,6 +18749,7 @@ export default function TemplateEditWorkspace({
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const checklistRegistrationTargetRef = React.useRef<TemplateChecklistRegistrationTarget | null>(null);
+  const selectedCanvasBoxesRef = React.useRef<TemplateCanvasSelectedBox[]>([]);
   const [signatureOverlayTarget, setSignatureOverlayTarget] =
     React.useState<TemplateChecklistRegistrationTarget | null>(null);
   const [signatureOverlaySubmitting, setSignatureOverlaySubmitting] = React.useState(false);
@@ -18512,6 +18766,9 @@ export default function TemplateEditWorkspace({
   React.useEffect(() => {
     checklistRegistrationTargetRef.current = checklistRegistrationTarget;
   }, [checklistRegistrationTarget]);
+  React.useEffect(() => {
+    selectedCanvasBoxesRef.current = selectedCanvasBoxes;
+  }, [selectedCanvasBoxes]);
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const bumpPositionStructureRevision = React.useCallback(() => {
     setPositionStructureRevision((previous) => previous + 1);
@@ -18878,10 +19135,12 @@ export default function TemplateEditWorkspace({
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
   const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode || canvasViewPreviewRequested;
+  const canvasBoxSelectionModeActive = canvasSelectionMode === 'box';
   const checklistCanvasSelectionModeActive =
     templateUsagePreviewActive &&
-    checklistSelectableTargets.length > 0 &&
-    Boolean(onChecklistSelectableTargetSelect || onChecklistSelectableTargetsSelect);
+    (canvasBoxSelectionModeActive ||
+      (checklistSelectableTargets.length > 0 &&
+        Boolean(onChecklistSelectableTargetSelect || onChecklistSelectableTargetsSelect)));
   const surfaceRenderedPreviewHtml = templateUsagePreviewActive
     ? templateUsagePreviewHtml || renderedPreviewHtml
     : renderedPreviewHtml;
@@ -20029,8 +20288,7 @@ export default function TemplateEditWorkspace({
     if (
       !templateUsagePreviewActive ||
       !root ||
-      checklistSelectableTargets.length === 0 ||
-      (!onChecklistSelectableTargetSelect && !onChecklistSelectableTargetsSelect)
+      !checklistCanvasSelectionModeActive
     ) {
       return undefined;
     }
@@ -20066,12 +20324,30 @@ export default function TemplateEditWorkspace({
         node.removeAttribute(TEMPLATE_CHECKLIST_INACTIVE_ATTR);
       });
     };
-    const selectableTargets = checklistSelectableTargets
-      .map((target) => ({
-        target,
-        nodes: Array.from(new Set(collectChecklistTargetVisualNodes(root, target))),
-      }))
+    const selectableTargets: TemplateCanvasSelectableTargetItem[] = (
+      checklistSelectableTargets.length > 0
+        ? checklistSelectableTargets.map((target) => ({
+            target,
+            selectedBox: {
+              id: target.valueKey || target.frameGroupId || target.slotKey || target.id,
+              frameGroupId: target.frameGroupId || target.valueKey || target.slotKey || target.id,
+              role: target.kind === 'signature' ? 'signature' : target.kind === 'file' ? 'attachment' : 'value',
+              label: target.label,
+              valueKey: target.valueKey,
+              slotKey: target.slotKey,
+              contextKey: target.contextKey,
+              highlightFrameGroupIds: target.highlightFrameGroupIds,
+              requestKind: target.kind,
+            } satisfies TemplateCanvasSelectedBox,
+            nodes: Array.from(new Set(collectChecklistTargetVisualNodes(root, target))),
+          }))
+        : collectCanvasSelectionTargetItems(root, canvasSelectablePolicy)
+    )
       .filter((item) => item.nodes.length > 0);
+
+    if (selectableTargets.length <= 0) {
+      return undefined;
+    }
 
     clearChecklistAvailability();
     const selectableFrameNodes = new Set<HTMLElement>();
@@ -20125,23 +20401,6 @@ export default function TemplateEditWorkspace({
         .map((value) => value?.trim())
         .find((value) => Boolean(value)) || '';
 
-    const normalizeSelectableTargetDisplayText = (value: string) =>
-      value
-        .replace(/\s+/g, ' ')
-        .replace(/([가-힣])\s+(?=[가-힣])/g, '$1')
-        .replace(/(텍스트|서명|첨부파일|파일|사진)?(상위 키|하위 값)$/g, '')
-        .trim();
-
-    const isGeneratedSelectableTargetLabel = (value: string) =>
-      /^(band-\d+|status-history-\d+|field-\d+|frame-\d+)/i.test(value.trim());
-
-    const readSelectableTargetNodeText = (node: HTMLElement) =>
-      normalizeSelectableTargetDisplayText(
-        node.querySelector<HTMLInputElement | HTMLTextAreaElement>('[data-template-frame-input="true"]')?.value ||
-          node.textContent ||
-          ''
-      );
-
     const resolveSelectableTargetDisplayLabel = (target: TemplateChecklistRegistrationTarget) => {
       const targetKey = getTargetKey(target);
       const item = selectableTargets.find((candidate) => getTargetKey(candidate.target) === targetKey) || null;
@@ -20149,11 +20408,11 @@ export default function TemplateEditWorkspace({
         item?.nodes.find((node) => readFrameRole(resolveFrameSelectionAnchor(node) || node) === 'key') ||
         item?.nodes.find((node) => readFrameRole(resolveFrameSelectionAnchor(node) || node) === 'key_value') ||
         null;
-      const keyText = keyNode ? readSelectableTargetNodeText(resolveFrameSelectionAnchor(keyNode) || keyNode) : '';
-      const targetLabel = normalizeSelectableTargetDisplayText(target.label || '');
+      const keyText = keyNode ? readCanvasSelectableNodeText(resolveFrameSelectionAnchor(keyNode) || keyNode) : '';
+      const targetLabel = normalizeCanvasSelectableDisplayText(target.label || '');
       const nextLabel = keyText || targetLabel;
 
-      if (!nextLabel || isGeneratedSelectableTargetLabel(nextLabel) || nextLabel === target.label) {
+      if (!nextLabel || isGeneratedCanvasSelectableLabel(nextLabel) || nextLabel === target.label) {
         return target;
       }
 
@@ -20242,13 +20501,49 @@ export default function TemplateEditWorkspace({
         return;
       }
 
+      const resolvedTargets = targets.map(resolveSelectableTargetDisplayLabel);
+
+      if (onCanvasSelectionChange) {
+        const selectedBoxes = resolvedTargets.map((target) => {
+          const targetKey = getTargetKey(target);
+          const matchedItem = selectableTargets.find((candidate) => getTargetKey(candidate.target) === targetKey) || null;
+          const selectionIds = collectChecklistTargetCanvasSelectionIds(root, target);
+          const selectedBox = matchedItem?.selectedBox;
+          const label = normalizeCanvasSelectableDisplayText(target.label || selectedBox?.label || '') || targetKey;
+
+          return {
+            ...(selectedBox || {
+              id: target.valueKey || target.frameGroupId || target.slotKey || target.id,
+              frameGroupId: target.frameGroupId || selectionIds[0] || target.valueKey || target.slotKey || target.id,
+              role: target.kind === 'signature' ? 'signature' : target.kind === 'file' ? 'attachment' : 'value',
+              requestKind: target.kind,
+            }),
+            id: selectedBox?.id || target.valueKey || target.frameGroupId || target.slotKey || target.id,
+            frameGroupId:
+              selectedBox?.frameGroupId || target.frameGroupId || selectionIds[0] || target.valueKey || target.slotKey || target.id,
+            label,
+            valueKey: selectedBox?.valueKey || target.valueKey,
+            slotKey: selectedBox?.slotKey || target.slotKey,
+            contextKey: selectedBox?.contextKey || target.contextKey,
+            highlightFrameGroupIds:
+              selectedBox?.highlightFrameGroupIds ||
+              Array.from(new Set([...(target.highlightFrameGroupIds || []), ...selectionIds].filter(Boolean))),
+          } satisfies TemplateCanvasSelectedBox;
+        });
+
+        onCanvasSelectionChange(selectedBoxes, {
+          append: Boolean(options?.append),
+          source: selectedBoxes.length > 1 ? 'drag' : 'click',
+        } satisfies TemplateCanvasSelectionChangeOptions);
+      }
+
       if (onChecklistSelectableTargetsSelect) {
-        onChecklistSelectableTargetsSelect(targets.map(resolveSelectableTargetDisplayLabel), options);
+        onChecklistSelectableTargetsSelect(resolvedTargets, options);
         return;
       }
 
-      targets.forEach((target, index) => {
-        onChecklistSelectableTargetSelect?.(resolveSelectableTargetDisplayLabel(target), {
+      resolvedTargets.forEach((target, index) => {
+        onChecklistSelectableTargetSelect?.(target, {
           append: Boolean(options?.append) || index > 0,
         });
       });
@@ -20366,15 +20661,27 @@ export default function TemplateEditWorkspace({
         updateChecklistSelectableMarquee(state, event.clientX, event.clientY, { force: true });
         if (state.lastTargets.length > 0) {
           emitChecklistSelectableTargets(state.lastTargets, { append: state.append });
-        } else if (!state.append && (checklistRegistrationTargetRef.current || selectedFrameGroupIdsRef.current.length > 0)) {
+        } else if (
+          !state.append &&
+          (checklistRegistrationTargetRef.current ||
+            selectedCanvasBoxesRef.current.length > 0 ||
+            selectedFrameGroupIdsRef.current.length > 0)
+        ) {
           onChecklistSelectionClear?.();
+          onCanvasSelectionChange?.([], { source: 'clear' });
         }
         suppressClickAfterMarquee();
       } else if (state.anchorTarget) {
         emitChecklistSelectableTargets([state.anchorTarget], { append: state.append });
         suppressClickAfterMarquee();
-      } else if (!state.append && (checklistRegistrationTargetRef.current || selectedFrameGroupIdsRef.current.length > 0)) {
+      } else if (
+        !state.append &&
+        (checklistRegistrationTargetRef.current ||
+          selectedCanvasBoxesRef.current.length > 0 ||
+          selectedFrameGroupIdsRef.current.length > 0)
+      ) {
         onChecklistSelectionClear?.();
+        onCanvasSelectionChange?.([], { source: 'clear' });
       }
 
       cleanupChecklistSelectableMarquee();
@@ -20403,8 +20710,14 @@ export default function TemplateEditWorkspace({
       const pageInner = eventTarget.closest<HTMLElement>('.page-inner');
 
       if (!pageInner) {
-        if (!event.shiftKey && (checklistRegistrationTargetRef.current || selectedFrameGroupIdsRef.current.length > 0)) {
+        if (
+          !event.shiftKey &&
+          (checklistRegistrationTargetRef.current ||
+            selectedCanvasBoxesRef.current.length > 0 ||
+            selectedFrameGroupIdsRef.current.length > 0)
+        ) {
           onChecklistSelectionClear?.();
+          onCanvasSelectionChange?.([], { source: 'clear' });
         }
         return;
       }
@@ -20491,9 +20804,12 @@ export default function TemplateEditWorkspace({
       clearChecklistAvailability();
     };
   }, [
+    canvasSelectablePolicy,
     canvasViewMetadataVisualMode,
     canvasViewSelectionPanelTab,
+    checklistCanvasSelectionModeActive,
     checklistSelectableTargets,
+    onCanvasSelectionChange,
     onChecklistSelectableTargetsSelect,
     onChecklistSelectableTargetSelect,
     onChecklistSelectionClear,
@@ -25062,7 +25378,11 @@ export default function TemplateEditWorkspace({
     }
 
     const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-    const nextSelectedFrameGroupIds = collectChecklistTargetCanvasSelectionIds(root, checklistRegistrationTarget);
+    const canvasSelectedBoxFrameGroupIds = collectCanvasSelectedBoxCanvasSelectionIds(root, selectedCanvasBoxes);
+    const checklistTargetFrameGroupIds = collectChecklistTargetCanvasSelectionIds(root, checklistRegistrationTarget);
+    const nextSelectedFrameGroupIds = Array.from(
+      new Set([...(canvasSelectedBoxFrameGroupIds.length > 0 ? canvasSelectedBoxFrameGroupIds : checklistTargetFrameGroupIds)])
+    );
     const selectionChanged = !stringArraysEqual(selectedFrameGroupIdsRef.current, nextSelectedFrameGroupIds);
     const hasEdgeSelection = edgeSelectionStateRef.current.tokens.length > 0;
 
@@ -25105,6 +25425,7 @@ export default function TemplateEditWorkspace({
     positionRelationAnchorFrameGroupId,
     positionSpacingGuideRelations,
     selectionPanelTab,
+    selectedCanvasBoxes,
     surfaceRenderedPreviewHtml,
     syncEdgeRoleDiagnosticsState,
     templateUsagePreviewActive,
@@ -25166,18 +25487,23 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      if (!checklistRegistrationTargetRef.current && selectedFrameGroupIdsRef.current.length === 0) {
+      if (
+        !checklistRegistrationTargetRef.current &&
+        selectedCanvasBoxesRef.current.length === 0 &&
+        selectedFrameGroupIdsRef.current.length === 0
+      ) {
         return;
       }
 
       event.preventDefault();
       clearChecklistCanvasSelection();
       onChecklistSelectionClear?.();
+      onCanvasSelectionChange?.([], { source: 'clear' });
     };
 
     window.addEventListener('keydown', handleChecklistSelectionEscape, true);
     return () => window.removeEventListener('keydown', handleChecklistSelectionEscape, true);
-  }, [checklistCanvasSelectionModeActive, clearChecklistCanvasSelection, onChecklistSelectionClear]);
+  }, [checklistCanvasSelectionModeActive, clearChecklistCanvasSelection, onCanvasSelectionChange, onChecklistSelectionClear]);
 
   const applyRuntimeSelectionVisuals = React.useCallback(
     (nextSelectedFrameGroupIds: string[], nextEdgeSelectionState: TemplateEdgeSelectionStateDto) => {
