@@ -58,6 +58,37 @@ const toDatetimeLocalValue = (date: Date) => {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 };
 
+const REQUEST_LINK_DEFAULT_EXPIRATION_OFFSET_MS = 7 * 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+const buildDefaultRequestLinkExpiresAt = () =>
+  toDatetimeLocalValue(new Date(Date.now() + REQUEST_LINK_DEFAULT_EXPIRATION_OFFSET_MS));
+
+const formatExpirationRemainingTime = (value: string, nowMs: number) => {
+  const parsed = new Date(value);
+
+  if (!value || Number.isNaN(parsed.getTime())) {
+    return '만료 시각을 입력하세요.';
+  }
+
+  const diffMs = parsed.getTime() - nowMs;
+
+  if (diffMs <= 0) {
+    return '만료 시각이 지났습니다.';
+  }
+
+  const totalHours = Math.max(0, Math.round(diffMs / HOUR_MS));
+
+  if (totalHours <= 0) {
+    return '1시간 미만 후';
+  }
+
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+
+  return `${days}일 ${hours}시간 후`;
+};
+
 const formatPhoneNumber = (value: string | null | undefined) => {
   const digits = (value || '').replace(/[^0-9]/g, '');
 
@@ -498,7 +529,8 @@ export function DocumentsOwnerWorkspace({
   const [newMemberRegistrationOpen, setNewMemberRegistrationOpen] = React.useState(false);
   const [newMemberName, setNewMemberName] = React.useState('');
   const [newMemberPhone, setNewMemberPhone] = React.useState('');
-  const [expiresAt, setExpiresAt] = React.useState(() => toDatetimeLocalValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+  const [expiresAt, setExpiresAt] = React.useState(buildDefaultRequestLinkExpiresAt);
+  const [currentTimeMs, setCurrentTimeMs] = React.useState(() => Date.now());
   const [latestCreatedRequestLinks, setLatestCreatedRequestLinks] = React.useState<
     Array<{ requestLink: DocumentsOwnerRecentRequestLink['requestLink']; requestUrl: string }>
   >([]);
@@ -512,6 +544,14 @@ export function DocumentsOwnerWorkspace({
   const documentListLoadSeqRef = React.useRef(0);
   const documentContextLoadSeqRef = React.useRef(0);
   const shouldSyncSelectionQuery = surface === 'documents' && !embedded && !hideDocumentPicker;
+
+  React.useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCurrentTimeMs(Date.now());
+    }, 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   React.useEffect(() => {
     if (initialSiteId) {
@@ -1770,6 +1810,7 @@ export function DocumentsOwnerWorkspace({
   const renderExpirationRequestPanel = () => {
     const assignedFieldCount = selectedFields.filter((field) => selectedFieldAssigneeByValueKey[field.valueKey]).length;
     const totalRequestCount = selectedFields.length + mediaRequestDrafts.length;
+    const expirationRemainingTime = formatExpirationRemainingTime(expiresAt, currentTimeMs);
 
     return (
       <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" {...documentsOwnerItem('request-link-action-panel', '요청 링크 실행 설정 패널')}>
@@ -1795,6 +1836,9 @@ export function DocumentsOwnerWorkspace({
           <label className="text-xs font-medium text-slate-700" {...documentsOwnerItem('request-link-expiration-label', '요청 링크 만료 시각 라벨')}>
             만료 시각
           </label>
+          <p className="text-sm font-medium text-slate-900" {...documentsOwnerItem('request-link-expiration-relative-time', '요청 링크 만료까지 남은 시간')}>
+            {expirationRemainingTime}
+          </p>
           <Input
             type="datetime-local"
             value={expiresAt}
@@ -1954,7 +1998,6 @@ export function DocumentsOwnerWorkspace({
             suppressInitialDraftLoadedMessage
             templateNameReadOnly
             saveDisabled
-            canvasSelectionMode={activeRequestSetupStep === 'expiration' ? 'none' : 'box'}
             canvasSelectablePolicy={canvasSelectablePolicy}
             selectedCanvasBoxes={selectedCanvasBoxes}
             onCanvasSelectionChange={selectFieldsFromCanvasBoxes}

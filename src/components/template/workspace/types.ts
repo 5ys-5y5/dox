@@ -710,6 +710,8 @@ export type TemplateCanvasSelectedBox = {
   frameRole?: TemplateFrameRole | 'group' | '';
   runtimeMode?: TemplateFrameRuntimeMode | '';
   requestKind?: TemplateChecklistRegistrationKind;
+  requestId?: string;
+  signerName?: string;
 };
 
 export type TemplateCanvasSelectionChangeOptions = {
@@ -745,6 +747,7 @@ export type TemplateEditWorkspaceProps = {
   checklistRegistrationTarget?: TemplateChecklistRegistrationTarget | null;
   checklistSelectableTargets?: TemplateChecklistRegistrationTarget[];
   checklistSignatureStates?: TemplateChecklistSignatureState[];
+  canvasSignatureStates?: TemplateChecklistSignatureState[];
   onChecklistTargetActivate?: (target: TemplateChecklistRegistrationTarget) => void;
   onChecklistSelectableTargetSelect?: (
     target: TemplateChecklistRegistrationTarget,
@@ -756,6 +759,7 @@ export type TemplateEditWorkspaceProps = {
   ) => void;
   onChecklistSelectionClear?: () => void;
   onChecklistSignatureSubmit?: (params: TemplateChecklistSignatureSubmitParams) => Promise<void> | void;
+  onCanvasSignatureSubmit?: (params: TemplateChecklistSignatureSubmitParams) => Promise<void> | void;
   defaultCanvasFullscreen?: boolean;
   canvasPageContainerWidth?: string;
   canvasPageContainerHeight?: string;

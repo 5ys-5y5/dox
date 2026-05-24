@@ -606,32 +606,31 @@ export const updateCanvasOwnerSettingsStoreOverride = <K extends CanvasOwnerSett
   };
 };
 
+const readDefaultCanvasOwnerSettings = (
+  context: CanvasOwnerSettingsContext = { pageId: 'canvas', workspaceMode: 'template' }
+) => {
+  const settingsStore = createEmptyCanvasOwnerSettingsStore();
+  const resolvedSettings = resolveCanvasOwnerSettings(settingsStore, context);
+
+  return {
+    ...resolvedSettings,
+    settingsStore,
+    hasStoredSettings: false,
+  };
+};
+
 export const readCanvasOwnerSettingsFromStorage = (
   context: CanvasOwnerSettingsContext = { pageId: 'canvas', workspaceMode: 'template' }
 ) => {
   if (typeof window === 'undefined') {
-    const settingsStore = createEmptyCanvasOwnerSettingsStore();
-    const resolvedSettings = resolveCanvasOwnerSettings(settingsStore, context);
-
-    return {
-      ...resolvedSettings,
-      settingsStore,
-      hasStoredSettings: false,
-    };
+    return readDefaultCanvasOwnerSettings(context);
   }
 
   try {
     const rawSettings = window.localStorage.getItem(CANVAS_OWNER_SETTINGS_STORAGE_KEY);
 
     if (!rawSettings) {
-      const settingsStore = createEmptyCanvasOwnerSettingsStore();
-      const resolvedSettings = resolveCanvasOwnerSettings(settingsStore, context);
-
-      return {
-        ...resolvedSettings,
-        settingsStore,
-        hasStoredSettings: false,
-      };
+      return readDefaultCanvasOwnerSettings(context);
     }
 
     const settingsStore = normalizeCanvasOwnerSettingsStore(JSON.parse(rawSettings));
@@ -644,14 +643,7 @@ export const readCanvasOwnerSettingsFromStorage = (
     };
   } catch {
     window.localStorage.removeItem(CANVAS_OWNER_SETTINGS_STORAGE_KEY);
-    const settingsStore = createEmptyCanvasOwnerSettingsStore();
-    const resolvedSettings = resolveCanvasOwnerSettings(settingsStore, context);
-
-    return {
-      ...resolvedSettings,
-      settingsStore,
-      hasStoredSettings: false,
-    };
+    return readDefaultCanvasOwnerSettings(context);
   }
 };
 
@@ -683,7 +675,7 @@ export const useStoredCanvasOwnerSettings = (
   context: CanvasOwnerSettingsContext = { pageId: 'canvas', workspaceMode: 'template' }
 ) => {
   const [state, setState] = React.useState(() => ({
-    ...readCanvasOwnerSettingsFromStorage(context),
+    ...readDefaultCanvasOwnerSettings(context),
     loaded: false,
   }));
 

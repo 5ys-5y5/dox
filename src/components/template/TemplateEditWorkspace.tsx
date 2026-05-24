@@ -15147,6 +15147,8 @@ const buildChecklistTargetForCanvasSelectedBox = (box: TemplateCanvasSelectedBox
     )
   ),
   activationValueKey: box.valueKey,
+  requestId: box.requestId,
+  signerName: box.signerName,
 });
 
 const collectCanvasSelectedBoxCanvasSelectionIds = (root: HTMLElement, boxes: TemplateCanvasSelectedBox[]) =>
@@ -18563,6 +18565,8 @@ export default function TemplateEditWorkspace({
   onChecklistSelectableTargetsSelect,
   onChecklistSelectionClear,
   onChecklistSignatureSubmit,
+  canvasSignatureStates,
+  onCanvasSignatureSubmit,
   defaultCanvasFullscreen = false,
   canvasPageContainerWidth = '',
   canvasPageContainerHeight = '',
@@ -18618,6 +18622,8 @@ export default function TemplateEditWorkspace({
     () => normalizeTemplateUsagePreviewAttachmentTagColorByName(documentAttachmentTagColorByName),
     [documentAttachmentTagColorByName]
   );
+  const activeChecklistSignatureStates = canvasSignatureStates || checklistSignatureStates;
+  const activeChecklistSignatureSubmit = onCanvasSignatureSubmit || onChecklistSignatureSubmit;
   const [templates, setTemplates] = React.useState<TemplateRecordDto[]>([]);
   const [templateDetail, setTemplateDetail] = React.useState<TemplateDetailResult | null>(null);
   const [previewHtml, setPreviewHtml] = React.useState('');
@@ -20268,11 +20274,15 @@ export default function TemplateEditWorkspace({
     };
     clearHighlight();
 
-    if (!checklistRegistrationTarget || checklistCanvasSelectionModeActive) {
+    const highlightTargets = checklistRegistrationTarget
+      ? [checklistRegistrationTarget]
+      : selectedCanvasBoxes.map(buildChecklistTargetForCanvasSelectedBox);
+
+    if (highlightTargets.length <= 0 || checklistCanvasSelectionModeActive) {
       return clearHighlight;
     }
 
-    const targetNodes = collectChecklistTargetVisualNodes(root, checklistRegistrationTarget);
+    const targetNodes = highlightTargets.flatMap((target) => collectChecklistTargetVisualNodes(root, target));
     const uniqueTargetNodes = Array.from(new Set(targetNodes));
 
     uniqueTargetNodes.forEach((node) => {
@@ -20280,7 +20290,13 @@ export default function TemplateEditWorkspace({
     });
 
     return clearHighlight;
-  }, [checklistCanvasSelectionModeActive, checklistRegistrationTarget, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+  }, [
+    checklistCanvasSelectionModeActive,
+    checklistRegistrationTarget,
+    selectedCanvasBoxes,
+    surfaceRenderedPreviewHtml,
+    templateUsagePreviewActive,
+  ]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -20528,6 +20544,8 @@ export default function TemplateEditWorkspace({
             highlightFrameGroupIds:
               selectedBox?.highlightFrameGroupIds ||
               Array.from(new Set([...(target.highlightFrameGroupIds || []), ...selectionIds].filter(Boolean))),
+            requestId: selectedBox?.requestId || target.requestId,
+            signerName: selectedBox?.signerName || target.signerName,
           } satisfies TemplateCanvasSelectedBox;
         });
 
@@ -20826,7 +20844,8 @@ export default function TemplateEditWorkspace({
     }
 
     const handleChecklistTargetClick = (event: MouseEvent) => {
-      const target = checklistRegistrationTargetRef.current;
+      const selectedCanvasBox = selectedCanvasBoxesRef.current.length === 1 ? selectedCanvasBoxesRef.current[0] : null;
+      const target = checklistRegistrationTargetRef.current || (selectedCanvasBox ? buildChecklistTargetForCanvasSelectedBox(selectedCanvasBox) : null);
       const eventTarget = event.target instanceof HTMLElement ? event.target : null;
 
       if (!target || !eventTarget) {
@@ -20871,10 +20890,10 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    checklistSignatureStates.forEach((state) => {
+    activeChecklistSignatureStates.forEach((state) => {
       applyChecklistSignatureStateToRoot(root, state);
     });
-  }, [checklistSignatureStates, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
+  }, [activeChecklistSignatureStates, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
 
   React.useEffect(() => {
     if (!signatureOverlayTarget || !signatureOverlayCanvasRef.current) {
@@ -21020,7 +21039,7 @@ export default function TemplateEditWorkspace({
 
     try {
       if (target.requestId) {
-        await onChecklistSignatureSubmit?.({ target, imageData } satisfies TemplateChecklistSignatureSubmitParams);
+        await activeChecklistSignatureSubmit?.({ target, imageData } satisfies TemplateChecklistSignatureSubmitParams);
       }
 
       if (root) {
@@ -21043,7 +21062,7 @@ export default function TemplateEditWorkspace({
     } finally {
       setSignatureOverlaySubmitting(false);
     }
-  }, [onChecklistSignatureSubmit, signatureOverlaySubmitting, signatureOverlayTarget]);
+  }, [activeChecklistSignatureSubmit, signatureOverlaySubmitting, signatureOverlayTarget]);
 
   React.useLayoutEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current) {

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
-import TemplateEditWorkspace, {
+import {
   materializeTemplateCanvasHtmlForPersistence,
   type TemplateEditWorkspaceInitialDraft,
 } from './TemplateEditWorkspace';
@@ -218,6 +218,7 @@ export type TemplateExtractWorkspaceProps = {
   showStatusSection?: boolean;
   statusResetKey?: number;
   onStatusChange?: (status: TemplateExtractWorkspaceStatus | null) => void;
+  renderPreviewWorkspace?: (draft: TemplateEditWorkspaceInitialDraft) => React.ReactNode;
 };
 
 export type TemplateExtractWorkspaceStatus =
@@ -241,6 +242,7 @@ export function TemplateExtractWorkspace({
   showStatusSection = true,
   statusResetKey = 0,
   onStatusChange,
+  renderPreviewWorkspace,
 }: TemplateExtractWorkspaceProps) {
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [frameGroupVersion, setFrameGroupVersion] = React.useState<TemplateExtractFrameGroupVersion>('fv1.11');
@@ -967,16 +969,13 @@ export function TemplateExtractWorkspace({
 
         <div className="min-w-0 self-start">
           {previewInitialDraft ? (
-            <TemplateEditWorkspace
-              key={previewInitialDraft.draftKey}
-              initialDraft={previewInitialDraft}
-              workspaceMode="read"
-              hideHeader
-              hidePersistencePanel
-              suppressInitialDraftLoadedMessage
-              templateNameReadOnly
-              saveDisabled
-            />
+            renderPreviewWorkspace ? (
+              renderPreviewWorkspace(previewInitialDraft)
+            ) : (
+              <div className="flex min-h-[70vh] items-center justify-center rounded-xl border border-slate-200 bg-card px-6 text-center text-sm text-slate-500">
+                상자 편집 캔버스 미리보기 렌더러가 연결되지 않았습니다.
+              </div>
+            )
           ) : (
             <div className="flex min-h-[70vh] items-center justify-center rounded-xl border border-slate-200 bg-card text-sm text-slate-500">
               실행 결과가 여기에 표시됩니다.

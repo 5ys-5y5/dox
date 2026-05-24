@@ -185,14 +185,36 @@ export function CanvasOwnedWorkspace({
   const canvasOwnerSettingSources =
     explicitCanvasOwnerSettingSources ??
     (applyStoredCanvasOwnerSettings ? storedCanvasOwnerSettings.sources : undefined);
+  const resolvedWorkspaceProps = resolveCanvasOwnedWorkspaceProps({
+    ...ownedWorkspaceProps,
+    canvasOwnerSettings,
+    canvasOwnerSettingSources,
+  });
+  const canvasOwnerSettingsSource = canvasOwnerSettingSources
+    ? [
+        `canvasViewMode:${canvasOwnerSettingSources.canvasViewMode || 'unknown'}`,
+        `readModeInteractionMode:${canvasOwnerSettingSources.readModeInteractionMode || 'unknown'}`,
+        `selectionInactiveOverlayOpacity:${canvasOwnerSettingSources.selectionInactiveOverlayOpacity || 'unknown'}`,
+      ].join('|')
+    : canvasOwnerSettings
+      ? 'explicit'
+      : 'props';
 
   return (
-    <TemplateEditWorkspace
-      {...resolveCanvasOwnedWorkspaceProps({
-        ...ownedWorkspaceProps,
-        canvasOwnerSettings,
-        canvasOwnerSettingSources,
-      })}
-    />
+    <div
+      style={{ display: 'contents' }}
+      data-canvas-owner-surface={ownedWorkspaceProps.surface}
+      data-canvas-owner-mode={resolvedWorkspaceProps.workspaceMode || 'template'}
+      data-canvas-owner-access-role={effectiveCanvasAccessRole}
+      data-canvas-owner-view-mode={resolvedWorkspaceProps.canvasViewMode || 'position'}
+      data-canvas-owner-selection-mode={resolvedWorkspaceProps.canvasSelectionMode || 'none'}
+      data-canvas-owner-text-interaction-mode={resolvedWorkspaceProps.canvasTextInteractionMode || 'default'}
+      data-canvas-owner-selection-inactive-overlay-opacity={String(
+        resolvedWorkspaceProps.selectionInactiveOverlayOpacity ?? ''
+      )}
+      data-canvas-owner-settings-source={canvasOwnerSettingsSource}
+    >
+      <TemplateEditWorkspace {...resolvedWorkspaceProps} />
+    </div>
   );
 }

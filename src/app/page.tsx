@@ -67,9 +67,9 @@ const pageGroups = [
       {
         href: '/templates/edit',
         title: '템플릿 편집',
-        summary: '저장된 템플릿의 div 상자를 다중 선택해 크기와 스타일을 일괄 조정합니다.',
-        status: '완료',
-        statusVariant: 'blue',
+        summary: '저장된 템플릿 편집 전용 레거시 진입점입니다. /canvas 환경 설정으로 대체되어 삭제 예정입니다.',
+        status: '레거시',
+        statusVariant: 'slate',
       },
       {
         href: '/photos',
@@ -166,6 +166,7 @@ export default function HomePage() {
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {group.pages.map((page) => {
                   const statusVariant = resolvePageStatusVariant(page);
+                  const legacyTextClassName = page.status === '레거시' ? 'text-slate-300' : '';
 
                   return (
                     <Link
@@ -178,15 +179,15 @@ export default function HomePage() {
                     >
                       <div className="space-y-3">
                         <div className="flex items-center gap-2">
-                          <Badge variant={statusVariant}>{page.status}</Badge>
-                          <span className="text-xs text-slate-500">{page.href}</span>
+                          <Badge variant={statusVariant} className={legacyTextClassName}>{page.status}</Badge>
+                          <span className={cn('text-xs text-slate-500', legacyTextClassName)}>{page.href}</span>
                         </div>
                         <div className="space-y-1">
-                          <h3 className="text-xl font-semibold text-slate-950">{page.title}</h3>
-                          <p className="text-sm text-slate-600">{page.summary}</p>
+                          <h3 className={cn('text-xl font-semibold text-slate-950', legacyTextClassName)}>{page.title}</h3>
+                          <p className={cn('text-sm text-slate-600', legacyTextClassName)}>{page.summary}</p>
                         </div>
                       </div>
-                      <div className="pt-4 text-sm font-medium text-slate-900">페이지 열기</div>
+                      <div className={cn('pt-4 text-sm font-medium text-slate-900', legacyTextClassName)}>페이지 열기</div>
                     </Link>
                   );
                 })}

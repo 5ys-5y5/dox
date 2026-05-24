@@ -8,7 +8,9 @@ import {
 } from '../../../components/template/TemplateEditWorkspace';
 import { buildDocumentAttachmentValueFilesForSave } from '../../../components/template/workspace/persistence/documentAttachmentClient';
 import type {
-  TemplateChecklistRegistrationTarget,
+  TemplateCanvasSelectablePolicy,
+  TemplateCanvasSelectedBox,
+  TemplateCanvasSelectionChangeOptions,
   TemplateChecklistSignatureState,
   TemplateChecklistSignatureSubmitParams,
   TemplateEditWorkspaceSaveDraftParams,
@@ -123,25 +125,38 @@ const readTaskPayloadStringArray = (task: DocumentRequestTaskDto, key: string) =
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())) : [];
 };
 
-const buildChecklistTargetFromRequestTask = (
+const getCanvasRoleFromRequestTask = (task: DocumentRequestTaskDto): TemplateCanvasSelectedBox['role'] => {
+  if (task.kind === 'signature') {
+    return 'signature';
+  }
+
+  if (task.kind === 'photo' || task.kind === 'file') {
+    return 'attachment';
+  }
+
+  return 'value';
+};
+
+const buildCanvasSelectedBoxFromRequestTask = (
   task: DocumentRequestTaskDto,
   signerName: string | null | undefined
-): TemplateChecklistRegistrationTarget => {
+): TemplateCanvasSelectedBox => {
   const keyFrameGroupId = readTaskPayloadString(task, 'keyFrameGroupId');
   const valueFrameGroupId = readTaskPayloadString(task, 'valueFrameGroupId');
-  const frameGroupId = task.frameGroupId || valueFrameGroupId || keyFrameGroupId || undefined;
-  const kind = task.kind === 'signature' ? 'signature' : task.kind === 'photo' ? 'photo' : task.kind === 'file' ? 'file' : 'value';
+  const frameGroupId = task.frameGroupId || valueFrameGroupId || keyFrameGroupId || task.valueKey || task.targetKey;
 
   return {
     id: task.id,
-    kind,
+    frameGroupId,
+    role: getCanvasRoleFromRequestTask(task),
     label: task.targetLabel || task.targetKey,
     valueKey: task.valueKey || undefined,
     slotKey: task.slotKey || task.valueKey || task.targetKey,
-    frameGroupId,
     contextKey: readTaskPayloadString(task, 'contextKey') || undefined,
+    keyFrameGroupId: keyFrameGroupId || undefined,
+    valueFrameGroupId: valueFrameGroupId || undefined,
     highlightFrameGroupIds: [keyFrameGroupId, valueFrameGroupId, task.frameGroupId || ''].filter(Boolean),
-    activationValueKey: task.valueKey || undefined,
+    requestKind: task.kind === 'signature' ? 'signature' : task.kind === 'photo' ? 'photo' : task.kind === 'file' ? 'file' : 'value',
     requestId: task.linkedExternalId || undefined,
     signerName: signerName || undefined,
   };
@@ -265,12 +280,76 @@ export default function RequestLinkTokenPage() {
     }
   }, [activeTaskId, requestTasks]);
 
-  const activeTaskTarget = React.useMemo<TemplateChecklistRegistrationTarget | null>(() => {
+  const canvasSelectablePolicy = React.useMemo<TemplateCanvasSelectablePolicy>(() => ({
+    selectableFrameGroupIds: Array.from(
+      new Set(
+        requestTasks
+          .flatMap((task) => [
+            task.frameGroupId || '',
+            task.valueKey || '',
+            readTaskPayloadString(task, 'keyFrameGroupId'),
+            readTaskPayloadString(task, 'valueFrameGroupId'),
+          ])
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    ),
+  }), [requestTasks]);
+
+  const activeTaskCanvasBox = React.useMemo<TemplateCanvasSelectedBox | null>(() => {
     const task = requestTasks.find((item) => item.id === activeTaskId) || null;
-    return task ? buildChecklistTargetFromRequestTask(task, requestLink?.recipientName) : null;
+    return task ? buildCanvasSelectedBoxFromRequestTask(task, requestLink?.recipientName) : null;
   }, [activeTaskId, requestLink?.recipientName, requestTasks]);
 
-  const checklistSignatureStates = React.useMemo<TemplateChecklistSignatureState[]>(
+  const selectedCanvasBoxes = React.useMemo(
+    () => (activeTaskCanvasBox ? [activeTaskCanvasBox] : []),
+    [activeTaskCanvasBox]
+  );
+
+  const handleCanvasSelectionChange = React.useCallback(
+    (boxes: TemplateCanvasSelectedBox[], options?: TemplateCanvasSelectionChangeOptions) => {
+      if (options?.source === 'clear' || boxes.length <= 0) {
+        setActiveTaskId('');
+        return;
+      }
+
+      const box = boxes[boxes.length - 1];
+      const tokens = new Set(
+        [
+          box.id,
+          box.valueKey,
+          box.slotKey,
+          box.frameGroupId,
+          box.keyFrameGroupId,
+          box.valueFrameGroupId,
+          box.contextKey,
+          ...(box.highlightFrameGroupIds || []),
+        ]
+          .map((value) => value?.trim())
+          .filter((value): value is string => Boolean(value))
+      );
+      const matchedTask =
+        requestTasks.find((task) => tokens.has(task.id)) ||
+        requestTasks.find((task) =>
+          [
+            task.valueKey || '',
+            task.slotKey || '',
+            task.frameGroupId || '',
+            readTaskPayloadString(task, 'keyFrameGroupId'),
+            readTaskPayloadString(task, 'valueFrameGroupId'),
+            readTaskPayloadString(task, 'contextKey'),
+          ].some((value) => value && tokens.has(value))
+        ) ||
+        null;
+
+      if (matchedTask) {
+        setActiveTaskId(matchedTask.id);
+      }
+    },
+    [requestTasks]
+  );
+
+  const canvasSignatureStates = React.useMemo<TemplateChecklistSignatureState[]>(
     () =>
       requestTasks
         .filter((task) => task.kind === 'signature')
@@ -479,7 +558,7 @@ export default function RequestLinkTokenPage() {
     [loadRequestLink, requestLink, setTaskBusy, setTaskMessage, submittedBy, token, updateRequestTask]
   );
 
-  const handleChecklistSignatureSubmit = React.useCallback(
+  const handleCanvasSignatureSubmit = React.useCallback(
     async ({ target, imageData }: TemplateChecklistSignatureSubmitParams) => {
       if (!requestLink || !initialDraft) {
         throw new Error('서명할 문서 본문을 찾지 못했습니다.');
@@ -579,9 +658,11 @@ export default function RequestLinkTokenPage() {
                 saveDisabled={workspaceMode !== 'document' || loading}
                 documentAttachmentApiPath={requestLink ? `/api/request-links/${encodeURIComponent(token)}/attachments` : ''}
                 onSaveDraftHtml={workspaceMode === 'document' ? handleSaveDraft : undefined}
-                checklistRegistrationTarget={activeTaskTarget}
-                checklistSignatureStates={checklistSignatureStates}
-                onChecklistSignatureSubmit={handleChecklistSignatureSubmit}
+                canvasSelectablePolicy={canvasSelectablePolicy}
+                selectedCanvasBoxes={selectedCanvasBoxes}
+                onCanvasSelectionChange={handleCanvasSelectionChange}
+                canvasSignatureStates={canvasSignatureStates}
+                onCanvasSignatureSubmit={handleCanvasSignatureSubmit}
                 headerTitle="상자 편집 캔버스"
                 headerDescription="요청 링크에서 허용된 항목만 기록할 수 있습니다."
                 saveButtonLabel="문서 저장"
@@ -697,10 +778,10 @@ export default function RequestLinkTokenPage() {
                       </div>
                     );
                   })}
-                  {activeTaskTarget?.kind === 'signature' ? (
+                  {activeTaskCanvasBox?.requestKind === 'signature' ? (
                     <p className="text-xs text-slate-500">강조된 서명 상자를 선택하면 서명판이 열립니다.</p>
                   ) : null}
-                  {activeTaskTarget && activeTaskTarget.kind !== 'signature' ? (
+                  {activeTaskCanvasBox && activeTaskCanvasBox.requestKind !== 'signature' ? (
                     <p className="text-xs text-slate-500">강조된 상자에서 값을 입력하거나 파일을 등록합니다.</p>
                   ) : null}
                 </div>

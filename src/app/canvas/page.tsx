@@ -80,7 +80,8 @@ type ManagedCanvasPageId =
   | 'documents'
   | 'project'
   | 'request-links'
-  | 'member-access';
+  | 'member-access'
+  | 'templates-extract-preview';
 type ManagedCanvasPage = {
   id: ManagedCanvasPageId;
   label: string;
@@ -279,6 +280,15 @@ const managedCanvasPages: ManagedCanvasPage[] = [
     description: '초대된 권한에 따라 문서를 편집하거나 읽기 전용으로 여는 페이지입니다.',
     allowedModes: ['document', 'read'],
     defaultMode: 'document',
+  },
+  {
+    id: 'templates-extract-preview',
+    label: '템플릿 추출 미리보기',
+    path: '/templates/extract',
+    surface: 'templates-extract-preview',
+    description: 'PDF 추출 결과를 읽기 전용 공용 캔버스로 확인합니다.',
+    allowedModes: ['read'],
+    defaultMode: 'read',
   },
 ];
 
@@ -1108,6 +1118,23 @@ export default function CanvasOwnerPage() {
       };
     }
 
+    if (selectedManagedPage.id === 'templates-extract-preview') {
+      return {
+        hideHeader: true,
+        hidePersistencePanel: true,
+        editableValueKeys: null,
+        showWorkspaceMessages: true,
+        suppressInitialDraftLoadedMessage: true,
+        headerTitle: '상자 편집 캔버스',
+        headerDescription: 'PDF 추출 결과를 읽기 전용 공용 캔버스로 확인합니다.',
+        nameFieldLabel: '템플릿 이름:',
+        saveButtonLabel: '열람 전용',
+        templateNameReadOnly: true,
+        saveDisabled: true,
+        documentAttachmentApiPath: '',
+      };
+    }
+
     return {
       hideHeader: false,
       hidePersistencePanel: true,
@@ -1125,73 +1152,74 @@ export default function CanvasOwnerPage() {
           ? `/api/member-access/documents/${encodeURIComponent(previewDocumentId)}/attachments`
           : '',
     };
-	  })();
-	  const routeEquivalentPreviewEnabled = routeEquivalentPreviewProps !== null;
-	  const canvasOwnerPreviewBaseProps: CanvasRoutePreviewProps = {
-	    hideHeader: false,
-	    hidePersistencePanel: false,
-	    templateListDisplay: 'inline',
-	    editableValueKeys: effectiveEditableValueKeys,
-	    additionalControlPanels,
-	    topNotice,
-	    showWorkspaceMessages: true,
-	    suppressInitialDraftLoadedMessage: false,
-	    headerTitle: defaultCanvasOwnerSettings.headerTitle,
-	    headerDescription: defaultCanvasOwnerSettings.headerDescription,
-	    nameFieldLabel: defaultCanvasOwnerSettings.nameFieldLabel,
-	    saveButtonLabel: defaultCanvasOwnerSettings.saveButtonLabel,
-	    templateNameReadOnly: false,
-	    saveDisabled:
-        selectedAccessMode !== 'edit' ||
-        effectiveWorkspaceMode === 'read' ||
-        (effectiveWorkspaceMode === 'document' && loadingDocumentDetail),
-	    documentAttachmentApiPath: effectiveDocumentAttachmentApiPath,
-	  };
-	  const previewWorkspaceProps = applyCanvasOwnerSettingsToWorkspaceProps({
-	    baseProps: routeEquivalentPreviewProps ?? canvasOwnerPreviewBaseProps,
-	    settings: previewSettings,
-	    settingSources: previewSettingSources,
-	    workspaceMode: effectiveWorkspaceMode,
-	    applyDefaultSettings: !routeEquivalentPreviewEnabled,
-	  });
-	  const previewHideHeader = Boolean(previewWorkspaceProps.hideHeader);
-	  const previewHidePersistencePanel = Boolean(previewWorkspaceProps.hidePersistencePanel);
-	  const previewTemplateListDisplay = previewWorkspaceProps.templateListDisplay ?? previewSettings.templateListDisplay;
-	  const previewEditableValueKeys = previewWorkspaceProps.editableValueKeys ?? null;
-	  const previewAdditionalControlPanels = previewWorkspaceProps.additionalControlPanels;
-	  const previewTopNotice = previewWorkspaceProps.topNotice;
-	  const previewShowWorkspaceMessages = previewWorkspaceProps.showWorkspaceMessages !== false;
-	  const previewSuppressInitialDraftLoadedMessage = Boolean(previewWorkspaceProps.suppressInitialDraftLoadedMessage);
-	  const previewHeaderTitle = previewWorkspaceProps.headerTitle ?? previewEffectiveHeaderTitle;
-	  const previewHeaderDescription = previewWorkspaceProps.headerDescription ?? previewEffectiveHeaderDescription;
-	  const previewNameFieldLabel = previewWorkspaceProps.nameFieldLabel ?? previewEffectiveNameFieldLabel;
-	  const previewSaveButtonLabel = previewWorkspaceProps.saveButtonLabel ?? previewEffectiveSaveButtonLabel;
-	  const previewTemplateNameReadOnly = Boolean(previewWorkspaceProps.templateNameReadOnly);
-	  const previewSaveDisabled = Boolean(previewWorkspaceProps.saveDisabled);
-	  const previewCanvasPageContainerWidth = previewWorkspaceProps.canvasPageContainerWidth ?? '';
-	  const previewCanvasPageContainerHeight = previewWorkspaceProps.canvasPageContainerHeight ?? '';
-	  const previewCanvasSpecifiedHeightEnabled = Boolean(previewWorkspaceProps.canvasSpecifiedHeightEnabled);
-	  const previewCanvasSpecifiedHeight = previewWorkspaceProps.canvasSpecifiedHeight ?? '';
-	  const previewCanvasSpecifiedWidthEnabled = Boolean(previewWorkspaceProps.canvasSpecifiedWidthEnabled);
-	  const previewCanvasSpecifiedWidth = previewWorkspaceProps.canvasSpecifiedWidth ?? '';
-	  const previewDocumentAttachmentApiPath = previewWorkspaceProps.documentAttachmentApiPath ?? '';
-	  const previewCanvasTextInteractionMode = previewWorkspaceProps.canvasTextInteractionMode ?? 'default';
-	  const previewCanvasSelectionMode = previewWorkspaceProps.canvasSelectionMode ?? 'none';
-	  const previewCanvasViewMode = previewWorkspaceProps.canvasViewMode ?? previewSettings.canvasViewMode;
-	  const previewSelectionInactiveOverlayOpacity =
-	    previewWorkspaceProps.selectionInactiveOverlayOpacity ?? previewSettings.selectionInactiveOverlayOpacity;
-	  const previewCanvasToolbarVisibility = previewWorkspaceProps.canvasToolbarVisibility ?? effectiveCanvasToolbarVisibility;
-	  const previewPersistenceVisibility = previewWorkspaceProps.persistenceVisibility ?? effectivePersistenceVisibility;
-	  const previewTemplateUsagePreviewLayoutDebugOptions =
-	    previewWorkspaceProps.templateUsagePreviewLayoutDebugOptions ?? templateUsagePreviewLayoutDebugOptions;
-	  const previewUsesRouteProps = routeEquivalentPreviewEnabled
-	    ? 'route-defaults + canvas-owner-settings'
-	    : 'canvas-owner-settings';
-	  const previewAdditionalControlPanelsEnabled =
-	    selectedManagedPage.id === 'templates' || (!routeEquivalentPreviewEnabled && Boolean(templateExtractPanel || previewSettings.showAdditionalControlPanels));
-	  const previewTopNoticeEnabled = Boolean(previewTopNotice);
-	  const previewTodoPanelEnabled = effectiveWorkspaceMode === 'document' && Boolean(selectedDocumentInitialDraft);
-	  const previewTodoCount = previewTodoPanelEnabled ? documentRequestTasks.length : 0;
+  })();
+  const routeEquivalentPreviewEnabled = routeEquivalentPreviewProps !== null;
+  const canvasOwnerPreviewBaseProps: CanvasRoutePreviewProps = {
+    hideHeader: false,
+    hidePersistencePanel: false,
+    templateListDisplay: 'inline',
+    editableValueKeys: effectiveEditableValueKeys,
+    additionalControlPanels,
+    topNotice,
+    showWorkspaceMessages: true,
+    suppressInitialDraftLoadedMessage: false,
+    headerTitle: defaultCanvasOwnerSettings.headerTitle,
+    headerDescription: defaultCanvasOwnerSettings.headerDescription,
+    nameFieldLabel: defaultCanvasOwnerSettings.nameFieldLabel,
+    saveButtonLabel: defaultCanvasOwnerSettings.saveButtonLabel,
+    templateNameReadOnly: false,
+    saveDisabled:
+      selectedAccessMode !== 'edit' ||
+      effectiveWorkspaceMode === 'read' ||
+      (effectiveWorkspaceMode === 'document' && loadingDocumentDetail),
+    documentAttachmentApiPath: effectiveDocumentAttachmentApiPath,
+  };
+  const previewBaseWorkspaceProps = routeEquivalentPreviewProps ?? canvasOwnerPreviewBaseProps;
+  const previewWorkspaceProps = applyCanvasOwnerSettingsToWorkspaceProps({
+    baseProps: previewBaseWorkspaceProps,
+    settings: previewSettings,
+    settingSources: previewSettingSources,
+    workspaceMode: effectiveWorkspaceMode,
+    applyDefaultSettings: !routeEquivalentPreviewEnabled,
+  });
+  const previewHideHeader = Boolean(previewWorkspaceProps.hideHeader);
+  const previewHidePersistencePanel = Boolean(previewWorkspaceProps.hidePersistencePanel);
+  const previewTemplateListDisplay = previewWorkspaceProps.templateListDisplay ?? previewSettings.templateListDisplay;
+  const previewEditableValueKeys = previewWorkspaceProps.editableValueKeys ?? null;
+  const previewAdditionalControlPanels = previewWorkspaceProps.additionalControlPanels;
+  const previewTopNotice = previewWorkspaceProps.topNotice;
+  const previewShowWorkspaceMessages = previewWorkspaceProps.showWorkspaceMessages !== false;
+  const previewSuppressInitialDraftLoadedMessage = Boolean(previewWorkspaceProps.suppressInitialDraftLoadedMessage);
+  const previewHeaderTitle = previewWorkspaceProps.headerTitle ?? previewEffectiveHeaderTitle;
+  const previewHeaderDescription = previewWorkspaceProps.headerDescription ?? previewEffectiveHeaderDescription;
+  const previewNameFieldLabel = previewWorkspaceProps.nameFieldLabel ?? previewEffectiveNameFieldLabel;
+  const previewSaveButtonLabel = previewWorkspaceProps.saveButtonLabel ?? previewEffectiveSaveButtonLabel;
+  const previewTemplateNameReadOnly = Boolean(previewWorkspaceProps.templateNameReadOnly);
+  const previewSaveDisabled = Boolean(previewWorkspaceProps.saveDisabled);
+  const previewCanvasPageContainerWidth = previewWorkspaceProps.canvasPageContainerWidth ?? '';
+  const previewCanvasPageContainerHeight = previewWorkspaceProps.canvasPageContainerHeight ?? '';
+  const previewCanvasSpecifiedHeightEnabled = Boolean(previewWorkspaceProps.canvasSpecifiedHeightEnabled);
+  const previewCanvasSpecifiedHeight = previewWorkspaceProps.canvasSpecifiedHeight ?? '';
+  const previewCanvasSpecifiedWidthEnabled = Boolean(previewWorkspaceProps.canvasSpecifiedWidthEnabled);
+  const previewCanvasSpecifiedWidth = previewWorkspaceProps.canvasSpecifiedWidth ?? '';
+  const previewDocumentAttachmentApiPath = previewWorkspaceProps.documentAttachmentApiPath ?? '';
+  const previewCanvasTextInteractionMode = previewWorkspaceProps.canvasTextInteractionMode ?? 'default';
+  const previewCanvasSelectionMode = previewWorkspaceProps.canvasSelectionMode ?? 'none';
+  const previewCanvasViewMode = previewWorkspaceProps.canvasViewMode ?? previewSettings.canvasViewMode;
+  const previewSelectionInactiveOverlayOpacity =
+    previewWorkspaceProps.selectionInactiveOverlayOpacity ?? previewSettings.selectionInactiveOverlayOpacity;
+  const previewCanvasToolbarVisibility = previewWorkspaceProps.canvasToolbarVisibility ?? effectiveCanvasToolbarVisibility;
+  const previewPersistenceVisibility = previewWorkspaceProps.persistenceVisibility ?? effectivePersistenceVisibility;
+  const previewTemplateUsagePreviewLayoutDebugOptions =
+    previewWorkspaceProps.templateUsagePreviewLayoutDebugOptions ?? templateUsagePreviewLayoutDebugOptions;
+  const previewUsesRouteProps = routeEquivalentPreviewEnabled
+    ? 'route-defaults + canvas-owner-settings'
+    : 'canvas-owner-settings';
+  const previewAdditionalControlPanelsEnabled =
+    selectedManagedPage.id === 'templates' || (!routeEquivalentPreviewEnabled && Boolean(templateExtractPanel || previewSettings.showAdditionalControlPanels));
+  const previewTopNoticeEnabled = Boolean(previewTopNotice);
+  const previewTodoPanelEnabled = effectiveWorkspaceMode === 'document' && Boolean(selectedDocumentInitialDraft);
+  const previewTodoCount = previewTodoPanelEnabled ? documentRequestTasks.length : 0;
   const settingKeyByDefinitionName: Record<string, CanvasOwnerSettingKey> = {
     hideHeader: 'hideHeader',
     hidePersistencePanel: 'hidePersistencePanel',
@@ -1864,6 +1892,12 @@ export default function CanvasOwnerPage() {
       name: 'canvasTextInteractionMode',
       value: previewCanvasTextInteractionMode,
       description: 'TemplateEditWorkspace에 전달되는 텍스트 포인터 상호작용 모드입니다.',
+    },
+    {
+      section: 'TemplateEditWorkspaceProps',
+      name: 'canvasSelectionMode',
+      value: previewCanvasSelectionMode,
+      description: 'TemplateEditWorkspace에 전달되는 공용 상자 선택 모드입니다.',
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -2877,100 +2911,90 @@ export default function CanvasOwnerPage() {
                   선택한 권한자의 캔버스 상태는 문서를 선택할 수 있는 화면에서 확인합니다.
                 </div>
               ) : effectiveWorkspaceMode === 'template' ? (
-	              <CanvasOwnedWorkspace
-	                key={`canvas-owner:${selectedManagedPage.id}:${selectedCanvasAccessRole}:${effectiveWorkspaceMode}:${selectedTemplateId || 'no-template'}`}
-	                surface={selectedManagedPage.surface}
+                <CanvasOwnedWorkspace
+                  key={`canvas-owner:${selectedManagedPage.id}:${selectedCanvasAccessRole}:${effectiveWorkspaceMode}:${selectedTemplateId || 'no-template'}`}
+                  surface={selectedManagedPage.surface}
                   canvasAccessRole={selectedCanvasAccessRole}
-	                applyStoredCanvasOwnerSettings={false}
-	                initialTemplateId={selectedTemplateId}
-	                templateListDisplay={previewTemplateListDisplay}
-	                hideHeader={previewHideHeader}
-	                hidePersistencePanel={previewHidePersistencePanel}
-	                additionalControlPanels={previewAdditionalControlPanels}
-	                topNotice={previewTopNotice}
-	                showWorkspaceMessages={previewShowWorkspaceMessages}
-	                suppressInitialDraftLoadedMessage={previewSuppressInitialDraftLoadedMessage}
-	                headerTitle={previewHeaderTitle}
-	                headerDescription={previewHeaderDescription}
-	                nameFieldLabel={previewNameFieldLabel}
-	                saveButtonLabel={previewSaveButtonLabel}
-	                templateNameReadOnly={previewTemplateNameReadOnly}
-	                saveDisabled={previewSaveDisabled}
-	                defaultCanvasFullscreen={previewWorkspaceProps.defaultCanvasFullscreen}
-	                canvasPageContainerWidth={previewCanvasPageContainerWidth}
-	                canvasPageContainerHeight={previewCanvasPageContainerHeight}
-	                canvasSpecifiedHeightEnabled={previewCanvasSpecifiedHeightEnabled}
-	                canvasSpecifiedHeight={previewCanvasSpecifiedHeight}
-		                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
-		                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
-		                canvasTextInteractionMode={previewCanvasTextInteractionMode}
-		                canvasSelectionMode={previewCanvasSelectionMode}
-		                selectedCanvasBoxes={previewSelectedCanvasBoxes}
-		                onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
-		                canvasViewMode={previewCanvasViewMode}
-	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
-	                canvasToolbarVisibility={previewCanvasToolbarVisibility}
-	                persistenceVisibility={previewPersistenceVisibility}
-	                templateUsagePreviewLayoutDebugOptions={previewTemplateUsagePreviewLayoutDebugOptions}
-	                onTemplateSaved={
+                  applyStoredCanvasOwnerSettings={false}
+                  canvasOwnerSettings={previewSettings}
+                  canvasOwnerSettingSources={previewSettingSources}
+                  initialTemplateId={selectedTemplateId}
+                  templateListDisplay={previewBaseWorkspaceProps.templateListDisplay}
+                  hideHeader={previewBaseWorkspaceProps.hideHeader}
+                  hidePersistencePanel={previewBaseWorkspaceProps.hidePersistencePanel}
+                  additionalControlPanels={previewBaseWorkspaceProps.additionalControlPanels}
+                  topNotice={previewBaseWorkspaceProps.topNotice}
+                  showWorkspaceMessages={previewBaseWorkspaceProps.showWorkspaceMessages}
+                  suppressInitialDraftLoadedMessage={previewBaseWorkspaceProps.suppressInitialDraftLoadedMessage}
+                  headerTitle={previewBaseWorkspaceProps.headerTitle}
+                  headerDescription={previewBaseWorkspaceProps.headerDescription}
+                  nameFieldLabel={previewBaseWorkspaceProps.nameFieldLabel}
+                  saveButtonLabel={previewBaseWorkspaceProps.saveButtonLabel}
+                  templateNameReadOnly={previewBaseWorkspaceProps.templateNameReadOnly}
+                  saveDisabled={previewBaseWorkspaceProps.saveDisabled}
+                  defaultCanvasFullscreen={previewBaseWorkspaceProps.defaultCanvasFullscreen}
+                  canvasPageContainerWidth={previewBaseWorkspaceProps.canvasPageContainerWidth}
+                  canvasPageContainerHeight={previewBaseWorkspaceProps.canvasPageContainerHeight}
+                  canvasSpecifiedHeightEnabled={previewBaseWorkspaceProps.canvasSpecifiedHeightEnabled}
+                  canvasSpecifiedHeight={previewBaseWorkspaceProps.canvasSpecifiedHeight}
+                  canvasSpecifiedWidthEnabled={previewBaseWorkspaceProps.canvasSpecifiedWidthEnabled}
+                  canvasSpecifiedWidth={previewBaseWorkspaceProps.canvasSpecifiedWidth}
+                  selectedCanvasBoxes={previewSelectedCanvasBoxes}
+                  onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
+                  onTemplateSaved={
                     selectedAccessMode !== 'edit'
                       ? undefined
                       : selectedManagedPage.id === 'templates'
-	                    ? () => setOwnerEventMessage('템플릿 생성 페이지의 onTemplateSaved 콜백이 실행되었습니다.')
-	                    : !routeEquivalentPreviewEnabled && settings.enableOnTemplateSaved
-	                      ? (template) => setOwnerEventMessage(`onTemplateSaved 콜백: ${template.templateName} (${template.id})`)
-	                      : undefined
-	                }
-	              />
-	            ) : selectedDocumentInitialDraft ? (
-	              <CanvasOwnedWorkspace
-	                key={`canvas-owner:${selectedManagedPage.id}:${selectedCanvasAccessRole}:${selectedDocumentInitialDraft.draftKey}`}
-	                surface={selectedManagedPage.surface}
+                        ? () => setOwnerEventMessage('템플릿 생성 페이지의 onTemplateSaved 콜백이 실행되었습니다.')
+                        : !routeEquivalentPreviewEnabled && settings.enableOnTemplateSaved
+                          ? (template) => setOwnerEventMessage(`onTemplateSaved 콜백: ${template.templateName} (${template.id})`)
+                          : undefined
+                  }
+                />
+              ) : selectedDocumentInitialDraft ? (
+                <CanvasOwnedWorkspace
+                  key={`canvas-owner:${selectedManagedPage.id}:${selectedCanvasAccessRole}:${selectedDocumentInitialDraft.draftKey}`}
+                  surface={selectedManagedPage.surface}
                   canvasAccessRole={selectedCanvasAccessRole}
-	                applyStoredCanvasOwnerSettings={false}
-	                initialDraft={selectedDocumentInitialDraft}
-	                workspaceMode={effectiveWorkspaceMode}
-	                editableValueKeys={previewEditableValueKeys}
-	                hideHeader={previewHideHeader}
-	                hidePersistencePanel={previewHidePersistencePanel}
-	                additionalControlPanels={previewAdditionalControlPanels}
-	                topNotice={previewTopNotice}
-	                showWorkspaceMessages={previewShowWorkspaceMessages}
-	                suppressInitialDraftLoadedMessage={previewSuppressInitialDraftLoadedMessage}
-	                headerTitle={previewHeaderTitle}
-	                headerDescription={previewHeaderDescription}
-	                nameFieldLabel={previewNameFieldLabel}
-	                saveButtonLabel={previewSaveButtonLabel}
-	                templateNameReadOnly={previewTemplateNameReadOnly}
-	                saveDisabled={previewSaveDisabled}
-	                defaultCanvasFullscreen={previewWorkspaceProps.defaultCanvasFullscreen}
-	                canvasPageContainerWidth={previewCanvasPageContainerWidth}
-	                canvasPageContainerHeight={previewCanvasPageContainerHeight}
-	                canvasSpecifiedHeightEnabled={previewCanvasSpecifiedHeightEnabled}
-	                canvasSpecifiedHeight={previewCanvasSpecifiedHeight}
-	                canvasSpecifiedWidthEnabled={previewCanvasSpecifiedWidthEnabled}
-	                canvasSpecifiedWidth={previewCanvasSpecifiedWidth}
-		                documentAttachmentApiPath={previewDocumentAttachmentApiPath}
-		                documentAttachmentTagOptions={documentAttachmentTagOptions}
-		                documentAttachmentTagColorByName={documentAttachmentTagColorByName}
-		                canvasTextInteractionMode={previewCanvasTextInteractionMode}
-		                canvasSelectionMode={previewCanvasSelectionMode}
-		                selectedCanvasBoxes={previewSelectedCanvasBoxes}
-		                onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
-		                canvasViewMode={previewCanvasViewMode}
-	                selectionInactiveOverlayOpacity={previewSelectionInactiveOverlayOpacity}
-	                todoPanel={canvasTodoPanel}
-	                todoButtonLabel="할 일"
-	                todoCount={documentRequestTasks.length}
-	                canvasToolbarVisibility={previewCanvasToolbarVisibility}
-	                persistenceVisibility={previewPersistenceVisibility}
-	                templateUsagePreviewLayoutDebugOptions={previewTemplateUsagePreviewLayoutDebugOptions}
-	                onSaveDraftHtml={
+                  applyStoredCanvasOwnerSettings={false}
+                  canvasOwnerSettings={previewSettings}
+                  canvasOwnerSettingSources={previewSettingSources}
+                  initialDraft={selectedDocumentInitialDraft}
+                  workspaceMode={effectiveWorkspaceMode}
+                  editableValueKeys={previewBaseWorkspaceProps.editableValueKeys}
+                  hideHeader={previewBaseWorkspaceProps.hideHeader}
+                  hidePersistencePanel={previewBaseWorkspaceProps.hidePersistencePanel}
+                  additionalControlPanels={previewBaseWorkspaceProps.additionalControlPanels}
+                  topNotice={previewBaseWorkspaceProps.topNotice}
+                  showWorkspaceMessages={previewBaseWorkspaceProps.showWorkspaceMessages}
+                  suppressInitialDraftLoadedMessage={previewBaseWorkspaceProps.suppressInitialDraftLoadedMessage}
+                  headerTitle={previewBaseWorkspaceProps.headerTitle}
+                  headerDescription={previewBaseWorkspaceProps.headerDescription}
+                  nameFieldLabel={previewBaseWorkspaceProps.nameFieldLabel}
+                  saveButtonLabel={previewBaseWorkspaceProps.saveButtonLabel}
+                  templateNameReadOnly={previewBaseWorkspaceProps.templateNameReadOnly}
+                  saveDisabled={previewBaseWorkspaceProps.saveDisabled}
+                  defaultCanvasFullscreen={previewBaseWorkspaceProps.defaultCanvasFullscreen}
+                  canvasPageContainerWidth={previewBaseWorkspaceProps.canvasPageContainerWidth}
+                  canvasPageContainerHeight={previewBaseWorkspaceProps.canvasPageContainerHeight}
+                  canvasSpecifiedHeightEnabled={previewBaseWorkspaceProps.canvasSpecifiedHeightEnabled}
+                  canvasSpecifiedHeight={previewBaseWorkspaceProps.canvasSpecifiedHeight}
+                  canvasSpecifiedWidthEnabled={previewBaseWorkspaceProps.canvasSpecifiedWidthEnabled}
+                  canvasSpecifiedWidth={previewBaseWorkspaceProps.canvasSpecifiedWidth}
+                  documentAttachmentApiPath={previewBaseWorkspaceProps.documentAttachmentApiPath}
+                  documentAttachmentTagOptions={documentAttachmentTagOptions}
+                  documentAttachmentTagColorByName={documentAttachmentTagColorByName}
+                  selectedCanvasBoxes={previewSelectedCanvasBoxes}
+                  onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
+                  todoPanel={canvasTodoPanel}
+                  todoButtonLabel="할 일"
+                  todoCount={documentRequestTasks.length}
+                  onSaveDraftHtml={
                     selectedAccessMode === 'edit' && effectiveWorkspaceMode === 'document'
                       ? handleSaveDocumentDraft
                       : undefined
                   }
-	              />
+                />
             ) : (
               <div className="px-6 py-12 text-sm text-slate-500">
                 {loadingDocumentDetail ? '문서 초안을 준비하는 중입니다.' : '문서를 선택하면 공용 캔버스가 여기에 표시됩니다.'}
