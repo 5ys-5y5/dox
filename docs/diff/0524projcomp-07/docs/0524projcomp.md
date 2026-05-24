@@ -11,23 +11,22 @@
 `선택 문서 요청 링크 설정` 안에 넣지 않는다.
 
 대신 `/project` 페이지 하단의 기존 문서 편집 캔버스 자리,
-즉 사용자가 지칭한 `/html/body/main/div/div[3]` 위치에 `편집`/`할 일`
-탭을 만들고, 각 탭에서 `/canvas`와 `/documents`의 중앙 설정 UI가
-저장한 `현장 관리` 출력 설정을 함께 적용한다.
+즉 사용자가 지칭한 `/html/body/main/div/div[3]` 위치에 기존 항목 대신
+`current-work-panel`을 출력한다.
 
 ## 현재 구조
 
 - `/documents`는 `src/app/documents/page.tsx`에서 `DocumentsOwnerWorkspace`를 전체 화면으로 렌더링한다.
 - `current-work-panel`은 `src/app/documents/_owner/DocumentsOwnerWorkspace.tsx` 내부의 `Card`로 렌더링된다.
-- `/project`는 `src/app/project/page.tsx`에서 우측 선택 문서 요약 카드와 하단 문서 작업 영역을 렌더링한다.
-- `/project` 하단에는 `편집`/`할 일` 탭이 있고, 이 영역이 사용자가 말한 `/html/body/main/div/div[3]` 자리에 해당한다.
+- `/project`는 `src/app/project/page.tsx`에서 우측 카드 제목 `선택 문서 요청 링크 설정` 아래에 `DocumentsOwnerWorkspace`를 임베드한다.
+- `/project` 하단에는 별도 `CanvasOwnedWorkspace`가 있고, 이 영역이 사용자가 말한 `/html/body/main/div/div[3]` 자리에 해당한다.
 
 ## 구현 원칙
 
 - `/documents` 페이지의 기존 전체 흐름은 유지한다.
 - `/project`는 documents owner 기능을 중복 구현하지 않고 import만 사용한다.
 - `/project`에서 `선택 문서 요청 링크 설정` 텍스트 아래에 `current-work-panel`이 렌더링되지 않게 한다.
-- `/project` 하단 자리는 탭 컨테이너가 담당하고, `할 일` 탭 내부에 `data-documents-owner-item="current-work-panel"`을 출력한다.
+- `/project` 하단 자리의 최상위 렌더 결과가 `data-documents-owner-item="current-work-panel"`이 되게 한다.
 - 문서 생성, 요청 링크 API, 구성원 API, 캔버스 내부 동작은 이번 변경 범위가 아니다.
 - `/documents`가 문서 기능 설정의 주인이다. `/project`는 설정 UI를 만들지 않고 documents owner 설정을 읽어 적용한다.
 - `/documents`에서 구현된 주요 기능은 owner 설정으로 ON/OFF 할 수 있어야 한다.
@@ -47,7 +46,6 @@
 | `docs/diff/0524projcomp-04/**` | 관리 대상 페이지 선택 UI 공통화 전 백업 코드 보관 |
 | `docs/diff/0524projcomp-05/**` | 문서 기능 설정 적용 출력 구분선 추가 전 백업 코드 보관 |
 | `docs/diff/0524projcomp-06/**` | `/documents` 출력 surface 파라미터 적용 전 백업 코드 보관 |
-| `docs/diff/0524projcomp-07/**` | `/project` 편집/할 일 탭 출력 적용 전 백업 코드 보관 |
 | `src/components/ui/OwnerSettingsLayout.tsx` | `/canvas`, `/documents` 환경설정 UI 공통 컴포넌트 |
 | `src/app/canvas/page.tsx` | 기존 `/canvas` 환경설정 UI를 공통 컴포넌트 사용으로 전환 |
 | `src/app/documents/page.tsx` | `/documents` 출력 surface URL 파라미터 해석 |
@@ -186,29 +184,9 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 
 ### 4. `/project` 하단 자리 교체
 
-`/project` 하단의 기존 문서 작업 자리는 `편집`/`할 일` 탭 컨테이너로 교체한다.
-
-`편집` 탭은 `/canvas`가 소유한 문서 편집 UI를 출력한다. `/project`에서 선택한
-문서 본문을 `CanvasOwnedWorkspace`에 넘기고, `surface="project"`로 렌더링해
-`/canvas` 환경설정에서 `현장 관리` 페이지에 저장한 설정을 적용한다.
+`/project` 하단의 기존 `CanvasOwnedWorkspace` 분기를 `DocumentsOwnerWorkspace` 단독 패널 모드로 교체한다.
 
 개념 코드:
-
-```tsx
-<CanvasOwnedWorkspace
-  surface="project"
-  initialDraft={selectedDocumentInitialDraft}
-  workspaceMode="document"
-  hideHeader
-  hidePersistencePanel
-  documentAttachmentApiPath={`/api/documents/${selectedDocumentId}/attachments`}
-  onSaveDraftHtml={handleSaveDocumentDraft}
-/>
-```
-
-`할 일` 탭은 `/documents`가 소유한 할 일 부여 UI를 출력한다. `surface="project"`와
-`renderMode="current-work-panel"`을 함께 넘겨 `/documents` 문서 기능 환경설정에서
-`현장 관리` 페이지에 저장한 설정을 적용한다.
 
 ```tsx
 <DocumentsOwnerWorkspace
@@ -259,17 +237,6 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 - `/documents` 설정 변경은 `/canvas`처럼 draft 상태를 먼저 변경하고, `설정 저장` 시 localStorage에 확정한다.
 - `/project`는 저장된 `/documents` owner 설정만 읽고, 별도 설정 UI를 만들지 않는다.
 
-### 7. `/project` 하단 탭 출력 매핑
-
-`/project`의 `/html/body/main/div/div[3]` 자리는 아래 매핑을 따른다.
-
-- `편집`: `/canvas`의 `현장 관리` 페이지 설정을 적용한 문서 편집 UI.
-- `할 일`: `/documents`의 `현장 관리` 페이지 설정을 적용한 할 일 부여 UI.
-- 탭 UI는 `/canvas` 환경설정에서 쓰는 `OwnerSettingsTabList` 공통 컴포넌트를 사용한다.
-- `/project`는 두 설정의 저장 UI를 만들지 않는다.
-- 두 탭 모두 `/project`에서 선택한 현장 문서와 현장 ID를 입력값으로 사용한다.
-- 현장 생성 폼이 열린 상태와 문서 미선택 상태의 안내는 탭 내부 공통 안내로 유지한다.
-
 ## 체크리스트
 
 구현 시 아래 항목을 빠뜨리면 완료로 보지 않는다.
@@ -305,20 +272,14 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 - [x] `/documents` 환경설정의 관리 대상 선택과 아래 출력 대상이 같은 surface를 가리킨다.
 - [x] `/documents` 환경설정에서 선택한 관리 대상은 URL의 `ownerSurface`를 갱신한다.
 - [x] `/documents` 페이지는 기존 전체 화면 구조를 유지한다.
-- [x] `/project` 편집/할 일 탭 적용 전 `docs/diff/0524projcomp-07/`에 백업 코드를 남겼다.
 - [x] `/project` 우측 카드에서 `선택 문서 요청 링크 설정` 아래 owner 임베드를 제거했다.
-- [x] `/project` 하단 기존 문서 작업 자리를 `편집`/`할 일` 탭 컨테이너로 교체했다.
-- [x] `/project` `편집`/`할 일` 탭은 `/canvas` 환경설정 공통 탭 컴포넌트 `OwnerSettingsTabList`를 사용한다.
-- [x] `/project` `편집` 탭은 `CanvasOwnedWorkspace surface="project"`를 통해 `/canvas`의 `현장 관리` 저장 설정을 적용한다.
-- [x] `/project` `할 일` 탭은 `DocumentsOwnerWorkspace surface="project" renderMode="current-work-panel"`를 통해 `/documents`의 `현장 관리` 저장 설정을 적용한다.
-- [x] `/project` 하단에서 `/canvas` 설정 UI 출력과 `/documents` 설정 UI 출력이 모두 접근 가능하다.
+- [x] `/project` 하단 기존 `CanvasOwnedWorkspace` 자리를 `DocumentsOwnerWorkspace renderMode="current-work-panel"`로 교체했다.
 - [x] 문서 미선택 빈 상태는 유지했다.
 - [x] 현장 생성 폼이 열린 상태의 안내는 유지했다.
 - [x] `/project`에 설정 UI를 두지 않는다.
 - [x] `/project`는 `DocumentsOwnerWorkspace surface="project"`를 통해 `/documents` 중앙 설정을 적용한다.
 - [x] `/project` 선택 문서 요약 카드의 status badge가 존재하지 않는 helper를 참조하지 않는다.
-- [x] `data-project-owner-item="document-output-tabs"`가 `/project` 하단 자리에서 확인된다.
-- [x] `data-documents-owner-item="current-work-panel"`이 `/project` 하단 `할 일` 탭에서 확인된다.
+- [x] `data-documents-owner-item="current-work-panel"`이 `/project` 하단 자리에서 확인된다.
 - [x] `/project`에서 `선택 문서 요청 링크 설정` 텍스트 아래에는 `current-work-panel`이 존재하지 않는다.
 - [x] `/documents`의 `data-documents-owner-item="current-work-panel"`은 기존처럼 존재한다.
 - [x] `rg -n "선택 문서 요청 링크 설정" src/app/project/page.tsx` 결과가 없거나, 해당 텍스트가 owner 패널을 감싸지 않는다.
@@ -332,11 +293,8 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 
 가능하면 `http://localhost:3001/project`에서 확인한다.
 
-- 현장 문서를 선택하면 하단 영역에 `편집`/`할 일` 탭이 나온다.
-- `편집` 탭은 `/canvas`의 `현장 관리` 설정이 적용된 문서 편집 UI를 보여준다.
-- `할 일` 탭은 `/documents`의 `현장 관리` 설정이 적용된 `지금 할 작업` 패널을 보여준다.
-- 하단 탭 DOM에 `data-project-owner-item="document-output-tabs"`가 있다.
-- `할 일` 탭 내부 DOM에 `data-documents-owner-item="current-work-panel"`이 있다.
+- 현장 문서를 선택하면 하단 영역에 `지금 할 작업` 패널이 나온다.
+- 하단 패널 DOM에 `data-documents-owner-item="current-work-panel"`이 있다.
 - 우측 `선택 문서 요청 링크 설정` 카드 안에는 owner 작업 패널이 없다.
 - `/project` 안에는 문서 기능 설정 ON/OFF UI가 없다.
 - `/documents`는 `문서 기능 설정`, `작업할 문서 고르기`, `지금 할 작업`, `이 문서 기록`이 보인다.
@@ -381,9 +339,6 @@ src/app/project/page.tsx
 - 2026-05-24: `/documents` 문서 기능 환경설정 아래에 `문서 기능 · {적용 surface} · 설정 적용 출력` Divider를 추가해 설정 적용 출력 영역 시작점을 표시했다.
 - 2026-05-24: `/documents`가 `ownerSurface` URL 파라미터를 읽어 실제 출력에 적용할 surface 설정을 정하게 했다.
 - 2026-05-24: `/documents`의 관리 대상 surface 선택이 URL `ownerSurface`를 갱신하고, 아래 출력도 같은 surface 설정을 읽게 했다.
-- 2026-05-24: `/project` 편집/할 일 탭 적용 전 백업을 `docs/diff/0524projcomp-07/`에 생성하고 SHA-256 해시를 기록했다.
-- 2026-05-24: `/project` 하단 `/html/body/main/div/div[3]` 자리를 `OwnerSettingsTabList` 기반 `편집`/`할 일` 탭 컨테이너로 바꾸고, `편집` 탭은 `CanvasOwnedWorkspace surface="project"`로 `/canvas`의 `현장 관리` 설정을 적용하게 했다.
-- 2026-05-24: `/project` 하단 `할 일` 탭은 `DocumentsOwnerWorkspace surface="project" renderMode="current-work-panel"`로 `/documents`의 `현장 관리` 설정을 적용하게 했다.
 - 2026-05-24: 정정 후 `/project`에서 `페이지별 캔버스 설정`, `project.canvasOwnerSettingsEnabled`, `projectCanvasOwnerSettingsEnabled` 흔적이 검색되지 않는 것을 확인했다.
 - 2026-05-24: 정정 후 `git diff --check`, `docs/diff/0524projcomp-01` SHA-256 검증, `/documents`와 `/project` esbuild 번들 검증을 통과했다.
 - 2026-05-24: `git diff --check`, 금지 문구 검색, `renderMode` 연결 검색, `/documents`와 `/project` esbuild 번들 검증을 통과했다.

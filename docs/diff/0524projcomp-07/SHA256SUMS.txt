@@ -1,0 +1,2 @@
+753ae100bed4bc8eead98353af085b0d1c7f6c5ecb3876962ad1728b63830d9b  docs/0524projcomp.md
+53b13aa67ab3c9717f99df844493fa63740a75c07faf1f1e4d05ec523f71cf50  src/app/project/page.tsx

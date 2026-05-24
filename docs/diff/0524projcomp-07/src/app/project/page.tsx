@@ -20,7 +20,6 @@ import {
   type TemplateEditWorkspaceInitialDraft,
 } from '../../components/template/TemplateEditWorkspace';
 import { DocumentsOwnerWorkspace } from '../documents/_owner';
-import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
 import type {
   TemplateChecklistRegistrationTarget,
@@ -34,7 +33,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Input } from '../../components/ui/Input';
 import { MejaiScrollTable, type MejaiScrollTableColumn, type MejaiScrollTableRow } from '../../components/ui/MejaiScrollTable';
 import { MultiEntityPicker } from '../../components/ui/MultiEntityPicker';
-import { OwnerSettingsTabList } from '../../components/ui/OwnerSettingsLayout';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import {
   collapseDocumentCanvasWhitespace as collapseWhitespace,
@@ -83,7 +81,6 @@ type DocumentDetailDiagnosticItem = {
   source: string;
 };
 type ProjectListStatusVariant = 'default' | 'green' | 'amber' | 'slate' | 'red' | 'outline';
-type ProjectDocumentOutputTab = 'edit' | 'todo';
 type ProjectListAction = {
   title: string;
   ariaLabel: string;
@@ -1797,8 +1794,6 @@ export default function ProjectPage() {
     variant: 'info' | 'error' | 'success';
     message: string;
   } | null>(null);
-  const [activeProjectDocumentOutputTab, setActiveProjectDocumentOutputTab] =
-    React.useState<ProjectDocumentOutputTab>('edit');
   const [photoRequirementLinksByKey, setPhotoRequirementLinksByKey] = React.useState<
     Record<string, ProjectChecklistLinkedPosition>
   >({});
@@ -5346,133 +5341,6 @@ export default function ProjectPage() {
     selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId.trim();
   const selectedOwnerSiteId =
     selectedDocumentListItem?.document.siteId || selectedDocumentDetail?.document.siteId || selectedSiteId;
-  const projectDocumentOutputTabs: Array<{ value: ProjectDocumentOutputTab; label: string }> = [
-    { value: 'edit', label: '편집' },
-    { value: 'todo', label: '할 일' },
-  ];
-
-  const renderProjectDocumentCreateSiteNotice = () => (
-    <Card className="border-slate-200">
-      <CardContent className="p-6">
-        <EmptyState
-          title="새 현장을 입력하는 중입니다."
-          description="현장 생성을 마치거나 입력을 닫으면 선택한 문서를 다시 편집할 수 있습니다."
-        />
-      </CardContent>
-    </Card>
-  );
-
-  const renderProjectDocumentNoSelectionNotice = () => (
-    <Card className="border-slate-200">
-      <CardContent className="p-6">
-        <EmptyState
-          title="작업할 현장 문서를 먼저 고르세요."
-          description="위의 현장 문서에서 문서를 선택하면 이 페이지 하단에서 바로 편집하거나 할 일을 부여할 수 있습니다."
-        />
-      </CardContent>
-    </Card>
-  );
-
-  const renderProjectDocumentEditPanel = () => {
-    if (showCreateSiteForm) {
-      return renderProjectDocumentCreateSiteNotice();
-    }
-
-    if (loadingDocumentDetail && selectedOwnerDocumentId && !selectedDocumentInitialDraft) {
-      return (
-        <Card className="border-slate-200">
-          <CardContent className="p-6">
-            <EmptyState
-              title="문서 정보를 불러오는 중입니다."
-              description="현장 문서 본문을 준비하고 있습니다."
-            />
-          </CardContent>
-        </Card>
-      );
-    }
-
-    if (selectedOwnerDocumentId && selectedDocumentInitialDraft) {
-      return (
-        <CanvasOwnedWorkspace
-          key={`project-edit:${selectedDocumentInitialDraft.draftKey}`}
-          surface="project"
-          initialDraft={selectedDocumentInitialDraft}
-          workspaceMode="document"
-          hideHeader
-          hidePersistencePanel
-          nameFieldLabel="문서 이름:"
-          saveButtonLabel="문서 저장"
-          templateNameReadOnly
-          documentAttachmentApiPath={`/api/documents/${encodeURIComponent(selectedOwnerDocumentId)}/attachments`}
-          onSaveDraftHtml={handleSaveDocumentDraft}
-          suppressInitialDraftLoadedMessage
-        />
-      );
-    }
-
-    if (selectedOwnerDocumentId || selectedDocumentListItem) {
-      return (
-        <Card className="border-slate-200">
-          <CardContent className="p-6">
-            <EmptyState
-              title="현재 문서에 편집할 본문이 없습니다."
-              description="이 문서의 최신 본문이 없어서 상자 편집 캔버스를 열 수 없습니다."
-            />
-          </CardContent>
-        </Card>
-      );
-    }
-
-    return renderProjectDocumentNoSelectionNotice();
-  };
-
-  const renderProjectDocumentTodoPanel = () => {
-    if (showCreateSiteForm) {
-      return renderProjectDocumentCreateSiteNotice();
-    }
-
-    if (selectedOwnerDocumentId) {
-      return (
-        <DocumentsOwnerWorkspace
-          key={`project-current-work:${selectedOwnerDocumentId}`}
-          initialSiteId={selectedOwnerSiteId}
-          lockedDocumentId={selectedOwnerDocumentId}
-          hideDocumentPicker
-          hidePageHeader
-          embedded
-          surface="project"
-          renderMode="current-work-panel"
-        />
-      );
-    }
-
-    return renderProjectDocumentNoSelectionNotice();
-  };
-
-  const renderProjectDocumentOutputTabs = () => (
-    <div className="space-y-4" data-project-owner-item="document-output-tabs">
-      <OwnerSettingsTabList
-        value={activeProjectDocumentOutputTab}
-        ariaLabel="현장 문서 작업 탭"
-        options={projectDocumentOutputTabs}
-        onChange={(value) => setActiveProjectDocumentOutputTab(value as ProjectDocumentOutputTab)}
-        className="max-w-xs"
-      />
-
-      <div
-        role="tabpanel"
-        data-project-owner-item={
-          activeProjectDocumentOutputTab === 'edit'
-            ? 'document-edit-output-panel'
-            : 'document-todo-output-panel'
-        }
-      >
-        {activeProjectDocumentOutputTab === 'edit'
-          ? renderProjectDocumentEditPanel()
-          : renderProjectDocumentTodoPanel()}
-      </div>
-    </div>
-  );
 
   return (
     <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
@@ -6093,7 +5961,45 @@ export default function ProjectPage() {
       </div>
 
       <div className="space-y-4">
-        {renderProjectDocumentOutputTabs()}
+        {showCreateSiteForm ? (
+          <Card className="border-slate-200">
+            <CardContent className="p-6">
+              <EmptyState
+                title="새 현장을 입력하는 중입니다."
+                description="현장 생성을 마치거나 입력을 닫으면 선택한 문서를 다시 편집할 수 있습니다."
+              />
+            </CardContent>
+          </Card>
+        ) : selectedOwnerDocumentId ? (
+          <DocumentsOwnerWorkspace
+            key={`project-current-work:${selectedOwnerDocumentId}`}
+            initialSiteId={selectedOwnerSiteId}
+            lockedDocumentId={selectedOwnerDocumentId}
+            hideDocumentPicker
+            hidePageHeader
+            embedded
+            surface="project"
+            renderMode="current-work-panel"
+          />
+        ) : selectedDocumentListItem ? (
+          <Card className="border-slate-200">
+            <CardContent className="p-6">
+              <EmptyState
+                title="현재 문서에 편집할 본문이 없습니다."
+                description="이 문서의 최신 본문이 없어서 상자 편집 캔버스를 열 수 없습니다."
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-slate-200">
+            <CardContent className="p-6">
+              <EmptyState
+                title="작업할 현장 문서를 먼저 고르세요."
+                description="위의 현장 문서에서 문서를 선택하면 이 페이지 하단에서 바로 편집할 수 있습니다."
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
     </div>
