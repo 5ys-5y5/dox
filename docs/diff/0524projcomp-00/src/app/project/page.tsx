@@ -27,6 +27,7 @@ import type {
   TemplateChecklistSignatureSubmitParams,
   TemplateEditWorkspaceSaveDraftParams,
 } from '../../components/template/workspace/types';
+import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
@@ -5337,10 +5338,6 @@ export default function ProjectPage() {
 
   const hasSelectedDocumentContext = Boolean(selectedDocumentId || loadingDocumentDetail || selectedDocumentListItem);
   const selectedDetailPanel = hasSelectedDocumentContext ? 'document' : 'summary';
-  const selectedOwnerDocumentId =
-    selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId.trim();
-  const selectedOwnerSiteId =
-    selectedDocumentListItem?.document.siteId || selectedDocumentDetail?.document.siteId || selectedSiteId;
 
   return (
     <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
@@ -5889,16 +5886,18 @@ export default function ProjectPage() {
                 <Card className="border-slate-200">
                   <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
                     <div className="space-y-1.5">
-                      <CardTitle>선택 문서</CardTitle>
-                      <CardDescription>선택한 현장 문서 상태와 삭제 작업을 확인합니다.</CardDescription>
+                      <CardTitle>선택 문서 요청 링크 설정</CardTitle>
+                      <CardDescription>현재 문서의 요청 항목과 구성원을 정합니다.</CardDescription>
                     </div>
-                    {selectedOwnerDocumentId ? (
+                    {selectedDocumentId ? (
                       <Button
                         type="button"
                         variant="destructive"
                         size="sm"
                         onClick={() => {
-                          void handleDeleteDocument(selectedOwnerDocumentId);
+                          void handleDeleteDocument(
+                            selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId
+                          );
                         }}
                         disabled={deletingDocument}
                         className="h-[42px] shrink-0"
@@ -5916,17 +5915,14 @@ export default function ProjectPage() {
                           : '문서 정보를 불러오는 중입니다.'}
                       </div>
                     ) : selectedDocumentDetail ? (
-                      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={getDocumentStatusVariant(selectedDocumentDetail.document.status)}>
-                            {getDocumentStatusLabel(selectedDocumentDetail.document.status)}
-                          </Badge>
-                          <span className="font-medium text-slate-900">{selectedDocumentDetail.document.title}</span>
-                        </div>
-                        <p>문서 종류: {selectedDocumentDetail.document.documentTypeKey}</p>
-                        <p>최신 버전: {selectedDocumentDetail.latestVersion?.versionNumber || '-'}</p>
-                        <p>최근 요청 링크와 받을 사람 설정은 아래 지금 할 작업에서 진행합니다.</p>
-                      </div>
+                      <DocumentsOwnerWorkspace
+                        initialSiteId={selectedDocumentDetail.document.siteId}
+                        lockedDocumentId={selectedDocumentDetail.document.id}
+                        hideDocumentPicker
+                        hidePageHeader
+                        embedded
+                        surface="project"
+                      />
                     ) : selectedDocumentListItem ? (
                       <div className="space-y-3">
                         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
@@ -5944,10 +5940,10 @@ export default function ProjectPage() {
               ) : (
                 <Card className="border-slate-200">
                   <CardHeader>
-                    <CardTitle>선택 문서</CardTitle>
-                    <CardDescription>현장 문서를 선택하면 상태와 삭제 작업을 보여줍니다.</CardDescription>
+                    <CardTitle>선택 문서 요청 링크 설정</CardTitle>
+                    <CardDescription>현장 문서를 선택하면 요청 항목과 구성원 설정을 보여줍니다.</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
+                  <CardContent>
                     <EmptyState
                       title="선택된 항목이 없습니다."
                       description="왼쪽의 현장 문서 목록에서 작업할 문서를 선택해 주세요."
@@ -5970,16 +5966,22 @@ export default function ProjectPage() {
               />
             </CardContent>
           </Card>
-        ) : selectedOwnerDocumentId ? (
-          <DocumentsOwnerWorkspace
-            key={`project-current-work:${selectedOwnerDocumentId}`}
-            initialSiteId={selectedOwnerSiteId}
-            lockedDocumentId={selectedOwnerDocumentId}
-            hideDocumentPicker
-            hidePageHeader
-            embedded
+        ) : selectedDocumentInitialDraft ? (
+          <CanvasOwnedWorkspace
             surface="project"
-            renderMode="current-work-panel"
+            key={selectedDocumentInitialDraft.draftKey}
+            initialDraft={selectedDocumentInitialDraft}
+            workspaceMode="document"
+            hideHeader
+            hidePersistencePanel
+            nameFieldLabel="문서 이름:"
+            saveButtonLabel="문서 저장"
+            templateNameReadOnly
+            documentAttachmentApiPath={`/api/documents/${encodeURIComponent(
+              selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId
+            )}/attachments`}
+            onSaveDraftHtml={handleSaveDocumentDraft}
+            suppressInitialDraftLoadedMessage
           />
         ) : selectedDocumentListItem ? (
           <Card className="border-slate-200">

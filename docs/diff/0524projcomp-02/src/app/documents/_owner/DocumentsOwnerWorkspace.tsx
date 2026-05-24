@@ -5,15 +5,9 @@ import * as React from 'react';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
-import { Divider } from '../../../components/ui/Divider';
 import { EntityPicker } from '../../../components/ui/EntityPicker';
 import { Input } from '../../../components/ui/Input';
 import { MultiEntityPicker } from '../../../components/ui/MultiEntityPicker';
-import {
-  OwnerSettingsActionBar,
-  OwnerSettingsManagedTargetControls,
-  OwnerSettingsSectionHeader,
-} from '../../../components/ui/OwnerSettingsLayout';
 import { SettingToggleRow } from '../../../components/ui/SettingToggleRow';
 import { CanvasOwnedWorkspace } from '../../canvas/ownerPolicy';
 import type { TemplateEditWorkspaceInitialDraft } from '../../../components/template/TemplateEditWorkspace';
@@ -39,7 +33,6 @@ import type {
   DocumentOwnerMemberOption,
   DocumentRequestableField,
   DocumentsOwnerRecentRequestLink,
-  DocumentsOwnerSurface,
   DocumentsOwnerWorkspaceProps,
 } from './documentOwnerTypes';
 
@@ -513,18 +506,12 @@ export function DocumentsOwnerWorkspace({
   hidePageHeader = false,
   embedded = false,
   surface = 'documents',
-  outputSurface,
   renderMode = 'full',
 }: DocumentsOwnerWorkspaceProps) {
   const pathname = usePathname();
   const router = useRouter();
   const documentsOwnerSettings = useDocumentsOwnerSettings();
-  const appliedSurface = outputSurface || surface;
-  const appliedManagedSurface =
-    documentsOwnerManagedSurfaces.find((item) => item.surface === appliedSurface) ||
-    documentsOwnerManagedSurfaces[0];
-  const [activeOwnerSettingsSurface, setActiveOwnerSettingsSurface] = React.useState<DocumentsOwnerSurface>(appliedSurface);
-  const surfaceOwnerSettings = documentsOwnerSettings.resolveSurfaceSettings(appliedSurface);
+  const surfaceOwnerSettings = documentsOwnerSettings.resolveSurfaceSettings(surface);
   const documentPickerEnabled = !hideDocumentPicker && surfaceOwnerSettings.documentSelectionMode === 'picker';
   const requestSetupSteps = React.useMemo(
     () => documentsOwnerRequestSetupSteps.filter((step) => surfaceOwnerSettings[step.settingKey]),
@@ -577,57 +564,6 @@ export function DocumentsOwnerWorkspace({
   const documentListLoadSeqRef = React.useRef(0);
   const documentContextLoadSeqRef = React.useRef(0);
   const shouldSyncSelectionQuery = surface === 'documents' && !embedded && documentPickerEnabled;
-
-  React.useEffect(() => {
-    setActiveOwnerSettingsSurface(appliedSurface);
-  }, [appliedSurface]);
-
-  React.useEffect(() => {
-    if (surface !== 'documents' || embedded || renderMode !== 'full' || typeof window === 'undefined') {
-      return;
-    }
-
-    const nextSearchParams = new URLSearchParams(window.location.search);
-    const currentSurface = nextSearchParams.get('ownerSurface')?.trim();
-
-    if (currentSurface === appliedSurface) {
-      return;
-    }
-
-    nextSearchParams.set('ownerSurface', appliedSurface);
-    const nextQueryString = nextSearchParams.toString();
-    const nextHref = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
-    const currentHref = `${window.location.pathname}${window.location.search}`;
-
-    if (currentHref === nextHref) {
-      return;
-    }
-
-    router.replace(nextHref, { scroll: false });
-  }, [appliedSurface, embedded, pathname, renderMode, router, surface]);
-
-  const updateOutputSurface = React.useCallback(
-    (nextSurface: DocumentsOwnerSurface) => {
-      setActiveOwnerSettingsSurface(nextSurface);
-
-      if (surface !== 'documents' || embedded || renderMode !== 'full' || typeof window === 'undefined') {
-        return;
-      }
-
-      const nextSearchParams = new URLSearchParams(window.location.search);
-      nextSearchParams.set('ownerSurface', nextSurface);
-      const nextQueryString = nextSearchParams.toString();
-      const nextHref = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
-      const currentHref = `${window.location.pathname}${window.location.search}`;
-
-      if (currentHref === nextHref) {
-        return;
-      }
-
-      router.replace(nextHref, { scroll: false });
-    },
-    [embedded, pathname, renderMode, router, surface]
-  );
 
   React.useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -2098,7 +2034,7 @@ export function DocumentsOwnerWorkspace({
       <div className="min-w-0">
         {selectedDocumentInitialDraft ? (
           <CanvasOwnedWorkspace
-            surface={appliedSurface}
+            surface={surface === 'project' ? 'project' : 'documents'}
             key={selectedDocumentInitialDraft.draftKey}
             initialDraft={selectedDocumentInitialDraft}
             workspaceMode="read"
@@ -2393,198 +2329,150 @@ export function DocumentsOwnerWorkspace({
       return null;
     }
 
-    const managedSurface =
-      documentsOwnerManagedSurfaces.find((item) => item.surface === activeOwnerSettingsSurface) ||
-      documentsOwnerManagedSurfaces[0];
-    const managedSettings = documentsOwnerSettings.resolveSurfaceSettings(managedSurface.surface);
-    const savedManagedSettings = documentsOwnerSettings.resolveSavedSurfaceSettings(managedSurface.surface);
-    const savedDocumentSelectionModeLabel =
-      savedManagedSettings.documentSelectionMode === 'picker' ? '저장값 picker' : '저장값 host';
-    const formatSavedBooleanDefinition = (definitionName: string, value: boolean) =>
-      `${definitionName} · 저장값 ${value ? 'ON' : 'OFF'}`;
-    const getManagedSurfaceDescription = (targetSurface: DocumentsOwnerSurface) =>
-      targetSurface === 'documents'
-        ? '문서 기능의 owner 페이지입니다. 문서 선택과 요청 작업 전체 화면을 관리합니다.'
-        : '현장 관리 페이지가 documents owner 기능을 불러오는 대상입니다.';
-
     return (
       <Card className="border-slate-200" {...documentsOwnerItem('owner-settings-panel', '문서 owner 설정 패널')}>
-        <CardHeader className="p-4 pb-3" {...documentsOwnerItem('owner-settings-panel-header', '문서 owner 설정 제목 영역')}>
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-1">
-              <CardTitle className="text-sm" {...documentsOwnerItem('owner-settings-panel-title', '문서 owner 설정 제목')}>
-                문서 기능 환경설정
-              </CardTitle>
-              <CardDescription
-                className="text-xs leading-5"
-                {...documentsOwnerItem('owner-settings-panel-description', '문서 owner 설정 설명')}
-              >
-                {managedSurface.label} · documents owner 기능 표시와 /canvas 환경 적용을 편집합니다.
-              </CardDescription>
-            </div>
-            <OwnerSettingsActionBar
-              dirty={documentsOwnerSettings.hasUnsavedSettings}
-              onReset={() => {
-                documentsOwnerSettings.resetSettings();
-                setMessage('저장된 문서 기능 환경설정으로 되돌렸습니다.');
-              }}
-              onSave={() => {
-                documentsOwnerSettings.saveSettings();
-                setMessage('문서 기능 환경설정을 저장했습니다.');
-              }}
-            />
-          </div>
+        <CardHeader {...documentsOwnerItem('owner-settings-panel-header', '문서 owner 설정 제목 영역')}>
+          <CardTitle {...documentsOwnerItem('owner-settings-panel-title', '문서 owner 설정 제목')}>
+            문서 기능 설정
+          </CardTitle>
+          <CardDescription {...documentsOwnerItem('owner-settings-panel-description', '문서 owner 설정 설명')}>
+            이 문서 기능을 불러오는 페이지별 표시와 캔버스 환경 적용을 정합니다.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 p-4 pt-0" {...documentsOwnerItem('owner-settings-panel-content', '문서 owner 설정 내용')}>
-          <OwnerSettingsManagedTargetControls
-            value={managedSurface.surface}
-            targets={documentsOwnerManagedSurfaces.map((item) => {
-              const itemSettings = documentsOwnerSettings.resolveSurfaceSettings(item.surface);
-              const itemSavedSettings = documentsOwnerSettings.resolveSavedSurfaceSettings(item.surface);
+        <CardContent className="space-y-3" {...documentsOwnerItem('owner-settings-panel-content', '문서 owner 설정 내용')}>
+          {documentsOwnerManagedSurfaces.map((managedSurface) => {
+            const managedSettings = documentsOwnerSettings.resolveSurfaceSettings(managedSurface.surface);
 
-              return {
-                value: item.surface,
-                label: item.label,
-                path: item.path,
-                description: getManagedSurfaceDescription(item.surface),
-                badge: (
-                  <Badge variant="slate" className="shrink-0 px-2 py-0 text-[10px]">
-                    {item.surface}
-                  </Badge>
-                ),
-                detailRows: [
-                  { label: 'route', value: item.path },
-                  { label: 'surface', value: item.surface },
-                  {
-                    label: '문서 선택',
-                    value: itemSettings.documentSelectionMode === 'picker' ? 'picker' : 'host',
-                  },
-                  {
-                    label: '저장 상태',
-                    value: itemSavedSettings.showCurrentWorkPanel ? '지금 할 작업 ON' : '지금 할 작업 OFF',
-                  },
-                ],
-              };
-            })}
-            onChange={(value) => updateOutputSurface(value as DocumentsOwnerSurface)}
-          />
-
-          <div className="space-y-1.5" {...documentsOwnerItem('owner-settings-display-section', '문서 출력 방식 설정 섹션')}>
-            <OwnerSettingsSectionHeader
-              label="문서 출력 방식"
-              description="문서 선택, 작업 패널, 기록 패널의 표시 여부를 정합니다."
-              count="3개"
-            />
-            <div className="grid gap-1 md:grid-cols-3">
-              <SettingToggleRow
-                label="작업할 문서 고르기"
-                sectionLabel="문서 기능"
-                definitionName={`documentSelectionMode · ${savedDocumentSelectionModeLabel}`}
-                description="ON이면 문서 선택 UI를 쓰고, OFF이면 호출 페이지나 URL에서 받은 문서로 출력합니다."
-                checked={managedSettings.documentSelectionMode === 'picker'}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(
-                    managedSurface.surface,
-                    'documentSelectionMode',
-                    checked ? 'picker' : 'host'
-                  )
-                }
-              />
-              <SettingToggleRow
-                label="지금 할 작업"
-                sectionLabel="문서 기능"
-                definitionName={formatSavedBooleanDefinition('showCurrentWorkPanel', savedManagedSettings.showCurrentWorkPanel)}
-                description="이 페이지에서 문서 요청 작업 패널을 표시합니다."
-                checked={managedSettings.showCurrentWorkPanel}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showCurrentWorkPanel', checked)
-                }
-              />
-              <SettingToggleRow
-                label="이 문서 기록"
-                sectionLabel="문서 기능"
-                definitionName={formatSavedBooleanDefinition('showHistoryPanel', savedManagedSettings.showHistoryPanel)}
-                description="버전 이력과 최근 요청 링크 기록을 표시합니다."
-                checked={managedSettings.showHistoryPanel}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showHistoryPanel', checked)
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5" {...documentsOwnerItem('owner-settings-request-steps-section', '지금 할 작업 단계 설정 섹션')}>
-            <OwnerSettingsSectionHeader
-              label="지금 할 작업 단계"
-              description="요청 링크 생성 흐름의 각 단계를 선택적으로 표시합니다."
-              count="4개"
-            />
-            <div className="grid gap-1 md:grid-cols-3">
-              <SettingToggleRow
-                label="1단계 상자 담당자"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepBoxAssignee', savedManagedSettings.showRequestStepBoxAssignee)}
-                description="선택한 상자와 담당 구성원을 지정하는 단계를 표시합니다."
-                checked={managedSettings.showRequestStepBoxAssignee}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepBoxAssignee', checked)
-                }
-              />
-              <SettingToggleRow
-                label="2단계 필수 사진"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepPhoto', savedManagedSettings.showRequestStepPhoto)}
-                description="사진 태그와 담당 구성원을 정하는 단계를 표시합니다."
-                checked={managedSettings.showRequestStepPhoto}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepPhoto', checked)
-                }
-              />
-              <SettingToggleRow
-                label="3단계 필수 파일"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepFile', savedManagedSettings.showRequestStepFile)}
-                description="파일 태그와 담당 구성원을 정하는 단계를 표시합니다."
-                checked={managedSettings.showRequestStepFile}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepFile', checked)
-                }
-              />
-              <SettingToggleRow
-                label="4단계 만료 시각"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepExpiration', savedManagedSettings.showRequestStepExpiration)}
-                description="요청 링크 만료 시각과 생성 버튼 단계를 표시합니다."
-                checked={managedSettings.showRequestStepExpiration}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepExpiration', checked)
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5" {...documentsOwnerItem('owner-settings-canvas-section', '상자 편집 캔버스 연동 설정 섹션')}>
-            <OwnerSettingsSectionHeader
-              label="상자 편집 캔버스 연동"
-              description="/canvas owner의 저장 환경을 이 문서 기능 화면에 적용할지 정합니다."
-              count="1개"
-            />
-            <div className="grid gap-1 md:grid-cols-3">
-              <SettingToggleRow
-                label="상자 캔버스 환경"
-                sectionLabel="문서 기능"
-                definitionName={formatSavedBooleanDefinition(
-                  'applyStoredCanvasOwnerSettings',
-                  savedManagedSettings.applyStoredCanvasOwnerSettings
-                )}
-                description="/canvas에 저장된 해당 페이지 캔버스 설정을 적용합니다."
-                checked={managedSettings.applyStoredCanvasOwnerSettings}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'applyStoredCanvasOwnerSettings', checked)
-                }
-              />
-            </div>
-          </div>
+            return (
+              <div
+                key={managedSurface.surface}
+                className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                {...documentsOwnerItem('owner-settings-surface-card', `${managedSurface.label} 문서 기능 설정`)}
+              >
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{managedSurface.label}</p>
+                    <p className="text-xs text-slate-500">{managedSurface.path}</p>
+                  </div>
+                  <Badge variant="slate">{managedSurface.surface}</Badge>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <SettingToggleRow
+                    label="작업할 문서 고르기"
+                    sectionLabel="문서 기능"
+                    definitionName="document-selection-mode"
+                    description="ON이면 문서 선택 UI를 쓰고, OFF이면 호출 페이지나 URL에서 받은 문서로 출력합니다."
+                    checked={managedSettings.documentSelectionMode === 'picker'}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'documentSelectionMode',
+                        checked ? 'picker' : 'host'
+                      )
+                    }
+                  />
+                  <SettingToggleRow
+                    label="지금 할 작업"
+                    sectionLabel="문서 기능"
+                    definitionName="current-work-panel"
+                    description="이 페이지에서 문서 요청 작업 패널을 표시합니다."
+                    checked={managedSettings.showCurrentWorkPanel}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'showCurrentWorkPanel',
+                        checked
+                      )
+                    }
+                  />
+                  <SettingToggleRow
+                    label="1단계 상자 담당자"
+                    sectionLabel="지금 할 작업"
+                    definitionName="showRequestStepBoxAssignee"
+                    description="선택한 상자와 담당 구성원을 지정하는 단계를 표시합니다."
+                    checked={managedSettings.showRequestStepBoxAssignee}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'showRequestStepBoxAssignee',
+                        checked
+                      )
+                    }
+                  />
+                  <SettingToggleRow
+                    label="2단계 필수 사진"
+                    sectionLabel="지금 할 작업"
+                    definitionName="showRequestStepPhoto"
+                    description="사진 태그와 담당 구성원을 정하는 단계를 표시합니다."
+                    checked={managedSettings.showRequestStepPhoto}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'showRequestStepPhoto',
+                        checked
+                      )
+                    }
+                  />
+                  <SettingToggleRow
+                    label="3단계 필수 파일"
+                    sectionLabel="지금 할 작업"
+                    definitionName="showRequestStepFile"
+                    description="파일 태그와 담당 구성원을 정하는 단계를 표시합니다."
+                    checked={managedSettings.showRequestStepFile}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'showRequestStepFile',
+                        checked
+                      )
+                    }
+                  />
+                  <SettingToggleRow
+                    label="4단계 만료 시각"
+                    sectionLabel="지금 할 작업"
+                    definitionName="showRequestStepExpiration"
+                    description="요청 링크 만료 시각과 생성 버튼 단계를 표시합니다."
+                    checked={managedSettings.showRequestStepExpiration}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'showRequestStepExpiration',
+                        checked
+                      )
+                    }
+                  />
+                  <SettingToggleRow
+                    label="이 문서 기록"
+                    sectionLabel="문서 기능"
+                    definitionName="document-history-panel"
+                    description="버전 이력과 최근 요청 링크 기록을 표시합니다."
+                    checked={managedSettings.showHistoryPanel}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'showHistoryPanel',
+                        checked
+                      )
+                    }
+                  />
+                  <SettingToggleRow
+                    label="상자 캔버스 환경"
+                    sectionLabel="문서 기능"
+                    definitionName="canvas-owner-settings"
+                    description="/canvas에 저장된 해당 페이지 캔버스 설정을 적용합니다."
+                    checked={managedSettings.applyStoredCanvasOwnerSettings}
+                    onCheckedChange={(checked) =>
+                      documentsOwnerSettings.updateSurfaceSetting(
+                        managedSurface.surface,
+                        'applyStoredCanvasOwnerSettings',
+                        checked
+                      )
+                    }
+                  />
+                </div>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
     );
@@ -2633,20 +2521,6 @@ export function DocumentsOwnerWorkspace({
     );
   };
 
-  const renderOwnerSettingsOutputDivider = () => {
-    if (surface !== 'documents' || renderMode !== 'full') {
-      return null;
-    }
-
-    return (
-      <Divider
-        label={`문서 기능 · ${appliedManagedSurface.label} · 설정 적용 출력`}
-        className="py-0"
-        {...documentsOwnerItem('owner-settings-output-divider', '문서 기능 설정 적용 출력 시작 구분선')}
-      />
-    );
-  };
-
   if (renderMode === 'current-work-panel') {
     return renderCurrentWorkPanel();
   }
@@ -2689,8 +2563,6 @@ export function DocumentsOwnerWorkspace({
       ) : null}
 
       {renderOwnerSettingsPanel()}
-
-      {renderOwnerSettingsOutputDivider()}
 
       {renderDocumentSelectPanel()}
 

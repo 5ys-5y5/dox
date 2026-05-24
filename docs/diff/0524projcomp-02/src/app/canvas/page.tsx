@@ -58,12 +58,6 @@ import { Divider } from '../../components/ui/Divider';
 import { EntityPicker, type EntityPickerOption } from '../../components/ui/EntityPicker';
 import { Input } from '../../components/ui/Input';
 import { OptionButtonGroup } from '../../components/ui/OptionButtonGroup';
-import {
-  OwnerSettingsActionBar,
-  OwnerSettingsManagedTargetControls,
-  OwnerSettingsSectionHeader,
-  OwnerSettingsTabList,
-} from '../../components/ui/OwnerSettingsLayout';
 import { SettingToggleRow } from '../../components/ui/SettingToggleRow';
 import {
   extractDocumentCanvasLabelValuesFromHtml,
@@ -2213,34 +2207,57 @@ export default function CanvasOwnerPage() {
     </div>
   );
   const renderManagedPageControls = () => (
-    <OwnerSettingsManagedTargetControls
-      value={selectedManagedPage.id}
-      targets={managedCanvasPages.map((page) => ({
-        value: page.id,
-        label: page.label,
-        path: page.path,
-        description: page.description,
-        badge: (
+    <div className="space-y-3">
+      <div className="max-h-[22rem] space-y-1.5 overflow-y-auto pr-1">
+        {managedCanvasPages.map((page) => {
+          const active = page.id === selectedManagedPage.id;
+
+          return (
+            <Button
+              key={page.id}
+              type="button"
+              variant={active ? 'default' : 'outline'}
+              className="h-auto w-full justify-start px-2 py-2 text-left"
+              onClick={() => handleSelectManagedPage(page.id)}
+            >
+              <span className="min-w-0">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 truncate text-xs font-semibold">{page.label}</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">{page.path}</span>
+              </span>
+            </Button>
+          );
+        })}
+      </div>
+
+      <div className="rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate font-semibold text-slate-900">{selectedManagedPage.label}</div>
+            <div className="mt-0.5 truncate text-[10px] text-slate-500">{selectedManagedPage.description}</div>
+          </div>
           <Badge variant="slate" className="shrink-0 px-2 py-0 text-[10px]">
-            {page.surface}
+            {selectedManagedPage.surface}
           </Badge>
-        ),
-        detailRows: [
-          { label: 'route', value: page.path },
-          { label: '기본 모드', value: modeLabels[page.defaultMode] },
-          {
-            label: '허용 모드',
-            value: page.allowedModes.map((mode) => (
+        </div>
+        <div className="mt-2 grid gap-x-3 gap-y-1 sm:grid-cols-[72px_minmax(0,1fr)]">
+          <div className="font-medium text-slate-600">route</div>
+          <div className="truncate text-slate-900">{selectedManagedPage.path}</div>
+          <div className="font-medium text-slate-600">기본 모드</div>
+          <div className="truncate text-slate-900">{modeLabels[selectedManagedPage.defaultMode]}</div>
+          <div className="font-medium text-slate-600">허용 모드</div>
+          <div className="flex flex-wrap gap-1">
+            {selectedManagedPage.allowedModes.map((mode) => (
               <Badge key={mode} variant={workspaceMode === mode ? 'blue' : 'slate'} className="px-1.5 py-0 text-[9px]">
                 {mode}
               </Badge>
-            )),
-            valueClassName: 'flex flex-wrap gap-1',
-          },
-        ],
-      }))}
-      onChange={(nextValue) => handleSelectManagedPage(nextValue as ManagedCanvasPageId)}
-    />
+            ))}
+          </div>
+        </div>
+      </div>
+
+    </div>
   );
   const renderModeControls = () => (
     <div className="space-y-2.5">
@@ -2265,10 +2282,14 @@ export default function CanvasOwnerPage() {
   );
   const renderPageWorkspaceModeSettings = () => (
     <div className="space-y-3">
-      <OwnerSettingsSectionHeader
-        label="이 페이지에서 사용할 모드"
-        description="템플릿, 문서, 읽기 모드는 페이지별 상호작용 프리셋입니다."
-      />
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">이 페이지에서 사용할 모드</div>
+          <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+            템플릿, 문서, 읽기 모드는 페이지별 상호작용 프리셋입니다.
+          </div>
+        </div>
+      </div>
       <div className="space-y-1.5">
         {renderWorkspaceModeButtons()}
         <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
@@ -2284,15 +2305,17 @@ export default function CanvasOwnerPage() {
   );
   const renderAccessRolePolicySettings = () => (
     <div className="space-y-1.5">
-      <OwnerSettingsSectionHeader
-        label="권한자별 접근"
-        description="선택한 페이지에서 문서 권한자가 사용할 수 있는 조작과 표시 색상을 정합니다."
-        badge={
-          <Badge variant="slate" className="shrink-0 px-2 py-0 text-[9px]">
-            {selectedManagedPage.label}
-          </Badge>
-        }
-      />
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">권한자별 접근</div>
+          <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+            선택한 페이지에서 문서 권한자가 사용할 수 있는 조작과 표시 색상을 정합니다.
+          </div>
+        </div>
+        <Badge variant="slate" className="shrink-0 px-2 py-0 text-[9px]">
+          {selectedManagedPage.label}
+        </Badge>
+      </div>
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
         <span className="font-semibold text-slate-900">{canvasAccessRoleLabels[selectedCanvasAccessRole]}</span>
         <span>{selectedAccessMode === 'edit' ? '편집 가능' : '보기 전용'}</span>
@@ -2411,10 +2434,14 @@ export default function CanvasOwnerPage() {
   );
   const renderCanvasSizeSettings = () => (
     <div className="space-y-1.5">
-      <OwnerSettingsSectionHeader
-        label="출력 크기"
-        description="자동 크기를 끄면 상자 편집 캔버스 출력 크기를 직접 지정합니다."
-      />
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">출력 크기</div>
+          <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+            자동 크기를 끄면 상자 편집 캔버스 출력 크기를 직접 지정합니다.
+          </div>
+        </div>
+      </div>
       <div className="grid gap-2 lg:grid-cols-2">
         <div className={`space-y-2 rounded border px-2 py-1.5 ${getModeManagedClassName('autoCanvasHeight')}`}>
           <div className="flex items-start justify-between gap-2">
@@ -2508,10 +2535,14 @@ export default function CanvasOwnerPage() {
 
     return (
       <div className="space-y-1.5">
-        <OwnerSettingsSectionHeader
-          label="선택 오버레이"
-          description="선택 중 비활성 상자를 덮는 흰색 오버레이 강도입니다."
-        />
+        <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">선택 오버레이</div>
+            <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+              선택 중 비활성 상자를 덮는 흰색 오버레이 강도입니다.
+            </div>
+          </div>
+        </div>
         <div className={`space-y-2 rounded border px-2 py-1.5 ${getModeManagedClassName('selectionInactiveOverlayOpacity')}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -2620,11 +2651,15 @@ export default function CanvasOwnerPage() {
       {canvasConfigSections.map((section) =>
         section.rows.length > 0 ? (
           <div key={section.key} className="space-y-1">
-            <OwnerSettingsSectionHeader
-              label={section.label}
-              description={section.description}
-              count={`${section.rows.length}개`}
-            />
+            <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+              <div className="flex min-w-0 items-baseline gap-1.5">
+                <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">{section.label}</div>
+                <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">{section.description}</div>
+              </div>
+              <span className="shrink-0 text-[9px] font-semibold text-slate-400">
+                {section.rows.length}개
+              </span>
+            </div>
             <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
               {section.rows.map((row) => {
                 const settingKey = getSettingKeyForDefinitionName(row.definitionName);
@@ -2651,19 +2686,26 @@ export default function CanvasOwnerPage() {
   );
   const renderEffectiveTemplateWorkspaceProps = () => (
     <div className="space-y-1.5">
-      <OwnerSettingsSectionHeader
-        label="전달 prop 전체"
-        description="CanvasOwnedWorkspace를 거쳐 TemplateEditWorkspace에 실제로 전달되는 effective 값입니다."
-        count={`${effectiveTemplateWorkspacePropRows.length}개`}
-      />
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">전달 prop 전체</div>
+          <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">
+            CanvasOwnedWorkspace를 거쳐 TemplateEditWorkspace에 실제로 전달되는 effective 값입니다.
+          </div>
+        </div>
+        <span className="shrink-0 text-[9px] font-semibold text-slate-400">{effectiveTemplateWorkspacePropRows.length}개</span>
+      </div>
       {effectiveTemplateWorkspacePropSections.map((section) =>
         section.rows.length > 0 ? (
           <div key={section.key} className="space-y-1">
-            <OwnerSettingsSectionHeader
-              label={section.label}
-              description={`${section.definitionName} · ${section.description}`}
-              count={`${section.rows.length}개`}
-            />
+            <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 pb-0.5">
+              <div className="flex min-w-0 items-baseline gap-1.5">
+                <div className="shrink-0 text-[11px] font-semibold leading-3 text-slate-800">{section.label}</div>
+                <div className="shrink-0 text-[10px] font-medium leading-3 text-slate-500">{section.definitionName}</div>
+                <div className="min-w-0 truncate text-[10px] leading-3 text-slate-500">{section.description}</div>
+              </div>
+              <span className="shrink-0 text-[9px] font-semibold text-slate-400">{section.rows.length}개</span>
+            </div>
             <div className="grid gap-1 md:grid-cols-2 2xl:grid-cols-3">
               {section.rows.map((row) => (
                 <div key={`${row.section}:${row.name}`} className="min-w-0 rounded border border-slate-200 px-1.5 py-1 text-[11px] text-slate-700">
@@ -2721,15 +2763,22 @@ export default function CanvasOwnerPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 p-4 pt-0">
-              <OwnerSettingsTabList
-                value={activeControlTab}
-                ariaLabel="공용 캔버스 관리 탭"
-                options={[
-                  { value: 'page', label: '페이지' },
-                  { value: 'mode', label: '모드' },
-                ]}
-                onChange={(value) => setActiveControlTab(value as CanvasOwnerControlTab)}
-              />
+              <div role="tablist" aria-label="공용 캔버스 관리 탭" className="grid grid-cols-2 gap-1.5">
+                {(['page', 'mode'] as CanvasOwnerControlTab[]).map((tab) => (
+                  <Button
+                    key={tab}
+                    type="button"
+                    size="sm"
+                    variant={activeControlTab === tab ? 'default' : 'outline'}
+                    className="h-8 text-xs"
+                    role="tab"
+                    aria-selected={activeControlTab === tab}
+                    onClick={() => setActiveControlTab(tab)}
+                  >
+                    {tab === 'page' ? '페이지' : '모드'}
+                  </Button>
+                ))}
+              </div>
               {activeControlTab === 'page' ? renderManagedPageControls() : renderModeControls()}
             </CardContent>
           </Card>
@@ -2805,11 +2854,23 @@ export default function CanvasOwnerPage() {
 	                        : `${canvasAccessRoleLabels[selectedCanvasAccessRole]} · ${modeLabels[effectiveWorkspaceMode]} 설정을 편집합니다. 페이지 권한 설정이 있는 항목은 실제 출력에서 페이지 설정이 우선됩니다.`}
 	                    </CardDescription>
                   </div>
-                  <OwnerSettingsActionBar
-                    dirty={hasUnsavedCanvasSettings}
-                    onReset={resetCanvasOwnerSettings}
-                    onSave={saveCanvasOwnerSettings}
-                  />
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Badge variant={hasUnsavedCanvasSettings ? 'amber' : 'green'} className="px-2 py-0 text-[10px]">
+                      {hasUnsavedCanvasSettings ? '저장 전' : '저장됨'}
+                    </Badge>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!hasUnsavedCanvasSettings}
+                      onClick={resetCanvasOwnerSettings}
+                    >
+                      되돌리기
+                    </Button>
+                    <Button type="button" size="sm" disabled={!hasUnsavedCanvasSettings} onClick={saveCanvasOwnerSettings}>
+                      설정 저장
+                    </Button>
+                  </div>
                 </div>
 		            </CardHeader>
 		            <CardContent className="space-y-3 p-4 pt-0">

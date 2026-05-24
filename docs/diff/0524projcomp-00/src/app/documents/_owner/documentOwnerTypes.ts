@@ -6,7 +6,6 @@ import type { SiteRecordDto } from '../../../lib/siteChecklistDtos';
 import type { EntityPickerOption } from '../../../components/ui/EntityPicker';
 
 export type DocumentsOwnerSurface = 'documents' | 'project';
-export type DocumentsOwnerRenderMode = 'full' | 'current-work-panel';
 
 export type DocumentsOwnerWorkspaceProps = {
   initialSiteId?: string;
@@ -15,8 +14,6 @@ export type DocumentsOwnerWorkspaceProps = {
   hidePageHeader?: boolean;
   embedded?: boolean;
   surface?: DocumentsOwnerSurface;
-  outputSurface?: DocumentsOwnerSurface;
-  renderMode?: DocumentsOwnerRenderMode;
 };
 
 export type DocumentsOwnerRecentRequestLink = {

@@ -1,0 +1,4 @@
+cc2449b36ff4b9da0e634018644af6f8d45b20094e3b2d56a7c7df0615430006  docs/0524projcomp.md
+4cfcd8519cc97062577b3ba15aeccf4ad2b66e573a9ca5d750b4b3c81fb54c74  src/app/canvas/page.tsx
+6d9083878579dd53e24b6a3e10c2596c14d978408c82407bc95db2bdde2f7592  src/app/documents/_owner/DocumentsOwnerWorkspace.tsx
+1532b50b7d07ca507ea803e83275dcced469b29a932315cd7fe548a70617a05f  src/components/ui/OwnerSettingsLayout.tsx

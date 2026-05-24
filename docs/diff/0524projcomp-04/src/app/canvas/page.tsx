@@ -60,7 +60,6 @@ import { Input } from '../../components/ui/Input';
 import { OptionButtonGroup } from '../../components/ui/OptionButtonGroup';
 import {
   OwnerSettingsActionBar,
-  OwnerSettingsManagedTargetControls,
   OwnerSettingsSectionHeader,
   OwnerSettingsTabList,
 } from '../../components/ui/OwnerSettingsLayout';
@@ -2213,34 +2212,57 @@ export default function CanvasOwnerPage() {
     </div>
   );
   const renderManagedPageControls = () => (
-    <OwnerSettingsManagedTargetControls
-      value={selectedManagedPage.id}
-      targets={managedCanvasPages.map((page) => ({
-        value: page.id,
-        label: page.label,
-        path: page.path,
-        description: page.description,
-        badge: (
+    <div className="space-y-3">
+      <div className="max-h-[22rem] space-y-1.5 overflow-y-auto pr-1">
+        {managedCanvasPages.map((page) => {
+          const active = page.id === selectedManagedPage.id;
+
+          return (
+            <Button
+              key={page.id}
+              type="button"
+              variant={active ? 'default' : 'outline'}
+              className="h-auto w-full justify-start px-2 py-2 text-left"
+              onClick={() => handleSelectManagedPage(page.id)}
+            >
+              <span className="min-w-0">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 truncate text-xs font-semibold">{page.label}</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">{page.path}</span>
+              </span>
+            </Button>
+          );
+        })}
+      </div>
+
+      <div className="rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate font-semibold text-slate-900">{selectedManagedPage.label}</div>
+            <div className="mt-0.5 truncate text-[10px] text-slate-500">{selectedManagedPage.description}</div>
+          </div>
           <Badge variant="slate" className="shrink-0 px-2 py-0 text-[10px]">
-            {page.surface}
+            {selectedManagedPage.surface}
           </Badge>
-        ),
-        detailRows: [
-          { label: 'route', value: page.path },
-          { label: '기본 모드', value: modeLabels[page.defaultMode] },
-          {
-            label: '허용 모드',
-            value: page.allowedModes.map((mode) => (
+        </div>
+        <div className="mt-2 grid gap-x-3 gap-y-1 sm:grid-cols-[72px_minmax(0,1fr)]">
+          <div className="font-medium text-slate-600">route</div>
+          <div className="truncate text-slate-900">{selectedManagedPage.path}</div>
+          <div className="font-medium text-slate-600">기본 모드</div>
+          <div className="truncate text-slate-900">{modeLabels[selectedManagedPage.defaultMode]}</div>
+          <div className="font-medium text-slate-600">허용 모드</div>
+          <div className="flex flex-wrap gap-1">
+            {selectedManagedPage.allowedModes.map((mode) => (
               <Badge key={mode} variant={workspaceMode === mode ? 'blue' : 'slate'} className="px-1.5 py-0 text-[9px]">
                 {mode}
               </Badge>
-            )),
-            valueClassName: 'flex flex-wrap gap-1',
-          },
-        ],
-      }))}
-      onChange={(nextValue) => handleSelectManagedPage(nextValue as ManagedCanvasPageId)}
-    />
+            ))}
+          </div>
+        </div>
+      </div>
+
+    </div>
   );
   const renderModeControls = () => (
     <div className="space-y-2.5">

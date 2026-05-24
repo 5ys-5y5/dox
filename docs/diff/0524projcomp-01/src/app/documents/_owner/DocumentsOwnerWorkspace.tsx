@@ -5,16 +5,9 @@ import * as React from 'react';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
-import { Divider } from '../../../components/ui/Divider';
 import { EntityPicker } from '../../../components/ui/EntityPicker';
 import { Input } from '../../../components/ui/Input';
 import { MultiEntityPicker } from '../../../components/ui/MultiEntityPicker';
-import {
-  OwnerSettingsActionBar,
-  OwnerSettingsManagedTargetControls,
-  OwnerSettingsSectionHeader,
-} from '../../../components/ui/OwnerSettingsLayout';
-import { SettingToggleRow } from '../../../components/ui/SettingToggleRow';
 import { CanvasOwnedWorkspace } from '../../canvas/ownerPolicy';
 import type { TemplateEditWorkspaceInitialDraft } from '../../../components/template/TemplateEditWorkspace';
 import type {
@@ -34,12 +27,10 @@ import type { SiteRecordDto } from '../../../lib/siteChecklistDtos';
 import { cn } from '../../../lib/utils';
 import { DocumentsOwnerClient } from './documentOwnerClient';
 import { collectDocumentRequestableFields } from './documentFieldIndex';
-import { documentsOwnerManagedSurfaces, useDocumentsOwnerSettings } from './documentOwnerSettings';
 import type {
   DocumentOwnerMemberOption,
   DocumentRequestableField,
   DocumentsOwnerRecentRequestLink,
-  DocumentsOwnerSurface,
   DocumentsOwnerWorkspaceProps,
 } from './documentOwnerTypes';
 
@@ -349,39 +340,35 @@ const mediaRequestTagFieldLabels: Record<MediaRequestKind, string> = {
 
 const documentsOwnerRequestSetupSteps: Array<{
   key: DocumentsOwnerRequestSetupStepKey;
-  settingKey:
-    | 'showRequestStepBoxAssignee'
-    | 'showRequestStepPhoto'
-    | 'showRequestStepFile'
-    | 'showRequestStepExpiration';
   label: string;
   description: string;
 }> = [
   {
     key: 'box-assignee',
-    settingKey: 'showRequestStepBoxAssignee',
     label: '상자에 담당자 지정',
     description: '상자 편집 캔버스에서 선택한 상자를 한 담당자에게 일괄 지정합니다.',
   },
   {
     key: 'photo',
-    settingKey: 'showRequestStepPhoto',
     label: '필수 사진 등록',
     description: '사진 태그, 첨부파일 상자 연결 여부, 담당자를 정합니다.',
   },
   {
     key: 'file',
-    settingKey: 'showRequestStepFile',
     label: '필수 파일 등록',
     description: '파일 태그, 첨부파일 상자 연결 여부, 담당자를 정합니다.',
   },
   {
     key: 'expiration',
-    settingKey: 'showRequestStepExpiration',
     label: '만료 시각 설정',
     description: '요청 링크 만료 시각을 정하고 담당자별 요청 링크를 만듭니다.',
   },
 ];
+
+const getDocumentsOwnerRequestSetupStepIndex = (stepKey: DocumentsOwnerRequestSetupStepKey) => {
+  const index = documentsOwnerRequestSetupSteps.findIndex((step) => step.key === stepKey);
+  return index >= 0 ? index : 0;
+};
 
 const buildMediaTagKey = (kind: MediaRequestKind, value: string) => {
   const normalized = value
@@ -513,29 +500,11 @@ export function DocumentsOwnerWorkspace({
   hidePageHeader = false,
   embedded = false,
   surface = 'documents',
-  outputSurface,
   renderMode = 'full',
+  applyStoredCanvasOwnerSettings = true,
 }: DocumentsOwnerWorkspaceProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const documentsOwnerSettings = useDocumentsOwnerSettings();
-  const appliedSurface = outputSurface || surface;
-  const appliedManagedSurface =
-    documentsOwnerManagedSurfaces.find((item) => item.surface === appliedSurface) ||
-    documentsOwnerManagedSurfaces[0];
-  const [activeOwnerSettingsSurface, setActiveOwnerSettingsSurface] = React.useState<DocumentsOwnerSurface>(appliedSurface);
-  const surfaceOwnerSettings = documentsOwnerSettings.resolveSurfaceSettings(appliedSurface);
-  const documentPickerEnabled = !hideDocumentPicker && surfaceOwnerSettings.documentSelectionMode === 'picker';
-  const requestSetupSteps = React.useMemo(
-    () => documentsOwnerRequestSetupSteps.filter((step) => surfaceOwnerSettings[step.settingKey]),
-    [
-      surfaceOwnerSettings.showRequestStepBoxAssignee,
-      surfaceOwnerSettings.showRequestStepExpiration,
-      surfaceOwnerSettings.showRequestStepFile,
-      surfaceOwnerSettings.showRequestStepPhoto,
-    ]
-  );
-  const firstRequestSetupStepKey = requestSetupSteps[0]?.key || 'box-assignee';
   const [sites, setSites] = React.useState<SiteRecordDto[]>([]);
   const [documents, setDocuments] = React.useState<DocumentListItem[]>([]);
   const [selectedSiteId, setSelectedSiteId] = React.useState(initialSiteId);
@@ -557,7 +526,7 @@ export function DocumentsOwnerWorkspace({
   const [mediaAssigneeByKind, setMediaAssigneeByKind] = React.useState<Record<MediaRequestKind, string>>({ photo: '', file: '' });
   const [mediaRequiredCountByKind, setMediaRequiredCountByKind] = React.useState<Record<MediaRequestKind, number>>({ photo: 1, file: 1 });
   const [activeRequestSetupStep, setActiveRequestSetupStep] =
-    React.useState<DocumentsOwnerRequestSetupStepKey>(firstRequestSetupStepKey);
+    React.useState<DocumentsOwnerRequestSetupStepKey>('box-assignee');
   const [activeFieldValueKey, setActiveFieldValueKey] = React.useState('');
   const [newMemberRegistrationOpen, setNewMemberRegistrationOpen] = React.useState(false);
   const [newMemberName, setNewMemberName] = React.useState('');
@@ -576,58 +545,7 @@ export function DocumentsOwnerWorkspace({
   const selectionQuerySyncRef = React.useRef('');
   const documentListLoadSeqRef = React.useRef(0);
   const documentContextLoadSeqRef = React.useRef(0);
-  const shouldSyncSelectionQuery = surface === 'documents' && !embedded && documentPickerEnabled;
-
-  React.useEffect(() => {
-    setActiveOwnerSettingsSurface(appliedSurface);
-  }, [appliedSurface]);
-
-  React.useEffect(() => {
-    if (surface !== 'documents' || embedded || renderMode !== 'full' || typeof window === 'undefined') {
-      return;
-    }
-
-    const nextSearchParams = new URLSearchParams(window.location.search);
-    const currentSurface = nextSearchParams.get('ownerSurface')?.trim();
-
-    if (currentSurface === appliedSurface) {
-      return;
-    }
-
-    nextSearchParams.set('ownerSurface', appliedSurface);
-    const nextQueryString = nextSearchParams.toString();
-    const nextHref = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
-    const currentHref = `${window.location.pathname}${window.location.search}`;
-
-    if (currentHref === nextHref) {
-      return;
-    }
-
-    router.replace(nextHref, { scroll: false });
-  }, [appliedSurface, embedded, pathname, renderMode, router, surface]);
-
-  const updateOutputSurface = React.useCallback(
-    (nextSurface: DocumentsOwnerSurface) => {
-      setActiveOwnerSettingsSurface(nextSurface);
-
-      if (surface !== 'documents' || embedded || renderMode !== 'full' || typeof window === 'undefined') {
-        return;
-      }
-
-      const nextSearchParams = new URLSearchParams(window.location.search);
-      nextSearchParams.set('ownerSurface', nextSurface);
-      const nextQueryString = nextSearchParams.toString();
-      const nextHref = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
-      const currentHref = `${window.location.pathname}${window.location.search}`;
-
-      if (currentHref === nextHref) {
-        return;
-      }
-
-      router.replace(nextHref, { scroll: false });
-    },
-    [embedded, pathname, renderMode, router, surface]
-  );
+  const shouldSyncSelectionQuery = surface === 'documents' && !embedded && !hideDocumentPicker;
 
   React.useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -636,12 +554,6 @@ export function DocumentsOwnerWorkspace({
 
     return () => window.clearInterval(intervalId);
   }, []);
-
-  React.useEffect(() => {
-    if (requestSetupSteps.length > 0 && !requestSetupSteps.some((step) => step.key === activeRequestSetupStep)) {
-      setActiveRequestSetupStep(firstRequestSetupStepKey);
-    }
-  }, [activeRequestSetupStep, firstRequestSetupStepKey, requestSetupSteps]);
 
   React.useEffect(() => {
     if (initialSiteId) {
@@ -715,12 +627,6 @@ export function DocumentsOwnerWorkspace({
           displayKeyText: selectedFieldLabelByValueKey[field.valueKey] || canvasFieldLabelByValueKey[field.valueKey] || field.displayKeyText,
         })),
     [canvasFieldLabelByValueKey, requestableFields, selectedFieldKeys, selectedFieldLabelByValueKey]
-  );
-  const requestLinkSelectedFields = surfaceOwnerSettings.showRequestStepBoxAssignee ? selectedFields : [];
-  const requestLinkMediaRequestDrafts = mediaRequestDrafts.filter((draft) =>
-    draft.kind === 'photo'
-      ? surfaceOwnerSettings.showRequestStepPhoto
-      : surfaceOwnerSettings.showRequestStepFile
   );
   const activeMediaRequestKind: MediaRequestKind | null =
     activeRequestSetupStep === 'photo' || activeRequestSetupStep === 'file' ? activeRequestSetupStep : null;
@@ -833,11 +739,10 @@ export function DocumentsOwnerWorkspace({
     () => memberOptions.find((option) => option.memberId === selectedFieldAssigneeState.value) || null,
     [memberOptions, selectedFieldAssigneeState.value]
   );
-  const rawActiveRequestSetupStepIndex = requestSetupSteps.findIndex((step) => step.key === activeRequestSetupStep);
-  const activeRequestSetupStepIndex = rawActiveRequestSetupStepIndex >= 0 ? rawActiveRequestSetupStepIndex : 0;
+  const activeRequestSetupStepIndex = getDocumentsOwnerRequestSetupStepIndex(activeRequestSetupStep);
   const currentRequestSetupStep =
-    requestSetupSteps[activeRequestSetupStepIndex] || null;
-  const requestSetupStepCount = requestSetupSteps.length;
+    documentsOwnerRequestSetupSteps[activeRequestSetupStepIndex] || documentsOwnerRequestSetupSteps[0];
+  const requestSetupStepCount = documentsOwnerRequestSetupSteps.length;
   const requestSetupStepIsFirst = activeRequestSetupStepIndex <= 0;
   const requestSetupStepIsLast = activeRequestSetupStepIndex >= requestSetupStepCount - 1;
 
@@ -945,7 +850,7 @@ export function DocumentsOwnerWorkspace({
   }, []);
 
   const loadDocuments = React.useCallback(async (siteId: string) => {
-    if (!siteId || !documentPickerEnabled) {
+    if (!siteId || hideDocumentPicker) {
       setDocumentListLoading(false);
       setDocuments([]);
       return;
@@ -975,7 +880,7 @@ export function DocumentsOwnerWorkspace({
         setDocumentListLoading(false);
       }
     }
-  }, [documentPickerEnabled]);
+  }, [hideDocumentPicker]);
 
   const loadDocumentContext = React.useCallback(async (documentId: string) => {
     const normalizedDocumentId = documentId.trim();
@@ -1052,8 +957,8 @@ export function DocumentsOwnerWorkspace({
     setMediaTagColorByKey({});
     setMediaAttachmentValueKeyByKind({ photo: '', file: '' });
     setMediaAssigneeByKind({ photo: '', file: '' });
-    setActiveRequestSetupStep(firstRequestSetupStepKey);
-  }, [firstRequestSetupStepKey, selectedDocumentId]);
+    setActiveRequestSetupStep('box-assignee');
+  }, [selectedDocumentId]);
 
   React.useEffect(() => {
     if (!shouldSyncSelectionQuery || typeof window === 'undefined') {
@@ -1504,14 +1409,14 @@ export function DocumentsOwnerWorkspace({
       return;
     }
 
-    if (requestLinkSelectedFields.length === 0 && requestLinkMediaRequestDrafts.length === 0) {
+    if (selectedFields.length === 0 && mediaRequestDrafts.length === 0) {
       setMessage('상자 담당자나 필수 사진/파일 요청을 하나 이상 지정하세요.');
       return;
     }
 
-    const missingAssigneeField = requestLinkSelectedFields.find((field) => !selectedFieldAssigneeByValueKey[field.valueKey]);
+    const missingAssigneeField = selectedFields.find((field) => !selectedFieldAssigneeByValueKey[field.valueKey]);
     if (missingAssigneeField) {
-      setActiveRequestSetupStep(firstRequestSetupStepKey);
+      setActiveRequestSetupStep('box-assignee');
       setActiveFieldValueKey(missingAssigneeField.valueKey);
       setMessage('담당 구성원을 선택한 상자 전체에 지정하세요.');
       return;
@@ -1529,7 +1434,7 @@ export function DocumentsOwnerWorkspace({
     try {
       const documentContent = selectedDocumentInitialDraft?.draftHtml || selectedDocumentDetail?.latestVersion?.htmlCanonical || '';
       const tasksByAssignee = new Map<string, DocumentRequestTaskInput[]>();
-      const fieldsByAssignee = requestLinkSelectedFields.reduce<Map<string, DocumentRequestableField[]>>((map, field) => {
+      const fieldsByAssignee = selectedFields.reduce<Map<string, DocumentRequestableField[]>>((map, field) => {
         const assigneeMemberId = selectedFieldAssigneeByValueKey[field.valueKey];
         map.set(assigneeMemberId, [...(map.get(assigneeMemberId) || []), field]);
         return map;
@@ -1538,7 +1443,7 @@ export function DocumentsOwnerWorkspace({
       fieldsByAssignee.forEach((fields, assigneeMemberId) => {
         tasksByAssignee.set(assigneeMemberId, buildRequestTasks(fields));
       });
-      requestLinkMediaRequestDrafts.forEach((draft) => {
+      mediaRequestDrafts.forEach((draft) => {
         const attachmentField =
           requestableFields.find((field) => field.valueKey === draft.attachmentValueKey && field.requestKind === 'file') || null;
         tasksByAssignee.set(draft.assigneeMemberId, [
@@ -1648,16 +1553,16 @@ export function DocumentsOwnerWorkspace({
     setMediaAssigneeByKind({ photo: '', file: '' });
     setActiveFieldValueKey('');
     setNewMemberRegistrationOpen(false);
-    setActiveRequestSetupStep(firstRequestSetupStepKey);
-  }, [firstRequestSetupStepKey]);
+    setActiveRequestSetupStep('box-assignee');
+  }, []);
 
   const moveRequestSetupStep = React.useCallback((offset: number) => {
     setActiveRequestSetupStep((currentStep) => {
-      const currentIndex = requestSetupSteps.findIndex((step) => step.key === currentStep);
-      const nextIndex = Math.min(Math.max((currentIndex >= 0 ? currentIndex : 0) + offset, 0), requestSetupSteps.length - 1);
-      return requestSetupSteps[nextIndex]?.key || firstRequestSetupStepKey;
+      const currentIndex = getDocumentsOwnerRequestSetupStepIndex(currentStep);
+      const nextIndex = Math.min(Math.max(currentIndex + offset, 0), documentsOwnerRequestSetupSteps.length - 1);
+      return documentsOwnerRequestSetupSteps[nextIndex]?.key || 'box-assignee';
     });
-  }, [firstRequestSetupStepKey, requestSetupSteps]);
+  }, []);
 
   const updateMediaTagColor = React.useCallback((kind: MediaRequestKind, tagKey: string, nextColor: string) => {
     const normalizedTagKey = tagKey.trim();
@@ -1905,8 +1810,8 @@ export function DocumentsOwnerWorkspace({
   };
 
   const renderExpirationRequestPanel = () => {
-    const assignedFieldCount = requestLinkSelectedFields.filter((field) => selectedFieldAssigneeByValueKey[field.valueKey]).length;
-    const totalRequestCount = requestLinkSelectedFields.length + requestLinkMediaRequestDrafts.length;
+    const assignedFieldCount = selectedFields.filter((field) => selectedFieldAssigneeByValueKey[field.valueKey]).length;
+    const totalRequestCount = selectedFields.length + mediaRequestDrafts.length;
     const expirationRemainingTime = formatExpirationRemainingTime(expiresAt, currentTimeMs);
 
     return (
@@ -1926,7 +1831,7 @@ export function DocumentsOwnerWorkspace({
         </div>
 
         <div className="rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-600" {...documentsOwnerItem('request-link-action-summary', '요청 링크 실행 설정 요약')}>
-          상자 담당자 {assignedFieldCount}/{requestLinkSelectedFields.length}개 · 필수 사진/파일 {requestLinkMediaRequestDrafts.length}개
+          상자 담당자 {assignedFieldCount}/{selectedFields.length}개 · 필수 사진/파일 {mediaRequestDrafts.length}개
         </div>
 
         <div className="space-y-2" {...documentsOwnerItem('request-link-expiration-field', '요청 링크 만료 시각 항목')}>
@@ -1991,7 +1896,7 @@ export function DocumentsOwnerWorkspace({
   };
 
   const renderDocumentSelectPanel = () => {
-    if (!documentPickerEnabled) {
+    if (hideDocumentPicker) {
       return null;
     }
 
@@ -2081,30 +1986,18 @@ export function DocumentsOwnerWorkspace({
     );
   };
 
-  const renderRequestLinkSetup = () => {
-    if (requestSetupSteps.length <= 0 || !currentRequestSetupStep) {
-      return (
-        <div
-          className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500"
-          {...documentsOwnerItem('request-link-setup-disabled-state', '요청 링크 설정 단계 꺼짐 안내')}
-        >
-          켜진 작업 단계가 없습니다. 문서 기능 설정에서 필요한 단계를 켜세요.
-        </div>
-      );
-    }
-
-    return (
+  const renderRequestLinkSetup = () => (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]" {...documentsOwnerItem('request-link-setup-layout', '요청 링크 설정 2열 배치')}>
       <div className="min-w-0">
         {selectedDocumentInitialDraft ? (
           <CanvasOwnedWorkspace
-            surface={appliedSurface}
+            surface={surface === 'project' ? 'project' : 'documents'}
             key={selectedDocumentInitialDraft.draftKey}
             initialDraft={selectedDocumentInitialDraft}
             workspaceMode="read"
             hideHeader
             hidePersistencePanel
-            applyStoredCanvasOwnerSettings={surfaceOwnerSettings.applyStoredCanvasOwnerSettings}
+            applyStoredCanvasOwnerSettings={applyStoredCanvasOwnerSettings}
             suppressInitialDraftLoadedMessage
             templateNameReadOnly
             saveDisabled
@@ -2128,7 +2021,7 @@ export function DocumentsOwnerWorkspace({
       >
         <div className="space-y-3" {...documentsOwnerItem('request-setup-stepper', '요청 링크 설정 단계 선택 영역')}>
           <div className="grid grid-cols-1 gap-2" {...documentsOwnerItem('request-setup-step-list', '요청 링크 설정 단계 목록')}>
-            {requestSetupSteps.map((step, index) => {
+            {documentsOwnerRequestSetupSteps.map((step, index) => {
               const active = step.key === activeRequestSetupStep;
 
               return (
@@ -2298,11 +2191,10 @@ export function DocumentsOwnerWorkspace({
         </div>
       </aside>
     </div>
-    );
-  };
+  );
 
   const renderHistoryPanel = () => {
-    if (!surfaceOwnerSettings.showHistoryPanel || !selectedDocumentDetail) {
+    if (!selectedDocumentDetail) {
       return null;
     }
 
@@ -2310,7 +2202,7 @@ export function DocumentsOwnerWorkspace({
       <Card className="border-slate-200" {...documentsOwnerItem('document-history-panel', '이 문서 기록 패널')}>
         <CardHeader {...documentsOwnerItem('document-history-panel-header', '이 문서 기록 제목 영역')}>
           <CardTitle {...documentsOwnerItem('document-history-panel-title', '이 문서 기록 제목')}>
-            {documentPickerEnabled ? '3. 이 문서 기록' : '이 문서 기록'}
+            {hideDocumentPicker ? '이 문서 기록' : '3. 이 문서 기록'}
           </CardTitle>
           <CardDescription {...documentsOwnerItem('document-history-panel-description', '이 문서 기록 설명')}>
             현재 문서의 버전과 요청 링크 기록을 확인합니다.
@@ -2388,264 +2280,42 @@ export function DocumentsOwnerWorkspace({
     );
   };
 
-  const renderOwnerSettingsPanel = () => {
-    if (surface !== 'documents' || renderMode !== 'full') {
-      return null;
-    }
-
-    const managedSurface =
-      documentsOwnerManagedSurfaces.find((item) => item.surface === activeOwnerSettingsSurface) ||
-      documentsOwnerManagedSurfaces[0];
-    const managedSettings = documentsOwnerSettings.resolveSurfaceSettings(managedSurface.surface);
-    const savedManagedSettings = documentsOwnerSettings.resolveSavedSurfaceSettings(managedSurface.surface);
-    const savedDocumentSelectionModeLabel =
-      savedManagedSettings.documentSelectionMode === 'picker' ? '저장값 picker' : '저장값 host';
-    const formatSavedBooleanDefinition = (definitionName: string, value: boolean) =>
-      `${definitionName} · 저장값 ${value ? 'ON' : 'OFF'}`;
-    const getManagedSurfaceDescription = (targetSurface: DocumentsOwnerSurface) =>
-      targetSurface === 'documents'
-        ? '문서 기능의 owner 페이지입니다. 문서 선택과 요청 작업 전체 화면을 관리합니다.'
-        : '현장 관리 페이지가 documents owner 기능을 불러오는 대상입니다.';
-
-    return (
-      <Card className="border-slate-200" {...documentsOwnerItem('owner-settings-panel', '문서 owner 설정 패널')}>
-        <CardHeader className="p-4 pb-3" {...documentsOwnerItem('owner-settings-panel-header', '문서 owner 설정 제목 영역')}>
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-1">
-              <CardTitle className="text-sm" {...documentsOwnerItem('owner-settings-panel-title', '문서 owner 설정 제목')}>
-                문서 기능 환경설정
-              </CardTitle>
-              <CardDescription
-                className="text-xs leading-5"
-                {...documentsOwnerItem('owner-settings-panel-description', '문서 owner 설정 설명')}
-              >
-                {managedSurface.label} · documents owner 기능 표시와 /canvas 환경 적용을 편집합니다.
-              </CardDescription>
-            </div>
-            <OwnerSettingsActionBar
-              dirty={documentsOwnerSettings.hasUnsavedSettings}
-              onReset={() => {
-                documentsOwnerSettings.resetSettings();
-                setMessage('저장된 문서 기능 환경설정으로 되돌렸습니다.');
-              }}
-              onSave={() => {
-                documentsOwnerSettings.saveSettings();
-                setMessage('문서 기능 환경설정을 저장했습니다.');
-              }}
-            />
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3 p-4 pt-0" {...documentsOwnerItem('owner-settings-panel-content', '문서 owner 설정 내용')}>
-          <OwnerSettingsManagedTargetControls
-            value={managedSurface.surface}
-            targets={documentsOwnerManagedSurfaces.map((item) => {
-              const itemSettings = documentsOwnerSettings.resolveSurfaceSettings(item.surface);
-              const itemSavedSettings = documentsOwnerSettings.resolveSavedSurfaceSettings(item.surface);
-
-              return {
-                value: item.surface,
-                label: item.label,
-                path: item.path,
-                description: getManagedSurfaceDescription(item.surface),
-                badge: (
-                  <Badge variant="slate" className="shrink-0 px-2 py-0 text-[10px]">
-                    {item.surface}
-                  </Badge>
-                ),
-                detailRows: [
-                  { label: 'route', value: item.path },
-                  { label: 'surface', value: item.surface },
-                  {
-                    label: '문서 선택',
-                    value: itemSettings.documentSelectionMode === 'picker' ? 'picker' : 'host',
-                  },
-                  {
-                    label: '저장 상태',
-                    value: itemSavedSettings.showCurrentWorkPanel ? '지금 할 작업 ON' : '지금 할 작업 OFF',
-                  },
-                ],
-              };
-            })}
-            onChange={(value) => updateOutputSurface(value as DocumentsOwnerSurface)}
-          />
-
-          <div className="space-y-1.5" {...documentsOwnerItem('owner-settings-display-section', '문서 출력 방식 설정 섹션')}>
-            <OwnerSettingsSectionHeader
-              label="문서 출력 방식"
-              description="문서 선택, 작업 패널, 기록 패널의 표시 여부를 정합니다."
-              count="3개"
-            />
-            <div className="grid gap-1 md:grid-cols-3">
-              <SettingToggleRow
-                label="작업할 문서 고르기"
-                sectionLabel="문서 기능"
-                definitionName={`documentSelectionMode · ${savedDocumentSelectionModeLabel}`}
-                description="ON이면 문서 선택 UI를 쓰고, OFF이면 호출 페이지나 URL에서 받은 문서로 출력합니다."
-                checked={managedSettings.documentSelectionMode === 'picker'}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(
-                    managedSurface.surface,
-                    'documentSelectionMode',
-                    checked ? 'picker' : 'host'
-                  )
-                }
-              />
-              <SettingToggleRow
-                label="지금 할 작업"
-                sectionLabel="문서 기능"
-                definitionName={formatSavedBooleanDefinition('showCurrentWorkPanel', savedManagedSettings.showCurrentWorkPanel)}
-                description="이 페이지에서 문서 요청 작업 패널을 표시합니다."
-                checked={managedSettings.showCurrentWorkPanel}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showCurrentWorkPanel', checked)
-                }
-              />
-              <SettingToggleRow
-                label="이 문서 기록"
-                sectionLabel="문서 기능"
-                definitionName={formatSavedBooleanDefinition('showHistoryPanel', savedManagedSettings.showHistoryPanel)}
-                description="버전 이력과 최근 요청 링크 기록을 표시합니다."
-                checked={managedSettings.showHistoryPanel}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showHistoryPanel', checked)
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5" {...documentsOwnerItem('owner-settings-request-steps-section', '지금 할 작업 단계 설정 섹션')}>
-            <OwnerSettingsSectionHeader
-              label="지금 할 작업 단계"
-              description="요청 링크 생성 흐름의 각 단계를 선택적으로 표시합니다."
-              count="4개"
-            />
-            <div className="grid gap-1 md:grid-cols-3">
-              <SettingToggleRow
-                label="1단계 상자 담당자"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepBoxAssignee', savedManagedSettings.showRequestStepBoxAssignee)}
-                description="선택한 상자와 담당 구성원을 지정하는 단계를 표시합니다."
-                checked={managedSettings.showRequestStepBoxAssignee}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepBoxAssignee', checked)
-                }
-              />
-              <SettingToggleRow
-                label="2단계 필수 사진"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepPhoto', savedManagedSettings.showRequestStepPhoto)}
-                description="사진 태그와 담당 구성원을 정하는 단계를 표시합니다."
-                checked={managedSettings.showRequestStepPhoto}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepPhoto', checked)
-                }
-              />
-              <SettingToggleRow
-                label="3단계 필수 파일"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepFile', savedManagedSettings.showRequestStepFile)}
-                description="파일 태그와 담당 구성원을 정하는 단계를 표시합니다."
-                checked={managedSettings.showRequestStepFile}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepFile', checked)
-                }
-              />
-              <SettingToggleRow
-                label="4단계 만료 시각"
-                sectionLabel="지금 할 작업"
-                definitionName={formatSavedBooleanDefinition('showRequestStepExpiration', savedManagedSettings.showRequestStepExpiration)}
-                description="요청 링크 만료 시각과 생성 버튼 단계를 표시합니다."
-                checked={managedSettings.showRequestStepExpiration}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'showRequestStepExpiration', checked)
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5" {...documentsOwnerItem('owner-settings-canvas-section', '상자 편집 캔버스 연동 설정 섹션')}>
-            <OwnerSettingsSectionHeader
-              label="상자 편집 캔버스 연동"
-              description="/canvas owner의 저장 환경을 이 문서 기능 화면에 적용할지 정합니다."
-              count="1개"
-            />
-            <div className="grid gap-1 md:grid-cols-3">
-              <SettingToggleRow
-                label="상자 캔버스 환경"
-                sectionLabel="문서 기능"
-                definitionName={formatSavedBooleanDefinition(
-                  'applyStoredCanvasOwnerSettings',
-                  savedManagedSettings.applyStoredCanvasOwnerSettings
-                )}
-                description="/canvas에 저장된 해당 페이지 캔버스 설정을 적용합니다."
-                checked={managedSettings.applyStoredCanvasOwnerSettings}
-                onCheckedChange={(checked) =>
-                  documentsOwnerSettings.updateSurfaceSetting(managedSurface.surface, 'applyStoredCanvasOwnerSettings', checked)
-                }
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  const renderCurrentWorkPanel = () => {
-    if (!surfaceOwnerSettings.showCurrentWorkPanel) {
-      return null;
-    }
-
-    return (
-      <Card className="border-slate-200" {...documentsOwnerItem('current-work-panel', '지금 할 작업 패널')}>
-        <CardHeader {...documentsOwnerItem('current-work-panel-header', '지금 할 작업 제목 영역')}>
-          <CardTitle {...documentsOwnerItem('current-work-panel-title', '지금 할 작업 제목')}>
-            {documentPickerEnabled ? '2. 지금 할 작업' : '지금 할 작업'}
-          </CardTitle>
-          <CardDescription {...documentsOwnerItem('current-work-panel-description', '지금 할 작업 설명')}>
-            요청 링크 설정 안에서 받을 값과 받을 사람을 정합니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4" {...documentsOwnerItem('current-work-panel-content', '지금 할 작업 내용')}>
-          {selectedDocumentDetail ? (
-            renderRequestLinkSetup()
-          ) : selectedDocumentDetailLoading ? (
-            <div
-              className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-600"
-              role="status"
-              aria-live="polite"
-              {...documentsOwnerItem('current-work-loading-state', '지금 할 작업 로딩 상태')}
-            >
-              <span className="mx-auto block h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" aria-hidden="true" />
-              <p className="mt-3 font-medium text-slate-900" {...documentsOwnerItem('current-work-loading-title', '지금 할 작업 로딩 제목')}>
-                문서 로딩 중
-              </p>
-              <p className="mt-1 text-xs text-slate-500" {...documentsOwnerItem('current-work-loading-description', '지금 할 작업 로딩 설명')}>
-                상자 편집 캔버스를 준비하고 있습니다.
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500" {...documentsOwnerItem('current-work-empty-state', '지금 할 작업 빈 상태')}>
-              문서를 고르면 요청 링크 설정을 시작할 수 있습니다.
+  const renderCurrentWorkPanel = () => (
+    <Card className="border-slate-200" {...documentsOwnerItem('current-work-panel', '지금 할 작업 패널')}>
+      <CardHeader {...documentsOwnerItem('current-work-panel-header', '지금 할 작업 제목 영역')}>
+        <CardTitle {...documentsOwnerItem('current-work-panel-title', '지금 할 작업 제목')}>
+          {hideDocumentPicker ? '지금 할 작업' : '2. 지금 할 작업'}
+        </CardTitle>
+        <CardDescription {...documentsOwnerItem('current-work-panel-description', '지금 할 작업 설명')}>
+          요청 링크 설정 안에서 받을 값과 받을 사람을 정합니다.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4" {...documentsOwnerItem('current-work-panel-content', '지금 할 작업 내용')}>
+        {selectedDocumentDetail ? (
+          renderRequestLinkSetup()
+        ) : selectedDocumentDetailLoading ? (
+          <div
+            className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-600"
+            role="status"
+            aria-live="polite"
+            {...documentsOwnerItem('current-work-loading-state', '지금 할 작업 로딩 상태')}
+          >
+            <span className="mx-auto block h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" aria-hidden="true" />
+            <p className="mt-3 font-medium text-slate-900" {...documentsOwnerItem('current-work-loading-title', '지금 할 작업 로딩 제목')}>
+              문서 로딩 중
             </p>
-          )}
-        </CardContent>
-      </Card>
-    );
-  };
-
-  const renderOwnerSettingsOutputDivider = () => {
-    if (surface !== 'documents' || renderMode !== 'full') {
-      return null;
-    }
-
-    return (
-      <Divider
-        label={`문서 기능 · ${appliedManagedSurface.label} · 설정 적용 출력`}
-        className="py-0"
-        {...documentsOwnerItem('owner-settings-output-divider', '문서 기능 설정 적용 출력 시작 구분선')}
-      />
-    );
-  };
+            <p className="mt-1 text-xs text-slate-500" {...documentsOwnerItem('current-work-loading-description', '지금 할 작업 로딩 설명')}>
+              상자 편집 캔버스를 준비하고 있습니다.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500" {...documentsOwnerItem('current-work-empty-state', '지금 할 작업 빈 상태')}>
+            문서를 고르면 요청 링크 설정을 시작할 수 있습니다.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
 
   if (renderMode === 'current-work-panel') {
     return renderCurrentWorkPanel();
@@ -2687,10 +2357,6 @@ export function DocumentsOwnerWorkspace({
           </CardContent>
         </Card>
       ) : null}
-
-      {renderOwnerSettingsPanel()}
-
-      {renderOwnerSettingsOutputDivider()}
 
       {renderDocumentSelectPanel()}
 

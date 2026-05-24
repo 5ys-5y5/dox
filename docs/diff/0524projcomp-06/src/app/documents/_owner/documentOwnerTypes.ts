@@ -15,7 +15,6 @@ export type DocumentsOwnerWorkspaceProps = {
   hidePageHeader?: boolean;
   embedded?: boolean;
   surface?: DocumentsOwnerSurface;
-  outputSurface?: DocumentsOwnerSurface;
   renderMode?: DocumentsOwnerRenderMode;
 };
 

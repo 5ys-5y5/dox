@@ -33,6 +33,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Input } from '../../components/ui/Input';
 import { MejaiScrollTable, type MejaiScrollTableColumn, type MejaiScrollTableRow } from '../../components/ui/MejaiScrollTable';
 import { MultiEntityPicker } from '../../components/ui/MultiEntityPicker';
+import { SettingToggleRow } from '../../components/ui/SettingToggleRow';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import {
   collapseDocumentCanvasWhitespace as collapseWhitespace,
@@ -748,6 +749,7 @@ const normalizeRequiredFileCount = (value: string | number | null | undefined) =
 
 const DOCUMENT_FILE_REQUIREMENTS_STORAGE_KEY = 'project.documentFileRequirements.v1';
 const PHOTO_REQUIREMENT_LINKS_STORAGE_KEY = 'project.photoRequirementLinks.v1';
+const PROJECT_CANVAS_OWNER_SETTINGS_ENABLED_STORAGE_KEY = 'project.canvasOwnerSettingsEnabled.v1';
 
 const DOCUMENT_CHECKLIST_TABS: Array<{ value: DocumentChecklistTab; label: string }> = [
   { value: 'signature', label: '서명 요청' },
@@ -1738,6 +1740,7 @@ export default function ProjectPage() {
   const [loadingDashboardSummaries, setLoadingDashboardSummaries] = React.useState(false);
   const [dashboardRefreshKey, setDashboardRefreshKey] = React.useState(0);
   const [showCreateSiteForm, setShowCreateSiteForm] = React.useState(false);
+  const [projectCanvasOwnerSettingsEnabled, setProjectCanvasOwnerSettingsEnabled] = React.useState(true);
   const [newSiteName, setNewSiteName] = React.useState('');
   const [newSiteOpenDate, setNewSiteOpenDate] = React.useState(getTodayInputValue());
   const [newSiteTemplateIds, setNewSiteTemplateIds] = React.useState<string[]>([]);
@@ -1832,6 +1835,29 @@ export default function ProjectPage() {
     },
     []
   );
+
+  React.useEffect(() => {
+    try {
+      const rawValue = window.localStorage.getItem(PROJECT_CANVAS_OWNER_SETTINGS_ENABLED_STORAGE_KEY);
+
+      if (rawValue === 'off') {
+        setProjectCanvasOwnerSettingsEnabled(false);
+      }
+    } catch {
+      setProjectCanvasOwnerSettingsEnabled(true);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        PROJECT_CANVAS_OWNER_SETTINGS_ENABLED_STORAGE_KEY,
+        projectCanvasOwnerSettingsEnabled ? 'on' : 'off'
+      );
+    } catch {
+      // localStorage is only a client-side owner settings preference. The page can continue without it.
+    }
+  }, [projectCanvasOwnerSettingsEnabled]);
 
   React.useEffect(() => {
     try {
@@ -5341,6 +5367,16 @@ export default function ProjectPage() {
     selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId.trim();
   const selectedOwnerSiteId =
     selectedDocumentListItem?.document.siteId || selectedDocumentDetail?.document.siteId || selectedSiteId;
+  const renderProjectCanvasOwnerSettingsToggle = () => (
+    <SettingToggleRow
+      label="페이지별 캔버스 설정"
+      sectionLabel="설정"
+      definitionName="/canvas · 현장 관리"
+      description="ON이면 /canvas에서 저장한 현장 관리 페이지 설정을 지금 할 작업 캔버스에 적용합니다."
+      checked={projectCanvasOwnerSettingsEnabled}
+      onCheckedChange={setProjectCanvasOwnerSettingsEnabled}
+    />
+  );
 
   return (
     <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
@@ -5907,8 +5943,9 @@ export default function ProjectPage() {
                         삭제
                       </Button>
                     ) : null}
-                  </CardHeader>
-                  <CardContent className="space-y-4">
+	                  </CardHeader>
+	                  <CardContent className="space-y-4">
+                    {renderProjectCanvasOwnerSettingsToggle()}
                     {loadingDocumentDetail ? (
                       <div className="rounded-xl border border-slate-200 px-4 py-4 text-sm text-slate-500">
                         {selectedDocumentListItem
@@ -5916,13 +5953,13 @@ export default function ProjectPage() {
                           : '문서 정보를 불러오는 중입니다.'}
                       </div>
                     ) : selectedDocumentDetail ? (
-                      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={getDocumentStatusVariant(selectedDocumentDetail.document.status)}>
-                            {getDocumentStatusLabel(selectedDocumentDetail.document.status)}
-                          </Badge>
-                          <span className="font-medium text-slate-900">{selectedDocumentDetail.document.title}</span>
-                        </div>
+	                      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+	                        <div className="flex flex-wrap items-center gap-2">
+	                          <Badge variant={getDocumentStatusVariant(selectedDocumentDetail.document.status)}>
+	                            {getDocumentStatusLabel(selectedDocumentDetail.document.status)}
+	                          </Badge>
+	                          <span className="font-medium text-slate-900">{selectedDocumentDetail.document.title}</span>
+	                        </div>
                         <p>문서 종류: {selectedDocumentDetail.document.documentTypeKey}</p>
                         <p>최신 버전: {selectedDocumentDetail.latestVersion?.versionNumber || '-'}</p>
                         <p>최근 요청 링크와 받을 사람 설정은 아래 지금 할 작업에서 진행합니다.</p>
@@ -5947,10 +5984,11 @@ export default function ProjectPage() {
                     <CardTitle>선택 문서</CardTitle>
                     <CardDescription>현장 문서를 선택하면 상태와 삭제 작업을 보여줍니다.</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <EmptyState
-                      title="선택된 항목이 없습니다."
-                      description="왼쪽의 현장 문서 목록에서 작업할 문서를 선택해 주세요."
+	                  <CardContent className="space-y-4">
+                    {renderProjectCanvasOwnerSettingsToggle()}
+	                    <EmptyState
+	                      title="선택된 항목이 없습니다."
+	                      description="왼쪽의 현장 문서 목록에서 작업할 문서를 선택해 주세요."
                     />
                   </CardContent>
                 </Card>
@@ -5980,6 +6018,7 @@ export default function ProjectPage() {
             embedded
             surface="project"
             renderMode="current-work-panel"
+            applyStoredCanvasOwnerSettings={projectCanvasOwnerSettingsEnabled}
           />
         ) : selectedDocumentListItem ? (
           <Card className="border-slate-200">

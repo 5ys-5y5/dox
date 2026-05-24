@@ -30,7 +30,6 @@
 - 문서 생성, 요청 링크 API, 구성원 API, 캔버스 내부 동작은 이번 변경 범위가 아니다.
 - `/documents`가 문서 기능 설정의 주인이다. `/project`는 설정 UI를 만들지 않고 documents owner 설정을 읽어 적용한다.
 - `/documents`에서 구현된 주요 기능은 owner 설정으로 ON/OFF 할 수 있어야 한다.
-- `/documents`의 환경설정 UI는 `/canvas` 환경설정 화면의 공통 UI 구조를 적극적으로 재사용한다.
 
 ## 화이트리스트
 
@@ -41,14 +40,6 @@
 | `docs/0524projcomp.md` | 설계, 체크리스트, 백업/복구 기준 갱신 |
 | `docs/diff/0524projcomp-00/**` | 구현 전 백업 코드 보관 |
 | `docs/diff/0524projcomp-01/**` | 잘못된 `/project` 로컬 설정 구현 정정 전 백업 코드 보관 |
-| `docs/diff/0524projcomp-02/**` | `/canvas` 환경설정 UI 공통화 전 백업 코드 보관 |
-| `docs/diff/0524projcomp-03/**` | 문서 기능 환경설정 3열 통일 전 백업 코드 보관 |
-| `docs/diff/0524projcomp-04/**` | 관리 대상 페이지 선택 UI 공통화 전 백업 코드 보관 |
-| `docs/diff/0524projcomp-05/**` | 문서 기능 설정 적용 출력 구분선 추가 전 백업 코드 보관 |
-| `docs/diff/0524projcomp-06/**` | `/documents` 출력 surface 파라미터 적용 전 백업 코드 보관 |
-| `src/components/ui/OwnerSettingsLayout.tsx` | `/canvas`, `/documents` 환경설정 UI 공통 컴포넌트 |
-| `src/app/canvas/page.tsx` | 기존 `/canvas` 환경설정 UI를 공통 컴포넌트 사용으로 전환 |
-| `src/app/documents/page.tsx` | `/documents` 출력 surface URL 파라미터 해석 |
 | `src/app/documents/_owner/documentOwnerSettings.ts` | `/documents` owner가 소유하는 페이지별 문서 기능 설정 저장/조회 |
 | `src/app/documents/_owner/documentOwnerTypes.ts` | `DocumentsOwnerWorkspace` 렌더 모드 타입 추가 |
 | `src/app/documents/_owner/DocumentsOwnerWorkspace.tsx` | `current-work-panel` 단독 렌더 모드와 중앙 owner 설정 적용 |
@@ -118,16 +109,6 @@ docs/diff/0524projcomp-01/
 `src/app/documents/_owner/documentOwnerSettings.ts`는 구현 전 부재 상태를
 `documentOwnerSettings.ts.before.txt`로 기록한다.
 
-`/canvas` 환경설정 UI 공통화 전 백업 위치:
-
-```text
-docs/diff/0524projcomp-02/
-```
-
-`0524projcomp-02`는 `/canvas` 환경설정 UI를 공통 컴포넌트로 추출하기 전 복구 지점이다.
-신규 파일 `src/components/ui/OwnerSettingsLayout.tsx`는 구현 전 부재 상태를
-`OwnerSettingsLayout.tsx.before.txt`로 기록한다.
-
 ## 설계
 
 ### 1. 렌더 모드 추가
@@ -144,7 +125,6 @@ export type DocumentsOwnerWorkspaceProps = {
   hidePageHeader?: boolean;
   embedded?: boolean;
   surface?: DocumentsOwnerSurface;
-  outputSurface?: DocumentsOwnerSurface;
   renderMode?: DocumentsOwnerRenderMode;
 };
 ```
@@ -220,22 +200,6 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 - `applyStoredCanvasOwnerSettings`: 해당 surface에서 내부 `CanvasOwnedWorkspace`에 `/canvas` 저장 설정을 적용할지 정한다.
 - `/documents` full 화면은 `문서 기능 설정` 패널을 렌더링하고, 이 패널에서 surface별 ON/OFF를 변경한다.
 - `/project`는 이 설정 UI를 렌더링하지 않는다. `DocumentsOwnerWorkspace surface="project"`가 중앙 설정을 읽어 자동 적용한다.
-- `/documents`는 `ownerSurface` URL 파라미터로 실제 출력에 적용할 surface 설정을 정한다.
-- `/documents?ownerSurface=project`는 `project` 설정을 적용해 출력하고, `/documents?ownerSurface=documents`는 `documents` 설정을 적용해 출력한다.
-- `ownerSurface`, `documentsOwnerSurface`, `settingsSurface`, `surface`, `ownerPage`, `page` 중 유효한 첫 surface 값을 읽는다.
-- `/documents`에서 관리 대상 surface를 선택하면 URL의 `ownerSurface`도 함께 갱신해 환경설정 대상과 아래 출력 대상이 다르게 보이지 않게 한다.
-
-### 6. `/canvas` 환경설정 UI 재사용
-
-`/canvas`의 환경설정 화면에서 쓰는 공통 UI 패턴을 `src/components/ui/OwnerSettingsLayout.tsx`로 분리한다.
-
-- `OwnerSettingsTabList`: `/canvas`의 `페이지`/`모드` 탭과 `/documents`의 surface 탭을 같은 컴포넌트로 렌더링한다.
-- `OwnerSettingsManagedTargetControls`: `/canvas`의 관리 대상 페이지 선택 목록과 상세 요약 UI를 `/documents` surface 선택에도 같이 사용한다.
-- `OwnerSettingsActionBar`: `/canvas`의 `저장 전`/`저장됨`, `되돌리기`, `설정 저장` UI를 `/documents` 환경설정에서도 사용한다.
-- `OwnerSettingsSectionHeader`: `/canvas` 설정 섹션 헤더와 `/documents` 설정 섹션 헤더를 같은 밀도와 구조로 렌더링한다.
-- `/documents` 환경설정 패널 아래에는 `/canvas`처럼 `Divider`를 두어 설정이 적용된 실제 출력 영역의 시작점을 표시한다.
-- `/documents` 설정 변경은 `/canvas`처럼 draft 상태를 먼저 변경하고, `설정 저장` 시 localStorage에 확정한다.
-- `/project`는 저장된 `/documents` owner 설정만 읽고, 별도 설정 UI를 만들지 않는다.
 
 ## 체크리스트
 
@@ -260,17 +224,6 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 - [x] OFF 처리된 `지금 할 작업` 단계의 기존 선택값은 요청 링크 생성 대상에서 제외한다.
 - [x] `문서 기능 설정`에서 `이 문서 기록`을 ON/OFF 한다.
 - [x] `문서 기능 설정`에서 surface별 `/canvas` 저장 설정 적용 ON/OFF를 관리한다.
-- [x] `/canvas` 환경설정 UI의 탭, 저장 액션바, 섹션 헤더를 공통 컴포넌트로 분리했다.
-- [x] `/canvas` 환경설정 화면이 공통 컴포넌트를 사용한다.
-- [x] `/documents` 문서 기능 환경설정이 공통 컴포넌트를 사용한다.
-- [x] `/documents` 문서 기능 환경설정은 `/canvas`처럼 `저장 전`/`저장됨`, `되돌리기`, `설정 저장` 흐름을 사용한다.
-- [x] `/documents` 문서 기능 환경설정의 ON/OFF 항목 그리드는 모두 3열 구조를 사용한다.
-- [x] `/documents`의 `문서 관리`, `현장 관리` 선택 UI는 `/canvas`의 관리 대상 페이지 선택 UI와 같은 공통 컴포넌트를 사용한다.
-- [x] `/documents` 문서 기능 환경설정 아래에 `/canvas`와 같은 출력 시작 `Divider`를 표시한다.
-- [x] `/documents`는 URL 파라미터로 실제 출력에 적용할 surface를 지정할 수 있다.
-- [x] `/documents?ownerSurface=project`에서는 `project`의 `documentSelectionMode`가 아래 출력에 적용된다.
-- [x] `/documents` 환경설정의 관리 대상 선택과 아래 출력 대상이 같은 surface를 가리킨다.
-- [x] `/documents` 환경설정에서 선택한 관리 대상은 URL의 `ownerSurface`를 갱신한다.
 - [x] `/documents` 페이지는 기존 전체 화면 구조를 유지한다.
 - [x] `/project` 우측 카드에서 `선택 문서 요청 링크 설정` 아래 owner 임베드를 제거했다.
 - [x] `/project` 하단 기존 `CanvasOwnedWorkspace` 자리를 `DocumentsOwnerWorkspace renderMode="current-work-panel"`로 교체했다.
@@ -287,7 +240,6 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 - [x] `git diff --check`를 통과했다.
 - [x] 가능한 경우 `npx esbuild src/app/documents/page.tsx --bundle --platform=browser --format=esm --outfile=/tmp/documents-page.mjs`를 통과했다.
 - [x] 가능한 경우 `npx esbuild src/app/project/page.tsx --bundle --platform=browser --format=esm --outfile=/tmp/project-page.mjs`를 통과했다.
-- [x] 가능한 경우 `npx esbuild src/app/canvas/page.tsx --bundle --platform=browser --format=esm --outfile=/tmp/canvas-page.mjs`를 통과했다.
 
 ## 브라우저 확인 기준
 
@@ -308,8 +260,6 @@ history panel을 렌더링하지 않고 `renderCurrentWorkPanel()` 결과만 반
 src/app/documents/_owner/documentOwnerTypes.ts
 src/app/documents/_owner/DocumentsOwnerWorkspace.tsx
 src/app/documents/_owner/documentOwnerSettings.ts
-src/components/ui/OwnerSettingsLayout.tsx
-src/app/canvas/page.tsx
 src/app/documents/_owner/index.ts
 src/app/project/page.tsx
 ```
@@ -330,18 +280,8 @@ src/app/project/page.tsx
 - 2026-05-24: `문서 기능 설정`을 확장해 `작업할 문서 고르기`의 `picker`/`host` 전환, `지금 할 작업` 1~4단계, `이 문서 기록`, `/canvas` 저장 설정 적용 여부를 surface별로 ON/OFF 하게 했다.
 - 2026-05-24: 모든 `지금 할 작업` 단계가 OFF이면 `켜진 작업 단계가 없습니다` 안내를 표시하게 했다.
 - 2026-05-24: OFF 처리된 `지금 할 작업` 단계의 기존 선택값이 요청 링크 생성에 포함되지 않도록 필터링했다.
-- 2026-05-24: `/canvas` 환경설정 UI 공통화 전 백업을 `docs/diff/0524projcomp-02/`에 생성하고 SHA-256 해시를 기록했다.
-- 2026-05-24: `OwnerSettingsLayout.tsx`를 추가해 `/canvas` 환경설정의 탭, 저장 액션바, 섹션 헤더를 공통 UI로 분리했다.
-- 2026-05-24: `/canvas` 환경설정 화면과 `/documents` 문서 기능 환경설정이 같은 공통 UI 컴포넌트를 사용하게 했다.
-- 2026-05-24: `/documents` 문서 기능 환경설정 저장 흐름을 `/canvas`와 같은 draft/save/reset 방식으로 변경했다.
-- 2026-05-24: 문서 기능 환경설정의 ON/OFF 항목 그리드를 모두 3열 구조로 통일했다.
-- 2026-05-24: `/canvas`의 관리 대상 페이지 선택 UI를 `OwnerSettingsManagedTargetControls`로 공통화하고, `/documents`의 `문서 관리`, `현장 관리` 선택에도 같은 UI를 적용했다.
-- 2026-05-24: `/documents` 문서 기능 환경설정 아래에 `문서 기능 · {적용 surface} · 설정 적용 출력` Divider를 추가해 설정 적용 출력 영역 시작점을 표시했다.
-- 2026-05-24: `/documents`가 `ownerSurface` URL 파라미터를 읽어 실제 출력에 적용할 surface 설정을 정하게 했다.
-- 2026-05-24: `/documents`의 관리 대상 surface 선택이 URL `ownerSurface`를 갱신하고, 아래 출력도 같은 surface 설정을 읽게 했다.
 - 2026-05-24: 정정 후 `/project`에서 `페이지별 캔버스 설정`, `project.canvasOwnerSettingsEnabled`, `projectCanvasOwnerSettingsEnabled` 흔적이 검색되지 않는 것을 확인했다.
 - 2026-05-24: 정정 후 `git diff --check`, `docs/diff/0524projcomp-01` SHA-256 검증, `/documents`와 `/project` esbuild 번들 검증을 통과했다.
 - 2026-05-24: `git diff --check`, 금지 문구 검색, `renderMode` 연결 검색, `/documents`와 `/project` esbuild 번들 검증을 통과했다.
-- 2026-05-24: `/canvas` 환경설정 UI 공통화 후 `git diff --check`, `/canvas`, `/documents`, `/project` esbuild 번들 검증을 통과했다.
 - 2026-05-24: `http://localhost:3001/project`는 포트 리슨 프로세스가 있었지만 이 세션의 `curl`에서 연결이 거부되어 브라우저 자동 확인은 수행하지 못했다.
 - 2026-05-24: 대체 포트 `3002`로 `next dev` 실행을 시도했지만 sandbox에서 `listen EPERM: operation not permitted 127.0.0.1:3002`로 실패했다.

@@ -174,7 +174,8 @@ export default function HomePage() {
                       href={page.href}
                       className={cn(
                         'flex min-h-[180px] flex-col justify-between rounded-2xl p-5 transition-colors',
-                        pageCardToneClassNameByVariant[statusVariant]
+                        pageCardToneClassNameByVariant[statusVariant],
+                        legacyTextClassName
                       )}
                     >
                       <div className="space-y-3">

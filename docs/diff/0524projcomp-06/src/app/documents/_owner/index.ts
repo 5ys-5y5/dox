@@ -7,4 +7,4 @@ export {
   useDocumentsOwnerSettings,
 } from './documentOwnerSettings';
 export type { DocumentsOwnerSettings, DocumentsOwnerSettingsStore } from './documentOwnerSettings';
-export type { DocumentsOwnerRenderMode, DocumentsOwnerSurface, DocumentsOwnerWorkspaceProps } from './documentOwnerTypes';
+export type { DocumentsOwnerRenderMode, DocumentsOwnerWorkspaceProps } from './documentOwnerTypes';

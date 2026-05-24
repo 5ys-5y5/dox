@@ -5,7 +5,6 @@ import * as React from 'react';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/Card';
-import { Divider } from '../../../components/ui/Divider';
 import { EntityPicker } from '../../../components/ui/EntityPicker';
 import { Input } from '../../../components/ui/Input';
 import { MultiEntityPicker } from '../../../components/ui/MultiEntityPicker';
@@ -513,18 +512,13 @@ export function DocumentsOwnerWorkspace({
   hidePageHeader = false,
   embedded = false,
   surface = 'documents',
-  outputSurface,
   renderMode = 'full',
 }: DocumentsOwnerWorkspaceProps) {
   const pathname = usePathname();
   const router = useRouter();
   const documentsOwnerSettings = useDocumentsOwnerSettings();
-  const appliedSurface = outputSurface || surface;
-  const appliedManagedSurface =
-    documentsOwnerManagedSurfaces.find((item) => item.surface === appliedSurface) ||
-    documentsOwnerManagedSurfaces[0];
-  const [activeOwnerSettingsSurface, setActiveOwnerSettingsSurface] = React.useState<DocumentsOwnerSurface>(appliedSurface);
-  const surfaceOwnerSettings = documentsOwnerSettings.resolveSurfaceSettings(appliedSurface);
+  const [activeOwnerSettingsSurface, setActiveOwnerSettingsSurface] = React.useState<DocumentsOwnerSurface>('documents');
+  const surfaceOwnerSettings = documentsOwnerSettings.resolveSurfaceSettings(surface);
   const documentPickerEnabled = !hideDocumentPicker && surfaceOwnerSettings.documentSelectionMode === 'picker';
   const requestSetupSteps = React.useMemo(
     () => documentsOwnerRequestSetupSteps.filter((step) => surfaceOwnerSettings[step.settingKey]),
@@ -577,57 +571,6 @@ export function DocumentsOwnerWorkspace({
   const documentListLoadSeqRef = React.useRef(0);
   const documentContextLoadSeqRef = React.useRef(0);
   const shouldSyncSelectionQuery = surface === 'documents' && !embedded && documentPickerEnabled;
-
-  React.useEffect(() => {
-    setActiveOwnerSettingsSurface(appliedSurface);
-  }, [appliedSurface]);
-
-  React.useEffect(() => {
-    if (surface !== 'documents' || embedded || renderMode !== 'full' || typeof window === 'undefined') {
-      return;
-    }
-
-    const nextSearchParams = new URLSearchParams(window.location.search);
-    const currentSurface = nextSearchParams.get('ownerSurface')?.trim();
-
-    if (currentSurface === appliedSurface) {
-      return;
-    }
-
-    nextSearchParams.set('ownerSurface', appliedSurface);
-    const nextQueryString = nextSearchParams.toString();
-    const nextHref = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
-    const currentHref = `${window.location.pathname}${window.location.search}`;
-
-    if (currentHref === nextHref) {
-      return;
-    }
-
-    router.replace(nextHref, { scroll: false });
-  }, [appliedSurface, embedded, pathname, renderMode, router, surface]);
-
-  const updateOutputSurface = React.useCallback(
-    (nextSurface: DocumentsOwnerSurface) => {
-      setActiveOwnerSettingsSurface(nextSurface);
-
-      if (surface !== 'documents' || embedded || renderMode !== 'full' || typeof window === 'undefined') {
-        return;
-      }
-
-      const nextSearchParams = new URLSearchParams(window.location.search);
-      nextSearchParams.set('ownerSurface', nextSurface);
-      const nextQueryString = nextSearchParams.toString();
-      const nextHref = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
-      const currentHref = `${window.location.pathname}${window.location.search}`;
-
-      if (currentHref === nextHref) {
-        return;
-      }
-
-      router.replace(nextHref, { scroll: false });
-    },
-    [embedded, pathname, renderMode, router, surface]
-  );
 
   React.useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -2098,7 +2041,7 @@ export function DocumentsOwnerWorkspace({
       <div className="min-w-0">
         {selectedDocumentInitialDraft ? (
           <CanvasOwnedWorkspace
-            surface={appliedSurface}
+            surface={surface === 'project' ? 'project' : 'documents'}
             key={selectedDocumentInitialDraft.draftKey}
             initialDraft={selectedDocumentInitialDraft}
             workspaceMode="read"
@@ -2466,7 +2409,7 @@ export function DocumentsOwnerWorkspace({
                 ],
               };
             })}
-            onChange={(value) => updateOutputSurface(value as DocumentsOwnerSurface)}
+            onChange={(value) => setActiveOwnerSettingsSurface(value as DocumentsOwnerSurface)}
           />
 
           <div className="space-y-1.5" {...documentsOwnerItem('owner-settings-display-section', '문서 출력 방식 설정 섹션')}>
@@ -2633,20 +2576,6 @@ export function DocumentsOwnerWorkspace({
     );
   };
 
-  const renderOwnerSettingsOutputDivider = () => {
-    if (surface !== 'documents' || renderMode !== 'full') {
-      return null;
-    }
-
-    return (
-      <Divider
-        label={`문서 기능 · ${appliedManagedSurface.label} · 설정 적용 출력`}
-        className="py-0"
-        {...documentsOwnerItem('owner-settings-output-divider', '문서 기능 설정 적용 출력 시작 구분선')}
-      />
-    );
-  };
-
   if (renderMode === 'current-work-panel') {
     return renderCurrentWorkPanel();
   }
@@ -2689,8 +2618,6 @@ export function DocumentsOwnerWorkspace({
       ) : null}
 
       {renderOwnerSettingsPanel()}
-
-      {renderOwnerSettingsOutputDivider()}
 
       {renderDocumentSelectPanel()}
 
