@@ -14,6 +14,7 @@ import {
   OwnerSettingsManagedTargetControls,
   OwnerSettingsSectionHeader,
 } from '../../../components/ui/OwnerSettingsLayout';
+import { OwnerSharedUiPreview } from '../../../components/ui/OwnerSharedUiPreview';
 import { SettingToggleRow } from '../../../components/ui/SettingToggleRow';
 import { CanvasOwnedWorkspace } from '../../canvas/ownerPolicy';
 import type { TemplateEditWorkspaceInitialDraft } from '../../../components/template/TemplateEditWorkspace';
@@ -2595,20 +2596,14 @@ export function DocumentsOwnerWorkspace({
       return null;
     }
 
+    if (selectedDocumentDetail) {
+      return renderRequestLinkSetup();
+    }
+
     return (
       <Card className="border-slate-200" {...documentsOwnerItem('current-work-panel', '지금 할 작업 패널')}>
-        <CardHeader {...documentsOwnerItem('current-work-panel-header', '지금 할 작업 제목 영역')}>
-          <CardTitle {...documentsOwnerItem('current-work-panel-title', '지금 할 작업 제목')}>
-            {documentPickerEnabled ? '2. 지금 할 작업' : '지금 할 작업'}
-          </CardTitle>
-          <CardDescription {...documentsOwnerItem('current-work-panel-description', '지금 할 작업 설명')}>
-            요청 링크 설정 안에서 받을 값과 받을 사람을 정합니다.
-          </CardDescription>
-        </CardHeader>
         <CardContent className="space-y-4" {...documentsOwnerItem('current-work-panel-content', '지금 할 작업 내용')}>
-          {selectedDocumentDetail ? (
-            renderRequestLinkSetup()
-          ) : selectedDocumentDetailLoading ? (
+          {selectedDocumentDetailLoading ? (
             <div
               className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-600"
               role="status"
@@ -2630,6 +2625,19 @@ export function DocumentsOwnerWorkspace({
           )}
         </CardContent>
       </Card>
+    );
+  };
+
+  const renderOwnerSettingsSharedUiPreview = () => {
+    if (surface !== 'documents' || renderMode !== 'full') {
+      return null;
+    }
+
+    return (
+      <OwnerSharedUiPreview
+        ownerLabel={`문서 기능 · ${appliedManagedSurface.label}`}
+        itemAttributes={documentsOwnerItem}
+      />
     );
   };
 
@@ -2697,6 +2705,8 @@ export function DocumentsOwnerWorkspace({
       {renderCurrentWorkPanel()}
 
       {renderHistoryPanel()}
+
+      {renderOwnerSettingsSharedUiPreview()}
     </div>
   );
 }

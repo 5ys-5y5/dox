@@ -5,7 +5,6 @@
 `/project`에서 리스트에 값이 등록될 때 행 높이가 커졌다가 줄어드는 것처럼 보이는 모션을 사후 차단 CSS로 덮지 않고, 리스트 컴포넌트의 렌더링 원인에서 제거한다.
 
 현재 `/project`의 `.project-no-motion * { animation: none; transition: none; }` 방식은 금지한다. 이 규칙은 페이지 전체 상호작용을 일괄 무력화하므로 원인 해결이 아니다.
-`MejaiScrollTable` 내부에는 `Button`, `Badge` 같은 공통 UI가 셀 콘텐츠로 들어올 수 있으므로, 테이블 루트인 `data-mejai-scroll-table="1"` 하위에서는 공통 UI의 `transition-colors`까지 무효화한다.
 
 ## 절대 금지 범위
 
@@ -25,7 +24,6 @@
 
 1. `src/components/ui/MejaiScrollTable.tsx`
 2. `src/app/project/page.tsx`
-3. `src/components/design-system/conversation/runtimeUiCatalog.ts`
 
 검토만 허용되는 파일:
 
@@ -41,8 +39,6 @@
 2. 이 측정은 현재 `React.useEffect`에서 실행된다. 행 추가 직후 첫 paint 이후에 보정 상태가 들어오면 사용자는 행 높이가 한 번 커졌다가 줄어드는 것처럼 볼 수 있다.
 3. `MejaiScrollTable` 내부에 `transition-opacity duration-200`, `transition-colors`가 남아 있다. 높이 전용 transition은 아니지만 리스트 컴포넌트 자체에 motion class가 남아 있으므로 제거 대상이다.
 4. `/project`는 `.project-no-motion` 전역 규칙으로 animation/transition을 모두 끄고 있다. 이는 원인 제거가 아니라 사후 처리이므로 마지막에 제거한다.
-5. `MejaiScrollTable` 셀 안에 렌더링되는 공통 `Button`, `Badge`는 컴포넌트 기본 클래스에 `transition-colors`를 가진다. 셀 콘텐츠가 바뀌면 이 공통 클래스가 다시 들어오므로, 테이블 내부에서 재발 방지용 scoped no-motion 규칙이 필요하다.
-6. `src/components/design-system/conversation/runtimeUiCatalog.ts`는 `data-mejai-scroll-*` HTML 문자열을 별도로 만들며, 좌우 스크롤 힌트에 `transition:opacity .2s ease`를 inline style로 갖고 있었다. 같은 data attribute 계열이므로 같이 제거한다.
 
 ## 구현 설계
 
@@ -52,8 +48,6 @@
 - `ResizeObserver`와 `bodyRowHeights` 자체는 유지한다. filler 영역의 구조적 높이 동기화 기능이므로 삭제하지 않는다.
 - `transition-opacity duration-200`를 제거해 좌우 스크롤 힌트가 즉시 표시/숨김되게 한다.
 - 행의 `transition-colors`를 제거한다. hover 색상은 즉시 바뀌어도 된다.
-- `data-mejai-scroll-table="1"` 루트와 모든 하위 요소, `::before`, `::after`에는 `animation: none !important`, `transition: none !important`, `scroll-behavior: auto !important`를 적용한다.
-- 이 scoped guard는 페이지 전체가 아니라 Mejai scroll table 내부에만 적용한다.
 - 높이 보정 로직을 타이머, CSS animation, `requestAnimationFrame` 기반 지연 처리로 대체하지 않는다.
 
 ### C02. `/project`의 사후 차단 규칙 제거
@@ -93,10 +87,6 @@
 - [x] DELMOTION-V02: `rg -n "auto-height|auto-width|grow_height|grow_width|data-template-frame-auto" src/app/canvas src/components/template src/lib src/services`는 읽기 검증만 수행하고 결과 파일을 수정하지 않는다.
 - [x] DELMOTION-V03: `/project`에서 현장 문서, 서명 요청, 필수 사진, 필수 파일, 구성원, 문서 권한 목록에 항목을 추가하거나 목록 데이터가 갱신될 때 행 높이 모션이 보이지 않는지 확인한다.
 - [x] DELMOTION-V04: `/member-access`의 현장 접근 권한, 접근 가능한 문서 목록에서 표 레이아웃과 클릭 이동이 유지되는지 확인한다.
-- [x] DELMOTION-B02: 2026-05-24 재발 방지 보강 전 상태를 `docs/diff/2026-05-24_DELMOTION-02/`에 백업한다.
-- [x] DELMOTION-C04: `MejaiScrollTable` 루트 하위 전체에 scoped no-motion guard를 추가한다.
-- [x] DELMOTION-C05: `runtimeUiCatalog.ts`의 `data-mejai-scroll-*` HTML 문자열에서도 opacity transition을 제거하고 같은 no-motion guard를 추가한다.
-- [x] DELMOTION-V05: `data-mejai-scroll-table` 하위 후손의 computed `transitionDuration`과 `animationDuration`이 0인지 확인한다.
 
 ## 구현 기록
 
@@ -106,14 +96,10 @@
 - 2026-05-21: DELMOTION-V02 완료. 자동 높이/너비 관련 경로는 검색만 수행했고 파일 수정은 하지 않았다.
 - 2026-05-21: DELMOTION-V03 완료. `/project?projectId=1b75a399-09c0-45b7-ab2a-c7cb4b7d791c&documentId=2f6d0be2-8ba5-4d69-aacf-845275a66908`에서 현장 문서 새로고침, 문서 상태 펼침, 필수 사진, 필수 파일, 기록 값, 서명 요청, 구성원 문서 권한 목록을 브라우저로 측정했다. 필수 파일은 임시 항목 추가/삭제까지 수행했다. 측정 결과 `transitionrun`, `transitionstart`, `animationstart` 이벤트 0건, 같은 행의 높이 변화 0건이다. 측정 산출물은 `/private/tmp/delmotion-v03-project.json`, `/private/tmp/delmotion-v03-file-add.json`이다.
 - 2026-05-21: DELMOTION-V04 완료. 샌드박스에서 새 `next dev -p 3001` 서버 바인딩은 `listen EPERM`으로 불가했으므로, `/member-access`에 이미 로드된 클라이언트 화면에서 세션 API 응답만 검증용 fixture로 주입하고, 현장 접근 권한 목록 렌더, 현장 행 클릭 필터, 문서 검색 필터를 브라우저로 측정했다. 소스와 DB는 수정하지 않았다. 측정 결과 `transitionrun`, `transitionstart`, `animationstart` 이벤트 0건, 같은 행의 높이 변화 0건이다. 문서 열기 링크가 `/member-access/document/delmotion-doc-a1?phoneNumber=01093107159` 형태로 유지되는 것도 확인했다. 측정 산출물은 `/private/tmp/delmotion-v04-member-access.json`, `/private/tmp/delmotion-v04-member-access.snapshot.txt`이다.
-- 2026-05-24: DELMOTION-B02 완료. `src/components/ui/MejaiScrollTable.tsx`, `src/components/design-system/conversation/runtimeUiCatalog.ts`, `docs/delmotion.md`를 `docs/diff/2026-05-24_DELMOTION-02/`에 백업하고 SHA-256 해시를 기록했다.
-- 2026-05-24: DELMOTION-C04 완료. `MejaiScrollTable`의 `data-mejai-scroll-table="1"` 루트 하위 전체에 scoped no-motion guard를 추가해 셀 안의 공통 `Button`, `Badge`가 가진 `transition-colors`도 테이블 내부에서는 무효화했다.
-- 2026-05-24: DELMOTION-C05 완료. `runtimeUiCatalog.ts`의 `data-mejai-scroll-*` HTML 문자열에서 inline opacity transition을 제거하고 같은 no-motion guard를 추가했다.
 
 ## 완료 기준
 
 - `/project`에 페이지 전체 motion 차단 CSS가 남아 있지 않다.
 - 리스트 컴포넌트 자체에 행/스크롤 힌트 motion class가 남아 있지 않다.
-- 리스트 셀 안에 공통 UI 컴포넌트가 들어와도 `data-mejai-scroll-table="1"` 하위에서는 transition/animation이 computed style 기준 0이다.
 - 행 높이 측정 보정이 사용자의 눈에 paint 이후 변경으로 보이지 않는다.
 - `/canvas`와 템플릿 자동 높이/너비 관련 파일은 수정되지 않는다.

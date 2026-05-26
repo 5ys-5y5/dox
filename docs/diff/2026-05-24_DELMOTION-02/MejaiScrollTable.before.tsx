@@ -414,16 +414,6 @@ export function MejaiScrollTable({
       style={{ marginTop: 4 }}
     >
       <style>{`
-        [data-mejai-scroll-table="1"],
-        [data-mejai-scroll-table="1"] *,
-        [data-mejai-scroll-table="1"]::before,
-        [data-mejai-scroll-table="1"]::after,
-        [data-mejai-scroll-table="1"] *::before,
-        [data-mejai-scroll-table="1"] *::after {
-          animation: none !important;
-          transition: none !important;
-          scroll-behavior: auto !important;
-        }
         [data-mejai-scroll-area="1"] {
           scrollbar-width: none;
           -ms-overflow-style: none;

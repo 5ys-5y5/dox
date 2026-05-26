@@ -64,6 +64,7 @@ import {
   OwnerSettingsSectionHeader,
   OwnerSettingsTabList,
 } from '../../components/ui/OwnerSettingsLayout';
+import { OwnerSharedUiPreview } from '../../components/ui/OwnerSharedUiPreview';
 import { SettingToggleRow } from '../../components/ui/SettingToggleRow';
 import {
   extractDocumentCanvasLabelValuesFromHtml,
@@ -222,6 +223,11 @@ const canvasViewModeOptions: Array<{ value: CanvasOwnerSettings['canvasViewMode'
   { value: 'position', label: canvasViewModeLabels.position },
   { value: 'metadata', label: canvasViewModeLabels.metadata },
 ];
+
+const canvasOwnerItem = (item: string, name: string) => ({
+  'data-canvas-owner-item': item,
+  'data-canvas-owner-name': name,
+});
 
 const managedCanvasPages: ManagedCanvasPage[] = [
   {
@@ -2939,6 +2945,13 @@ export default function CanvasOwnerPage() {
                 {loadingDocumentDetail ? '문서 초안을 준비하는 중입니다.' : '문서를 선택하면 공용 캔버스가 여기에 표시됩니다.'}
               </div>
             )}
+          </div>
+
+          <div className="xl:col-span-2">
+            <OwnerSharedUiPreview
+              ownerLabel={`공용 캔버스 · ${selectedManagedPage.label}`}
+              itemAttributes={canvasOwnerItem}
+            />
           </div>
         </div>
       </div>
