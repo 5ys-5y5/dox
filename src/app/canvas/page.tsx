@@ -72,7 +72,7 @@ import {
   materializeDocumentCanvasHtml,
   stringifyDocumentValue,
 } from '../../lib/documentCanvasState';
-import { annotateOwnerUnnamedElements } from '../../lib/ownerDomNaming';
+import { watchOwnerUnnamedElements } from '../../lib/ownerDomNaming';
 import type { DocumentDetailResult, DocumentListItem, DocumentRequestTaskDto } from '../../lib/documentDtos';
 import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../lib/memberAccessDtos';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
@@ -441,48 +441,21 @@ export default function CanvasOwnerPage() {
   const previewSettingSources = previewResolvedSettings.sources;
 
   React.useEffect(() => {
-    const root = canvasOwnerRootRef.current;
+    const canvasRoot = canvasOwnerRootRef.current;
 
-    if (!root) {
+    if (!canvasRoot) {
       return undefined;
     }
 
-    let animationFrameId = 0;
-
-    const annotate = () => {
-      animationFrameId = 0;
-      annotateOwnerUnnamedElements({
-        root,
-        itemAttribute: canvasOwnerItemAttribute,
-        nameAttribute: canvasOwnerNameAttribute,
-        autoNamedAttribute: canvasOwnerAutoNamedAttribute,
-        itemPrefix: 'canvas-auto',
-      });
-    };
-    const scheduleAnnotate = () => {
-      if (animationFrameId) {
-        return;
-      }
-
-      animationFrameId = window.requestAnimationFrame(annotate);
-    };
-
-    scheduleAnnotate();
-
-    const observer = new MutationObserver((mutations) => {
-      if (mutations.some((mutation) => mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
-        scheduleAnnotate();
-      }
+    return watchOwnerUnnamedElements({
+      root: canvasRoot,
+      itemAttribute: canvasOwnerItemAttribute,
+      nameAttribute: canvasOwnerNameAttribute,
+      autoNamedAttribute: canvasOwnerAutoNamedAttribute,
+      itemPrefix: 'canvas',
+      mutationDelayMs: 700,
+      pauseAfterPointerDownMs: 2500,
     });
-    observer.observe(root, { childList: true, subtree: true });
-
-    return () => {
-      observer.disconnect();
-
-      if (animationFrameId) {
-        window.cancelAnimationFrame(animationFrameId);
-      }
-    };
   }, []);
 
   React.useEffect(() => {

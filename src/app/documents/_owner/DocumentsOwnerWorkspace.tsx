@@ -33,7 +33,7 @@ import {
 } from '../../../lib/documentCanvasState';
 import type { DocumentDetailResult, DocumentListItem, DocumentRequestTaskDto, DocumentRequestTaskInput } from '../../../lib/documentDtos';
 import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../../lib/memberAccessDtos';
-import { annotateOwnerUnnamedElements } from '../../../lib/ownerDomNaming';
+import { watchOwnerUnnamedElements } from '../../../lib/ownerDomNaming';
 import type { SiteRecordDto } from '../../../lib/siteChecklistDtos';
 import { cn } from '../../../lib/utils';
 import { DocumentsOwnerClient } from './documentOwnerClient';
@@ -600,42 +600,15 @@ export function DocumentsOwnerWorkspace({
       return undefined;
     }
 
-    let animationFrameId = 0;
-
-    const annotate = () => {
-      animationFrameId = 0;
-      annotateOwnerUnnamedElements({
-        root,
-        itemAttribute: documentsOwnerItemAttribute,
-        nameAttribute: documentsOwnerNameAttribute,
-        autoNamedAttribute: documentsOwnerAutoNamedAttribute,
-        itemPrefix: 'documents-auto',
-      });
-    };
-    const scheduleAnnotate = () => {
-      if (animationFrameId) {
-        return;
-      }
-
-      animationFrameId = window.requestAnimationFrame(annotate);
-    };
-
-    scheduleAnnotate();
-
-    const observer = new MutationObserver((mutations) => {
-      if (mutations.some((mutation) => mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
-        scheduleAnnotate();
-      }
+    return watchOwnerUnnamedElements({
+      root,
+      itemAttribute: documentsOwnerItemAttribute,
+      nameAttribute: documentsOwnerNameAttribute,
+      autoNamedAttribute: documentsOwnerAutoNamedAttribute,
+      itemPrefix: 'documents',
+      mutationDelayMs: 700,
+      pauseAfterPointerDownMs: 2500,
     });
-    observer.observe(root, { childList: true, subtree: true });
-
-    return () => {
-      observer.disconnect();
-
-      if (animationFrameId) {
-        window.cancelAnimationFrame(animationFrameId);
-      }
-    };
   }, []);
 
   React.useEffect(() => {
