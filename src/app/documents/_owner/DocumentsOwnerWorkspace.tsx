@@ -9,6 +9,8 @@ import { Divider } from '../../../components/ui/Divider';
 import { EntityPicker } from '../../../components/ui/EntityPicker';
 import { Input } from '../../../components/ui/Input';
 import { MultiEntityPicker } from '../../../components/ui/MultiEntityPicker';
+import { OwnerLoadingState } from '../../../components/ui/OwnerLoadingState';
+import { OwnerPanelShell } from '../../../components/ui/OwnerPanelShell';
 import {
   OwnerSettingsActionBar,
   OwnerSettingsManagedTargetControls,
@@ -31,6 +33,7 @@ import {
 } from '../../../lib/documentCanvasState';
 import type { DocumentDetailResult, DocumentListItem, DocumentRequestTaskDto, DocumentRequestTaskInput } from '../../../lib/documentDtos';
 import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../../lib/memberAccessDtos';
+import { annotateOwnerUnnamedElements } from '../../../lib/ownerDomNaming';
 import type { SiteRecordDto } from '../../../lib/siteChecklistDtos';
 import { cn } from '../../../lib/utils';
 import { DocumentsOwnerClient } from './documentOwnerClient';
@@ -306,6 +309,11 @@ const documentsOwnerItem = (item: string, name: string) => ({
   'data-documents-owner-name': name,
 });
 
+const documentsOwnerItemAttribute = 'data-documents-owner-item';
+const documentsOwnerNameAttribute = 'data-documents-owner-name';
+const documentsOwnerAutoNamedAttribute = 'data-documents-owner-auto-named';
+const documentsCanvasOwnerSurface: DocumentsOwnerSurface = 'documents';
+
 type MediaRequestKind = 'photo' | 'file';
 type DocumentsOwnerRequestSetupStepKey = 'box-assignee' | 'photo' | 'file' | 'expiration';
 
@@ -519,6 +527,7 @@ export function DocumentsOwnerWorkspace({
 }: DocumentsOwnerWorkspaceProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const documentsOwnerRootRef = React.useRef<HTMLDivElement | null>(null);
   const documentsOwnerSettings = useDocumentsOwnerSettings();
   const appliedSurface = outputSurface || surface;
   const appliedManagedSurface =
@@ -526,6 +535,7 @@ export function DocumentsOwnerWorkspace({
     documentsOwnerManagedSurfaces[0];
   const [activeOwnerSettingsSurface, setActiveOwnerSettingsSurface] = React.useState<DocumentsOwnerSurface>(appliedSurface);
   const surfaceOwnerSettings = documentsOwnerSettings.resolveSurfaceSettings(appliedSurface);
+  const canvasSurfaceOwnerSettings = documentsOwnerSettings.resolveSurfaceSettings(documentsCanvasOwnerSurface);
   const documentPickerEnabled = !hideDocumentPicker && surfaceOwnerSettings.documentSelectionMode === 'picker';
   const requestSetupSteps = React.useMemo(
     () => documentsOwnerRequestSetupSteps.filter((step) => surfaceOwnerSettings[step.settingKey]),
@@ -582,6 +592,51 @@ export function DocumentsOwnerWorkspace({
   React.useEffect(() => {
     setActiveOwnerSettingsSurface(appliedSurface);
   }, [appliedSurface]);
+
+  React.useEffect(() => {
+    const root = documentsOwnerRootRef.current;
+
+    if (!root) {
+      return undefined;
+    }
+
+    let animationFrameId = 0;
+
+    const annotate = () => {
+      animationFrameId = 0;
+      annotateOwnerUnnamedElements({
+        root,
+        itemAttribute: documentsOwnerItemAttribute,
+        nameAttribute: documentsOwnerNameAttribute,
+        autoNamedAttribute: documentsOwnerAutoNamedAttribute,
+        itemPrefix: 'documents-auto',
+      });
+    };
+    const scheduleAnnotate = () => {
+      if (animationFrameId) {
+        return;
+      }
+
+      animationFrameId = window.requestAnimationFrame(annotate);
+    };
+
+    scheduleAnnotate();
+
+    const observer = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
+        scheduleAnnotate();
+      }
+    });
+    observer.observe(root, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, []);
 
   React.useEffect(() => {
     if (surface !== 'documents' || embedded || renderMode !== 'full' || typeof window === 'undefined') {
@@ -2110,33 +2165,33 @@ export function DocumentsOwnerWorkspace({
     }
 
     return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]" {...documentsOwnerItem('request-link-setup-layout', '요청 링크 설정 2열 배치')}>
-      <div className="min-w-0">
-        {selectedDocumentInitialDraft ? (
-          <CanvasOwnedWorkspace
-            surface={appliedSurface}
-            key={selectedDocumentInitialDraft.draftKey}
-            initialDraft={selectedDocumentInitialDraft}
-            workspaceMode="read"
-            hideHeader
-            hidePersistencePanel
-            applyStoredCanvasOwnerSettings={surfaceOwnerSettings.applyStoredCanvasOwnerSettings}
-            suppressInitialDraftLoadedMessage
-            templateNameReadOnly
-            saveDisabled
-            canvasSelectablePolicy={canvasSelectablePolicy}
-            selectedCanvasBoxes={selectedCanvasBoxes}
-            onCanvasSelectionChange={selectFieldsFromCanvasBoxes}
-          />
-        ) : (
-          <div
-            className="rounded-lg border border-dashed border-slate-200 px-4 py-12 text-center text-sm text-slate-500"
-            {...documentsOwnerItem('request-link-canvas-empty-state', '요청 링크 설정 문서 본문 없음 안내')}
-          >
-            표시할 문서 본문이 없습니다.
-          </div>
-        )}
-      </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]" {...documentsOwnerItem('request-link-setup-layout', '요청 링크 설정 2열 배치')}>
+        <div className="min-w-0" {...documentsOwnerItem('request-link-canvas-column', '요청 링크 설정 상자 편집 캔버스 열')}>
+          {selectedDocumentInitialDraft ? (
+            <CanvasOwnedWorkspace
+              surface={documentsCanvasOwnerSurface}
+              key={selectedDocumentInitialDraft.draftKey}
+              initialDraft={selectedDocumentInitialDraft}
+              workspaceMode="read"
+              hideHeader
+              hidePersistencePanel
+              applyStoredCanvasOwnerSettings={canvasSurfaceOwnerSettings.applyStoredCanvasOwnerSettings}
+              suppressInitialDraftLoadedMessage
+              templateNameReadOnly
+              saveDisabled
+              canvasSelectablePolicy={canvasSelectablePolicy}
+              selectedCanvasBoxes={selectedCanvasBoxes}
+              onCanvasSelectionChange={selectFieldsFromCanvasBoxes}
+            />
+          ) : (
+            <div
+              className="rounded-lg border border-dashed border-slate-200 px-4 py-12 text-center text-sm text-slate-500"
+              {...documentsOwnerItem('request-link-canvas-empty-state', '요청 링크 설정 문서 본문 없음 안내')}
+            >
+              표시할 문서 본문이 없습니다.
+            </div>
+          )}
+        </div>
 
       <aside
         className="min-w-0 space-y-4 border-t border-slate-200 pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0"
@@ -2623,28 +2678,23 @@ export function DocumentsOwnerWorkspace({
 
     return (
       <Card className="border-slate-200" {...documentsOwnerItem('current-work-panel', '지금 할 작업 패널')}>
-        <CardContent className="space-y-4" {...documentsOwnerItem('current-work-panel-content', '지금 할 작업 내용')}>
+        <OwnerPanelShell {...documentsOwnerItem('current-work-panel-content', '지금 할 작업 내용')}>
           {selectedDocumentDetailLoading ? (
-            <div
-              className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-600"
-              role="status"
-              aria-live="polite"
-              {...documentsOwnerItem('current-work-loading-state', '지금 할 작업 로딩 상태')}
-            >
-              <span className="mx-auto block h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" aria-hidden="true" />
-              <p className="mt-3 font-medium text-slate-900" {...documentsOwnerItem('current-work-loading-title', '지금 할 작업 로딩 제목')}>
-                문서 로딩 중
-              </p>
-              <p className="mt-1 text-xs text-slate-500" {...documentsOwnerItem('current-work-loading-description', '지금 할 작업 로딩 설명')}>
-                상자 편집 캔버스를 준비하고 있습니다.
-              </p>
-            </div>
+            <OwnerLoadingState
+              itemAttributes={documentsOwnerItem}
+              stateItemKey="current-work-loading-state"
+              stateItemName="지금 할 작업 로딩 상태"
+              titleItemKey="current-work-loading-title"
+              titleItemName="지금 할 작업 로딩 제목"
+              descriptionItemKey="current-work-loading-description"
+              descriptionItemName="지금 할 작업 로딩 설명"
+            />
           ) : (
             <p className="text-sm text-slate-500" {...documentsOwnerItem('current-work-empty-state', '지금 할 작업 빈 상태')}>
               문서를 고르면 요청 링크 설정을 시작할 수 있습니다.
             </p>
           )}
-        </CardContent>
+        </OwnerPanelShell>
       </Card>
     );
   };
@@ -2677,12 +2727,23 @@ export function DocumentsOwnerWorkspace({
   };
 
   if (renderMode === 'current-work-panel') {
-    return renderCurrentWorkPanel();
+    return (
+      <div
+        ref={documentsOwnerRootRef}
+        className="contents"
+        data-documents-owner-auto-name-root="documents-owner-current-work-panel"
+        {...documentsOwnerItem('documents-owner-current-work-root', '문서 관리 현재 작업 루트')}
+      >
+        {renderCurrentWorkPanel()}
+      </div>
+    );
   }
 
   return (
     <div
+      ref={documentsOwnerRootRef}
       className={cn(embedded ? 'space-y-6' : 'mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8 md:px-8')}
+      data-documents-owner-auto-name-root="documents-owner-page"
       {...documentsOwnerItem('documents-owner-root', '문서 관리 페이지 루트')}
     >
       {hidePageHeader ? null : (

@@ -72,6 +72,7 @@ import {
   materializeDocumentCanvasHtml,
   stringifyDocumentValue,
 } from '../../lib/documentCanvasState';
+import { annotateOwnerUnnamedElements } from '../../lib/ownerDomNaming';
 import type { DocumentDetailResult, DocumentListItem, DocumentRequestTaskDto } from '../../lib/documentDtos';
 import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../lib/memberAccessDtos';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
@@ -229,6 +230,10 @@ const canvasOwnerItem = (item: string, name: string) => ({
   'data-canvas-owner-name': name,
 });
 
+const canvasOwnerItemAttribute = 'data-canvas-owner-item';
+const canvasOwnerNameAttribute = 'data-canvas-owner-name';
+const canvasOwnerAutoNamedAttribute = 'data-canvas-owner-auto-named';
+
 const managedCanvasPages: ManagedCanvasPage[] = [
   {
     id: 'canvas',
@@ -355,6 +360,7 @@ export default function CanvasOwnerPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const canvasOwnerRootRef = React.useRef<HTMLElement | null>(null);
   const selectedManagedPageId = normalizeManagedCanvasPageId(searchParams.get('page'));
   const selectedManagedPage = getManagedCanvasPage(selectedManagedPageId);
   const workspaceMode = resolveManagedCanvasWorkspaceMode(selectedManagedPage, searchParams.get('mode'));
@@ -433,6 +439,51 @@ export default function CanvasOwnerPage() {
   );
   const previewSettings = previewResolvedSettings.settings;
   const previewSettingSources = previewResolvedSettings.sources;
+
+  React.useEffect(() => {
+    const root = canvasOwnerRootRef.current;
+
+    if (!root) {
+      return undefined;
+    }
+
+    let animationFrameId = 0;
+
+    const annotate = () => {
+      animationFrameId = 0;
+      annotateOwnerUnnamedElements({
+        root,
+        itemAttribute: canvasOwnerItemAttribute,
+        nameAttribute: canvasOwnerNameAttribute,
+        autoNamedAttribute: canvasOwnerAutoNamedAttribute,
+        itemPrefix: 'canvas-auto',
+      });
+    };
+    const scheduleAnnotate = () => {
+      if (animationFrameId) {
+        return;
+      }
+
+      animationFrameId = window.requestAnimationFrame(annotate);
+    };
+
+    scheduleAnnotate();
+
+    const observer = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
+        scheduleAnnotate();
+      }
+    });
+    observer.observe(root, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, []);
 
   React.useEffect(() => {
     const { settingsStore: nextSettingsStore, hasStoredSettings } = readCanvasOwnerSettingsFromStorage({
@@ -2692,7 +2743,12 @@ export default function CanvasOwnerPage() {
   );
 
   return (
-    <main className="min-h-screen bg-white">
+    <main
+      ref={canvasOwnerRootRef}
+      className="min-h-screen bg-white"
+      data-canvas-owner-auto-name-root="canvas-page"
+      {...canvasOwnerItem('canvas-page-root', '상자 편집 캔버스 페이지 루트')}
+    >
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
         <header className="space-y-3">
           <Badge variant="blue">CANVAS-OWNER-01</Badge>

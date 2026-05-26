@@ -5,6 +5,8 @@ import { Badge } from './Badge';
 import { Card } from './Card';
 import { Divider } from './Divider';
 import { EntityPicker } from './EntityPicker';
+import { OwnerLoadingState } from './OwnerLoadingState';
+import { OwnerPanelShell } from './OwnerPanelShell';
 import { OptionButtonGroup } from './OptionButtonGroup';
 import {
   OwnerSettingsActionBar,
@@ -50,9 +52,9 @@ function OwnerSharedUiPreviewSection({
         {...itemAttributes(`${itemBase}-preview-divider`, `${label} 미리보기 구분선`)}
       />
       <Card className="border-slate-200" {...itemAttributes(`${itemBase}-preview-panel`, `${label} 미리보기 패널`)}>
-        <div className="space-y-4 p-6" {...itemAttributes(`${itemBase}-preview-content`, `${label} 미리보기 내용`)}>
+        <OwnerPanelShell {...itemAttributes(`${itemBase}-preview-content`, `${label} 미리보기 내용`)}>
           {children}
-        </div>
+        </OwnerPanelShell>
       </Card>
     </section>
   );
@@ -74,20 +76,15 @@ export function OwnerSharedUiPreview({
         itemBase="owner-settings-loading"
         itemAttributes={itemAttributes}
       >
-        <div
-          className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-600"
-          role="status"
-          aria-live="polite"
-          {...itemAttributes('owner-settings-loading-preview-state', '로딩 UI 확인 상태')}
-        >
-          <span className="mx-auto block h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" aria-hidden="true" />
-          <p className="mt-3 font-medium text-slate-900" {...itemAttributes('owner-settings-loading-preview-title', '로딩 UI 확인 제목')}>
-            문서 로딩 중
-          </p>
-          <p className="mt-1 text-xs text-slate-500" {...itemAttributes('owner-settings-loading-preview-description', '로딩 UI 확인 설명')}>
-            상자 편집 캔버스를 준비하고 있습니다.
-          </p>
-        </div>
+        <OwnerLoadingState
+          itemAttributes={itemAttributes}
+          stateItemKey="owner-settings-loading-preview-state"
+          stateItemName="로딩 UI 확인 상태"
+          titleItemKey="owner-settings-loading-preview-title"
+          titleItemName="로딩 UI 확인 제목"
+          descriptionItemKey="owner-settings-loading-preview-description"
+          descriptionItemName="로딩 UI 확인 설명"
+        />
       </OwnerSharedUiPreviewSection>
 
       <OwnerSharedUiPreviewSection
