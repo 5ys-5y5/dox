@@ -25694,63 +25694,6 @@ export default function TemplateEditWorkspace({
     ]
   );
 
-  const applyInstantFrameBoxSelectionVisuals = React.useCallback(
-    (
-      nextSelectedFrameGroupIds: string[],
-      nextEdgeSelectionState: TemplateEdgeSelectionStateDto,
-      overridePositionGroupProxySelections?: PositionGroupProxySelection[],
-      frameNodeById?: Map<string, HTMLElement>
-    ) => {
-      const root = previewRef.current;
-      const normalizedSelectionIds = normalizeFrameSelectionIds(nextSelectedFrameGroupIds);
-
-      selectedFrameGroupIdsRef.current = normalizedSelectionIds;
-      edgeSelectionStateRef.current = nextEdgeSelectionState;
-
-      if (!root) {
-        return false;
-      }
-
-      const resolvedFrameNodeById = frameNodeById || new Map<string, HTMLElement>();
-      const resolvedPositionGroupProxySelections = restoreActivePositionGroupProxySelections(
-        normalizedSelectionIds,
-        overridePositionGroupProxySelections ??
-          resolvePositionGroupProxySelections(normalizedSelectionIds, positionGroupProxySelectionGroupIdRef.current)
-      );
-      const positionSelectionOrderState = resolvePositionSelectionOrderState(
-        normalizedSelectionIds,
-        resolvedPositionGroupProxySelections
-      );
-      const canShowCanvasDeleteButton = root.getAttribute('data-selection-panel-tab') === 'position';
-
-      positionSelectionOrderState.expectedDirectSelectedIds.forEach((frameGroupId, selectionIndex) => {
-        const node =
-          resolvedFrameNodeById.get(frameGroupId) ||
-          queryFrameSelectionAnchorByFrameGroupId(root, frameGroupId) ||
-          null;
-
-        if (!node) {
-          return;
-        }
-
-        resolvedFrameNodeById.set(frameGroupId, node);
-        const selectionOrder =
-          positionSelectionOrderState.directSelectionOrderByFrameGroupId.get(frameGroupId) || selectionIndex + 1;
-        ensureFrameSelectionChrome(node, frameGroupId, selectionOrder - 1, canShowCanvasDeleteButton);
-      });
-
-      appendPositionGroupProxyOverlayFast(root, positionSelectionOrderState.normalizedProxySelections, resolvedFrameNodeById);
-      cleanupStaleFrameSelectionChrome(
-        root,
-        positionSelectionOrderState.expectedDirectSelectedIds,
-        positionSelectionOrderState.directSelectionOrderByFrameGroupId
-      );
-
-      return true;
-    },
-    [resolvePositionGroupProxySelections, restoreActivePositionGroupProxySelections]
-  );
-
   const applyMinimalDirectFrameSelectionVisuals = React.useCallback(
     (nextFrameGroupId: string, frameNodeById?: Map<string, HTMLElement>) => {
       const normalizedNextFrameGroupId = nextFrameGroupId.trim();
@@ -25863,7 +25806,6 @@ export default function TemplateEditWorkspace({
         fastFrameNodeById?: Map<string, HTMLElement>;
         positionSelectionEntity?: PositionActiveSelectionEntity;
         forceImmediateReactState?: boolean;
-        deferReactStateCommit?: boolean;
       }
     ) => {
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
@@ -25993,9 +25935,7 @@ export default function TemplateEditWorkspace({
       const shouldSyncPositionStyleDraftImmediately =
         selectionPanelTab === 'position' &&
         (!styleOverlayCollapsedRef.current || !sizeTypeOverlayCollapsedRef.current || !textStyleOverlayCollapsedRef.current);
-      const shouldDeferReactStateCommit =
-        Boolean(options?.deferReactStateCommit) && !options?.forceImmediateReactState && typeof window !== 'undefined';
-      const readImmediateSelectionStyleDraft = () =>
+      const immediateSelectionStyleDraft =
         selectionPanelTab !== 'position'
           ? defaultSelectionStyleDraft
           : buildSelectionStyleDraftFromIds(
@@ -26003,7 +25943,7 @@ export default function TemplateEditWorkspace({
               immediateResolvedSelectionIds,
               options?.fastFrameNodeById
             );
-      const readImmediateFrameMetadataDraft = () =>
+      const immediateFrameMetadataDraft =
         selectionPanelTab !== 'metadata'
           ? defaultFrameMetadataDraft
           : buildFrameMetadataDraftFromIds(
@@ -26011,8 +25951,6 @@ export default function TemplateEditWorkspace({
               normalizedSelectionIds,
               options?.fastFrameNodeById
             );
-      const immediateSelectionStyleDraft = shouldDeferReactStateCommit ? null : readImmediateSelectionStyleDraft();
-      const immediateFrameMetadataDraft = shouldDeferReactStateCommit ? null : readImmediateFrameMetadataDraft();
       const commitSelectionReactState = () => {
         setSelectedFrameGroupIds(normalizedSelectionIds);
         setEdgeSelectionState(emptyEdgeSelection);
@@ -26044,41 +25982,28 @@ export default function TemplateEditWorkspace({
         applyRuntimeSelectionUi(normalizedSelectionIds, emptyEdgeSelection, nextPositionGroupProxySelections);
       }
       const commitImmediatePanelSync = () => {
-        const nextSelectionStyleDraft = immediateSelectionStyleDraft || readImmediateSelectionStyleDraft();
         if (shouldSyncPositionStyleDraftImmediately) {
-          setSelectionStyleDraft(nextSelectionStyleDraft);
+          setSelectionStyleDraft(immediateSelectionStyleDraft);
         }
         if (selectionPanelTab === 'metadata') {
-          const nextFrameMetadataDraft = immediateFrameMetadataDraft || readImmediateFrameMetadataDraft();
-          syncedFrameMetadataDraftRef.current = nextFrameMetadataDraft;
-          setFrameMetadataDraft(nextFrameMetadataDraft);
+          syncedFrameMetadataDraftRef.current = immediateFrameMetadataDraft;
+          setFrameMetadataDraft(immediateFrameMetadataDraft);
         }
         setStyleFieldApplyStatus(defaultStyleFieldApplyStatus);
       };
+      if (selectionPanelTab === 'position') {
+        syncSelectionStyleDraftControls(immediateSelectionStyleDraft, immediateResolvedSelectionIds);
+        syncTextAutoSizeUiOverrideFromSelection(previewRef.current, immediateResolvedSelectionIds);
+      }
       if (immediateSelectionPanelSyncFrameRef.current !== null && typeof window !== 'undefined') {
         window.cancelAnimationFrame(immediateSelectionPanelSyncFrameRef.current);
         immediateSelectionPanelSyncFrameRef.current = null;
       }
 
-      const commitSelectionUiState = () => {
-        if (selectionPanelTab === 'position') {
-          syncSelectionStyleDraftControls(
-            immediateSelectionStyleDraft || readImmediateSelectionStyleDraft(),
-            immediateResolvedSelectionIds
-          );
-          syncTextAutoSizeUiOverrideFromSelection(previewRef.current, immediateResolvedSelectionIds);
-        }
+      flushSync(() => {
         commitImmediatePanelSync();
         commitSelectionReactState();
-      };
-
-      if (shouldDeferReactStateCommit) {
-        window.setTimeout(() => {
-          flushSync(commitSelectionUiState);
-        }, 0);
-      } else {
-        flushSync(commitSelectionUiState);
-      }
+      });
     },
     [
       applyFastFrameBoxSelectionVisuals,
@@ -32129,7 +32054,6 @@ export default function TemplateEditWorkspace({
     syncEdgeRoleDiagnosticsState,
     applyFrameBoxSelection,
     applyFastFrameBoxSelectionVisuals,
-    applyInstantFrameBoxSelectionVisuals,
     applyPositionGroupEditModeSelection,
     applyPositionOrderLockMarqueeSelection,
     applyRuntimeSelectionUi,
