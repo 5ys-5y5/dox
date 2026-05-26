@@ -32,6 +32,9 @@ type EntityPickerProps = {
   onRenameOption?: (option: EntityPickerOption, nextLabel: string, nextMeta: string) => void;
   renameOptionLabel?: string;
   deleteOptionLabel?: string;
+  ownerItemKey?: string;
+  ownerItemName?: string;
+  ownerItemAttributes?: (item: string, name: string) => Record<string, string>;
 };
 
 export function EntityPicker({
@@ -53,6 +56,9 @@ export function EntityPicker({
   onRenameOption,
   renameOptionLabel = '항목 수정',
   deleteOptionLabel = '항목 삭제',
+  ownerItemKey,
+  ownerItemName = '항목 선택기',
+  ownerItemAttributes,
 }: EntityPickerProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -122,15 +128,20 @@ export function EntityPicker({
   }, [open]);
 
   const inlineOptionLayout = optionLayout === 'inline';
+  const ownerAttrs = React.useCallback(
+    (item: string | undefined, name: string) => (ownerItemAttributes && item ? ownerItemAttributes(item, name) : {}),
+    [ownerItemAttributes]
+  );
 
   return (
-    <div ref={rootRef} className={cn('relative w-full', className)}>
+    <div ref={rootRef} className={cn('relative w-full', className)} {...ownerAttrs(ownerItemKey, ownerItemName)}>
       <div
         className={cn(
           'group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 transition-colors focus-within:ring-1 focus-within:ring-slate-300',
           disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-slate-400',
           triggerClassName
         )}
+        {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-control` : undefined, `${ownerItemName} 컨트롤`)}
       >
         <input
           ref={inputRef}
@@ -163,6 +174,7 @@ export function EntityPicker({
             }
           }}
           className="h-6 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-input` : undefined, `${ownerItemName} 검색 입력`)}
         />
         {canCreate ? (
           <button
@@ -175,6 +187,7 @@ export function EntityPicker({
               setOpen(false);
             }}
             className="inline-flex h-7 shrink-0 items-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-create-button` : undefined, `${ownerItemName} 새 항목 만들기 버튼`)}
           >
             {createOptionLabel}
           </button>
@@ -184,6 +197,7 @@ export function EntityPicker({
           disabled={disabled}
           onClick={() => setOpen((current) => !current)}
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-toggle-button` : undefined, `${ownerItemName} 목록 열기 버튼`)}
         >
           <ChevronDown
             aria-hidden="true"
@@ -198,9 +212,10 @@ export function EntityPicker({
             'absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 p-2',
             panelClassName
           )}
+          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-dropdown` : undefined, `${ownerItemName} 드롭다운`)}
         >
-          <div className="space-y-2">
-            <div role="listbox" className="max-h-64 space-y-1 overflow-auto">
+          <div className="space-y-2" {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-dropdown-content` : undefined, `${ownerItemName} 드롭다운 내용`)}>
+            <div role="listbox" className="max-h-64 space-y-1 overflow-auto" {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-list` : undefined, `${ownerItemName} 옵션 목록`)}>
               {allowClear ? (
                 <button
                   type="button"
@@ -214,6 +229,7 @@ export function EntityPicker({
                       ? 'border-slate-200 bg-slate-100'
                       : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-white'
                   )}
+                  {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-clear-option` : undefined, `${ownerItemName} 선택 해제 옵션`)}
                 >
                   <span className="text-sm font-medium text-slate-900">선택 해제</span>
                   <span className="mt-0.5 text-[11px] text-slate-500">현재 선택을 비우고 다시 고릅니다.</span>
@@ -229,6 +245,7 @@ export function EntityPicker({
                       key={option.id}
                       role="option"
                       aria-selected={selected}
+                      {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}` : undefined, `${ownerItemName} 옵션 - ${option.label}`)}
                       className={cn(
                         'flex w-full items-center rounded-xl border text-left transition-colors',
                         option.disabled
@@ -262,6 +279,7 @@ export function EntityPicker({
                             setQuery(option.label);
                             setOpen(false);
                           }}
+                          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}-select-button` : undefined, `${ownerItemName} 옵션 선택 버튼 - ${option.label}`)}
                           className={cn('flex min-w-0 flex-1 items-center justify-start px-3 py-2.5 text-left', inlineOptionLayout ? 'gap-2' : 'flex-col items-start')}
                         >
                           <span
@@ -300,6 +318,7 @@ export function EntityPicker({
                                   setEditingMeta('');
                                 }}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
+                                {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}-rename-save-button` : undefined, `${ownerItemName} 옵션 수정 저장 버튼 - ${option.label}`)}
                               >
                                 <Check aria-hidden="true" className="h-4 w-4" />
                               </button>
@@ -314,6 +333,7 @@ export function EntityPicker({
                                   setEditingMeta('');
                                 }}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
+                                {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}-rename-cancel-button` : undefined, `${ownerItemName} 옵션 수정 취소 버튼 - ${option.label}`)}
                               >
                                 <X aria-hidden="true" className="h-4 w-4" />
                               </button>
@@ -330,6 +350,7 @@ export function EntityPicker({
                                 setEditingMeta(option.meta || option.id);
                               }}
                               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                              {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}-rename-button` : undefined, `${ownerItemName} 옵션 수정 버튼 - ${option.label}`)}
                             >
                               <Pencil aria-hidden="true" className="h-4 w-4" />
                             </button>
@@ -346,6 +367,7 @@ export function EntityPicker({
                               setOpen(false);
                             }}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-200"
+                            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}-delete-button` : undefined, `${ownerItemName} 옵션 삭제 버튼 - ${option.label}`)}
                           >
                             <Trash2 aria-hidden="true" className="h-4 w-4" />
                           </button>
@@ -355,7 +377,10 @@ export function EntityPicker({
                   );
                 })
               ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                <div
+                  className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500"
+                  {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-empty-state` : undefined, `${ownerItemName} 빈 상태`)}
+                >
                   {emptyMessage}
                 </div>
               )}

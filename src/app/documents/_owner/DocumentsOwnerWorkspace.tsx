@@ -1759,6 +1759,9 @@ export function DocumentsOwnerWorkspace({
             searchPlaceholder="태그 검색 또는 새 태그 입력"
             emptyMessage="등록된 태그가 없습니다. 입력해서 새로 만드세요."
             optionLayout="inline"
+            ownerItemKey={`${kind}-required-tag-picker`}
+            ownerItemName={`${mediaRequestKindLabels[kind]} 태그 선택기`}
+            ownerItemAttributes={documentsOwnerItem}
           />
         </div>
 
@@ -1801,6 +1804,9 @@ export function DocumentsOwnerWorkspace({
             searchPlaceholder="첨부파일 상자 검색"
             emptyMessage="연결 가능한 첨부파일 상자가 없습니다."
             optionLayout="inline"
+            ownerItemKey={`${kind}-required-attachment-picker`}
+            ownerItemName={`${mediaRequestKindLabels[kind]} 첨부파일 상자 선택기`}
+            ownerItemAttributes={documentsOwnerItem}
           />
           <p className="text-xs text-slate-500" {...documentsOwnerItem(`${kind}-required-attachment-help`, `${mediaRequestKindLabels[kind]} 첨부파일 상자 연결 도움말`)}>
             상자 지정은 선택입니다. 지정하려면 첨부파일 역할 상자만 고를 수 있습니다.
@@ -1819,6 +1825,9 @@ export function DocumentsOwnerWorkspace({
             searchPlaceholder="이름 또는 번호 검색"
             emptyMessage="현재 문서 접근 구성원이 없습니다."
             optionLayout="inline"
+            ownerItemKey={`${kind}-required-assignee-picker`}
+            ownerItemName={`${mediaRequestKindLabels[kind]} 담당 구성원 선택기`}
+            ownerItemAttributes={documentsOwnerItem}
           />
         </div>
 
@@ -2015,6 +2024,9 @@ export function DocumentsOwnerWorkspace({
               onChange={handleSiteSelectionChange}
               placeholder="현장을 선택하세요"
               emptyMessage="저장된 현장이 없습니다."
+              ownerItemKey="site-picker"
+              ownerItemName="현장 선택기"
+              ownerItemAttributes={documentsOwnerItem}
             />
           </div>
           <div className="space-y-2" {...documentsOwnerItem('document-picker-field', '문서 선택 항목')}>
@@ -2027,6 +2039,9 @@ export function DocumentsOwnerWorkspace({
               onChange={setSelectedDocumentId}
               placeholder="문서를 선택하세요"
               emptyMessage="선택 가능한 문서가 없습니다."
+              ownerItemKey="document-picker"
+              ownerItemName="문서 선택기"
+              ownerItemAttributes={documentsOwnerItem}
             />
           </div>
           {selectedDocumentDetail ? (
@@ -2194,6 +2209,9 @@ export function DocumentsOwnerWorkspace({
               optionLayout="inline"
               allowClear
               triggerClassName="transition-colors hover:border-slate-400"
+              ownerItemKey="selected-box-field-picker-control"
+              ownerItemName="선택한 상자 셀렉트 박스 선택기"
+              ownerItemAttributes={documentsOwnerItem}
             />
           </div>
 
@@ -2218,6 +2236,9 @@ export function DocumentsOwnerWorkspace({
                 emptyMessage="현재 문서 접근 구성원이 없습니다."
                 optionLayout="inline"
                 disabled={selectedFields.length <= 0}
+                ownerItemKey="selected-box-assignee-picker-control"
+                ownerItemName="선택한 상자 담당 구성원 선택기"
+                ownerItemAttributes={documentsOwnerItem}
               />
             </div>
             {selectedBatchAssignee ? (

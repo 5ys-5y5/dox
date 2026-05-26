@@ -106,6 +106,9 @@ export function OwnerSharedUiPreview({
           placeholder="항목 검색"
           searchPlaceholder="이름이나 경로 검색"
           optionLayout="stacked"
+          ownerItemKey="owner-settings-entity-picker-control"
+          ownerItemName="검색 셀렉트 박스 선택기"
+          ownerItemAttributes={itemAttributes}
         />
       </OwnerSharedUiPreviewSection>
 

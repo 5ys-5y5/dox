@@ -2719,14 +2719,14 @@ export default function CanvasOwnerPage() {
         {selectedManagedPage.id === 'templates' ? null : extractStatusNotice}
 
         <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-          <Card className="border-slate-200">
-            <CardHeader className="space-y-1 p-4 pb-3">
-              <CardTitle className="text-sm">공용 캔버스 관리</CardTitle>
-              <CardDescription className="text-xs leading-5">
+          <Card className="border-slate-200" {...canvasOwnerItem('canvas-management-panel', '공용 캔버스 관리 패널')}>
+            <CardHeader className="space-y-1 p-4 pb-3" {...canvasOwnerItem('canvas-management-panel-header', '공용 캔버스 관리 패널 머리글')}>
+              <CardTitle className="text-sm" {...canvasOwnerItem('canvas-management-panel-title', '공용 캔버스 관리 패널 제목')}>공용 캔버스 관리</CardTitle>
+              <CardDescription className="text-xs leading-5" {...canvasOwnerItem('canvas-management-panel-description', '공용 캔버스 관리 패널 설명')}>
                 페이지와 모드를 분리해서 선택합니다. 페이지 탭에서 공용 캔버스를 쓰는 모든 경로를 관리합니다.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 p-4 pt-0">
+            <CardContent className="space-y-3 p-4 pt-0" {...canvasOwnerItem('canvas-management-panel-content', '공용 캔버스 관리 패널 내용')}>
               <OwnerSettingsTabList
                 value={activeControlTab}
                 ariaLabel="공용 캔버스 관리 탭"
@@ -2740,28 +2740,28 @@ export default function CanvasOwnerPage() {
             </CardContent>
           </Card>
 
-	          {effectiveWorkspaceMode === 'template' ? (
-	            <Card className="border-slate-200">
-	              <CardHeader className="space-y-1 p-4 pb-3">
-	                <CardTitle className="text-sm">현재 템플릿</CardTitle>
-	                <CardDescription className="text-xs leading-5">템플릿 선택 상태를 확인합니다.</CardDescription>
-	              </CardHeader>
-	              <CardContent className="space-y-3 p-4 pt-0 text-sm text-slate-700">
-	                <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[72px_minmax(0,1fr)]">
-	                  <div className="font-medium text-slate-700">이름</div>
-	                  <div className="truncate text-slate-900">{selectedTemplateSummary?.templateName || '아직 선택되지 않음'}</div>
-	                  <div className="font-medium text-slate-700">ID</div>
-	                  <div className="truncate text-slate-500">{selectedTemplateSummary?.id || '-'}</div>
-	                </div>
-	              </CardContent>
-	            </Card>
-	          ) : (
-            <Card className="border-slate-200">
-              <CardHeader className="space-y-1 p-4 pb-3">
-                <CardTitle className="text-sm">문서 선택</CardTitle>
-                <CardDescription className="text-xs leading-5">문서 선택 상태와 public prop 설정을 함께 확인합니다.</CardDescription>
+          {effectiveWorkspaceMode === 'template' ? (
+            <Card className="border-slate-200" {...canvasOwnerItem('current-template-panel', '현재 템플릿 상태 패널')}>
+              <CardHeader className="space-y-1 p-4 pb-3" {...canvasOwnerItem('current-template-panel-header', '현재 템플릿 상태 패널 머리글')}>
+                <CardTitle className="text-sm" {...canvasOwnerItem('current-template-panel-title', '현재 템플릿 상태 패널 제목')}>현재 템플릿</CardTitle>
+                <CardDescription className="text-xs leading-5" {...canvasOwnerItem('current-template-panel-description', '현재 템플릿 상태 패널 설명')}>템플릿 선택 상태를 확인합니다.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 p-4 pt-0">
+              <CardContent className="space-y-3 p-4 pt-0 text-sm text-slate-700" {...canvasOwnerItem('current-template-panel-content', '현재 템플릿 상태 패널 내용')}>
+                <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[72px_minmax(0,1fr)]" {...canvasOwnerItem('current-template-summary-grid', '현재 템플릿 요약 표')}>
+                  <div className="font-medium text-slate-700" {...canvasOwnerItem('current-template-name-label', '현재 템플릿 이름 라벨')}>이름</div>
+                  <div className="truncate text-slate-900" {...canvasOwnerItem('current-template-name-value', '현재 템플릿 이름 값')}>{selectedTemplateSummary?.templateName || '아직 선택되지 않음'}</div>
+                  <div className="font-medium text-slate-700" {...canvasOwnerItem('current-template-id-label', '현재 템플릿 ID 라벨')}>ID</div>
+                  <div className="truncate text-slate-500" {...canvasOwnerItem('current-template-id-value', '현재 템플릿 ID 값')}>{selectedTemplateSummary?.id || '-'}</div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-slate-200" {...canvasOwnerItem('document-picker-panel', '문서 선택 상태 패널')}>
+              <CardHeader className="space-y-1 p-4 pb-3" {...canvasOwnerItem('document-picker-panel-header', '문서 선택 상태 패널 머리글')}>
+                <CardTitle className="text-sm" {...canvasOwnerItem('document-picker-panel-title', '문서 선택 상태 패널 제목')}>문서 선택</CardTitle>
+                <CardDescription className="text-xs leading-5" {...canvasOwnerItem('document-picker-panel-description', '문서 선택 상태 패널 설명')}>문서 선택 상태와 public prop 설정을 함께 확인합니다.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 p-4 pt-0" {...canvasOwnerItem('document-picker-panel-content', '문서 선택 상태 패널 내용')}>
                 <EntityPicker
                   value={selectedDocumentId}
                   options={documentOptions}
@@ -2770,35 +2770,38 @@ export default function CanvasOwnerPage() {
                   searchPlaceholder="문서 검색"
                   optionLayout="stacked"
                   disabled={loadingLists}
+                  ownerItemKey="document-picker"
+                  ownerItemName="문서 선택기"
+                  ownerItemAttributes={canvasOwnerItem}
                 />
 
                 {selectedDocumentDetail ? (
-                  <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[88px_minmax(0,1fr)]">
-                    <div className="font-medium text-slate-700">문서명</div>
-                    <div className="truncate text-slate-900">{selectedDocumentDetail.document.title}</div>
-                    <div className="font-medium text-slate-700">문서 ID</div>
-                    <div className="truncate text-slate-500">{selectedDocumentDetail.document.id}</div>
-                    <div className="font-medium text-slate-700">현재 버전</div>
-                    <div className="truncate text-slate-700">{selectedDocumentDetail.latestVersion?.versionNumber || '-'}</div>
-                    <div className="font-medium text-slate-700">마지막 저장</div>
-                    <div className="truncate text-slate-700">{formatDateTime(selectedDocumentDetail.latestVersion?.createdAt)}</div>
-                    <div className="font-medium text-slate-700">연결 템플릿</div>
-                    <div className="truncate text-slate-700">{selectedDocumentDetail.linkedTemplate?.templateName || '-'}</div>
-                    <div className="font-medium text-slate-700">editable 키</div>
-                    <div className="truncate text-slate-700">
+                  <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[88px_minmax(0,1fr)]" {...canvasOwnerItem('document-picker-detail-grid', '문서 선택 상세 요약 표')}>
+                    <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-title-label', '문서 선택 문서명 라벨')}>문서명</div>
+                    <div className="truncate text-slate-900" {...canvasOwnerItem('document-picker-detail-title-value', '문서 선택 문서명 값')}>{selectedDocumentDetail.document.title}</div>
+                    <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-id-label', '문서 선택 문서 ID 라벨')}>문서 ID</div>
+                    <div className="truncate text-slate-500" {...canvasOwnerItem('document-picker-detail-id-value', '문서 선택 문서 ID 값')}>{selectedDocumentDetail.document.id}</div>
+                    <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-version-label', '문서 선택 현재 버전 라벨')}>현재 버전</div>
+                    <div className="truncate text-slate-700" {...canvasOwnerItem('document-picker-detail-version-value', '문서 선택 현재 버전 값')}>{selectedDocumentDetail.latestVersion?.versionNumber || '-'}</div>
+                    <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-saved-at-label', '문서 선택 마지막 저장 라벨')}>마지막 저장</div>
+                    <div className="truncate text-slate-700" {...canvasOwnerItem('document-picker-detail-saved-at-value', '문서 선택 마지막 저장 값')}>{formatDateTime(selectedDocumentDetail.latestVersion?.createdAt)}</div>
+                    <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-template-label', '문서 선택 연결 템플릿 라벨')}>연결 템플릿</div>
+                    <div className="truncate text-slate-700" {...canvasOwnerItem('document-picker-detail-template-value', '문서 선택 연결 템플릿 값')}>{selectedDocumentDetail.linkedTemplate?.templateName || '-'}</div>
+                    <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-editable-keys-label', '문서 선택 editable 키 라벨')}>editable 키</div>
+                    <div className="truncate text-slate-700" {...canvasOwnerItem('document-picker-detail-editable-keys-value', '문서 선택 editable 키 값')}>
                       editableValueKeys 샘플:{' '}
                       {editableValueKeyCandidates.length ? editableValueKeyCandidates.join(', ') : '문서 값 키 없음'}
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-500" {...canvasOwnerItem('document-picker-empty-state', '문서 선택 상태 빈 상태')}>
                     {loadingDocumentDetail ? '문서 상세를 불러오는 중입니다.' : '문서를 선택하면 여기에서 현재 상태를 확인합니다.'}
                   </p>
                 )}
 
-	              </CardContent>
-	            </Card>
-	          )}
+              </CardContent>
+            </Card>
+          )}
 
 	          <Card className="border-slate-200 xl:col-span-2">
 	            <CardHeader className="p-4 pb-3">

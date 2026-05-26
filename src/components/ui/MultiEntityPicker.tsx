@@ -21,6 +21,9 @@ type MultiEntityPickerProps = {
   selectionSummary?: (selectedOptions: EntityPickerOption[]) => string;
   onDeleteOption?: (option: EntityPickerOption) => void;
   deleteOptionLabel?: string;
+  ownerItemKey?: string;
+  ownerItemName?: string;
+  ownerItemAttributes?: (item: string, name: string) => Record<string, string>;
 };
 
 const getDefaultSelectionSummary = (selectedOptions: EntityPickerOption[]) => {
@@ -51,6 +54,9 @@ export function MultiEntityPicker({
   selectionSummary,
   onDeleteOption,
   deleteOptionLabel = '항목 삭제',
+  ownerItemKey,
+  ownerItemName = '복수 항목 선택기',
+  ownerItemAttributes,
 }: MultiEntityPickerProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -109,18 +115,27 @@ export function MultiEntityPicker({
   }, [open]);
 
   const inlineOptionLayout = optionLayout === 'inline';
+  const ownerAttrs = React.useCallback(
+    (item: string | undefined, name: string) => (ownerItemAttributes && item ? ownerItemAttributes(item, name) : {}),
+    [ownerItemAttributes]
+  );
   const toggleValue = (optionId: string) => {
     onChange(values.includes(optionId) ? values.filter((value) => value !== optionId) : [...values, optionId]);
   };
 
   return (
-    <div ref={rootRef} className={cn('relative w-full', className)}>
+    <div
+      ref={rootRef}
+      className={cn('relative w-full', className)}
+      {...ownerAttrs(ownerItemKey, ownerItemName)}
+    >
       <div
         className={cn(
           'group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:ring-1 focus-within:ring-slate-300',
           disabled ? 'cursor-not-allowed opacity-60' : '',
           triggerClassName
         )}
+        {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-control` : undefined, `${ownerItemName} 컨트롤`)}
       >
         <input
           ref={inputRef}
@@ -146,6 +161,7 @@ export function MultiEntityPicker({
             }
           }}
           className="h-6 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-input` : undefined, `${ownerItemName} 검색 입력`)}
         />
         {allowClear && values.length > 0 ? (
           <button
@@ -157,6 +173,7 @@ export function MultiEntityPicker({
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
             aria-label="선택 초기화"
             title="선택 초기화"
+            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-clear-button` : undefined, `${ownerItemName} 선택 초기화 버튼`)}
           >
             <X aria-hidden="true" className="h-4 w-4" />
           </button>
@@ -171,6 +188,7 @@ export function MultiEntityPicker({
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
           aria-label="목록 열기"
           title="목록 열기"
+          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-toggle-button` : undefined, `${ownerItemName} 목록 열기 버튼`)}
         >
           <ChevronDown
             aria-hidden="true"
@@ -185,12 +203,21 @@ export function MultiEntityPicker({
             'absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 p-2',
             panelClassName
           )}
+          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-dropdown` : undefined, `${ownerItemName} 드롭다운`)}
         >
-          <div className="space-y-2">
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500">
+          <div className="space-y-2" {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-dropdown-content` : undefined, `${ownerItemName} 드롭다운 내용`)}>
+            <div
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
+              {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-count` : undefined, `${ownerItemName} 옵션 개수`)}
+            >
               전체 {options.length}개 중 {selectedOptions.length}개 선택
             </div>
-            <div role="listbox" aria-multiselectable="true" className="max-h-64 space-y-1 overflow-auto">
+            <div
+              role="listbox"
+              aria-multiselectable="true"
+              className="max-h-64 space-y-1 overflow-auto"
+              {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-list` : undefined, `${ownerItemName} 옵션 목록`)}
+            >
               {filteredOptions.length > 0 ? (
                 filteredOptions.map((option) => {
                   const selected = values.includes(option.id);
@@ -200,6 +227,7 @@ export function MultiEntityPicker({
                       key={option.id}
                       role="option"
                       aria-selected={selected}
+                      {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}` : undefined, `${ownerItemName} 옵션 - ${option.label}`)}
                       className={cn(
                         'flex w-full items-center rounded-xl border text-left',
                         option.disabled
@@ -213,6 +241,7 @@ export function MultiEntityPicker({
                         type="button"
                         disabled={option.disabled}
                         onClick={() => toggleValue(option.id)}
+                        {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}-select-button` : undefined, `${ownerItemName} 옵션 선택 버튼 - ${option.label}`)}
                         className={cn(
                           'flex min-w-0 flex-1 justify-start px-3 py-2.5 text-left disabled:cursor-not-allowed',
                           inlineOptionLayout ? 'items-center gap-2' : 'flex-col items-start'
@@ -254,6 +283,7 @@ export function MultiEntityPicker({
                               setQuery('');
                             }}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-${option.id}-delete-button` : undefined, `${ownerItemName} 옵션 삭제 버튼 - ${option.label}`)}
                           >
                             <Trash2 aria-hidden="true" className="h-4 w-4" />
                           </button>
@@ -263,7 +293,10 @@ export function MultiEntityPicker({
                   );
                 })
               ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                <div
+                  className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500"
+                  {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-empty-state` : undefined, `${ownerItemName} 빈 상태`)}
+                >
                   {emptyMessage}
                 </div>
               )}

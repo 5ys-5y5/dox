@@ -9,7 +9,9 @@ import {
   FileImage,
   FileStack,
   FolderKanban,
+  Info,
   Link2,
+  Minimize2,
   Plus,
   RefreshCcw,
   Signature,
@@ -97,6 +99,7 @@ type ProjectListAction = {
 type ProjectListRow = {
   key: string;
   label: string;
+  labelContent?: React.ReactNode;
   statusLabel: string;
   statusVariant: ProjectListStatusVariant;
   statusContent?: React.ReactNode;
@@ -110,6 +113,8 @@ type ProjectListRow = {
   roleLabel?: string;
   roleContent?: React.ReactNode;
   documentsContent?: React.ReactNode;
+  scopeLabel?: string;
+  scopeContent?: React.ReactNode;
   lastVerifiedAt?: string;
   signatureSlotLabel?: string;
   signatureSignerName?: string;
@@ -124,6 +129,7 @@ type ProjectListRow = {
   selected?: boolean;
   onClick?: () => void;
   expandedContent?: React.ReactNode;
+  detailAction?: ProjectListAction;
   documentLinkAction?: ProjectListAction;
   registerAction?: ProjectListAction;
   action?: ProjectListAction;
@@ -188,9 +194,11 @@ type PendingChecklistRegistration =
     };
 type ManagedSiteMemberAccessRole = 'manager' | 'participant';
 type ManagedDocumentMemberAccessRole = DocumentMemberAccessRole;
-type MemberDocumentAccessDraft = {
-  documentIds: string[];
-  accessRole: ManagedDocumentMemberAccessRole;
+type ProjectDocumentPickerOption = {
+  id: string;
+  label: string;
+  meta?: string;
+  keywords?: string[];
 };
 type ApiErrorDebug = Partial<
   Record<
@@ -306,12 +314,6 @@ const SITE_MEMBER_ROLE_LABELS: Record<SiteMemberAccessRole, string> = {
   participant: '참여자',
   editor: '참여자',
   viewer: '참여자',
-};
-
-const DOCUMENT_MEMBER_ROLE_LABELS: Record<DocumentMemberAccessRole, string> = {
-  editor: '편집',
-  viewer: '보기',
-  signer: '서명',
 };
 
 const DOCUMENT_CONNECTED_INFO_LABELS = {
@@ -796,6 +798,11 @@ const formatMemberDispatchMessage = (dispatch: MemberDispatchResultDto) => {
 const buildProjectSelectionQueryKey = (siteId: string, documentId: string) =>
   `${siteId.trim()}::${documentId.trim()}`;
 
+const projectOwnerItem = (item: string, name: string) => ({
+  'data-project-owner-item': item,
+  'data-project-owner-name': name,
+});
+
 const buildMemberAccessDocumentLinkUrl = (documentId: string, phoneNumber?: string | null) => {
   const normalizedDocumentId = documentId.trim();
   const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
@@ -844,13 +851,20 @@ function RoleSegmentedButtons<TValue extends string>({
   value,
   options,
   onChange,
+  ownerItemKey,
+  ownerItemName = '역할 선택 버튼 그룹',
 }: {
   value: TValue;
   options: Array<{ value: TValue; label: string }>;
   onChange: (value: TValue) => void;
+  ownerItemKey?: string;
+  ownerItemName?: string;
 }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div
+      className="flex flex-wrap gap-2"
+      {...(ownerItemKey ? projectOwnerItem(ownerItemKey, ownerItemName) : {})}
+    >
       {options.map((option) => {
         const selected = option.value === value;
 
@@ -861,16 +875,311 @@ function RoleSegmentedButtons<TValue extends string>({
             onClick={() => onChange(option.value)}
             className={cn(
               'inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium',
-              selected
-                ? 'border-slate-900 bg-slate-900 text-white'
-                : 'border-slate-300 bg-white text-slate-700'
-            )}
+	              selected
+	                ? 'border-slate-900 bg-slate-900 text-white'
+	                : 'border-slate-300 bg-white text-slate-700'
+	            )}
             aria-pressed={selected}
+            {...(ownerItemKey
+              ? projectOwnerItem(`${ownerItemKey}-${option.value}-button`, `${option.label} 선택 버튼`)
+              : {})}
           >
             {option.label}
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function MemberDocumentAccessPicker({
+  membership,
+  memberLabel,
+  options,
+  documentMemberships,
+  savingMemberDocumentAccessKey,
+  deletingDocumentMemberId,
+  onSaveDocumentAccess,
+  onDeleteDocumentAccess,
+  ownerItemKey,
+  ownerItemName,
+}: {
+  membership: SiteMemberRecordDto;
+  memberLabel: string;
+  options: ProjectDocumentPickerOption[];
+  documentMemberships: DocumentMemberRecordDto[];
+  savingMemberDocumentAccessKey: string;
+  deletingDocumentMemberId: string;
+  onSaveDocumentAccess: (
+    membership: SiteMemberRecordDto,
+    documentIds: string[],
+    accessRole: ManagedDocumentMemberAccessRole,
+    operationKey: string
+  ) => void | Promise<void>;
+  onDeleteDocumentAccess: (membershipId: string, memberLabel: string) => void | Promise<void>;
+  ownerItemKey: string;
+  ownerItemName: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const ownerAttrs = React.useCallback(
+    (item: string, name: string) => projectOwnerItem(item, name),
+    []
+  );
+  const documentMembershipByDocumentId = React.useMemo(
+    () => new Map(documentMemberships.map((documentMembership) => [documentMembership.documentId, documentMembership])),
+    [documentMemberships]
+  );
+  const selectedDocumentCount = documentMemberships.filter((documentMembership) =>
+    options.some((option) => option.id === documentMembership.documentId)
+  ).length;
+  const summary = selectedDocumentCount > 0
+    ? `${selectedDocumentCount}개 문서 접근`
+    : '접근 문서 없음';
+  const filteredOptions = React.useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return options;
+    }
+
+    return options.filter((option) =>
+      [option.label, option.meta || '', ...(option.keywords || [])].join(' ').toLowerCase().includes(normalizedQuery)
+    );
+  }, [options, query]);
+
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [open]);
+
+  React.useEffect(() => {
+    if (open) {
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [open]);
+
+  const handleSaveDocumentAccess = React.useCallback(
+    (documentId: string, accessRole: ManagedDocumentMemberAccessRole) => {
+      void onSaveDocumentAccess(
+        membership,
+        [documentId],
+        accessRole,
+        `${membership.membershipId}:${documentId}:${accessRole}`
+      );
+    },
+    [membership, onSaveDocumentAccess]
+  );
+
+  return (
+    <div ref={rootRef} className="relative w-full" {...ownerAttrs(ownerItemKey, ownerItemName)}>
+      <div
+        className="group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:ring-1 focus-within:ring-slate-300"
+        onClick={() => {
+          setQuery('');
+          setOpen(true);
+          inputRef.current?.focus();
+        }}
+        {...ownerAttrs(`${ownerItemKey}-control`, `${ownerItemName} 컨트롤`)}
+      >
+        <input
+          ref={inputRef}
+          type="text"
+          value={open ? query : summary}
+          readOnly={!open}
+          placeholder={open ? '문서 목록 검색' : '문서 접근 권한을 선택하세요'}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onFocus={() => {
+            setQuery('');
+            setOpen(true);
+          }}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setOpen(false);
+              setQuery('');
+            }
+          }}
+          className="h-6 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          {...ownerAttrs(`${ownerItemKey}-input`, `${ownerItemName} 검색 입력`)}
+        />
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setQuery('');
+            setOpen((current) => !current);
+          }}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
+          aria-label="문서 접근 권한 목록 열기"
+          title="문서 접근 권한 목록 열기"
+          {...ownerAttrs(`${ownerItemKey}-toggle-button`, `${ownerItemName} 목록 열기 버튼`)}
+        >
+          <ChevronDown aria-hidden="true" className="h-4 w-4" />
+        </button>
+      </div>
+
+      {open ? (
+        <div
+          className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 p-2"
+          {...ownerAttrs(`${ownerItemKey}-dropdown`, `${ownerItemName} 드롭다운`)}
+        >
+          <div className="space-y-2" {...ownerAttrs(`${ownerItemKey}-dropdown-content`, `${ownerItemName} 드롭다운 내용`)}>
+            <div
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
+              {...ownerAttrs(`${ownerItemKey}-option-count`, `${ownerItemName} 옵션 개수`)}
+            >
+              전체 {options.length}개 중 {selectedDocumentCount}개 접근 가능
+            </div>
+            <div
+              role="listbox"
+              className="max-h-80 space-y-1 overflow-auto"
+              {...ownerAttrs(`${ownerItemKey}-option-list`, `${ownerItemName} 옵션 목록`)}
+            >
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((option) => {
+                  const documentMembership = documentMembershipByDocumentId.get(option.id) || null;
+                  const selected = Boolean(documentMembership);
+                  const currentRole = documentMembership
+                    ? getManagedDocumentMemberRole(documentMembership.accessRole)
+                    : null;
+                  const savingThisDocument = savingMemberDocumentAccessKey.startsWith(
+                    `${membership.membershipId}:${option.id}:`
+                  );
+                  const deletingThisDocument = documentMembership
+                    ? deletingDocumentMemberId === documentMembership.membershipId
+                    : false;
+                  const disabled = Boolean(savingThisDocument || deletingThisDocument);
+
+                  return (
+                    <div
+                      key={option.id}
+                      role="option"
+                      aria-selected={selected}
+                      className={cn(
+                        'flex w-full items-center rounded-xl border text-left',
+                        selected ? 'border-slate-200 bg-slate-100' : 'border-transparent bg-transparent'
+                      )}
+                      {...ownerAttrs(`${ownerItemKey}-option-${option.id}`, `${ownerItemName} 옵션 - ${option.label}`)}
+                    >
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          if (!selected) {
+                            handleSaveDocumentAccess(option.id, 'viewer');
+                          }
+                        }}
+                        className="flex min-w-0 flex-1 flex-col items-start justify-start px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-60"
+                        {...ownerAttrs(`${ownerItemKey}-option-${option.id}-select-button`, `${ownerItemName} 옵션 선택 버튼 - ${option.label}`)}
+                      >
+                        <span className="min-w-0 truncate text-sm font-medium leading-5 text-slate-900">
+                          {option.label}
+                        </span>
+                        {option.meta ? (
+                          <span className="mt-0.5 min-w-0 truncate text-[11px] font-normal leading-4 text-slate-500">
+                            {option.meta}
+                          </span>
+                        ) : null}
+                      </button>
+                      <div
+                        className="flex shrink-0 flex-wrap justify-end gap-2 px-2 py-2"
+                        {...ownerAttrs(`${ownerItemKey}-option-${option.id}-role-buttons`, `${ownerItemName} 옵션 문서 권한 버튼 그룹 - ${option.label}`)}
+                      >
+                        {DOCUMENT_MEMBER_ROLE_OPTIONS.map((roleOption) => {
+                          const active = selected && currentRole === roleOption.value;
+
+                          return (
+                            <button
+                              key={roleOption.value}
+                              type="button"
+                              disabled={disabled}
+                              aria-pressed={active}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleSaveDocumentAccess(option.id, roleOption.value);
+                              }}
+                              className={cn(
+                                'inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60',
+                                active
+                                  ? 'border-slate-900 bg-slate-900 text-white'
+                                  : 'border-slate-300 bg-white text-slate-700'
+                              )}
+                              {...ownerAttrs(
+                                `${ownerItemKey}-option-${option.id}-role-${roleOption.value}-button`,
+                                `${ownerItemName} 옵션 ${roleOption.label} 권한 버튼 - ${option.label}`
+                              )}
+                            >
+                              {roleOption.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mr-1 flex shrink-0 items-center gap-1">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-md">
+                          {selected ? <Check aria-hidden="true" className="h-4 w-4 text-slate-700" /> : null}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!documentMembership || disabled}
+                          aria-label={`${memberLabel} ${option.label} 문서 접근 권한 삭제`}
+                          title="문서 접근 권한 삭제"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+
+                            if (!documentMembership) {
+                              return;
+                            }
+
+                            void onDeleteDocumentAccess(
+                              documentMembership.membershipId,
+                              `${memberLabel} / ${option.label}`
+                            );
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                          {...ownerAttrs(`${ownerItemKey}-option-${option.id}-delete-button`, `${ownerItemName} 옵션 문서 권한 삭제 버튼 - ${option.label}`)}
+                        >
+                          <Trash2 aria-hidden="true" className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div
+                  className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500"
+                  {...ownerAttrs(`${ownerItemKey}-empty-state`, `${ownerItemName} 빈 상태`)}
+                >
+                  접근 권한을 줄 현장 문서가 없습니다.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -915,6 +1224,8 @@ function TagComboboxInput({
   placeholder,
   emptyMessage,
   disabled = false,
+  ownerItemKey,
+  ownerItemName = '태그 검색 입력',
 }: {
   value: string;
   options: TagComboboxOption[];
@@ -922,6 +1233,8 @@ function TagComboboxInput({
   placeholder: string;
   emptyMessage: string;
   disabled?: boolean;
+  ownerItemKey?: string;
+  ownerItemName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -956,12 +1269,17 @@ function TagComboboxInput({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative w-full">
+    <div
+      ref={rootRef}
+      className="relative w-full"
+      {...(ownerItemKey ? projectOwnerItem(ownerItemKey, ownerItemName) : {})}
+    >
       <div
         className={cn(
           'flex min-h-10 w-full items-center gap-2 rounded-md border border-input bg-white px-3 py-1 text-sm focus-within:ring-1 focus-within:ring-ring',
           disabled ? 'cursor-not-allowed opacity-50' : ''
         )}
+        {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-control`, `${ownerItemName} 컨트롤`) : {})}
       >
         <input
           type="text"
@@ -976,6 +1294,7 @@ function TagComboboxInput({
           aria-haspopup="listbox"
           aria-expanded={open}
           className="h-7 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-input`, `${ownerItemName} 인풋`) : {})}
         />
         <button
           type="button"
@@ -984,18 +1303,29 @@ function TagComboboxInput({
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
           aria-label="기존 태그 목록 열기"
           title="기존 태그 목록 열기"
+          {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-toggle-button`, `${ownerItemName} 목록 열기 버튼`) : {})}
         >
           <ChevronDown aria-hidden="true" className="h-4 w-4" />
         </button>
       </div>
 
       {open ? (
-        <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 p-2">
-          <div className="space-y-2">
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500">
+        <div
+          className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 p-2"
+          {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-dropdown`, `${ownerItemName} 드롭다운`) : {})}
+        >
+          <div className="space-y-2" {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-dropdown-content`, `${ownerItemName} 드롭다운 내용`) : {})}>
+            <div
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
+              {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-option-count`, `${ownerItemName} 옵션 개수`) : {})}
+            >
               기존 태그 {options.length}개
             </div>
-            <div role="listbox" className="max-h-64 space-y-1 overflow-auto">
+            <div
+              role="listbox"
+              className="max-h-64 space-y-1 overflow-auto"
+              {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-option-list`, `${ownerItemName} 옵션 목록`) : {})}
+            >
               {filteredOptions.length > 0 ? (
                 filteredOptions.map((option) => (
                   <button
@@ -1008,6 +1338,9 @@ function TagComboboxInput({
                       setOpen(false);
                     }}
                     className="flex w-full flex-col items-start rounded-xl border border-transparent px-3 py-2.5 text-left hover:border-slate-200 hover:bg-white"
+                    {...(ownerItemKey
+                      ? projectOwnerItem(`${ownerItemKey}-option-${option.id}`, `${ownerItemName} 옵션 - ${option.label}`)
+                      : {})}
                   >
                     <span className="min-w-0 truncate text-sm font-medium leading-5 text-slate-900">
                       {option.label}
@@ -1018,7 +1351,10 @@ function TagComboboxInput({
                   </button>
                 ))
               ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                <div
+                  className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500"
+                  {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-empty-state`, `${ownerItemName} 빈 상태`) : {})}
+                >
                   {emptyMessage}
                 </div>
               )}
@@ -1118,33 +1454,9 @@ const PROJECT_DOCUMENT_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   {
     key: 'label',
     label: '문서',
-    width: 190,
-    minWidth: 164,
-    maxWidth: 240,
-    clampLines: 2,
-  },
-  {
-    key: 'status',
-    label: '문서 상태',
-    width: 106,
-    minWidth: 96,
-    maxWidth: 122,
-    align: 'center',
-  },
-  {
-    key: 'savedAt',
-    label: '최근 저장',
-    width: 146,
-    minWidth: 128,
-    maxWidth: 176,
-    clampLines: 1,
-  },
-  {
-    key: 'template',
-    label: '문서 양식',
-    width: 172,
-    minWidth: 144,
-    maxWidth: 220,
+    width: 320,
+    minWidth: 240,
+    maxWidth: 460,
     clampLines: 2,
   },
 ];
@@ -1260,22 +1572,6 @@ const PROJECT_MEMBER_LIST_COLUMNS: MejaiScrollTableColumn[] = [
     clampLines: 1,
   },
   {
-    key: 'role',
-    label: '권한',
-    width: 112,
-    minWidth: 96,
-    maxWidth: 136,
-    clampLines: 1,
-  },
-  {
-    key: 'documents',
-    label: '문서',
-    width: 112,
-    minWidth: 96,
-    maxWidth: 148,
-    clampLines: 1,
-  },
-  {
     key: 'status',
     label: '인증',
     width: 76,
@@ -1284,11 +1580,11 @@ const PROJECT_MEMBER_LIST_COLUMNS: MejaiScrollTableColumn[] = [
     align: 'center',
   },
   {
-    key: 'lastVerifiedAt',
-    label: '최근 인증',
-    width: 128,
-    minWidth: 112,
-    maxWidth: 156,
+    key: 'scope',
+    label: '범위',
+    width: 160,
+    minWidth: 132,
+    maxWidth: 190,
     clampLines: 1,
   },
 ];
@@ -1370,12 +1666,27 @@ const PROJECT_CHECKLIST_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   },
 ];
 
+const PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH = 60;
+
+const PROJECT_INFO_LIST_DETAIL_COLUMN: MejaiScrollTableColumn = {
+  key: 'detailAction',
+  label: '상세',
+  width: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  minWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  maxWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  align: 'center',
+  sticky: 'right',
+  clampLines: 1,
+  headerClassName: 'border-l border-slate-200',
+  cellClassName: 'border-l border-slate-200',
+};
+
 const PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN: MejaiScrollTableColumn = {
   key: 'documentLinkAction',
   label: '문서 링크',
-  width: 72,
-  minWidth: 72,
-  maxWidth: 72,
+  width: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  minWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  maxWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
   align: 'center',
   sticky: 'right',
   clampLines: 1,
@@ -1386,9 +1697,9 @@ const PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN: MejaiScrollTableColumn = {
 const PROJECT_INFO_LIST_REGISTER_COLUMN: MejaiScrollTableColumn = {
   key: 'registerAction',
   label: '등록',
-  width: 56,
-  minWidth: 56,
-  maxWidth: 56,
+  width: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  minWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  maxWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
   align: 'center',
   sticky: 'right',
   clampLines: 1,
@@ -1399,9 +1710,9 @@ const PROJECT_INFO_LIST_REGISTER_COLUMN: MejaiScrollTableColumn = {
 const PROJECT_INFO_LIST_ACTION_COLUMN: MejaiScrollTableColumn = {
   key: 'action',
   label: '삭제',
-  width: 48,
-  minWidth: 48,
-  maxWidth: 48,
+  width: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  minWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  maxWidth: PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
   align: 'center',
   sticky: 'right',
   clampLines: 1,
@@ -1414,34 +1725,36 @@ function MetricCard({
   label,
   value,
   description,
+  ownerItemKey,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   description: string;
+  ownerItemKey: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-medium text-slate-500">{label}</div>
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" {...projectOwnerItem(ownerItemKey, `${label} 지표 카드`)}>
+      <div className="flex items-center justify-between gap-3" {...projectOwnerItem(`${ownerItemKey}-header`, `${label} 지표 카드 머리글`)}>
+        <div className="text-xs font-medium text-slate-500" {...projectOwnerItem(`${ownerItemKey}-label`, `${label} 지표 라벨`)}>{label}</div>
         <Icon className="h-4 w-4 text-slate-400" />
       </div>
-      <div className="mt-3 text-2xl font-semibold text-slate-950">{value}</div>
-      <div className="mt-1 text-xs text-slate-500">{description}</div>
+      <div className="mt-3 text-2xl font-semibold text-slate-950" {...projectOwnerItem(`${ownerItemKey}-value`, `${label} 지표 값`)}>{value}</div>
+      <div className="mt-1 text-xs text-slate-500" {...projectOwnerItem(`${ownerItemKey}-description`, `${label} 지표 설명`)}>{description}</div>
     </div>
   );
 }
 
 function DashboardTodoCard({ item }: { item: ProjectDashboardTodoItem }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 text-sm font-semibold text-slate-900">{item.label}</div>
-        <Badge variant={item.statusVariant} className="shrink-0">
+    <div className="rounded-xl border border-slate-200 bg-white p-4" {...projectOwnerItem(`dashboard-todo-card-${item.key}`, `${item.label} 대시보드 할 일 카드`)}>
+      <div className="flex items-center justify-between gap-3" {...projectOwnerItem(`dashboard-todo-card-${item.key}-header`, `${item.label} 대시보드 할 일 머리글`)}>
+        <div className="min-w-0 text-sm font-semibold text-slate-900" {...projectOwnerItem(`dashboard-todo-card-${item.key}-label`, `${item.label} 대시보드 할 일 라벨`)}>{item.label}</div>
+        <Badge variant={item.statusVariant} className="shrink-0" {...projectOwnerItem(`dashboard-todo-card-${item.key}-status`, `${item.label} 대시보드 할 일 상태`)}>
           {item.statusLabel}
         </Badge>
       </div>
-      <div className="mt-2 text-xs leading-5 text-slate-600">{item.summary}</div>
+      <div className="mt-2 text-xs leading-5 text-slate-600" {...projectOwnerItem(`dashboard-todo-card-${item.key}-summary`, `${item.label} 대시보드 할 일 요약`)}>{item.summary}</div>
     </div>
   );
 }
@@ -1451,19 +1764,23 @@ function EmptyState({
   description,
   href,
   actionLabel,
+  ownerItemKey,
 }: {
   title: string;
   description: string;
   href?: string;
   actionLabel?: string;
+  ownerItemKey?: string;
 }) {
+  const resolvedOwnerItemKey = ownerItemKey || `empty-state-${title.replace(/\s+/g, '-').slice(0, 40)}`;
+
   return (
-    <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-sm text-slate-500">
-      <p className="font-medium text-slate-700">{title}</p>
-      <p className="mt-2">{description}</p>
+    <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-sm text-slate-500" {...projectOwnerItem(resolvedOwnerItemKey, `${title} 빈 상태`)}>
+      <p className="font-medium text-slate-700" {...projectOwnerItem(`${resolvedOwnerItemKey}-title`, `${title} 빈 상태 제목`)}>{title}</p>
+      <p className="mt-2" {...projectOwnerItem(`${resolvedOwnerItemKey}-description`, `${title} 빈 상태 설명`)}>{description}</p>
       {href && actionLabel ? (
-        <div className="mt-4">
-          <Button variant="outline" asChild>
+        <div className="mt-4" {...projectOwnerItem(`${resolvedOwnerItemKey}-action`, `${title} 빈 상태 실행 영역`)}>
+          <Button variant="outline" asChild {...projectOwnerItem(`${resolvedOwnerItemKey}-action-button`, `${actionLabel} 버튼`)}>
             <Link href={href}>{actionLabel}</Link>
           </Button>
         </div>
@@ -1475,9 +1792,11 @@ function EmptyState({
 function ProjectListActionButton({
   action,
   className,
+  ownerItemKey,
 }: {
   action: ProjectListAction;
   className: string;
+  ownerItemKey?: string;
 }) {
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   const completedTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1493,6 +1812,7 @@ function ProjectListActionButton({
   );
 
   const isCompleted = Boolean(action.completed || completed);
+  const resolvedOwnerItemKey = ownerItemKey || `project-list-action-${action.feedbackKey || action.title}`;
   const markCompleted = React.useCallback(() => {
     if (!action.completedIcon) {
       return;
@@ -1543,6 +1863,7 @@ function ProjectListActionButton({
         aria-label={action.ariaLabel}
         data-member-access-link-key={action.feedbackKey}
         data-copy-feedback-state={action.completedIcon ? (isCompleted ? 'completed' : 'idle') : undefined}
+        {...projectOwnerItem(resolvedOwnerItemKey, action.ariaLabel)}
         disabled={action.disabled}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -1590,13 +1911,18 @@ function ProjectInfoList({
   maxBodyHeightClassName,
   minTableWidth,
   variant = 'detail',
+  ownerItemKey,
+  ownerItemName = '현장 관리 목록',
 }: {
   items: ProjectListRow[];
   emptyMessage?: string;
   maxBodyHeightClassName?: string;
   minTableWidth?: number;
   variant?: 'detail' | 'document' | 'photo' | 'signature' | 'member' | 'memberDocument' | 'checklist';
+  ownerItemKey?: string;
+  ownerItemName?: string;
 }) {
+  const hasDetailColumn = items.some((item) => Boolean(item.detailAction));
   const hasDocumentLinkColumn = items.some((item) => Boolean(item.documentLinkAction));
   const hasRegisterColumn = items.some((item) => Boolean(item.registerAction));
   const hasActionColumn = items.some((item) => Boolean(item.action));
@@ -1616,16 +1942,18 @@ function ProjectInfoList({
               : PROJECT_INFO_LIST_COLUMNS;
   const columns = [
     ...baseColumns,
+    ...(hasDetailColumn ? [PROJECT_INFO_LIST_DETAIL_COLUMN] : []),
     ...(hasDocumentLinkColumn ? [PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN] : []),
     ...(hasRegisterColumn ? [PROJECT_INFO_LIST_REGISTER_COLUMN] : []),
     ...(hasActionColumn ? [PROJECT_INFO_LIST_ACTION_COLUMN] : []),
   ];
-  const linkColumnWidth = hasDocumentLinkColumn ? 72 : 0;
-  const registerColumnWidth = hasRegisterColumn ? 56 : 0;
-  const actionColumnWidth = hasActionColumn ? 48 : 0;
+  const detailColumnWidth = hasDetailColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
+  const linkColumnWidth = hasDocumentLinkColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
+  const registerColumnWidth = hasRegisterColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
+  const actionColumnWidth = hasActionColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
   const baseMinTableWidth =
     variant === 'document'
-      ? 584
+      ? 320
       : variant === 'photo'
         ? 556
         : variant === 'signature'
@@ -1637,12 +1965,14 @@ function ProjectInfoList({
               : variant === 'checklist'
                 ? 900
               : 492;
-  const resolvedMinTableWidth = minTableWidth || baseMinTableWidth + linkColumnWidth + registerColumnWidth + actionColumnWidth;
+  const resolvedMinTableWidth =
+    minTableWidth || baseMinTableWidth + detailColumnWidth + linkColumnWidth + registerColumnWidth + actionColumnWidth;
   const renderLinkActionButton = (action: ProjectListAction | undefined) =>
     action ? (
       <ProjectListActionButton
         action={action}
         className="h-7 w-7 rounded-md text-slate-500 disabled:opacity-100"
+        ownerItemKey={ownerItemKey ? `${ownerItemKey}-document-link-action-${action.feedbackKey || action.title}` : undefined}
       />
     ) : null;
   const rows: MejaiScrollTableRow[] = items.map((item) => ({
@@ -1650,6 +1980,8 @@ function ProjectInfoList({
     selected: item.selected,
     onClick: item.onClick,
     expandedContent: item.expandedContent,
+    ownerItemKey: ownerItemKey ? `${ownerItemKey}-row-${item.key}` : undefined,
+    ownerItemName: `${ownerItemName} 행 - ${item.label}`,
     ariaLabel: item.label,
     title: [
       item.signatureSlotLabel || item.label,
@@ -1659,12 +1991,13 @@ function ProjectInfoList({
       item.signatureSignedAt,
       item.contact,
       item.roleLabel,
+      item.scopeLabel,
       item.summary,
     ]
       .filter(Boolean)
       .join(' / '),
     cells: {
-      label: item.label,
+      label: item.labelContent ?? item.label,
       status: item.statusContent ?? (
         <Badge variant={item.statusVariant} className="px-1.5 py-0 text-[10px] font-semibold leading-5">
           {item.statusLabel}
@@ -1682,6 +2015,7 @@ function ProjectInfoList({
       contact: item.contact || '-',
       role: item.roleContent ?? item.roleLabel ?? '-',
       documents: item.documentsContent ?? '-',
+      scope: item.scopeContent ?? item.scopeLabel ?? '-',
       lastVerifiedAt: item.lastVerifiedAt || '-',
       signatureSlot: item.signatureSlotLabel || item.label,
       signatureSigner: item.signatureSignerName || '-',
@@ -1689,31 +2023,45 @@ function ProjectInfoList({
       signatureRequestedAt: item.signatureRequestedAt || '-',
       signatureSignedAt: item.signatureSignedAt || '-',
       signatureExpiresAt: item.signatureExpiresAt || '-',
+      detailAction: item.detailAction ? (
+        <ProjectListActionButton
+          action={item.detailAction}
+          className="h-7 w-7 rounded-md text-slate-500"
+          ownerItemKey={ownerItemKey ? `${ownerItemKey}-detail-action-${item.key}` : undefined}
+        />
+      ) : null,
       documentLinkAction: renderLinkActionButton(item.documentLinkAction),
       registerAction: item.registerAction ? (
         <ProjectListActionButton
           action={item.registerAction}
           className="h-7 w-7 rounded-md text-blue-600 disabled:text-slate-300"
+          ownerItemKey={ownerItemKey ? `${ownerItemKey}-register-action-${item.key}` : undefined}
         />
       ) : null,
       action: item.action ? (
         <ProjectListActionButton
           action={item.action}
           className="h-7 w-7 rounded-md text-rose-600"
+          ownerItemKey={ownerItemKey ? `${ownerItemKey}-row-action-${item.key}` : undefined}
         />
       ) : null,
     },
   }));
 
   return (
-    <MejaiScrollTable
-      columns={columns}
-      rows={rows}
-      emptyMessage={emptyMessage || '표시할 항목이 없습니다.'}
-      maxHeightClassName={maxBodyHeightClassName}
-      minTableWidth={resolvedMinTableWidth}
-      showIndexColumn={false}
-    />
+    <div {...(ownerItemKey ? projectOwnerItem(ownerItemKey, ownerItemName) : {})}>
+      <MejaiScrollTable
+        columns={columns}
+        rows={rows}
+        emptyMessage={emptyMessage || '표시할 항목이 없습니다.'}
+        maxHeightClassName={maxBodyHeightClassName}
+        minTableWidth={resolvedMinTableWidth}
+        showIndexColumn={false}
+        ownerItemKey={ownerItemKey ? `${ownerItemKey}-scroll-table` : undefined}
+        ownerItemName={`${ownerItemName} 스크롤 표`}
+        ownerItemAttributes={ownerItemKey ? projectOwnerItem : undefined}
+      />
+    </div>
   );
 }
 
@@ -1820,7 +2168,6 @@ export default function ProjectPage() {
   const [siteMemberDocumentIds, setSiteMemberDocumentIds] = React.useState<string[]>([]);
   const [siteMemberDocumentRole, setSiteMemberDocumentRole] = React.useState<ManagedDocumentMemberAccessRole>('viewer');
   const [expandedSiteMemberId, setExpandedSiteMemberId] = React.useState('');
-  const [memberDocumentDrafts, setMemberDocumentDrafts] = React.useState<Record<string, MemberDocumentAccessDraft>>({});
   const [invitingSiteMember, setInvitingSiteMember] = React.useState(false);
   const [deletingSiteMemberId, setDeletingSiteMemberId] = React.useState('');
   const [deletingDocumentMemberId, setDeletingDocumentMemberId] = React.useState('');
@@ -1946,6 +2293,7 @@ export default function ProjectPage() {
     setSelectedSiteId(requestedSiteId);
     setSelectedSiteIds(requestedSiteId ? [requestedSiteId] : []);
     setSelectedDocumentId(requestedDocumentId);
+    setExpandedDocumentStatusDocumentId(requestedDocumentId);
   }, [requestedDocumentId, requestedSiteId]);
 
   React.useEffect(() => {
@@ -3734,13 +4082,33 @@ export default function ProjectPage() {
         return current;
       }
 
-      return sites[0]?.id || '';
+      if (requestedSiteId && sites.some((site) => site.id === requestedSiteId)) {
+        return requestedSiteId;
+      }
+
+      return '';
     });
-  }, [rootDataLoaded, sites]);
+  }, [requestedSiteId, rootDataLoaded, sites]);
 
   React.useEffect(() => {
-    setSelectedSiteIds((current) => current.filter((siteId) => sites.some((site) => site.id === siteId)));
-  }, [sites]);
+    if (!rootDataLoaded) {
+      return;
+    }
+
+    setSelectedSiteIds((current) => {
+      const validSiteIds = current.filter((siteId) => sites.some((site) => site.id === siteId));
+
+      if (validSiteIds.length > 0) {
+        return validSiteIds;
+      }
+
+      if (requestedSiteId && sites.some((site) => site.id === requestedSiteId)) {
+        return [requestedSiteId];
+      }
+
+      return [];
+    });
+  }, [requestedSiteId, rootDataLoaded, sites]);
 
   React.useEffect(() => {
     setDeleteImpact(null);
@@ -3886,7 +4254,6 @@ export default function ProjectPage() {
     setSiteMemberDocumentIds([]);
     setSiteMemberDocumentRole('viewer');
     setExpandedSiteMemberId('');
-    setMemberDocumentDrafts({});
   }, [selectedSiteId]);
 
   const handleRefresh = () => {
@@ -3895,12 +4262,17 @@ export default function ProjectPage() {
 
   const handleChangeSelectedSites = React.useCallback(
     (nextSiteIds: string[]) => {
+      if (nextSiteIds.length === 0) {
+        setSelectedSiteIds([]);
+        setSelectedSiteId('');
+        setSelectedDocumentId('');
+        return;
+      }
+
       const addedSiteId = nextSiteIds.find((siteId) => !selectedSiteIds.includes(siteId)) || '';
       const nextActiveSiteId =
         addedSiteId ||
         (selectedSiteId && nextSiteIds.includes(selectedSiteId) ? selectedSiteId : nextSiteIds[0]) ||
-        selectedSiteId ||
-        sites[0]?.id ||
         '';
 
       setSelectedSiteIds(nextSiteIds);
@@ -3909,7 +4281,7 @@ export default function ProjectPage() {
         setSelectedSiteId(nextActiveSiteId);
       }
     },
-    [selectedSiteId, selectedSiteIds, sites]
+    [selectedSiteId, selectedSiteIds]
   );
 
   const loadSiteMembers = React.useCallback(async (siteId: string) => {
@@ -4161,24 +4533,6 @@ export default function ProjectPage() {
     [clearSelectedDocumentContext, deletingDocument, documents, selectedDocumentDetail, selectedDocumentId, selectedSiteId, syncSiteDocuments]
   );
 
-  const handleToggleDocumentStatus = React.useCallback(
-    (documentId: string) => {
-      const normalizedDocumentId = documentId.trim();
-
-      if (!normalizedDocumentId) {
-        return;
-      }
-
-      const willOpen = expandedDocumentStatusDocumentId !== normalizedDocumentId;
-      setExpandedDocumentStatusDocumentId(willOpen ? normalizedDocumentId : '');
-
-      if (willOpen) {
-        handleSelectDocument(normalizedDocumentId);
-      }
-    },
-    [expandedDocumentStatusDocumentId, handleSelectDocument]
-  );
-
   const setDocumentLinkButtonFeedback = React.useCallback((linkKey: string, state: 'idle' | 'completed') => {
     document
       .querySelectorAll<HTMLButtonElement>('[data-member-access-link-key]')
@@ -4425,13 +4779,6 @@ export default function ProjectPage() {
         );
 
         await loadSiteDocumentMembers(documents);
-        setMemberDocumentDrafts((current) => ({
-          ...current,
-          [membership.membershipId]: {
-            ...(current[membership.membershipId] || { accessRole: 'viewer' }),
-            documentIds: [],
-          },
-        }));
         setMessage(
           `"${membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber)}"의 문서 권한을 저장했습니다.`
         );
@@ -4442,24 +4789,6 @@ export default function ProjectPage() {
       }
     },
     [documents, loadSiteDocumentMembers, savingMemberDocumentAccessKey]
-  );
-
-  const handleUpdateMemberDocumentRole = React.useCallback(
-    async (membership: SiteMemberRecordDto, documentMembership: DocumentMemberRecordDto, nextRole: ManagedDocumentMemberAccessRole) => {
-      const currentRole = getManagedDocumentMemberRole(documentMembership.accessRole);
-
-      if (nextRole === currentRole) {
-        return;
-      }
-
-      await handleSaveMemberDocumentAccess(
-        membership,
-        [documentMembership.documentId],
-        nextRole,
-        `${documentMembership.membershipId}:role`
-      );
-    },
-    [handleSaveMemberDocumentAccess]
   );
 
   const handleDeleteSiteMember = React.useCallback(
@@ -4566,7 +4895,6 @@ export default function ProjectPage() {
         const linkedTemplate = item.document.templateId
           ? templates.find((template) => template.id === item.document.templateId) || null
           : null;
-        const isStatusExpanded = expandedDocumentStatusDocumentId === item.document.id;
         const directDocumentMembers = siteDocumentMembers.filter(
           (membership) => membership.documentId === item.document.id
         );
@@ -4574,32 +4902,32 @@ export default function ProjectPage() {
           directDocumentMembers.find((membership) => membership.accessRole === 'signer')?.member.phoneNumber ||
           directDocumentMembers[0]?.member.phoneNumber ||
           null;
+        const isStatusExpanded = expandedDocumentStatusDocumentId === item.document.id;
 
         return {
           key: item.document.id,
           label: item.document.title,
           statusLabel: getDocumentStatusLabel(item.document.status),
           statusVariant: getDocumentStatusVariant(item.document.status),
-          statusContent: (
-            <button
-              type="button"
-              className={cn(
-                'inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] font-semibold',
-                isStatusExpanded
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-white text-slate-700'
+          labelContent: (
+            <div
+              className="min-w-0"
+              {...projectOwnerItem(
+                `site-document-list-row-${item.document.id}-document-title-content`,
+                `${item.document.title} 문서명 표시 영역`
               )}
-              aria-expanded={isStatusExpanded}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                handleToggleDocumentStatus(item.document.id);
-              }}
             >
-              {getDocumentStatusLabel(item.document.status)}
-              <ChevronDown className={cn('h-3 w-3', isStatusExpanded ? 'rotate-180' : '')} />
-            </button>
+              <div
+                className="truncate text-sm font-medium text-slate-900"
+                title={item.document.title}
+                {...projectOwnerItem(
+                  `site-document-list-row-${item.document.id}-document-title`,
+                  `${item.document.title} 문서명`
+                )}
+              >
+                {item.document.title}
+              </div>
+            </div>
           ),
           summary: `버전 ${item.document.currentVersionNumber || 0}`,
           savedAt: item.latestVersion?.createdAt ? formatDateTime(item.latestVersion.createdAt) : '저장 이력 없음',
@@ -4630,24 +4958,24 @@ export default function ProjectPage() {
               )
             : '직접 추가한 문서',
           selected: item.document.id === selectedDocumentId,
-          onClick: () => handleSelectDocument(item.document.id),
-          expandedContent: isStatusExpanded ? (
-            <div className="space-y-2 rounded-lg bg-white p-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 text-xs font-semibold text-slate-900">
-                  {item.document.title} 문서 상태
-                </div>
-                {loadingDocumentDetail && selectedDocumentId === item.document.id ? (
-                  <span className="shrink-0 text-[11px] text-slate-500">불러오는 중</span>
-                ) : null}
-              </div>
-              <ProjectInfoList
-                items={selectedDocumentId === item.document.id ? selectedDocumentDetailRows : []}
-                emptyMessage="문서 상태를 확인할 항목이 없습니다."
-                minTableWidth={492}
-              />
-            </div>
-          ) : undefined,
+          onClick: () => {
+            setExpandedDocumentStatusDocumentId(item.document.id);
+            handleSelectDocument(item.document.id);
+          },
+          detailAction: {
+            title: isStatusExpanded ? '문서 상태 상세 숨기기' : '문서 상태 상세 보기',
+            ariaLabel: `${item.document.title} 문서 상태 상세 ${isStatusExpanded ? '숨기기' : '보기'}`,
+            icon: isStatusExpanded ? <Minimize2 className="h-4 w-4" /> : <Info className="h-4 w-4" />,
+            onClick: () => {
+              if (isStatusExpanded) {
+                setExpandedDocumentStatusDocumentId('');
+                return;
+              }
+
+              setExpandedDocumentStatusDocumentId(item.document.id);
+              handleSelectDocument(item.document.id);
+            },
+          },
           documentLinkAction: {
             title: '문서 접근 링크 복사',
             ariaLabel: `${item.document.title} 문서 접근 링크 복사`,
@@ -4679,15 +5007,33 @@ export default function ProjectPage() {
       handleCopyDocumentLink,
       handleDeleteDocument,
       handleSelectDocument,
-      handleToggleDocumentStatus,
       expandedDocumentStatusDocumentId,
-      loadingDocumentDetail,
       selectedDocumentId,
-      selectedDocumentDetailRows,
       siteDocumentMembers,
       templates,
     ]
   );
+
+  const expandedSiteDocumentStatusItem = React.useMemo(
+    () =>
+      expandedDocumentStatusDocumentId
+        ? documents.find((item) => item.document.id === expandedDocumentStatusDocumentId) || null
+        : null,
+    [documents, expandedDocumentStatusDocumentId]
+  );
+  const expandedSiteDocumentStatusTemplate = React.useMemo(
+    () =>
+      expandedSiteDocumentStatusItem?.document.templateId
+        ? templates.find((template) => template.id === expandedSiteDocumentStatusItem.document.templateId) || null
+        : null,
+    [expandedSiteDocumentStatusItem?.document.templateId, templates]
+  );
+  const expandedSiteDocumentStatusSavedAt = expandedSiteDocumentStatusItem?.latestVersion?.createdAt
+    ? formatDateTime(expandedSiteDocumentStatusItem.latestVersion.createdAt)
+    : '저장 이력 없음';
+  const expandedSiteDocumentStatusTemplateLabel = expandedSiteDocumentStatusItem?.document.templateId
+    ? expandedSiteDocumentStatusTemplate?.templateName || '이름 없는 문서 양식'
+    : '직접 추가한 문서';
 
   const photoRows = React.useMemo<ProjectListRow[]>(
     () =>
@@ -4745,63 +5091,54 @@ export default function ProjectPage() {
         const memberDocumentMemberships = memberDocumentMembershipsByMemberId[membership.member.id] || [];
         const isDeletingMember = deletingSiteMemberId === membership.membershipId;
         const isUpdatingMember = updatingSiteMemberId === membership.membershipId;
-        const managedSiteRole = getManagedSiteMemberRole(membership.accessRole);
         const hasFullDocumentAccess = hasFullDocumentAccessBySiteRole(membership.accessRole);
-        const expanded = !hasFullDocumentAccess && expandedSiteMemberId === membership.membershipId;
+        const expanded = expandedSiteMemberId === membership.membershipId;
+        const scopeLabel = hasFullDocumentAccess
+          ? '현장 전체 접근'
+          : memberDocumentMemberships.length > 0
+            ? `문서별 접근 · ${memberDocumentMemberships.length}개 문서`
+            : '문서별 접근 · 문서 없음';
 
         return {
 	          key: membership.membershipId,
 	          label: memberLabel,
 	          statusLabel: getMemberVerificationStatusLabel(membership.member.verificationStatus),
 	          statusVariant: getMemberVerificationStatusVariant(membership.member.verificationStatus),
-	          summary: SITE_MEMBER_ROLE_LABELS[membership.accessRole],
+	          summary: scopeLabel,
 	          contact: formatPhoneNumber(membership.member.phoneNumber),
 	          roleLabel: SITE_MEMBER_ROLE_LABELS[membership.accessRole],
-	          roleContent: (
-            <select
-              value={managedSiteRole}
-              onChange={(event) =>
-                void handleUpdateSiteMemberRole(membership, event.target.value as ManagedSiteMemberAccessRole)
-              }
-	              disabled={isDeletingMember || isUpdatingMember}
-	              className="h-7 w-full rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-	            >
-	              {SITE_MEMBER_ROLE_OPTIONS.map((option) => (
-	                <option key={option.value} value={option.value}>
-	                  {option.label}
-	                </option>
-	              ))}
-            </select>
+	          scopeLabel,
+          scopeContent: (
+            <div className="flex min-w-0 items-center gap-2">
+              <Badge
+                variant={hasFullDocumentAccess ? 'green' : 'slate'}
+                className="shrink-0 px-2 py-0 text-[10px] leading-5"
+              >
+                {hasFullDocumentAccess ? '현장 전체' : '문서별'}
+              </Badge>
+              <span className="min-w-0 truncate text-[10px] text-slate-500">
+                {hasFullDocumentAccess
+                  ? '모든 문서 접근 가능'
+                  : memberDocumentMemberships.length > 0
+                    ? `${memberDocumentMemberships.length}개 문서 접근`
+                    : '지정 문서 없음'}
+              </span>
+            </div>
           ),
-          documentsContent: hasFullDocumentAccess ? (
-            <span className="inline-flex h-7 items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-medium text-emerald-700">
-              전체 권한
-            </span>
-          ) : (
-            <button
-              type="button"
-	              className={cn(
-	                'inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-medium',
-	                expanded
-	                  ? 'border-slate-900 bg-slate-900 text-white'
-	                  : 'border-slate-300 bg-white text-slate-700'
-	              )}
-	              onPointerDown={(event) => event.stopPropagation()}
-	              onClick={(event) => {
-	                event.preventDefault();
-	                event.stopPropagation();
-	                setExpandedSiteMemberId((current) =>
-	                  current === membership.membershipId ? '' : membership.membershipId
-	                );
-	              }}
-	            >
-	              {memberDocumentMemberships.length > 0 ? `${memberDocumentMemberships.length}개 문서` : '문서 없음'}
-	              <ChevronDown className="h-3.5 w-3.5" />
-	            </button>
-	          ),
 	          lastVerifiedAt: membership.member.lastVerifiedAt ? formatDateTime(membership.member.lastVerifiedAt) : '인증 이력 없음',
 	          source: '현장 접근 권한',
 	          selected: expanded,
+          detailAction: {
+            title: expanded ? '구성원 접근 상세 숨기기' : '구성원 접근 상세 보기',
+            ariaLabel: `${memberLabel} 구성원 접근 상세 ${expanded ? '숨기기' : '보기'}`,
+            icon: expanded ? <Minimize2 className="h-4 w-4" /> : <Info className="h-4 w-4" />,
+            disabled: isDeletingMember || isUpdatingMember,
+            onClick: () => {
+              setExpandedSiteMemberId((current) =>
+                current === membership.membershipId ? '' : membership.membershipId
+              );
+            },
+          },
 	          action: {
 	            title: '현장 접근 권한 삭제',
 	            ariaLabel: `${memberLabel} 현장 접근 권한 삭제`,
@@ -4817,7 +5154,6 @@ export default function ProjectPage() {
 	      deletingSiteMemberId,
 	      expandedSiteMemberId,
 	      handleDeleteSiteMember,
-	      handleUpdateSiteMemberRole,
 	      memberDocumentMembershipsByMemberId,
 	      siteMembers,
 	      updatingSiteMemberId,
@@ -4831,74 +5167,22 @@ export default function ProjectPage() {
   const expandedSiteMemberLabel = expandedSiteMember
     ? expandedSiteMember.member.displayName?.trim() || formatPhoneNumber(expandedSiteMember.member.phoneNumber)
     : '';
-  const expandedSiteMemberCanManageDocuments = expandedSiteMember
-    ? !hasFullDocumentAccessBySiteRole(expandedSiteMember.accessRole)
+  const expandedSiteMemberManagedRole = expandedSiteMember
+    ? getManagedSiteMemberRole(expandedSiteMember.accessRole)
+    : 'participant';
+  const expandedSiteMemberHasFullDocumentAccess = expandedSiteMember
+    ? hasFullDocumentAccessBySiteRole(expandedSiteMember.accessRole)
+    : false;
+  const expandedSiteMemberCanManageDocuments = expandedSiteMember ? !expandedSiteMemberHasFullDocumentAccess : false;
+  const expandedSiteMemberIsUpdating = expandedSiteMember
+    ? updatingSiteMemberId === expandedSiteMember.membershipId
+    : false;
+  const expandedSiteMemberIsDeleting = expandedSiteMember
+    ? deletingSiteMemberId === expandedSiteMember.membershipId
     : false;
   const expandedMemberDocumentMemberships = expandedSiteMember
     ? memberDocumentMembershipsByMemberId[expandedSiteMember.member.id] || []
 	    : [];
-	  const expandedMemberDocumentIds = new Set(
-	    expandedMemberDocumentMemberships.map((membership) => membership.documentId)
-	  );
-	  const expandedMemberAvailableDocumentOptions = siteDocumentPickerOptions.filter(
-	    (option) => !expandedMemberDocumentIds.has(option.id)
-	  );
-  const expandedMemberDocumentDraft = expandedSiteMember
-    ? memberDocumentDrafts[expandedSiteMember.membershipId] || {
-        documentIds: [],
-        accessRole: 'viewer' as ManagedDocumentMemberAccessRole,
-      }
-    : {
-        documentIds: [],
-        accessRole: 'viewer' as ManagedDocumentMemberAccessRole,
-      };
-  const expandedMemberDocumentRows = React.useMemo<ProjectListRow[]>(() => {
-    if (!expandedSiteMember) {
-      return [];
-    }
-
-    return expandedMemberDocumentMemberships.map((documentMembership) => {
-      const documentTitle = documentTitleById.get(documentMembership.documentId) || '현장 문서';
-      const roleLabel = DOCUMENT_MEMBER_ROLE_LABELS[documentMembership.accessRole];
-
-      return {
-        key: documentMembership.membershipId,
-        label: documentTitle,
-        statusLabel: '등록됨',
-        statusVariant: 'slate',
-        summary: `문서 권한 ${roleLabel}`,
-        source: roleLabel,
-        roleLabel,
-        roleContent: (
-          <RoleSegmentedButtons
-            value={getManagedDocumentMemberRole(documentMembership.accessRole)}
-            options={DOCUMENT_MEMBER_ROLE_OPTIONS}
-            onChange={(value) => void handleUpdateMemberDocumentRole(expandedSiteMember, documentMembership, value)}
-          />
-        ),
-        action: {
-          title: '문서 권한 삭제',
-          ariaLabel: `${expandedSiteMemberLabel} ${documentTitle} 문서 권한 삭제`,
-          icon: <Trash2 className="h-4 w-4" />,
-          disabled: deletingDocumentMemberId === documentMembership.membershipId,
-          onClick: () => {
-            void handleDeleteDocumentMember(
-              documentMembership.membershipId,
-              `${expandedSiteMemberLabel} / ${documentTitle}`
-            );
-          },
-        },
-      };
-    });
-  }, [
-    deletingDocumentMemberId,
-    documentTitleById,
-    expandedMemberDocumentMemberships,
-    expandedSiteMember,
-    expandedSiteMemberLabel,
-    handleDeleteDocumentMember,
-    handleUpdateMemberDocumentRole,
-  ]);
 
   const dashboardTargetSiteIds = React.useMemo(
     () => (selectedSiteIds.length > 0 ? selectedSiteIds : sites.map((site) => site.id)),
@@ -5340,8 +5624,6 @@ export default function ProjectPage() {
     ]
   );
 
-  const hasSelectedDocumentContext = Boolean(selectedDocumentId || loadingDocumentDetail || selectedDocumentListItem);
-  const selectedDetailPanel = hasSelectedDocumentContext ? 'document' : 'summary';
   const selectedOwnerDocumentId =
     selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId.trim();
   const selectedOwnerSiteId =
@@ -5352,22 +5634,24 @@ export default function ProjectPage() {
   ];
 
   const renderProjectDocumentCreateSiteNotice = () => (
-    <Card className="border-slate-200">
-      <CardContent className="p-6">
+    <Card className="border-slate-200" {...projectOwnerItem('document-output-create-site-notice-panel', '문서 출력 새 현장 입력 중 안내 패널')}>
+      <CardContent className="p-6" {...projectOwnerItem('document-output-create-site-notice-content', '문서 출력 새 현장 입력 중 안내 내용')}>
         <EmptyState
           title="새 현장을 입력하는 중입니다."
           description="현장 생성을 마치거나 입력을 닫으면 선택한 문서를 다시 편집할 수 있습니다."
+          ownerItemKey="document-output-create-site-notice-empty-state"
         />
       </CardContent>
     </Card>
   );
 
   const renderProjectDocumentNoSelectionNotice = () => (
-    <Card className="border-slate-200">
-      <CardContent className="p-6">
+    <Card className="border-slate-200" {...projectOwnerItem('document-output-no-selection-notice-panel', '문서 출력 문서 미선택 안내 패널')}>
+      <CardContent className="p-6" {...projectOwnerItem('document-output-no-selection-notice-content', '문서 출력 문서 미선택 안내 내용')}>
         <EmptyState
           title="작업할 현장 문서를 먼저 고르세요."
           description="위의 현장 문서에서 문서를 선택하면 이 페이지 하단에서 바로 편집하거나 할 일을 부여할 수 있습니다."
+          ownerItemKey="document-output-no-selection-notice-empty-state"
         />
       </CardContent>
     </Card>
@@ -5380,11 +5664,12 @@ export default function ProjectPage() {
 
     if (loadingDocumentDetail && selectedOwnerDocumentId && !selectedDocumentInitialDraft) {
       return (
-        <Card className="border-slate-200">
-          <CardContent className="p-6">
+        <Card className="border-slate-200" {...projectOwnerItem('document-edit-loading-panel', '문서 편집 로딩 패널')}>
+          <CardContent className="p-6" {...projectOwnerItem('document-edit-loading-content', '문서 편집 로딩 내용')}>
             <EmptyState
               title="문서 정보를 불러오는 중입니다."
               description="현장 문서 본문을 준비하고 있습니다."
+              ownerItemKey="document-edit-loading-empty-state"
             />
           </CardContent>
         </Card>
@@ -5393,30 +5678,33 @@ export default function ProjectPage() {
 
     if (selectedOwnerDocumentId && selectedDocumentInitialDraft) {
       return (
-        <CanvasOwnedWorkspace
-          key={`project-edit:${selectedDocumentInitialDraft.draftKey}`}
-          surface="project"
-          initialDraft={selectedDocumentInitialDraft}
-          workspaceMode="document"
-          hideHeader
-          hidePersistencePanel
-          nameFieldLabel="문서 이름:"
-          saveButtonLabel="문서 저장"
-          templateNameReadOnly
-          documentAttachmentApiPath={`/api/documents/${encodeURIComponent(selectedOwnerDocumentId)}/attachments`}
-          onSaveDraftHtml={handleSaveDocumentDraft}
-          suppressInitialDraftLoadedMessage
-        />
+        <div {...projectOwnerItem('document-edit-canvas-owner-workspace', '문서 편집 상자 편집 캔버스')}>
+          <CanvasOwnedWorkspace
+            key={`project-edit:${selectedDocumentInitialDraft.draftKey}`}
+            surface="project"
+            initialDraft={selectedDocumentInitialDraft}
+            workspaceMode="document"
+            hideHeader
+            hidePersistencePanel
+            nameFieldLabel="문서 이름:"
+            saveButtonLabel="문서 저장"
+            templateNameReadOnly
+            documentAttachmentApiPath={`/api/documents/${encodeURIComponent(selectedOwnerDocumentId)}/attachments`}
+            onSaveDraftHtml={handleSaveDocumentDraft}
+            suppressInitialDraftLoadedMessage
+          />
+        </div>
       );
     }
 
     if (selectedOwnerDocumentId || selectedDocumentListItem) {
       return (
-        <Card className="border-slate-200">
-          <CardContent className="p-6">
+        <Card className="border-slate-200" {...projectOwnerItem('document-edit-empty-body-panel', '문서 편집 본문 없음 안내 패널')}>
+          <CardContent className="p-6" {...projectOwnerItem('document-edit-empty-body-content', '문서 편집 본문 없음 안내 내용')}>
             <EmptyState
               title="현재 문서에 편집할 본문이 없습니다."
               description="이 문서의 최신 본문이 없어서 상자 편집 캔버스를 열 수 없습니다."
+              ownerItemKey="document-edit-empty-body-empty-state"
             />
           </CardContent>
         </Card>
@@ -5433,16 +5721,18 @@ export default function ProjectPage() {
 
     if (selectedOwnerDocumentId) {
       return (
-        <DocumentsOwnerWorkspace
-          key={`project-current-work:${selectedOwnerDocumentId}`}
-          initialSiteId={selectedOwnerSiteId}
-          lockedDocumentId={selectedOwnerDocumentId}
-          hideDocumentPicker
-          hidePageHeader
-          embedded
-          surface="project"
-          renderMode="current-work-panel"
-        />
+        <div {...projectOwnerItem('document-todo-documents-owner-workspace', '문서 할 일 문서 기능 워크스페이스')}>
+          <DocumentsOwnerWorkspace
+            key={`project-current-work:${selectedOwnerDocumentId}`}
+            initialSiteId={selectedOwnerSiteId}
+            lockedDocumentId={selectedOwnerDocumentId}
+            hideDocumentPicker
+            hidePageHeader
+            embedded
+            surface="project"
+            renderMode="current-work-panel"
+          />
+        </div>
       );
     }
 
@@ -5450,22 +5740,27 @@ export default function ProjectPage() {
   };
 
   const renderProjectDocumentOutputTabs = () => (
-    <div className="space-y-4" data-project-owner-item="document-output-tabs">
-      <OwnerSettingsTabList
-        value={activeProjectDocumentOutputTab}
-        ariaLabel="현장 문서 작업 탭"
-        options={projectDocumentOutputTabs}
-        onChange={(value) => setActiveProjectDocumentOutputTab(value as ProjectDocumentOutputTab)}
-        className="max-w-xs"
-      />
+    <div className="space-y-4" {...projectOwnerItem('document-output-tabs', '현장 문서 출력 탭 영역')}>
+      <div {...projectOwnerItem('document-output-tab-list', '현장 문서 작업 탭 리스트')}>
+        <OwnerSettingsTabList
+          value={activeProjectDocumentOutputTab}
+          ariaLabel="현장 문서 작업 탭"
+          options={projectDocumentOutputTabs}
+          onChange={(value) => setActiveProjectDocumentOutputTab(value as ProjectDocumentOutputTab)}
+          className="max-w-xs"
+        />
+      </div>
 
       <div
         role="tabpanel"
-        data-project-owner-item={
+        {...projectOwnerItem(
           activeProjectDocumentOutputTab === 'edit'
             ? 'document-edit-output-panel'
-            : 'document-todo-output-panel'
-        }
+            : 'document-todo-output-panel',
+          activeProjectDocumentOutputTab === 'edit'
+            ? '현장 문서 편집 출력 패널'
+            : '현장 문서 할 일 출력 패널'
+        )}
       >
         {activeProjectDocumentOutputTab === 'edit'
           ? renderProjectDocumentEditPanel()
@@ -5475,17 +5770,17 @@ export default function ProjectPage() {
   );
 
   return (
-    <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-2">
-          <Badge variant="slate">현장 통합 관리</Badge>
-          <h1 className="text-3xl font-semibold text-slate-950">현장 관리</h1>
-          <p className="max-w-4xl text-sm text-slate-600">
+    <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8" {...projectOwnerItem('project-owner-root', '현장 관리 페이지 루트')}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between" {...projectOwnerItem('project-page-header', '현장 관리 페이지 머리글')}>
+        <div className="space-y-2" {...projectOwnerItem('project-page-heading-group', '현장 관리 페이지 제목 묶음')}>
+          <Badge variant="slate" {...projectOwnerItem('project-page-feature-badge', '현장 관리 페이지 기능 배지')}>현장 통합 관리</Badge>
+          <h1 className="text-3xl font-semibold text-slate-950" {...projectOwnerItem('project-page-title', '현장 관리 페이지 제목')}>현장 관리</h1>
+          <p className="max-w-4xl text-sm text-slate-600" {...projectOwnerItem('project-page-description', '현장 관리 페이지 설명')}>
             현장을 만들고 필요한 문서를 준비한 뒤, 기록 값과 첨부 파일, 사진 증빙, 구성원 접근 권한을 한곳에서 관리합니다.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+        <div className="flex flex-wrap gap-2" {...projectOwnerItem('project-page-actions', '현장 관리 페이지 실행 버튼 영역')}>
+          <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing} {...projectOwnerItem('project-refresh-button', '현장 관리 새로고침 버튼')}>
             <RefreshCcw className="h-4 w-4" />
             새로고침
           </Button>
@@ -5493,17 +5788,17 @@ export default function ProjectPage() {
       </div>
 
       {message ? (
-        <Card className="border-slate-200 bg-white">
-          <CardContent className="p-4 text-sm text-slate-700">{message}</CardContent>
+        <Card className="border-slate-200 bg-white" {...projectOwnerItem('project-message-panel', '현장 관리 메시지 패널')}>
+          <CardContent className="p-4 text-sm text-slate-700" {...projectOwnerItem('project-message-content', '현장 관리 메시지 내용')}>{message}</CardContent>
         </Card>
       ) : null}
 
-      <div className="space-y-6">
-        <Card className="min-w-0 border-slate-200">
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-            <div className="space-y-1.5">
-              <CardTitle>1. 현장 선택과 기본 정보</CardTitle>
-              <CardDescription>
+      <div className="space-y-6" {...projectOwnerItem('project-main-content', '현장 관리 주요 내용')}>
+        <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-selection-panel', '1. 현장 선택과 기본 정보 패널')}>
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0" {...projectOwnerItem('site-selection-panel-header', '현장 선택과 기본 정보 제목 영역')}>
+            <div className="space-y-1.5" {...projectOwnerItem('site-selection-panel-heading-group', '현장 선택과 기본 정보 제목 묶음')}>
+              <CardTitle {...projectOwnerItem('site-selection-panel-title', '현장 선택과 기본 정보 제목')}>1. 현장 선택과 기본 정보</CardTitle>
+              <CardDescription {...projectOwnerItem('site-selection-panel-description', '현장 선택과 기본 정보 설명')}>
                 새 현장을 만들거나 기존 현장을 선택해 문서, 사진, 구성원을 관리합니다.
               </CardDescription>
             </div>
@@ -5513,42 +5808,45 @@ export default function ProjectPage() {
               size="sm"
               onClick={() => setShowCreateSiteForm((previous) => !previous)}
               className="h-[42px] shrink-0"
+              {...projectOwnerItem('site-create-form-toggle-button', '새 현장 만들기 입력 열고 닫기 버튼')}
             >
               {showCreateSiteForm ? '입력 닫기' : '새 현장 만들기'}
             </Button>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="space-y-5" {...projectOwnerItem('site-picker-field', '현장 리스트 선택 항목')}>
             {showCreateSiteForm ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">현장 이름</label>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" {...projectOwnerItem('site-create-form-panel', '새 현장 만들기 입력 패널')}>
+                <div className="space-y-4" {...projectOwnerItem('site-create-form-content', '새 현장 만들기 입력 내용')}>
+                  <div className="grid gap-4 md:grid-cols-2" {...projectOwnerItem('site-create-basic-field-grid', '새 현장 기본 입력 필드 묶음')}>
+                    <div className="space-y-2" {...projectOwnerItem('site-create-name-field', '새 현장 이름 입력 항목')}>
+                      <label className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-create-name-label', '새 현장 이름 라벨')}>현장 이름</label>
                       <Input
                         value={newSiteName}
                         onChange={(event) => setNewSiteName(event.target.value)}
                         placeholder="예: 서울 A현장, 대구 침산 더샵 101동"
+                        {...projectOwnerItem('site-create-name-input', '새 현장 이름 입력')}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-800">공사 시작일</label>
+                    <div className="space-y-2" {...projectOwnerItem('site-create-open-date-field', '새 현장 공사 시작일 입력 항목')}>
+                      <label className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-create-open-date-label', '새 현장 공사 시작일 라벨')}>공사 시작일</label>
                       <Input
                         type="date"
                         value={newSiteOpenDate}
                         onChange={(event) => setNewSiteOpenDate(event.target.value)}
+                        {...projectOwnerItem('site-create-open-date-input', '새 현장 공사 시작일 입력')}
                       />
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-800">현장에서 사용할 문서</label>
-                      <p className="text-xs text-slate-500">
+                  <div className="space-y-2" {...projectOwnerItem('site-create-template-field', '새 현장 사용할 문서 선택 항목')}>
+                    <div className="space-y-1" {...projectOwnerItem('site-create-template-label-group', '새 현장 사용할 문서 라벨 묶음')}>
+                      <label className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-create-template-label', '새 현장 사용할 문서 라벨')}>현장에서 사용할 문서</label>
+                      <p className="text-xs text-slate-500" {...projectOwnerItem('site-create-template-description', '새 현장 사용할 문서 설명')}>
                         여기서 고른 문서만 이 현장의 문서 목록으로 준비됩니다.
                       </p>
                     </div>
                     {templates.length > 0 ? (
-                      <div className="space-y-2">
+                      <div className="space-y-2" {...projectOwnerItem('site-create-template-picker-field', '새 현장 사용할 문서 셀렉트 항목')}>
                         <MultiEntityPicker
                           values={newSiteTemplateIds}
                           options={newSiteTemplateOptions}
@@ -5557,16 +5855,19 @@ export default function ProjectPage() {
                           searchPlaceholder="문서 목록 검색"
                           emptyMessage="선택 가능한 문서 양식이 없습니다."
                           allowClear
+                          ownerItemKey="site-create-template-picker"
+                          ownerItemName="새 현장 사용할 문서 선택기"
+                          ownerItemAttributes={projectOwnerItem}
                         />
-                        <div className="text-xs text-slate-500">
+                        <div className="text-xs text-slate-500" {...projectOwnerItem('site-create-template-selection-summary', '새 현장 사용할 문서 선택 요약')}>
                           전체 {templates.length}개 중 {selectedNewSiteTemplates.length}개 선택됨. 필수: 최소 1건
                         </div>
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
-                        <div>먼저 문서 양식 화면에서 현장 문서를 시작할 양식을 만들어 주세요.</div>
-                        <div className="mt-4">
-                          <Button variant="outline" asChild>
+                      <div className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500" {...projectOwnerItem('site-create-template-empty-state', '새 현장 사용할 문서 양식 없음 안내')}>
+                        <div {...projectOwnerItem('site-create-template-empty-message', '새 현장 사용할 문서 양식 없음 메시지')}>먼저 문서 양식 화면에서 현장 문서를 시작할 양식을 만들어 주세요.</div>
+                        <div className="mt-4" {...projectOwnerItem('site-create-template-empty-action', '새 현장 사용할 문서 양식 없음 실행 영역')}>
+                          <Button variant="outline" asChild {...projectOwnerItem('site-create-template-open-templates-button', '문서 양식 화면 열기 버튼')}>
                             <Link href="/templates">문서 양식 화면 열기</Link>
                           </Button>
                         </div>
@@ -5574,11 +5875,11 @@ export default function ProjectPage() {
                     )}
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Button onClick={handleCreateSite} disabled={creatingSite}>
+                  <div className="flex flex-wrap gap-2" {...projectOwnerItem('site-create-form-actions', '새 현장 만들기 실행 버튼 영역')}>
+                    <Button onClick={handleCreateSite} disabled={creatingSite} {...projectOwnerItem('site-create-submit-button', '새 현장 만들기 버튼')}>
                       {creatingSite ? '현장 만드는 중...' : '현장 만들기'}
                     </Button>
-                    <Button variant="outline" onClick={handleResetCreateSiteForm} disabled={creatingSite}>
+                    <Button variant="outline" onClick={handleResetCreateSiteForm} disabled={creatingSite} {...projectOwnerItem('site-create-reset-button', '새 현장 입력 비우기 버튼')}>
                       입력 비우기
                     </Button>
                   </div>
@@ -5587,8 +5888,8 @@ export default function ProjectPage() {
             ) : null}
 
             {showCreateSiteForm ? null : (
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-slate-800">현장 리스트</label>
+              <div className="space-y-3" {...projectOwnerItem('site-picker-control-field', '현장 리스트 선택 컨트롤 항목')}>
+                <label className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-picker-label', '현장 리스트 라벨')}>현장 리스트</label>
                 <MultiEntityPicker
                   values={selectedSiteIds}
                   options={siteOptions}
@@ -5619,34 +5920,37 @@ export default function ProjectPage() {
 
                     return `${selectedOptions.length}곳 선택 · ${firstLabel} 외 ${selectedOptions.length - 1}곳`;
                   }}
+                  ownerItemKey="site-picker"
+                  ownerItemName="현장 리스트 선택기"
+                  ownerItemAttributes={projectOwnerItem}
                 />
 
                 {loadingDeleteImpact ? (
-                  <div className="text-xs text-slate-500">삭제 시 함께 지워질 항목을 확인하는 중입니다.</div>
+                  <div className="text-xs text-slate-500" {...projectOwnerItem('site-delete-impact-loading-state', '현장 삭제 영향 확인 로딩 상태')}>삭제 시 함께 지워질 항목을 확인하는 중입니다.</div>
                 ) : null}
 
                 {deleteImpact ? (
-                  <div className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <div className="space-y-1">
-                      <div className="text-sm font-semibold text-slate-900">
+                  <div className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-4" {...projectOwnerItem('site-delete-impact-panel', '현장 삭제 영향 확인 패널')}>
+                    <div className="space-y-1" {...projectOwnerItem('site-delete-impact-header', '현장 삭제 영향 확인 머리글')}>
+                      <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-delete-impact-title', '현장 삭제 영향 확인 제목')}>
                         "{deleteImpact.site.siteName}" 현장을 삭제하면 아래 항목도 함께 삭제됩니다.
                       </div>
-                      <p className="text-sm text-slate-600">
+                      <p className="text-sm text-slate-600" {...projectOwnerItem('site-delete-impact-description', '현장 삭제 영향 확인 설명')}>
                         삭제 후 되돌릴 수 없습니다. 항목을 확인한 뒤 정말 삭제할지 한 번 더 선택해 주세요.
                       </p>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-2" {...projectOwnerItem('site-delete-impact-list', '현장 삭제 영향 항목 목록')}>
                       {deleteImpact.items.map((item) => (
-                        <div key={item.key} className="rounded-lg border border-rose-100 bg-white px-3 py-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-slate-900">{item.label}</div>
+                        <div key={item.key} className="rounded-lg border border-rose-100 bg-white px-3 py-3" {...projectOwnerItem(`site-delete-impact-row-${item.key}`, `${item.label} 삭제 영향 항목`)}>
+                          <div className="flex items-start justify-between gap-3" {...projectOwnerItem(`site-delete-impact-row-${item.key}-content`, `${item.label} 삭제 영향 항목 내용`)}>
+                            <div className="min-w-0" {...projectOwnerItem(`site-delete-impact-row-${item.key}-text`, `${item.label} 삭제 영향 항목 텍스트`)}>
+                              <div className="text-sm font-medium text-slate-900" {...projectOwnerItem(`site-delete-impact-row-${item.key}-label`, `${item.label} 삭제 영향 항목 라벨`)}>{item.label}</div>
                               {item.description ? (
-                                <div className="mt-1 text-xs leading-5 text-slate-600">{item.description}</div>
+                                <div className="mt-1 text-xs leading-5 text-slate-600" {...projectOwnerItem(`site-delete-impact-row-${item.key}-description`, `${item.label} 삭제 영향 항목 설명`)}>{item.description}</div>
                               ) : null}
                             </div>
-                            <Badge variant="red" className="shrink-0">
+                            <Badge variant="red" className="shrink-0" {...projectOwnerItem(`site-delete-impact-row-${item.key}-count-badge`, `${item.label} 삭제 영향 항목 개수`)}>
                               {item.count}건
                             </Badge>
                           </div>
@@ -5654,11 +5958,11 @@ export default function ProjectPage() {
                       ))}
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="destructive" onClick={handleDeleteSite} disabled={deletingSite}>
+                    <div className="flex flex-wrap gap-2" {...projectOwnerItem('site-delete-impact-actions', '현장 삭제 영향 실행 버튼 영역')}>
+                      <Button variant="destructive" onClick={handleDeleteSite} disabled={deletingSite} {...projectOwnerItem('site-delete-confirm-button', '현장 삭제 확정 버튼')}>
                         {deletingSite ? '삭제하는 중...' : '정말 삭제'}
                       </Button>
-                      <Button variant="outline" onClick={handleCancelDeleteSite} disabled={deletingSite}>
+                      <Button variant="outline" onClick={handleCancelDeleteSite} disabled={deletingSite} {...projectOwnerItem('site-delete-cancel-button', '현장 삭제 취소 버튼')}>
                         취소
                       </Button>
                     </div>
@@ -5666,73 +5970,86 @@ export default function ProjectPage() {
                 ) : null}
               </div>
             )}
+          </CardContent>
+        </Card>
 
-            <div className="flex flex-col gap-3 p-0">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">현장 대시보드</div>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">
+        <div
+          className={cn(
+            'grid min-w-0 grid-cols-1 gap-6',
+            selectedSiteIds.length > 0 && selectedSite && !showCreateSiteForm
+              ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'
+              : ''
+          )}
+          {...projectOwnerItem('site-dashboard-document-member-layout', '현장 대시보드와 현장 문서 구성원 배치')}
+        >
+          <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-dashboard-content', '현장 대시보드 내용')}>
+            <CardContent className="space-y-3 p-6" {...projectOwnerItem('site-dashboard-content-body', '현장 대시보드 내용 본문')}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between" {...projectOwnerItem('site-dashboard-header', '현장 대시보드 머리글')}>
+                <div {...projectOwnerItem('site-dashboard-heading-group', '현장 대시보드 제목 묶음')}>
+                  <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-dashboard-title', '현장 대시보드 제목')}>현장 대시보드</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-500" {...projectOwnerItem('site-dashboard-description', '현장 대시보드 설명')}>
                     현장을 따로 고르지 않으면 모든 현장의 문서, 사진, 할 일을 합산해서 보여줍니다.
                   </p>
                 </div>
-                <Badge variant={loadingDashboardSummaries ? 'slate' : 'green'} className="w-fit shrink-0">
+                <Badge variant={loadingDashboardSummaries ? 'slate' : 'green'} className="w-fit shrink-0" {...projectOwnerItem('site-dashboard-scope-badge', '현장 대시보드 범위 배지')}>
                   {loadingDashboardSummaries ? '불러오는 중' : dashboardScopeLabel}
                 </Badge>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2" {...projectOwnerItem('site-dashboard-metric-grid', '현장 대시보드 지표 목록')}>
                 <MetricCard
                   icon={FolderKanban}
                   label="현장"
                   value={String(dashboardSiteCount)}
                   description="대시보드에 포함된 현장"
+                  ownerItemKey="site-dashboard-site-count-card"
                 />
                 <MetricCard
                   icon={FileStack}
                   label="문서"
                   value={String(dashboardDocumentCount)}
                   description="포함된 현장의 전체 문서"
+                  ownerItemKey="site-dashboard-document-count-card"
                 />
                 <MetricCard
                   icon={FileImage}
                   label="사진"
                   value={String(dashboardPhotoCount)}
                   description="포함된 현장의 전체 사진"
+                  ownerItemKey="site-dashboard-photo-count-card"
                 />
                 <MetricCard
                   icon={Signature}
                   label="할 일"
                   value={String(dashboardTodoCount)}
                   description="문서, 사진, 확인 필요 항목"
+                  ownerItemKey="site-dashboard-todo-count-card"
                 />
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2" {...projectOwnerItem('site-dashboard-todo-card-grid', '현장 대시보드 할 일 카드 목록')}>
                 {dashboardTodoItems.map((item) => (
                   <DashboardTodoCard key={item.key} item={item} />
                 ))}
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        {showCreateSiteForm ? null : (
-          <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="min-w-0">
-              <Card className="border-slate-200">
-                <CardHeader>
-                  <CardTitle>현장 문서 · 구성원</CardTitle>
-                  <CardDescription>선택한 현장의 문서와 구성원 권한을 관리합니다.</CardDescription>
+          {selectedSiteIds.length > 0 && selectedSite && !showCreateSiteForm ? (
+            <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-document-member-panel', '현장 문서 구성원 패널')}>
+                <CardHeader {...projectOwnerItem('site-document-member-panel-header', '현장 문서 구성원 제목 영역')}>
+                  <CardTitle {...projectOwnerItem('site-document-member-panel-title', '현장 문서 구성원 제목')}>현장 문서 · 구성원</CardTitle>
+                  <CardDescription {...projectOwnerItem('site-document-member-panel-description', '현장 문서 구성원 설명')}>선택한 현장의 문서와 구성원 권한을 관리합니다.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="text-sm font-semibold text-slate-900">현장 문서</div>
-                        <p className="text-xs text-slate-500">선택한 현장의 문서를 만들고, 접근 링크와 삭제를 관리합니다.</p>
+                <CardContent className="space-y-6" {...projectOwnerItem('site-document-member-panel-content', '현장 문서 구성원 내용')}>
+                  <div className="space-y-3" {...projectOwnerItem('site-document-section', '현장 문서 섹션')}>
+                    <div className="flex items-start justify-between gap-3" {...projectOwnerItem('site-document-section-header', '현장 문서 섹션 머리글')}>
+                      <div className="space-y-1" {...projectOwnerItem('site-document-section-heading-group', '현장 문서 섹션 제목 묶음')}>
+                        <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-document-section-title', '현장 문서 섹션 제목')}>현장 문서</div>
+                        <p className="text-xs text-slate-500" {...projectOwnerItem('site-document-section-description', '현장 문서 섹션 설명')}>선택한 현장의 문서를 만들고, 접근 링크와 삭제를 관리합니다.</p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500">전체 {documents.length}건</span>
+                      <div className="flex items-center gap-2" {...projectOwnerItem('site-document-section-actions', '현장 문서 섹션 실행 영역')}>
+                        <span className="text-xs text-slate-500" {...projectOwnerItem('site-document-total-count', '현장 문서 전체 개수')}>전체 {documents.length}건</span>
                         <Button
                           type="button"
                           variant="outline"
@@ -5742,6 +6059,7 @@ export default function ProjectPage() {
                           title="현장 문서 추가"
                           aria-label="현장 문서 추가"
                           disabled={!selectedSite}
+                          {...projectOwnerItem('site-document-add-toggle-button', '현장 문서 추가 열기 버튼')}
                         >
                           <Plus className="h-4 w-4" />
                         </Button>
@@ -5750,7 +6068,7 @@ export default function ProjectPage() {
                     {selectedSite ? (
                       <>
                         {showAddSiteDocumentForm ? (
-                          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4" {...projectOwnerItem('site-document-add-form-panel', '현장 문서 추가 입력 패널')}>
                             {siteDocumentTemplateOptions.length > 0 ? (
                               <>
                                 <MultiEntityPicker
@@ -5761,9 +6079,12 @@ export default function ProjectPage() {
                                   searchPlaceholder="문서 목록 검색"
                                   emptyMessage="추가 가능한 문서 양식이 없습니다."
                                   allowClear
+                                  ownerItemKey="site-document-add-template-picker"
+                                  ownerItemName="현장 문서 추가 문서 양식 선택기"
+                                  ownerItemAttributes={projectOwnerItem}
                                 />
-                                <div className="flex flex-wrap gap-2">
-                                  <Button onClick={handleAddSiteDocuments} disabled={addingSiteDocuments}>
+                                <div className="flex flex-wrap gap-2" {...projectOwnerItem('site-document-add-form-actions', '현장 문서 추가 실행 버튼 영역')}>
+                                  <Button onClick={handleAddSiteDocuments} disabled={addingSiteDocuments} {...projectOwnerItem('site-document-add-submit-button', '현장 문서 추가 버튼')}>
                                     {addingSiteDocuments ? '추가하는 중...' : '현장 문서 추가'}
                                   </Button>
                                   <Button
@@ -5773,43 +6094,185 @@ export default function ProjectPage() {
                                       setSiteDocumentTemplateIds([]);
                                     }}
                                     disabled={addingSiteDocuments}
+                                    {...projectOwnerItem('site-document-add-cancel-button', '현장 문서 추가 취소 버튼')}
                                   >
                                     취소
                                   </Button>
                                 </div>
                               </>
-                            ) : (
-                              <div className="text-sm text-slate-500">추가할 수 있는 문서 양식이 없습니다.</div>
-                            )}
-                          </div>
-                        ) : null}
+	                            ) : (
+	                              <div className="text-sm text-slate-500" {...projectOwnerItem('site-document-add-empty-state', '현장 문서 추가 가능 문서 없음 안내')}>추가할 수 있는 문서 양식이 없습니다.</div>
+	                            )}
+	                          </div>
+	                        ) : null}
                         <ProjectInfoList
                           items={siteDocumentRows}
                           variant="document"
                           emptyMessage="아직 만든 현장 문서가 없습니다."
                           maxBodyHeightClassName="max-h-[220px]"
+                          ownerItemKey="site-document-list"
+                          ownerItemName="현장 문서 목록"
                         />
+                        {expandedSiteDocumentStatusItem ? (
+                          <div
+                            className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                            {...projectOwnerItem(
+                              `site-document-status-expanded-panel-${expandedSiteDocumentStatusItem.document.id}`,
+                              `${expandedSiteDocumentStatusItem.document.title} 문서 상태 확장 패널`
+                            )}
+                          >
+                            <div
+                              className="flex items-center justify-between gap-3"
+                              {...projectOwnerItem(
+                                `site-document-status-expanded-header-${expandedSiteDocumentStatusItem.document.id}`,
+                                `${expandedSiteDocumentStatusItem.document.title} 문서 상태 확장 머리글`
+                              )}
+                            >
+                              <div
+                                className="min-w-0 text-xs font-semibold text-slate-900"
+                                {...projectOwnerItem(
+                                  `site-document-status-expanded-title-${expandedSiteDocumentStatusItem.document.id}`,
+                                  `${expandedSiteDocumentStatusItem.document.title} 문서 상태 확장 제목`
+                                )}
+                              >
+                                {expandedSiteDocumentStatusItem.document.title} 문서 상태
+                              </div>
+                              {loadingDocumentDetail && selectedDocumentId === expandedSiteDocumentStatusItem.document.id ? (
+                                <span
+                                  className="shrink-0 text-[11px] text-slate-500"
+                                  {...projectOwnerItem(
+                                    `site-document-status-expanded-loading-${expandedSiteDocumentStatusItem.document.id}`,
+                                    `${expandedSiteDocumentStatusItem.document.title} 문서 상태 확장 로딩 표시`
+                                  )}
+                                >
+                                  불러오는 중
+                                </span>
+                              ) : null}
+                            </div>
+
+                            <div
+                              className="grid gap-2 sm:grid-cols-3"
+                              {...projectOwnerItem(
+                                `site-document-status-expanded-summary-${expandedSiteDocumentStatusItem.document.id}`,
+                                `${expandedSiteDocumentStatusItem.document.title} 문서 상태 요약`
+                              )}
+                            >
+                              <div
+                                className="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                                {...projectOwnerItem(
+                                  `site-document-status-expanded-status-${expandedSiteDocumentStatusItem.document.id}`,
+                                  `${expandedSiteDocumentStatusItem.document.title} 문서 상태 값`
+                                )}
+                              >
+                                <div
+                                  className="text-[10px] font-medium text-slate-500"
+                                  {...projectOwnerItem(
+                                    `site-document-status-expanded-status-label-${expandedSiteDocumentStatusItem.document.id}`,
+                                    `${expandedSiteDocumentStatusItem.document.title} 문서 상태 라벨`
+                                  )}
+                                >
+                                  문서 상태
+                                </div>
+                                <div
+                                  className="mt-1 text-xs font-semibold text-slate-900"
+                                  {...projectOwnerItem(
+                                    `site-document-status-expanded-status-value-${expandedSiteDocumentStatusItem.document.id}`,
+                                    `${expandedSiteDocumentStatusItem.document.title} 문서 상태 값 텍스트`
+                                  )}
+                                >
+                                  {getDocumentStatusLabel(expandedSiteDocumentStatusItem.document.status)}
+                                </div>
+                              </div>
+                              <div
+                                className="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                                {...projectOwnerItem(
+                                  `site-document-status-expanded-saved-at-${expandedSiteDocumentStatusItem.document.id}`,
+                                  `${expandedSiteDocumentStatusItem.document.title} 최근 저장 값`
+                                )}
+                              >
+                                <div
+                                  className="text-[10px] font-medium text-slate-500"
+                                  {...projectOwnerItem(
+                                    `site-document-status-expanded-saved-at-label-${expandedSiteDocumentStatusItem.document.id}`,
+                                    `${expandedSiteDocumentStatusItem.document.title} 최근 저장 라벨`
+                                  )}
+                                >
+                                  최근 저장
+                                </div>
+                                <div
+                                  className="mt-1 text-xs font-semibold text-slate-900"
+                                  {...projectOwnerItem(
+                                    `site-document-status-expanded-saved-at-value-${expandedSiteDocumentStatusItem.document.id}`,
+                                    `${expandedSiteDocumentStatusItem.document.title} 최근 저장 값 텍스트`
+                                  )}
+                                >
+                                  {expandedSiteDocumentStatusSavedAt}
+                                </div>
+                              </div>
+                              <div
+                                className="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                                {...projectOwnerItem(
+                                  `site-document-status-expanded-template-${expandedSiteDocumentStatusItem.document.id}`,
+                                  `${expandedSiteDocumentStatusItem.document.title} 문서 양식 값`
+                                )}
+                              >
+                                <div
+                                  className="text-[10px] font-medium text-slate-500"
+                                  {...projectOwnerItem(
+                                    `site-document-status-expanded-template-label-${expandedSiteDocumentStatusItem.document.id}`,
+                                    `${expandedSiteDocumentStatusItem.document.title} 문서 양식 라벨`
+                                  )}
+                                >
+                                  문서 양식
+                                </div>
+                                <div
+                                  className="mt-1 truncate text-xs font-semibold text-slate-900"
+                                  title={expandedSiteDocumentStatusTemplateLabel}
+                                  {...projectOwnerItem(
+                                    `site-document-status-expanded-template-value-${expandedSiteDocumentStatusItem.document.id}`,
+                                    `${expandedSiteDocumentStatusItem.document.title} 문서 양식 값 텍스트`
+                                  )}
+                                >
+                                  {expandedSiteDocumentStatusTemplateLabel}
+                                </div>
+                              </div>
+                            </div>
+
+                            <ProjectInfoList
+                              items={
+                                selectedDocumentId === expandedSiteDocumentStatusItem.document.id
+                                  ? selectedDocumentDetailRows
+                                  : []
+                              }
+                              emptyMessage="문서 상태를 확인할 항목이 없습니다."
+                              minTableWidth={492}
+                              ownerItemKey={`site-document-status-expanded-list-${expandedSiteDocumentStatusItem.document.id}`}
+                              ownerItemName={`${expandedSiteDocumentStatusItem.document.title} 문서 상태 확장 목록`}
+                            />
+                          </div>
+                        ) : null}
                       </>
                     ) : (
                       <EmptyState
                         title="선택된 현장이 없습니다."
                         description="현장 리스트에서 현장을 선택하면 문서 목록을 확인할 수 있습니다."
+                        ownerItemKey="site-document-empty-state"
                       />
                     )}
                   </div>
 
-	                  <div className="space-y-3 border-t border-slate-200 pt-6">
-	                    <div className="space-y-1">
-	                      <div className="text-sm font-semibold text-slate-900">구성원</div>
-	                      <p className="text-xs text-slate-500">현장 접근 권한과 문서별 권한을 구성원별로 관리합니다.</p>
+	                  <div className="space-y-3 border-t border-slate-200 pt-6" {...projectOwnerItem('site-member-section', '구성원 섹션')}>
+	                    <div className="space-y-1" {...projectOwnerItem('site-member-section-heading-group', '구성원 섹션 제목 묶음')}>
+	                      <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-member-section-title', '구성원 섹션 제목')}>구성원</div>
+	                      <p className="text-xs text-slate-500" {...projectOwnerItem('site-member-section-description', '구성원 섹션 설명')}>현장 접근 권한과 문서별 권한을 구성원별로 관리합니다.</p>
 	                    </div>
 	                    {selectedSite ? (
-	                      <div className="space-y-5">
-	                        <div className="space-y-2">
-	                          <div className="flex items-center justify-between gap-3">
-	                            <div className="text-sm font-medium text-slate-800">현장 접근 권한</div>
-	                            <div className="flex items-center gap-2">
-	                              <span className="text-xs text-slate-500">
+	                      <div className="space-y-5" {...projectOwnerItem('site-member-content', '구성원 내용')}>
+	                        <div className="space-y-2" {...projectOwnerItem('site-member-access-section', '현장 접근 권한 섹션')}>
+	                          <div className="flex items-center justify-between gap-3" {...projectOwnerItem('site-member-access-header', '현장 접근 권한 머리글')}>
+	                            <div className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-member-access-title', '현장 접근 권한 제목')}>현장 접근 권한</div>
+	                            <div className="flex items-center gap-2" {...projectOwnerItem('site-member-access-actions', '현장 접근 권한 실행 영역')}>
+	                              <span className="text-xs text-slate-500" {...projectOwnerItem('site-member-count', '현장 구성원 수')}>
 	                                {loadingSiteMembers || loadingSiteDocumentMembers
 	                                  ? '불러오는 중...'
 	                                  : `${siteMembers.length}명`}
@@ -5822,33 +6285,36 @@ export default function ProjectPage() {
                                 onClick={() => setShowAddSiteMemberForm((current) => !current)}
                                 title="현장 구성원 추가"
                                 aria-label="현장 구성원 추가"
+                                {...projectOwnerItem('site-member-add-toggle-button', '현장 구성원 추가 열기 버튼')}
                               >
                                 <Plus className="h-4 w-4" />
                               </Button>
 	                            </div>
 	                          </div>
 	                          {showAddSiteMemberForm ? (
-	                            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-	                              <div className="space-y-3">
-	                                <div className="space-y-2">
-	                                  <label className="text-xs font-medium text-slate-700">이름</label>
+	                            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3" {...projectOwnerItem('site-member-add-form-panel', '현장 구성원 추가 입력 패널')}>
+	                              <div className="space-y-3" {...projectOwnerItem('site-member-add-form-basic-fields', '현장 구성원 추가 기본 입력 묶음')}>
+	                                <div className="space-y-2" {...projectOwnerItem('site-member-add-name-field', '현장 구성원 이름 입력 항목')}>
+	                                  <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-name-label', '현장 구성원 이름 라벨')}>이름</label>
 	                                  <Input
                                     value={siteMemberDisplayName}
                                     onChange={(event) => setSiteMemberDisplayName(event.target.value)}
                                     placeholder="이름이 있으면 입력"
+                                    {...projectOwnerItem('site-member-add-name-input', '현장 구성원 이름 입력')}
                                   />
                                 </div>
-                                <div className="space-y-2">
-                                  <label className="text-xs font-medium text-slate-700">휴대폰</label>
+                                <div className="space-y-2" {...projectOwnerItem('site-member-add-phone-field', '현장 구성원 휴대폰 입력 항목')}>
+                                  <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-phone-label', '현장 구성원 휴대폰 라벨')}>휴대폰</label>
                                   <Input
                                     value={siteMemberPhoneNumber}
                                     onChange={(event) => setSiteMemberPhoneNumber(event.target.value)}
                                     placeholder="예: 01012345678"
                                     inputMode="tel"
+                                    {...projectOwnerItem('site-member-add-phone-input', '현장 구성원 휴대폰 입력')}
                                   />
                                 </div>
-	                                <div className="space-y-2">
-	                                  <label className="text-xs font-medium text-slate-700">현장 권한</label>
+	                                <div className="space-y-2" {...projectOwnerItem('site-member-add-role-field', '현장 구성원 현장 권한 선택 항목')}>
+	                                  <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-role-label', '현장 구성원 현장 권한 라벨')}>현장 권한</label>
 		                                  <select
 		                                    value={siteMemberRole}
 		                                    onChange={(event) => {
@@ -5861,6 +6327,7 @@ export default function ProjectPage() {
 		                                      }
 		                                    }}
 		                                    className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+		                                    {...projectOwnerItem('site-member-add-role-select', '현장 구성원 현장 권한 선택')}
 		                                  >
 	                                    {SITE_MEMBER_ROLE_OPTIONS.map((option) => (
                                       <option key={option.value} value={option.value}>
@@ -5871,35 +6338,41 @@ export default function ProjectPage() {
 	                                </div>
 	                              </div>
 		                              {siteMemberRole === 'participant' ? (
-		                                <div className="space-y-3 border-t border-slate-200 pt-3">
-		                                  <div className="space-y-2">
-		                                    <label className="text-xs font-medium text-slate-700">문서</label>
+		                                <div className="space-y-3 border-t border-slate-200 pt-3" {...projectOwnerItem('site-member-add-document-access-section', '현장 구성원 문서 권한 추가 섹션')}>
+		                                  <div className="space-y-2" {...projectOwnerItem('site-member-add-document-picker-field', '현장 구성원 문서 선택 항목')}>
+		                                    <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-document-picker-label', '현장 구성원 문서 선택 라벨')}>문서</label>
 		                                    <MultiEntityPicker
 		                                      values={siteMemberDocumentIds}
 		                                      options={siteDocumentPickerOptions}
 		                                      onChange={setSiteMemberDocumentIds}
 		                                      placeholder="접근 권한을 줄 문서를 선택하세요"
 		                                      searchPlaceholder="문서 목록 검색"
-		                                      emptyMessage="권한을 줄 현장 문서가 없습니다."
-		                                      allowClear
-		                                    />
+			                                      emptyMessage="권한을 줄 현장 문서가 없습니다."
+			                                      allowClear
+			                                      ownerItemKey="site-member-add-document-picker"
+			                                      ownerItemName="현장 구성원 문서 권한 문서 선택기"
+			                                      ownerItemAttributes={projectOwnerItem}
+			                                    />
 		                                  </div>
-		                                  <div className="space-y-2">
-		                                    <label className="text-xs font-medium text-slate-700">문서 권한</label>
+		                                  <div className="space-y-2" {...projectOwnerItem('site-member-add-document-role-field', '현장 구성원 문서 권한 선택 항목')}>
+		                                    <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-document-role-label', '현장 구성원 문서 권한 라벨')}>문서 권한</label>
 		                                    <RoleSegmentedButtons
 		                                      value={siteMemberDocumentRole}
 		                                      options={DOCUMENT_MEMBER_ROLE_OPTIONS}
 		                                      onChange={(value) => setSiteMemberDocumentRole(value)}
+		                                      ownerItemKey="site-member-add-document-role-buttons"
+		                                      ownerItemName="현장 구성원 문서 권한 선택 버튼 그룹"
 		                                    />
 		                                  </div>
 		                                </div>
 		                              ) : null}
-	                              <div className="grid grid-cols-2 gap-2">
+	                              <div className="grid grid-cols-2 gap-2" {...projectOwnerItem('site-member-add-form-actions', '현장 구성원 추가 실행 버튼 영역')}>
 	                                <Button
 	                                  type="button"
                                   className="w-full"
                                   onClick={() => void handleInviteSiteMember()}
                                   disabled={invitingSiteMember}
+                                  {...projectOwnerItem('site-member-add-submit-button', '현장 구성원 초대 버튼')}
                                 >
                                   {invitingSiteMember ? '초대 중...' : '현장 구성원 초대'}
                                 </Button>
@@ -5916,6 +6389,7 @@ export default function ProjectPage() {
 	                                    setSiteMemberDocumentRole('viewer');
 	                                  }}
 	                                  disabled={invitingSiteMember}
+	                                  {...projectOwnerItem('site-member-add-cancel-button', '현장 구성원 추가 취소 버튼')}
 	                                >
                                   취소
 	                                </Button>
@@ -5927,80 +6401,192 @@ export default function ProjectPage() {
 	                            variant="member"
 	                            emptyMessage="아직 현장 접근 권한을 받은 구성원이 없습니다."
 	                            maxBodyHeightClassName="max-h-[260px]"
+	                            ownerItemKey="site-member-list"
+	                            ownerItemName="현장 접근 권한 구성원 목록"
 	                          />
-	                          {expandedSiteMember && expandedSiteMemberCanManageDocuments ? (
-	                            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-	                              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-	                                <div className="text-sm font-semibold text-slate-900">
-	                                  {expandedSiteMemberLabel} 문서 권한
+	                          {expandedSiteMember ? (
+	                            <div
+                                className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                                {...projectOwnerItem(
+                                  `site-member-access-expanded-panel-${expandedSiteMember.membershipId}`,
+                                  `${expandedSiteMemberLabel} 구성원 접근 상세 패널`
+                                )}
+                              >
+	                              <div
+                                  className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"
+                                  {...projectOwnerItem(
+                                    `site-member-access-expanded-panel-${expandedSiteMember.membershipId}-header`,
+                                    `${expandedSiteMemberLabel} 구성원 접근 상세 머리글`
+                                  )}
+                                >
+	                                <div
+                                    className="text-sm font-semibold text-slate-900"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-panel-${expandedSiteMember.membershipId}-title`,
+                                      `${expandedSiteMemberLabel} 구성원 접근 상세 제목`
+                                    )}
+                                  >
+	                                  {expandedSiteMemberLabel} 접근 상세
 	                                </div>
-	                                <div className="text-xs text-slate-500">
-	                                  {expandedMemberDocumentMemberships.length > 0
-	                                    ? `${expandedMemberDocumentMemberships.length}개 문서`
-	                                    : '등록된 문서 없음'}
+	                                <div
+                                    className="text-xs text-slate-500"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-panel-${expandedSiteMember.membershipId}-scope-summary`,
+                                      `${expandedSiteMemberLabel} 구성원 접근 범위 요약`
+                                    )}
+                                  >
+	                                  {expandedSiteMemberHasFullDocumentAccess
+	                                    ? '현장 전체 문서 접근 가능'
+	                                    : expandedMemberDocumentMemberships.length > 0
+	                                      ? `${expandedMemberDocumentMemberships.length}개 문서 접근`
+	                                      : '지정 문서 없음'}
 	                                </div>
 	                              </div>
-	                              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-end">
-	                                <div className="space-y-2">
-	                                  <label className="text-xs font-medium text-slate-700">문서 추가</label>
-	                                  <MultiEntityPicker
-	                                    values={expandedMemberDocumentDraft.documentIds}
-	                                    options={expandedMemberAvailableDocumentOptions}
-	                                    onChange={(nextDocumentIds) =>
-	                                      setMemberDocumentDrafts((current) => ({
-	                                        ...current,
-	                                        [expandedSiteMember.membershipId]: {
-	                                          ...expandedMemberDocumentDraft,
-	                                          documentIds: nextDocumentIds,
-	                                        },
-	                                      }))
-	                                    }
-	                                    placeholder="추가할 문서를 선택하세요"
-	                                    searchPlaceholder="문서 목록 검색"
-	                                    emptyMessage="추가할 수 있는 문서가 없습니다."
-	                                    allowClear
-	                                  />
-	                                </div>
-	                                <div className="space-y-2">
-	                                  <label className="text-xs font-medium text-slate-700">문서 권한</label>
-	                                  <RoleSegmentedButtons
-	                                    value={expandedMemberDocumentDraft.accessRole}
-	                                    options={DOCUMENT_MEMBER_ROLE_OPTIONS}
-	                                    onChange={(value) =>
-	                                      setMemberDocumentDrafts((current) => ({
-	                                        ...current,
-	                                        [expandedSiteMember.membershipId]: {
-	                                          ...expandedMemberDocumentDraft,
-	                                          accessRole: value,
-	                                        },
-	                                      }))
-	                                    }
-	                                  />
-	                                </div>
-	                                <Button
-	                                  type="button"
-	                                  onClick={() =>
-	                                    void handleSaveMemberDocumentAccess(
-	                                      expandedSiteMember,
-	                                      expandedMemberDocumentDraft.documentIds,
-	                                      expandedMemberDocumentDraft.accessRole,
-	                                      `${expandedSiteMember.membershipId}:add`
-	                                    )
-	                                  }
-	                                  disabled={
-	                                    expandedMemberDocumentDraft.documentIds.length === 0 ||
-	                                    savingMemberDocumentAccessKey === `${expandedSiteMember.membershipId}:add`
-	                                  }
-	                                >
-	                                  문서 권한 추가
-	                                </Button>
-	                              </div>
-	                              <ProjectInfoList
-	                                items={expandedMemberDocumentRows}
-	                                variant="memberDocument"
-	                                emptyMessage="이 구성원에게 등록된 문서 권한이 없습니다."
-	                                minTableWidth={448}
-	                              />
+                                <div
+                                  className="grid gap-3 md:grid-cols-3"
+                                  {...projectOwnerItem(
+                                    `site-member-access-expanded-summary-grid-${expandedSiteMember.membershipId}`,
+                                    `${expandedSiteMemberLabel} 구성원 접근 상세 요약 그리드`
+                                  )}
+                                >
+                                  <div className="rounded-lg border border-slate-200 bg-white p-3" {...projectOwnerItem(`site-member-access-expanded-member-card-${expandedSiteMember.membershipId}`, `${expandedSiteMemberLabel} 구성원 기본 정보 카드`)}>
+                                    <div className="text-[10px] font-medium text-slate-500" {...projectOwnerItem(`site-member-access-expanded-member-card-${expandedSiteMember.membershipId}-label`, `${expandedSiteMemberLabel} 구성원 이름 라벨`)}>구성원</div>
+                                    <div className="mt-1 truncate text-xs font-semibold text-slate-900" title={expandedSiteMemberLabel} {...projectOwnerItem(`site-member-access-expanded-member-card-${expandedSiteMember.membershipId}-value`, `${expandedSiteMemberLabel} 구성원 이름 값`)}>
+                                      {expandedSiteMemberLabel}
+                                    </div>
+                                    <div className="mt-1 truncate text-[10px] text-slate-500" title={formatPhoneNumber(expandedSiteMember.member.phoneNumber)} {...projectOwnerItem(`site-member-access-expanded-member-card-${expandedSiteMember.membershipId}-phone`, `${expandedSiteMemberLabel} 구성원 연락처 값`)}>
+                                      {formatPhoneNumber(expandedSiteMember.member.phoneNumber)}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-slate-200 bg-white p-3" {...projectOwnerItem(`site-member-access-expanded-verification-card-${expandedSiteMember.membershipId}`, `${expandedSiteMemberLabel} 구성원 인증 정보 카드`)}>
+                                    <div className="text-[10px] font-medium text-slate-500" {...projectOwnerItem(`site-member-access-expanded-verification-card-${expandedSiteMember.membershipId}-label`, `${expandedSiteMemberLabel} 구성원 인증 라벨`)}>인증</div>
+                                    <Badge
+                                      variant={getMemberVerificationStatusVariant(expandedSiteMember.member.verificationStatus)}
+                                      className="mt-1 px-2 py-0 text-[10px] leading-5"
+                                      {...projectOwnerItem(`site-member-access-expanded-verification-card-${expandedSiteMember.membershipId}-status`, `${expandedSiteMemberLabel} 구성원 인증 상태`)}
+                                    >
+                                      {getMemberVerificationStatusLabel(expandedSiteMember.member.verificationStatus)}
+                                    </Badge>
+                                    <div className="mt-1 truncate text-[10px] text-slate-500" {...projectOwnerItem(`site-member-access-expanded-verification-card-${expandedSiteMember.membershipId}-last-verified-at`, `${expandedSiteMemberLabel} 구성원 최근 인증 값`)}>
+                                      {expandedSiteMember.member.lastVerifiedAt
+                                        ? formatDateTime(expandedSiteMember.member.lastVerifiedAt)
+                                        : '인증 이력 없음'}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-slate-200 bg-white p-3" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}`, `${expandedSiteMemberLabel} 구성원 접근 범위 카드`)}>
+                                    <div className="text-[10px] font-medium text-slate-500" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-label`, `${expandedSiteMemberLabel} 구성원 접근 범위 라벨`)}>범위</div>
+                                    <div className="mt-1 text-xs font-semibold text-slate-900" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-value`, `${expandedSiteMemberLabel} 구성원 접근 범위 값`)}>
+                                      {expandedSiteMemberHasFullDocumentAccess ? '현장 전체' : '문서별'}
+                                    </div>
+                                    <div className="mt-1 truncate text-[10px] text-slate-500" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-description`, `${expandedSiteMemberLabel} 구성원 접근 범위 설명`)}>
+                                      {expandedSiteMemberHasFullDocumentAccess
+                                        ? '현장 아래 모든 문서 접근 가능'
+                                        : expandedMemberDocumentMemberships.length > 0
+                                          ? `${expandedMemberDocumentMemberships.length}개 문서 접근 가능`
+                                          : '접근 가능한 문서 없음'}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div
+                                  className="space-y-2"
+                                  {...projectOwnerItem(
+                                    `site-member-access-expanded-role-field-${expandedSiteMember.membershipId}`,
+                                    `${expandedSiteMemberLabel} 구성원 현장 권한 선택 항목`
+                                  )}
+                                >
+                                  <label
+                                    className="text-xs font-medium text-slate-700"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-role-label-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 현장 권한 라벨`
+                                    )}
+                                  >
+                                    현장 권한
+                                  </label>
+                                  <div
+                                    className="grid grid-cols-2 gap-2"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-role-button-group-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 현장 권한 버튼 그룹`
+                                    )}
+                                  >
+                                    {SITE_MEMBER_ROLE_OPTIONS.map((option) => {
+                                      const selected = option.value === expandedSiteMemberManagedRole;
+
+                                      return (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          disabled={
+                                            expandedSiteMemberIsDeleting ||
+                                            expandedSiteMemberIsUpdating ||
+                                            selected
+                                          }
+                                          aria-pressed={selected}
+                                          onClick={() =>
+                                            void handleUpdateSiteMemberRole(
+                                              expandedSiteMember,
+                                              option.value
+                                            )
+                                          }
+                                          className={cn(
+                                            'inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-70',
+                                            selected
+                                              ? 'border-slate-900 bg-slate-900 text-white'
+                                              : 'border-slate-300 bg-white text-slate-700'
+                                          )}
+                                          {...projectOwnerItem(
+                                            `site-member-access-expanded-role-${option.value}-button-${expandedSiteMember.membershipId}`,
+                                            `${expandedSiteMemberLabel} 구성원 ${option.label} 권한 버튼`
+                                          )}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                {expandedSiteMemberCanManageDocuments ? (
+                                  <div
+                                    className="space-y-2"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-document-picker-field-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 문서 접근 권한 선택 항목`
+                                    )}
+                                  >
+                                    <label
+                                      className="text-xs font-medium text-slate-700"
+                                      {...projectOwnerItem(
+                                        `site-member-access-expanded-document-picker-label-${expandedSiteMember.membershipId}`,
+                                        `${expandedSiteMemberLabel} 구성원 문서 접근 권한 라벨`
+                                      )}
+                                    >
+                                      문서 접근 권한
+                                    </label>
+                                    <MemberDocumentAccessPicker
+                                      membership={expandedSiteMember}
+                                      memberLabel={expandedSiteMemberLabel}
+                                      options={siteDocumentPickerOptions}
+                                      documentMemberships={expandedMemberDocumentMemberships}
+                                      savingMemberDocumentAccessKey={savingMemberDocumentAccessKey}
+                                      deletingDocumentMemberId={deletingDocumentMemberId}
+                                      onSaveDocumentAccess={handleSaveMemberDocumentAccess}
+                                      onDeleteDocumentAccess={handleDeleteDocumentMember}
+                                      ownerItemKey={`site-member-access-expanded-document-picker-${expandedSiteMember.membershipId}`}
+                                      ownerItemName={`${expandedSiteMemberLabel} 구성원 문서 접근 권한 선택기`}
+                                    />
+                                  </div>
+                                ) : (
+                                  <div
+                                    className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-full-access-notice-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 현장 전체 접근 안내`
+                                    )}
+                                  >
+                                    현장 접근 권한으로 현장 아래 모든 문서에 접근할 수 있습니다.
+                                  </div>
+                                )}
                             </div>
                           ) : null}
 	                        </div>
@@ -6009,90 +6595,17 @@ export default function ProjectPage() {
                       <EmptyState
                         title="선택된 현장이 없습니다."
                         description="현장을 선택하면 구성원 권한을 확인할 수 있습니다."
+                        ownerItemKey="site-member-empty-state"
                       />
                     )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+	                  </div>
+		                </CardContent>
+		              </Card>
+          ) : null}
+        </div>
+		      </div>
 
-            <div className="min-w-0 space-y-6">
-              {selectedDetailPanel === 'document' ? (
-                <Card className="border-slate-200">
-                  <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-                    <div className="space-y-1.5">
-                      <CardTitle>선택 문서</CardTitle>
-                      <CardDescription>선택한 현장 문서 상태와 삭제 작업을 확인합니다.</CardDescription>
-                    </div>
-                    {selectedOwnerDocumentId ? (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => {
-                          void handleDeleteDocument(selectedOwnerDocumentId);
-                        }}
-                        disabled={deletingDocument}
-                        className="h-[42px] shrink-0"
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        삭제
-                      </Button>
-                    ) : null}
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {loadingDocumentDetail ? (
-                      <div className="rounded-xl border border-slate-200 px-4 py-4 text-sm text-slate-500">
-                        {selectedDocumentListItem
-                          ? `"${selectedDocumentListItem.document.title}" 문서 정보를 불러오는 중입니다.`
-                          : '문서 정보를 불러오는 중입니다.'}
-                      </div>
-                    ) : selectedDocumentDetail ? (
-                      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={getDocumentStatusVariant(selectedDocumentDetail.document.status)}>
-                            {getDocumentStatusLabel(selectedDocumentDetail.document.status)}
-                          </Badge>
-                          <span className="font-medium text-slate-900">{selectedDocumentDetail.document.title}</span>
-                        </div>
-                        <p>문서 종류: {selectedDocumentDetail.document.documentTypeKey}</p>
-                        <p>최신 버전: {selectedDocumentDetail.latestVersion?.versionNumber || '-'}</p>
-                        <p>최근 요청 링크와 받을 사람 설정은 아래 지금 할 작업에서 진행합니다.</p>
-                      </div>
-                    ) : selectedDocumentListItem ? (
-                      <div className="space-y-3">
-                        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
-                          문서 편집은 계속할 수 있지만, 상세 정보 일부를 불러오지 못했습니다. 새로고침 후 다시 확인해 주세요.
-                        </div>
-                      </div>
-                    ) : (
-                      <EmptyState
-                        title="선택된 문서가 없습니다."
-                        description="왼쪽의 현장 문서에서 문서를 선택하면 요청 링크 설정을 확인할 수 있습니다."
-                      />
-                    )}
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card className="border-slate-200">
-                  <CardHeader>
-                    <CardTitle>선택 문서</CardTitle>
-                    <CardDescription>현장 문서를 선택하면 상태와 삭제 작업을 보여줍니다.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <EmptyState
-                      title="선택된 항목이 없습니다."
-                      description="왼쪽의 현장 문서 목록에서 작업할 문서를 선택해 주세요."
-                    />
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-4">
+      <div className="space-y-4" {...projectOwnerItem('document-output-section', '현장 문서 하단 출력 섹션')}>
         {renderProjectDocumentOutputTabs()}
       </div>
 
