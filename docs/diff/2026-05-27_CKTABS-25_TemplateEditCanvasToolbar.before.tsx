@@ -21,8 +21,8 @@ import {
 import * as React from 'react';
 import { Button } from '../../../ui/Button';
 import { CardContent, CardHeader, CardTitle } from '../../../ui/Card';
+import { Input } from '../../../ui/Input';
 import type { SelectionPanelTab, TemplateEditWorkspaceCanvasToolbarVisibility } from '../types';
-import { DeferredValueInput } from './DeferredValueInput';
 
 type TemplateEditCanvasToolbarProps = {
   documentMode: boolean;
@@ -289,9 +289,9 @@ export const TemplateEditCanvasToolbar = ({
                   <span className="sm:hidden">이름:</span>
                   <span className="hidden sm:inline">{nameFieldLabel}</span>
                 </span>
-                <DeferredValueInput
+                <Input
                   value={templateName}
-                  onCommit={onTemplateNameChange}
+                  onChange={(event) => onTemplateNameChange(event.target.value)}
                   disabled={loading || templateNameReadOnly}
                   readOnly={templateNameReadOnly}
                   aria-label={nameFieldLabel}

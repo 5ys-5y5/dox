@@ -7,7 +7,6 @@ import { Button } from '../../../ui/Button';
 import { EntityPicker } from '../../../ui/EntityPicker';
 import { Input } from '../../../ui/Input';
 import type { TemplateEditWorkspacePersistenceVisibility } from '../types';
-import { DeferredValueInput } from './DeferredValueInput';
 
 type TemplatePersistencePanelProps = {
   templateListDisplay: 'picker' | 'inline';
@@ -146,7 +145,7 @@ export const TemplatePersistencePanel = ({
           {showTemplateNameInput ? (
           <div className="space-y-2">
             <label className="text-sm font-medium text-slate-800">템플릿 이름</label>
-            <DeferredValueInput value={templateName} onCommit={onTemplateNameChange} />
+            <Input value={templateName} onChange={(event) => onTemplateNameChange(event.target.value)} />
           </div>
           ) : null}
           {showLayoutResizeModeSelect ? (

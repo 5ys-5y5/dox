@@ -19226,9 +19226,6 @@ export default function TemplateEditWorkspace({
   const [scopeDraftSnapshot, setScopeDraftSnapshot] = React.useState<CanvasScopeDraftSnapshot>(
     createEmptyCanvasScopeDraftSnapshot
   );
-  const [scopePersistedSnapshot, setScopePersistedSnapshot] = React.useState<CanvasScopeDraftSnapshot>(
-    createEmptyCanvasScopeDraftSnapshot
-  );
   const [scopeDraftLoading, setScopeDraftLoading] = React.useState(false);
   const [scopeDraftSaving, setScopeDraftSaving] = React.useState(false);
   const [scopeDraftMessage, setScopeDraftMessage] = React.useState('');
@@ -34155,7 +34152,6 @@ export default function TemplateEditWorkspace({
   const loadTemplateScopeDraft = React.useCallback(async () => {
     if (!activeTemplateScopeTemplateId) {
       roleAssignmentScopeHydrationSignatureRef.current = '';
-      setScopePersistedSnapshot(createEmptyCanvasScopeDraftSnapshot());
       setScopeDraftSnapshot(createEmptyCanvasScopeDraftSnapshot());
       setActiveScopeKey('');
       setScopeCreationMode(false);
@@ -34182,13 +34178,11 @@ export default function TemplateEditWorkspace({
         throw new Error(payload.message || 'scope 정보를 불러오지 못했습니다.');
       }
 
-      const loadedPersistedSnapshot = createCanvasScopeDraftSnapshot(payload.data);
       const nextSnapshot = {
-        ...loadedPersistedSnapshot,
+        ...createCanvasScopeDraftSnapshot(payload.data),
         requestConditionsByScopeKey: scopeDraftSnapshot.requestConditionsByScopeKey,
       };
       roleAssignmentScopeHydrationSignatureRef.current = '';
-      setScopePersistedSnapshot(loadedPersistedSnapshot);
       setScopeDraftSnapshot(nextSnapshot);
       setScopeCreationMode(false);
       setActiveScopeKey((previous) => {
@@ -34200,7 +34194,6 @@ export default function TemplateEditWorkspace({
       });
     } catch (error) {
       roleAssignmentScopeHydrationSignatureRef.current = '';
-      setScopePersistedSnapshot(createEmptyCanvasScopeDraftSnapshot());
       setScopeDraftSnapshot(createEmptyCanvasScopeDraftSnapshot());
       setActiveScopeKey('');
       setScopeCreationMode(false);
@@ -34449,7 +34442,7 @@ export default function TemplateEditWorkspace({
   );
   const scopePickerOptions = React.useMemo<EntityPickerOption[]>(
     () =>
-      scopePersistedSnapshot.logicalScopes
+      scopeDraftSnapshot.logicalScopes
         .filter((scope) => scope.status === 'active')
         .map((scope) => ({
           id: scope.scopeKey,
@@ -34457,7 +34450,7 @@ export default function TemplateEditWorkspace({
           meta: `${scope.scopeKey} · key ${scope.keyFrameGroupIds.length}개`,
           keywords: [scope.scopeKey, scope.displayName, scope.description || '', ...scope.keyFrameGroupIds],
         })),
-    [scopePersistedSnapshot.logicalScopes]
+    [scopeDraftSnapshot.logicalScopes]
   );
   const activeScopeMembershipSignature = React.useMemo(
     () => buildStringSetSignature(activeLogicalScope?.keyFrameGroupIds || []),
@@ -34760,7 +34753,6 @@ export default function TemplateEditWorkspace({
       }
 
       const nextSnapshot = createCanvasScopeDraftSnapshot(payload.data);
-      setScopePersistedSnapshot(nextSnapshot);
       setScopeDraftSnapshot(nextSnapshot);
       setScopeCreationMode(false);
       commitNewScopeDisplayName('');
@@ -34800,13 +34792,7 @@ export default function TemplateEditWorkspace({
   const [scopePickerOpen, setScopePickerOpen] = React.useState(false);
   const [scopePickerQuery, setScopePickerQuery] = React.useState('');
   const scopePickerRootRef = React.useRef<HTMLDivElement | null>(null);
-  const scopePickerInputRef = React.useRef<HTMLInputElement | null>(null);
   const scopePickerDropdownRef = React.useRef<HTMLDivElement | null>(null);
-  const scopePickerOpenRef = React.useRef(false);
-  const scopePickerTogglePointerHandledRef = React.useRef(false);
-  const scopePickerStateCommitFrameRef = React.useRef<number | null>(null);
-  const scopePickerStateCommitTimerRef = React.useRef<number | null>(null);
-  const [scopePickerPortalReady, setScopePickerPortalReady] = React.useState(false);
   const [scopePickerDropdownPortalStyle, setScopePickerDropdownPortalStyle] = React.useState<React.CSSProperties | null>(null);
   const selectedScopeOption = React.useMemo(
     () => scopePickerOptions.find((option) => option.id === activeScopeKey) || null,
@@ -34828,137 +34814,20 @@ export default function TemplateEditWorkspace({
     : scopeCreationMode
       ? 'scope 추가'
       : selectedScopeOption?.label || '';
-  const applyImmediateScopePickerDropdownVisibility = React.useCallback((open: boolean) => {
-    const dropdown = scopePickerDropdownRef.current;
-
-    if (!dropdown) {
-      return;
-    }
-
-    dropdown.style.visibility = open ? 'visible' : 'hidden';
-    dropdown.style.opacity = open ? '1' : '0';
-    dropdown.style.pointerEvents = open ? 'auto' : 'none';
-    dropdown.setAttribute('aria-hidden', open ? 'false' : 'true');
-  }, []);
-  const applyImmediateScopePickerDropdownGeometry = React.useCallback(() => {
-    const root = scopePickerRootRef.current;
-    const dropdown = scopePickerDropdownRef.current;
-
-    if (!root || !dropdown) {
-      return;
-    }
-
-    const nextStyle = resolveRoleScopeDropdownPortalStyle(root);
-    dropdown.style.position = 'fixed';
-    dropdown.style.top = `${Number(nextStyle.top || 0)}px`;
-    dropdown.style.left = `${Number(nextStyle.left || 0)}px`;
-    dropdown.style.width = `${Number(nextStyle.width || 0)}px`;
-    dropdown.style.maxHeight = `${Number(nextStyle.maxHeight || ROLE_SCOPE_DROPDOWN_MAX_HEIGHT)}px`;
-    dropdown.style.zIndex = String(nextStyle.zIndex || ROLE_SCOPE_DROPDOWN_PORTAL_Z_INDEX);
-  }, []);
-  const updateScopePickerDropdownPortalStyle = React.useCallback(() => {
-    if (!scopePickerRootRef.current) {
-      return;
-    }
-
-    setScopePickerDropdownPortalStyle(resolveRoleScopeDropdownPortalStyle(scopePickerRootRef.current));
-  }, []);
-  const cancelDeferredScopePickerStateCommit = React.useCallback(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (scopePickerStateCommitFrameRef.current !== null) {
-      window.cancelAnimationFrame(scopePickerStateCommitFrameRef.current);
-      scopePickerStateCommitFrameRef.current = null;
-    }
-
-    if (scopePickerStateCommitTimerRef.current !== null) {
-      window.clearTimeout(scopePickerStateCommitTimerRef.current);
-      scopePickerStateCommitTimerRef.current = null;
-    }
-  }, []);
-  const scheduleScopePickerStateCommitAfterPaint = React.useCallback(
-    (nextOpen: boolean, options?: { clearQuery?: boolean }) => {
-      cancelDeferredScopePickerStateCommit();
-
-      if (typeof window === 'undefined') {
-        setScopePickerOpen(nextOpen);
-        if (options?.clearQuery) {
-          setScopePickerQuery('');
-        }
-        return;
-      }
-
-      scopePickerStateCommitFrameRef.current = window.requestAnimationFrame(() => {
-        scopePickerStateCommitFrameRef.current = null;
-        scopePickerStateCommitTimerRef.current = window.setTimeout(() => {
-          scopePickerStateCommitTimerRef.current = null;
-          setScopePickerOpen(nextOpen);
-          if (options?.clearQuery) {
-            setScopePickerQuery('');
-          }
-        }, 0);
-      });
-    },
-    [cancelDeferredScopePickerStateCommit]
-  );
-  const revealScopePickerDropdownImmediately = React.useCallback(
-    (nextOpen: boolean) => {
-      if (nextOpen) {
-        applyImmediateScopePickerDropdownGeometry();
-      }
-
-      scopePickerOpenRef.current = nextOpen;
-      applyImmediateScopePickerDropdownVisibility(nextOpen);
-    },
-    [applyImmediateScopePickerDropdownGeometry, applyImmediateScopePickerDropdownVisibility]
-  );
-  const openScopePicker = React.useCallback((options?: { clearQuery?: boolean }) => {
-    revealScopePickerDropdownImmediately(true);
-    scheduleScopePickerStateCommitAfterPaint(true, { clearQuery: options?.clearQuery });
-  }, [revealScopePickerDropdownImmediately, scheduleScopePickerStateCommitAfterPaint]);
-  const closeScopePicker = React.useCallback(() => {
-    revealScopePickerDropdownImmediately(false);
-    scheduleScopePickerStateCommitAfterPaint(false, { clearQuery: true });
-  }, [revealScopePickerDropdownImmediately, scheduleScopePickerStateCommitAfterPaint]);
-  const toggleScopePicker = React.useCallback(() => {
-    const nextOpen = !scopePickerOpenRef.current;
-
-    revealScopePickerDropdownImmediately(nextOpen);
-    scheduleScopePickerStateCommitAfterPaint(nextOpen, { clearQuery: true });
-  }, [revealScopePickerDropdownImmediately, scheduleScopePickerStateCommitAfterPaint]);
 
   React.useEffect(() => {
-    setScopePickerPortalReady(true);
-  }, []);
-  React.useEffect(
-    () => () => {
-      cancelDeferredScopePickerStateCommit();
-    },
-    [cancelDeferredScopePickerStateCommit]
-  );
-  React.useEffect(() => {
-    scopePickerOpenRef.current = scopePickerOpen;
-    applyImmediateScopePickerDropdownVisibility(scopePickerOpen);
-  }, [applyImmediateScopePickerDropdownVisibility, scopePickerOpen]);
-
-  React.useEffect(() => {
-    if (!scopePickerPortalReady) {
+    if (!scopePickerOpen) {
       return;
     }
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (!scopePickerOpenRef.current) {
-        return;
-      }
-
       const target = event.target as Node;
       const clickedRoot = Boolean(scopePickerRootRef.current && scopePickerRootRef.current.contains(target));
       const clickedDropdown = Boolean(scopePickerDropdownRef.current && scopePickerDropdownRef.current.contains(target));
 
       if (!clickedRoot && !clickedDropdown) {
-        closeScopePicker();
+        setScopePickerOpen(false);
+        setScopePickerQuery('');
       }
     };
 
@@ -34967,11 +34836,20 @@ export default function TemplateEditWorkspace({
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
     };
-  }, [closeScopePicker, scopePickerPortalReady]);
+  }, [scopePickerOpen]);
   React.useEffect(() => {
-    if (!scopePickerPortalReady) {
+    if (!scopePickerOpen) {
+      setScopePickerDropdownPortalStyle(null);
       return;
     }
+
+    const updateScopePickerDropdownPortalStyle = () => {
+      if (!scopePickerRootRef.current) {
+        return;
+      }
+
+      setScopePickerDropdownPortalStyle(resolveRoleScopeDropdownPortalStyle(scopePickerRootRef.current));
+    };
 
     updateScopePickerDropdownPortalStyle();
     window.addEventListener('resize', updateScopePickerDropdownPortalStyle);
@@ -34981,7 +34859,7 @@ export default function TemplateEditWorkspace({
       window.removeEventListener('resize', updateScopePickerDropdownPortalStyle);
       window.removeEventListener('scroll', updateScopePickerDropdownPortalStyle, true);
     };
-  }, [filteredScopePickerOptions.length, roleAssignmentTabActive, scopePickerPortalReady, updateScopePickerDropdownPortalStyle]);
+  }, [filteredScopePickerOptions.length, scopePickerOpen]);
 
   const renderRoleAssignmentScopeSaveControls = () => (
     <div className="space-y-2" {...roleAssignmentOwnerItem('scope-save-controls', '권한 scope 저장 영역')}>
@@ -34996,26 +34874,11 @@ export default function TemplateEditWorkspace({
       </button>
     </div>
   );
-  const scopePickerPreloadedPortalStyle: React.CSSProperties = scopePickerDropdownPortalStyle || {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    width: 160,
-    maxHeight: ROLE_SCOPE_DROPDOWN_MAX_HEIGHT,
-    zIndex: ROLE_SCOPE_DROPDOWN_PORTAL_Z_INDEX,
-  };
   const scopePickerDropdownNode =
-    scopePickerPortalReady && typeof document !== 'undefined' ? (
+    scopePickerOpen && scopePickerDropdownPortalStyle && typeof document !== 'undefined' ? (
       <div
         ref={scopePickerDropdownRef}
-        aria-hidden={scopePickerOpen ? 'false' : 'true'}
-        style={{
-          ...scopePickerPreloadedPortalStyle,
-          visibility: scopePickerOpen ? 'visible' : 'hidden',
-          opacity: scopePickerOpen ? 1 : 0,
-          pointerEvents: scopePickerOpen ? 'auto' : 'none',
-        }}
-        data-scope-picker-preloaded="true"
+        style={scopePickerDropdownPortalStyle}
         className="overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 p-2"
         {...roleAssignmentOwnerItem('scope-picker-control-dropdown', '권한 scope 선택기 드롭다운')}
       >
@@ -35025,12 +34888,13 @@ export default function TemplateEditWorkspace({
               type="button"
               onClick={() => {
                 handleStartCreateRoleScope();
-                closeScopePicker();
+                setScopePickerOpen(false);
+                setScopePickerQuery('');
               }}
               className={`flex w-full items-center justify-start gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
                 scopeCreationMode
-                  ? 'border-slate-200 bg-white'
-                  : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-white'
+                  ? 'border-slate-200 bg-slate-100'
+                  : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-white'
               }`}
               {...roleAssignmentOwnerItem('scope-picker-control-add-option', '권한 scope 추가 옵션')}
             >
@@ -35054,7 +34918,8 @@ export default function TemplateEditWorkspace({
                     disabled={option.disabled}
                     onClick={() => {
                       handleSelectRoleScope(option.id);
-                      closeScopePicker();
+                      setScopePickerOpen(false);
+                      setScopePickerQuery('');
                     }}
                     className={`flex w-full flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-colors ${
                       option.disabled
@@ -35107,50 +34972,22 @@ export default function TemplateEditWorkspace({
               className={`group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 transition-colors focus-within:ring-1 focus-within:ring-slate-300 ${
                 scopeDraftLoading || !activeTemplateScopeTemplateId ? 'cursor-not-allowed opacity-60' : 'hover:border-slate-400'
               }`}
-              onPointerDown={(event) => {
-                if (event.button !== 0 || scopeDraftLoading || !activeTemplateScopeTemplateId) {
-                  return;
-                }
-
-                const target = event.target as HTMLElement;
-
-                if (target.closest('button') || target === scopePickerInputRef.current) {
-                  return;
-                }
-
-                revealScopePickerDropdownImmediately(true);
-                scheduleScopePickerStateCommitAfterPaint(true, { clearQuery: true });
-
-                if (target !== scopePickerInputRef.current && typeof window !== 'undefined') {
-                  window.requestAnimationFrame(() => {
-                    scopePickerInputRef.current?.focus();
-                  });
-                }
-              }}
               {...roleAssignmentOwnerItem('scope-picker-control-control', '권한 scope 선택기 컨트롤')}
             >
               <input
-                ref={scopePickerInputRef}
                 type="text"
                 value={scopePickerInputValue}
                 disabled={scopeDraftLoading || !activeTemplateScopeTemplateId}
                 placeholder={scopeDraftLoading ? 'scope 불러오는 중' : 'scope를 선택하세요'}
                 aria-haspopup="listbox"
                 aria-expanded={scopePickerOpen}
-                onPointerDown={() => {
-                  if (!scopeDraftLoading && activeTemplateScopeTemplateId) {
-                    revealScopePickerDropdownImmediately(true);
-                    scheduleScopePickerStateCommitAfterPaint(true, { clearQuery: true });
-                  }
-                }}
                 onFocus={() => {
-                  openScopePicker({ clearQuery: true });
+                  setScopePickerOpen(true);
+                  setScopePickerQuery('');
                 }}
                 onChange={(event) => {
-                  cancelDeferredScopePickerStateCommit();
-                  revealScopePickerDropdownImmediately(true);
-                  setScopePickerOpen(true);
                   setScopePickerQuery(event.target.value);
+                  setScopePickerOpen(true);
                 }}
                 className="h-6 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
                 {...roleAssignmentOwnerItem('scope-picker-control-input', '권한 scope 선택기 검색 입력')}
@@ -35158,23 +34995,9 @@ export default function TemplateEditWorkspace({
               <button
                 type="button"
                 disabled={scopeDraftLoading || !activeTemplateScopeTemplateId}
-                onPointerDown={(event) => {
-                  if (event.button !== 0 || scopeDraftLoading || !activeTemplateScopeTemplateId) {
-                    return;
-                  }
-
-                  const nextOpen = !scopePickerOpenRef.current;
-                  scopePickerTogglePointerHandledRef.current = true;
-                  revealScopePickerDropdownImmediately(nextOpen);
-                  scheduleScopePickerStateCommitAfterPaint(nextOpen, { clearQuery: true });
-                }}
                 onClick={() => {
-                  if (scopePickerTogglePointerHandledRef.current) {
-                    scopePickerTogglePointerHandledRef.current = false;
-                    return;
-                  }
-
-                  toggleScopePicker();
+                  setScopePickerOpen((current) => !current);
+                  setScopePickerQuery('');
                 }}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed"
                 {...roleAssignmentOwnerItem('scope-picker-control-toggle-button', '권한 scope 선택기 목록 열기 버튼')}

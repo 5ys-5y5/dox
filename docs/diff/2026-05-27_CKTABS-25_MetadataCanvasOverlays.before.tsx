@@ -3,7 +3,6 @@
 import * as React from 'react';
 import { Button } from '../../../ui/Button';
 import { Input } from '../../../ui/Input';
-import { DeferredValueInput } from '../panels/DeferredValueInput';
 import {
   FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES,
   FRAME_BOX_KIND_BUTTON_LABELS,
@@ -47,11 +46,11 @@ export const MetadataNameOverlay = ({
     <div className="space-y-2">
       <div className="space-y-1">
         <label className="text-xs font-semibold text-slate-800">상자명</label>
-        <DeferredValueInput
+        <Input
           data-metadata-field="label"
           value={hasSelectedMetadataTarget ? frameMetadataDraft.label : ''}
           disabled={!hasSelectedMetadataTarget || selectedFrameGroupIds.length !== 1}
-          onCommit={onLabelChange}
+          onChange={(event) => onLabelChange(event.target.value)}
           placeholder={
             hasSelectedMetadataTarget
               ? selectedFrameGroupIds.length === 1
