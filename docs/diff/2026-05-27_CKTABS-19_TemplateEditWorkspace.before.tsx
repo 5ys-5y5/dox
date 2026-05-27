@@ -18858,7 +18858,6 @@ export default function TemplateEditWorkspace({
   const [positionSelectionClickChainSnapshot, setPositionSelectionClickChainSnapshot] =
     React.useState<PositionSelectionClickChainSnapshot | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
-  const editorPreviewSourceRef = React.useRef<HTMLDivElement | null>(null);
   const templateUsagePreviewPreparedNodeRef = React.useRef<HTMLDivElement | null>(null);
   const templateUsagePreviewPreparedRuntimeRootRef = React.useRef<HTMLDivElement | null>(null);
   const templateUsagePreviewPreparedActivationRef = React.useRef<{
@@ -18879,7 +18878,6 @@ export default function TemplateEditWorkspace({
     lastY: number;
   } | null>(null);
   const [previewSurfaceNodeVersion, setPreviewSurfaceNodeVersion] = React.useState(0);
-  const [editorPreviewSourceNodeVersion, setEditorPreviewSourceNodeVersion] = React.useState(0);
   const [templateUsagePreviewPreparedNodeVersion, setTemplateUsagePreviewPreparedNodeVersion] = React.useState(0);
   const documentPreviewSourceKeyRef = React.useRef('');
   const documentAttachmentStateSourceKeyRef = React.useRef('');
@@ -20674,25 +20672,18 @@ export default function TemplateEditWorkspace({
   }, [activeInitialDraft?.draftKey, documentMode, readMode, renderedPreviewHtml]);
 
   React.useEffect(() => {
-    const root = previewRef.current || editorPreviewSourceRef.current;
-
-    if (!templateUsagePreviewActive || !root) {
+    if (!templateUsagePreviewActive || !previewRef.current) {
       return;
     }
 
+    const root = previewRef.current;
     const sourceKey = `${activeInitialDraft?.draftKey?.trim() || ''}:${documentAttachmentApiPath.trim()}`;
 
     if (documentAttachmentStateSourceKeyRef.current !== sourceKey) {
       clearTemplateUsagePreviewAttachmentStateStore(root);
       documentAttachmentStateSourceKeyRef.current = sourceKey;
     }
-  }, [
-    activeInitialDraft?.draftKey,
-    documentAttachmentApiPath,
-    editorPreviewSourceNodeVersion,
-    previewSurfaceNodeVersion,
-    templateUsagePreviewActive,
-  ]);
+  }, [activeInitialDraft?.draftKey, documentAttachmentApiPath, templateUsagePreviewActive]);
 
   React.useEffect(() => {
     return () => {
@@ -20710,18 +20701,11 @@ export default function TemplateEditWorkspace({
   }, [cancelDeferredTemplateUsagePreviewActivation, cancelScheduledTemplateUsagePreviewBuild]);
 
   React.useLayoutEffect(() => {
-    const documentOutputSourceRoot = editorPreviewSourceRef.current || previewRef.current;
-
-    if (
-      (!documentMode && !readMode) ||
-      !documentOutputSourceRoot ||
-      !renderedPreviewHtml.trim() ||
-      templateUsagePreviewHtml.trim()
-    ) {
+    if ((!documentMode && !readMode) || !previewRef.current || !renderedPreviewHtml.trim() || templateUsagePreviewHtml.trim()) {
       return;
     }
 
-    const runtimeHtml = buildTemplateUsagePreviewHtml(documentOutputSourceRoot, {
+    const runtimeHtml = buildTemplateUsagePreviewHtml(previewRef.current, {
       preserveValueText: true,
       readOnly: readMode,
       editableValueKeys: normalizedEditableValueKeys,
@@ -20743,7 +20727,6 @@ export default function TemplateEditWorkspace({
     activeInitialDraftAttachmentFilesByValueKey,
     documentAttachmentApiPath,
     documentMode,
-    editorPreviewSourceNodeVersion,
     normalizedEditableValueKeys,
     previewSurfaceNodeVersion,
     readMode,
@@ -25859,14 +25842,6 @@ export default function TemplateEditWorkspace({
 
     previewRef.current = node;
     setPreviewSurfaceNodeVersion((previous) => previous + 1);
-  }, []);
-  const setEditorPreviewSourceNode = React.useCallback((node: HTMLDivElement | null) => {
-    if (editorPreviewSourceRef.current === node) {
-      return;
-    }
-
-    editorPreviewSourceRef.current = node;
-    setEditorPreviewSourceNodeVersion((previous) => previous + 1);
   }, []);
   const setTemplateUsagePreviewPreparedNode = React.useCallback((node: HTMLDivElement | null) => {
     if (templateUsagePreviewPreparedNodeRef.current === node) {
@@ -35087,9 +35062,8 @@ export default function TemplateEditWorkspace({
             templateUsagePreviewMode={templateUsagePreviewActive}
             templateUsagePreviewHtml={templateUsagePreviewHtml}
             templateUsagePreviewPending={templateUsagePreviewPending}
-            showEditorRoomAsUsagePreviewFallback={documentMode || readMode}
             selectionPanelTab={activeCanvasSurfaceSelectionPanelTab}
-            editSettingsPanelVisible={editSettingsPanelVisible && !documentMode && !readMode}
+            editSettingsPanelVisible={editSettingsPanelVisible}
             showMetadataIcons={templateUsagePreviewActive ? false : showMetadataIcons}
             actionOverlay={positionActionOverlayNode}
             actionOverlayLabel={canvasActionOverlayLabel}
@@ -35113,7 +35087,6 @@ export default function TemplateEditWorkspace({
             summaryOverlay={selectionSummaryOverlayNode}
             onSummaryOverlayCollapsedChange={handleSummaryOverlayCollapsedChange}
             setPreviewNode={setPreviewNode}
-            setEditorPreviewNode={setEditorPreviewSourceNode}
             setTemplateUsagePreviewNode={setTemplateUsagePreviewPreparedNode}
             syncTemplateUsagePreviewTextControls={(root) => {
               if (readMode) {

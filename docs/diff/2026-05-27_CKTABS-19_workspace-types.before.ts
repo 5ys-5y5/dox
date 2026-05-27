@@ -813,7 +813,6 @@ export type TemplateEditPreviewSurfaceProps = {
   templateUsagePreviewMode: boolean;
   templateUsagePreviewHtml?: string;
   templateUsagePreviewPending?: boolean;
-  showEditorRoomAsUsagePreviewFallback?: boolean;
   selectionPanelTab: SelectionPanelTab;
   editSettingsPanelVisible: boolean;
   showMetadataIcons: boolean;
@@ -835,7 +834,6 @@ export type TemplateEditPreviewSurfaceProps = {
   summaryOverlay?: TemplateFloatingOverlayContent;
   onSummaryOverlayCollapsedChange?: (collapsed: boolean) => void;
   setPreviewNode: (node: HTMLDivElement | null) => void;
-  setEditorPreviewNode?: (node: HTMLDivElement | null) => void;
   setTemplateUsagePreviewNode?: (node: HTMLDivElement | null) => void;
   syncTemplateUsagePreviewTextControls?: (root: ParentNode) => void;
   handlePreviewPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;

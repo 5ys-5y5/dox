@@ -53,7 +53,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   templateUsagePreviewMode,
   templateUsagePreviewHtml = '',
   templateUsagePreviewPending = false,
-  showEditorRoomAsUsagePreviewFallback = false,
   selectionPanelTab,
   editSettingsPanelVisible,
   showMetadataIcons,
@@ -75,7 +74,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   summaryOverlay,
   onSummaryOverlayCollapsedChange,
   setPreviewNode,
-  setEditorPreviewNode,
   setTemplateUsagePreviewNode,
   syncTemplateUsagePreviewTextControls,
   handlePreviewPointerDown,
@@ -91,9 +89,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const editorPreviewNodeRef = React.useRef<HTMLDivElement | null>(null);
   const templateUsagePreviewNodeRef = React.useRef<HTMLDivElement | null>(null);
   const syncedTemplateUsagePreviewHtmlRef = React.useRef('');
-  const hasPreparedTemplateUsagePreviewHtml = templateUsagePreviewHtml.trim().length > 0;
-  const showEditorRoomFallbackForUsagePreview =
-    templateUsagePreviewMode && showEditorRoomAsUsagePreviewFallback && !hasPreparedTemplateUsagePreviewHtml;
   const floatingOverlayNodeRefs = React.useRef<Record<TemplateFloatingOverlayId, HTMLElement | null>>({
     summary: null,
     style: null,
@@ -130,17 +125,11 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const setEditorPreviewSurfaceNode = React.useCallback(
     (node: HTMLDivElement | null) => {
       editorPreviewNodeRef.current = node;
-      setEditorPreviewNode?.(node);
-      if (!templateUsagePreviewMode || showEditorRoomFallbackForUsagePreview) {
+      if (!templateUsagePreviewMode) {
         setActivePreviewSurfaceNode(node);
       }
     },
-    [
-      setActivePreviewSurfaceNode,
-      setEditorPreviewNode,
-      showEditorRoomFallbackForUsagePreview,
-      templateUsagePreviewMode,
-    ]
+    [setActivePreviewSurfaceNode, templateUsagePreviewMode]
   );
   const setTemplateUsagePreviewSurfaceNode = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -155,26 +144,9 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
 
   React.useLayoutEffect(() => {
     setActivePreviewSurfaceNode(
-      templateUsagePreviewMode
-        ? templateUsagePreviewNodeRef.current ||
-            (showEditorRoomFallbackForUsagePreview ? editorPreviewNodeRef.current : null)
-        : editorPreviewNodeRef.current
+      templateUsagePreviewMode ? templateUsagePreviewNodeRef.current : editorPreviewNodeRef.current
     );
-  }, [
-    renderedPreviewHtml,
-    setActivePreviewSurfaceNode,
-    showEditorRoomFallbackForUsagePreview,
-    templateUsagePreviewHtml,
-    templateUsagePreviewMode,
-  ]);
-
-  React.useLayoutEffect(() => {
-    if (!showEditorRoomFallbackForUsagePreview || !editorPreviewNodeRef.current) {
-      return;
-    }
-
-    syncTemplateUsagePreviewTextControls?.(editorPreviewNodeRef.current);
-  }, [renderedPreviewHtml, showEditorRoomFallbackForUsagePreview, syncTemplateUsagePreviewTextControls]);
+  }, [renderedPreviewHtml, setActivePreviewSurfaceNode, templateUsagePreviewHtml, templateUsagePreviewMode]);
 
   React.useLayoutEffect(() => {
     if (!templateUsagePreviewHtml.trim()) {
@@ -951,6 +923,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     }),
     [templateUsagePreviewHtml]
   );
+  const hasPreparedTemplateUsagePreviewHtml = templateUsagePreviewHtml.trim().length > 0;
   const normalizedSelectionInactiveOverlayOpacity = Math.max(
     0,
     Math.min(1, Number.isFinite(selectionInactiveOverlayOpacity) ? selectionInactiveOverlayOpacity : 0.5)
@@ -1079,7 +1052,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const preparedViewSelectionPanelTab = resolveTemplateCanvasSelectionPanelTab(preparedViewMode);
   const preparedViewMatchesActivePanel = preparedViewSelectionPanelTab === selectionPanelTab;
 
-  if (templateUsagePreviewPending && !showEditorRoomFallbackForUsagePreview) {
+  if (templateUsagePreviewPending) {
     return (
       <CardContent
         className={`min-h-0 bg-slate-200 p-6 ${canvasSurfaceSizingClassName}`}
@@ -1258,7 +1231,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const hiddenEditorRoomClassName = `${previewSurfaceBaseClassName} pointer-events-none invisible relative z-0`;
   const visibleTemplateUsagePreviewRoomClassName = `${previewSurfaceBaseClassName} absolute inset-0 z-20`;
   const hiddenTemplateUsagePreviewRoomClassName = `${previewSurfaceBaseClassName} pointer-events-none invisible absolute inset-0 z-0`;
-  const hideEditorRoomForUsagePreview = templateUsagePreviewMode && !showEditorRoomFallbackForUsagePreview;
 
   return (
     <CardContent
@@ -1269,17 +1241,16 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       <div
         data-template-canvas-editor-room-container="true"
         className={`flex h-full min-h-0 w-full ${
-          hideEditorRoomForUsagePreview ? 'pointer-events-none relative z-0' : 'relative z-10'
+          templateUsagePreviewMode ? 'pointer-events-none relative z-0' : 'relative z-10'
         }`}
-        aria-hidden={hideEditorRoomForUsagePreview ? 'true' : undefined}
+        aria-hidden={templateUsagePreviewMode ? 'true' : undefined}
       >
         <div className="relative min-w-0 flex-1">
           <div
             ref={setEditorPreviewSurfaceNode}
-            className={hideEditorRoomForUsagePreview ? hiddenEditorRoomClassName : visibleEditorRoomClassName}
-            aria-hidden={hideEditorRoomForUsagePreview ? 'true' : undefined}
+            className={templateUsagePreviewMode ? hiddenEditorRoomClassName : visibleEditorRoomClassName}
+            aria-hidden={templateUsagePreviewMode ? 'true' : undefined}
             data-template-canvas-editor-room="true"
-            data-template-usage-preview-fallback-visible={showEditorRoomFallbackForUsagePreview ? 'true' : 'false'}
             data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
             data-canvas-icon-scale={canvasIconScale}
             data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
@@ -1291,7 +1262,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             data-canvas-prepared-view-cache-key={`${templateUsagePreviewMode ? 'position' : preparedViewMode}:${selectionPanelTab}`}
             data-canvas-prepared-view-match={!templateUsagePreviewMode && preparedViewMatchesActivePanel ? 'true' : 'false'}
             data-canvas-prepared-view-requested-tab={preparedViewSelectionPanelTab}
-            data-canvas-prepared-view-visible={hideEditorRoomForUsagePreview ? 'false' : 'true'}
+            data-canvas-prepared-view-visible={templateUsagePreviewMode ? 'false' : 'true'}
             data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
             style={previewSurfaceStyle}
             onPointerDownCapture={handlePreviewPointerDown}
