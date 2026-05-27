@@ -96,12 +96,6 @@ export type CanvasScopeDraftCommand =
       keyFrameGroupIds: string[];
     }
   | {
-      type: 'set_scope_key_memberships';
-      scopeKey: string;
-      keyFrameGroupIds: string[];
-      valueKeyByKeyFrameGroupId?: Record<string, string | null>;
-    }
-  | {
       type: 'assign_members_to_scope';
       scopeKey: string;
       memberIds: string[];
@@ -509,52 +503,6 @@ export const applyCanvasScopeDraftCommand = (
       ...snapshot,
       logicalScopes: nextLogicalScopes,
       ...rebuildScopeIndex(nextLogicalScopes),
-      dirty: true,
-    };
-  }
-
-  if (command.type === 'set_scope_key_memberships') {
-    const scopeKey = normalizeString(command.scopeKey);
-    const keyFrameGroupIds = uniqueStrings(command.keyFrameGroupIds);
-
-    if (!scopeKey) {
-      return snapshot;
-    }
-
-    const currentScope = snapshot.logicalScopes.find((scope) => scope.scopeKey === scopeKey);
-    const baseScopes = upsertLogicalScope(snapshot.logicalScopes, {
-      templateId: snapshot.templateId,
-      scopeKey,
-      displayName: currentScope?.displayName || scopeKey,
-      description: currentScope?.description ?? null,
-    });
-    const nextValueKeyByKeyFrameGroupId = { ...snapshot.valueKeyByKeyFrameGroupId };
-
-    Object.entries(command.valueKeyByKeyFrameGroupId || {}).forEach(([keyFrameGroupId, valueKey]) => {
-      const normalizedKeyFrameGroupId = normalizeString(keyFrameGroupId);
-      if (normalizedKeyFrameGroupId) {
-        nextValueKeyByKeyFrameGroupId[normalizedKeyFrameGroupId] = normalizeString(valueKey) || null;
-      }
-    });
-
-    const nextLogicalScopes = baseScopes.map((scope) => {
-      if (scope.scopeKey !== scopeKey) {
-        return scope;
-      }
-
-      return {
-        ...scope,
-        status: 'active',
-        keyFrameGroupIds,
-        valueKeys: uniqueStrings(keyFrameGroupIds.map((keyFrameGroupId) => nextValueKeyByKeyFrameGroupId[keyFrameGroupId])),
-      };
-    });
-
-    return {
-      ...snapshot,
-      logicalScopes: nextLogicalScopes,
-      ...rebuildScopeIndex(nextLogicalScopes),
-      valueKeyByKeyFrameGroupId: nextValueKeyByKeyFrameGroupId,
       dirty: true,
     };
   }

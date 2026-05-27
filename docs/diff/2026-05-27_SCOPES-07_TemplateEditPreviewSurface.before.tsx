@@ -64,10 +64,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   metadataRolePrimaryOverlay,
   metadataRoleSecondaryOverlay,
   metadataRoleTertiaryOverlay,
-  metadata2RoleScopeOverlay,
-  metadata2RolePhotoOverlay,
-  metadata2RoleFileOverlay,
-  metadata2RoleExpirationOverlay,
   metadata2RoleAssignmentOverlay,
   styleOverlay,
   styleOverlayLabel = '스타일',
@@ -207,7 +203,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const [metadataRolePrimaryOverlayCollapsed, setMetadataRolePrimaryOverlayCollapsed] = React.useState(true);
   const [metadataRoleSecondaryOverlayCollapsed, setMetadataRoleSecondaryOverlayCollapsed] = React.useState(true);
   const [metadataRoleTertiaryOverlayCollapsed, setMetadataRoleTertiaryOverlayCollapsed] = React.useState(true);
-  const [metadata2NameOverlayCollapsed, setMetadata2NameOverlayCollapsed] = React.useState(false);
+  const [metadata2NameOverlayCollapsed, setMetadata2NameOverlayCollapsed] = React.useState(true);
   const [metadata2RolePrimaryOverlayCollapsed, setMetadata2RolePrimaryOverlayCollapsed] = React.useState(true);
   const [metadata2RoleSecondaryOverlayCollapsed, setMetadata2RoleSecondaryOverlayCollapsed] = React.useState(true);
   const [metadata2RoleTertiaryOverlayCollapsed, setMetadata2RoleTertiaryOverlayCollapsed] = React.useState(true);
@@ -988,11 +984,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       alwaysExpanded?: boolean;
       keepMountedWhenCollapsed?: boolean;
       expandedWidthClassName?: string;
-      sectionOwnerItem?: string;
-      sectionOwnerName?: string;
-      contentOwnerItem?: string;
-      contentOwnerName?: string;
-      overflowVisible?: boolean;
     } = {}
   ) => {
     const contentRenderer = typeof content === 'function' ? content : null;
@@ -1010,15 +1001,13 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
           ref={(node) => {
             floatingOverlayNodeRefs.current[overlayId] = node;
           }}
-          className={`w-full border-b border-slate-200 last:border-b-0 ${options.overflowVisible ? 'overflow-visible' : ''}`}
+          className="w-full border-b border-slate-200 last:border-b-0"
           data-template-floating-overlay-expanded={isCollapsed ? 'false' : 'true'}
           data-template-floating-overlay-id={overlayId}
-          data-canvas-owner-item={options.sectionOwnerItem}
-          data-canvas-owner-name={options.sectionOwnerName}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className={`w-full min-w-0 ${options.overflowVisible ? 'overflow-visible' : 'overflow-hidden'}`}>
+          <div className="w-full min-w-0 overflow-hidden">
             <button
               type="button"
               className="flex h-8 w-full items-center justify-between gap-3 bg-white px-3 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
@@ -1059,14 +1048,12 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             {isCollapsed ? null : (
               <div
                 data-template-overlay-rail-content="true"
-                data-canvas-owner-item={options.contentOwnerItem}
-                data-canvas-owner-name={options.contentOwnerName}
                 className={
                   overlayId === 'style'
-                    ? `flex w-full max-w-full flex-col items-stretch gap-2.5 bg-slate-100 px-3 py-2.5 ${options.overflowVisible ? 'overflow-visible' : ''}`
+                    ? 'flex w-full max-w-full flex-col items-stretch gap-2.5 bg-slate-100 px-3 py-2.5'
                     : overlayId === 'sizeType'
-                      ? `max-w-full bg-slate-100 px-3 py-2.5 ${options.overflowVisible ? 'overflow-visible' : ''}`
-                      : `bg-slate-100 px-3 py-2.5 ${options.overflowVisible ? 'overflow-visible' : ''}`
+                      ? 'max-w-full bg-slate-100 px-3 py-2.5'
+                      : 'bg-slate-100 px-3 py-2.5'
                 }
                 aria-hidden="false"
               >
@@ -1229,67 +1216,17 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
     ),
   ]);
-  const hasMetadata2ScopeRailOverlay = Boolean(
-    metadata2RoleScopeOverlay ||
-      metadata2RolePhotoOverlay ||
-      metadata2RoleFileOverlay ||
-      metadata2RoleExpirationOverlay ||
-      metadata2RoleAssignmentOverlay
-  );
   const metadata2OverlayRailSections = compactOverlayRailSections(
-    hasMetadata2ScopeRailOverlay
+    metadata2RoleAssignmentOverlay
       ? [
           renderFloatingOverlaySection(
-            'metadataName',
-            '상자에 scope 지정',
-            metadata2NameOverlayCollapsed,
-            setMetadata2NameOverlayCollapsed,
-            finishMetadataNameOverlayDrag,
-            metadata2RoleScopeOverlay || metadata2RoleAssignmentOverlay,
-            {
-              expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
-              sectionOwnerItem: 'canvas-container-123',
-              sectionOwnerName: '역할 탭 scope 설정 섹션',
-              contentOwnerItem: 'canvas-container-113',
-              contentOwnerName: '역할 탭 scope 설정 내용',
-              overflowVisible: true,
-            }
-          ),
-          renderFloatingOverlaySection(
             'metadataRolePrimary',
-            '필수 사진 등록',
-            metadata2RolePrimaryOverlayCollapsed,
-            setMetadata2RolePrimaryOverlayCollapsed,
+            '선택한 상자',
+            false,
+            null,
             finishMetadataRolePrimaryOverlayDrag,
-            metadata2RolePhotoOverlay,
-            {
-              expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
-              overflowVisible: true,
-            }
-          ),
-          renderFloatingOverlaySection(
-            'metadataRoleSecondary',
-            '필수 파일 등록',
-            metadata2RoleSecondaryOverlayCollapsed,
-            setMetadata2RoleSecondaryOverlayCollapsed,
-            finishMetadataRoleSecondaryOverlayDrag,
-            metadata2RoleFileOverlay,
-            {
-              expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
-              overflowVisible: true,
-            }
-          ),
-          renderFloatingOverlaySection(
-            'metadataRoleTertiary',
-            '만료 시각 설정',
-            metadata2RoleTertiaryOverlayCollapsed,
-            setMetadata2RoleTertiaryOverlayCollapsed,
-            finishMetadataRoleTertiaryOverlayDrag,
-            metadata2RoleExpirationOverlay,
-            {
-              expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
-              overflowVisible: true,
-            }
+            metadata2RoleAssignmentOverlay,
+            { alwaysExpanded: true, expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
           ),
         ]
       : [
@@ -1387,8 +1324,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             className="h-full w-[300px] shrink-0 overflow-y-auto border-l border-slate-300 bg-white p-0"
             data-template-overlay-rail="true"
             data-template-overlay-rail-active-tab={selectionPanelTab}
-            data-canvas-owner-item="canvas-aside-상자-편집-패널-2"
-            data-canvas-owner-name="상자 편집 패널"
             aria-label="상자 편집 패널"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
@@ -1413,8 +1348,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
           <aside
             className="h-full w-[300px] shrink-0 border-l border-slate-300 bg-white p-0"
             data-template-overlay-rail-placeholder="true"
-            data-canvas-owner-item="canvas-aside-상자-편집-패널-2"
-            data-canvas-owner-name="상자 편집 패널"
             aria-hidden="true"
             inert
           />

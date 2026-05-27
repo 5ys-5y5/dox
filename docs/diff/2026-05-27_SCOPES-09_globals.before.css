@@ -120,6 +120,18 @@
   }
 }
 
+section {
+  padding-top: 8rem;
+  padding-bottom: 8rem;
+}
+
+@media (min-width: 768px) {
+  section {
+    padding-top: 12rem;
+    padding-bottom: 12rem;
+  }
+}
+
 h1,
 h2,
 h3,

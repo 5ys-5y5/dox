@@ -34846,7 +34846,6 @@ export default function TemplateEditWorkspace({
               onChange={(event) => setNewScopeDisplayName(event.target.value)}
               placeholder="새 scope 이름"
               disabled={!activeTemplateScopeTemplateId}
-              className="bg-white"
               {...roleAssignmentOwnerItem('scope-create-input', '새 권한 scope 이름 입력')}
             />
             <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('scope-create-selection-rule', '새 권한 scope 선택 조건')}>

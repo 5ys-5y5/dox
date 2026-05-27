@@ -64,10 +64,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   metadataRolePrimaryOverlay,
   metadataRoleSecondaryOverlay,
   metadataRoleTertiaryOverlay,
-  metadata2RoleScopeOverlay,
-  metadata2RolePhotoOverlay,
-  metadata2RoleFileOverlay,
-  metadata2RoleExpirationOverlay,
   metadata2RoleAssignmentOverlay,
   styleOverlay,
   styleOverlayLabel = '스타일',
@@ -207,7 +203,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const [metadataRolePrimaryOverlayCollapsed, setMetadataRolePrimaryOverlayCollapsed] = React.useState(true);
   const [metadataRoleSecondaryOverlayCollapsed, setMetadataRoleSecondaryOverlayCollapsed] = React.useState(true);
   const [metadataRoleTertiaryOverlayCollapsed, setMetadataRoleTertiaryOverlayCollapsed] = React.useState(true);
-  const [metadata2NameOverlayCollapsed, setMetadata2NameOverlayCollapsed] = React.useState(false);
+  const [metadata2NameOverlayCollapsed, setMetadata2NameOverlayCollapsed] = React.useState(true);
   const [metadata2RolePrimaryOverlayCollapsed, setMetadata2RolePrimaryOverlayCollapsed] = React.useState(true);
   const [metadata2RoleSecondaryOverlayCollapsed, setMetadata2RoleSecondaryOverlayCollapsed] = React.useState(true);
   const [metadata2RoleTertiaryOverlayCollapsed, setMetadata2RoleTertiaryOverlayCollapsed] = React.useState(true);
@@ -1229,65 +1225,23 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
     ),
   ]);
-  const hasMetadata2ScopeRailOverlay = Boolean(
-    metadata2RoleScopeOverlay ||
-      metadata2RolePhotoOverlay ||
-      metadata2RoleFileOverlay ||
-      metadata2RoleExpirationOverlay ||
-      metadata2RoleAssignmentOverlay
-  );
   const metadata2OverlayRailSections = compactOverlayRailSections(
-    hasMetadata2ScopeRailOverlay
+    metadata2RoleAssignmentOverlay
       ? [
           renderFloatingOverlaySection(
-            'metadataName',
-            '상자에 scope 지정',
-            metadata2NameOverlayCollapsed,
-            setMetadata2NameOverlayCollapsed,
-            finishMetadataNameOverlayDrag,
-            metadata2RoleScopeOverlay || metadata2RoleAssignmentOverlay,
+            'metadataRolePrimary',
+            '선택한 상자',
+            false,
+            null,
+            finishMetadataRolePrimaryOverlayDrag,
+            metadata2RoleAssignmentOverlay,
             {
+              alwaysExpanded: true,
               expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
               sectionOwnerItem: 'canvas-container-123',
               sectionOwnerName: '역할 탭 scope 설정 섹션',
               contentOwnerItem: 'canvas-container-113',
-              contentOwnerName: '역할 탭 scope 설정 내용',
-              overflowVisible: true,
-            }
-          ),
-          renderFloatingOverlaySection(
-            'metadataRolePrimary',
-            '필수 사진 등록',
-            metadata2RolePrimaryOverlayCollapsed,
-            setMetadata2RolePrimaryOverlayCollapsed,
-            finishMetadataRolePrimaryOverlayDrag,
-            metadata2RolePhotoOverlay,
-            {
-              expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
-              overflowVisible: true,
-            }
-          ),
-          renderFloatingOverlaySection(
-            'metadataRoleSecondary',
-            '필수 파일 등록',
-            metadata2RoleSecondaryOverlayCollapsed,
-            setMetadata2RoleSecondaryOverlayCollapsed,
-            finishMetadataRoleSecondaryOverlayDrag,
-            metadata2RoleFileOverlay,
-            {
-              expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
-              overflowVisible: true,
-            }
-          ),
-          renderFloatingOverlaySection(
-            'metadataRoleTertiary',
-            '만료 시각 설정',
-            metadata2RoleTertiaryOverlayCollapsed,
-            setMetadata2RoleTertiaryOverlayCollapsed,
-            finishMetadataRoleTertiaryOverlayDrag,
-            metadata2RoleExpirationOverlay,
-            {
-              expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]',
+              contentOwnerName: '역할 탭 scope 설정 단계 내용',
               overflowVisible: true,
             }
           ),

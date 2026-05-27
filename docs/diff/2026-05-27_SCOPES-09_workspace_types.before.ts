@@ -824,10 +824,6 @@ export type TemplateEditPreviewSurfaceProps = {
   metadataRolePrimaryOverlay?: TemplateFloatingOverlayContent;
   metadataRoleSecondaryOverlay?: TemplateFloatingOverlayContent;
   metadataRoleTertiaryOverlay?: TemplateFloatingOverlayContent;
-  metadata2RoleScopeOverlay?: TemplateFloatingOverlayContent;
-  metadata2RolePhotoOverlay?: TemplateFloatingOverlayContent;
-  metadata2RoleFileOverlay?: TemplateFloatingOverlayContent;
-  metadata2RoleExpirationOverlay?: TemplateFloatingOverlayContent;
   metadata2RoleAssignmentOverlay?: TemplateFloatingOverlayContent;
   styleOverlay?: TemplateFloatingOverlayContent;
   styleOverlayLabel?: string;

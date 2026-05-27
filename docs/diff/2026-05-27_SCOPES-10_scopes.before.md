@@ -1473,39 +1473,6 @@ scope 선택, shift 선택, selected-box-field-picker 변경은 브라우저 메
   - `get_project_url` 호출 시 `Auth required`로 실패했다.
   - 이번 변경은 DB schema/API 변경이 없고, SQL 실행이 필요하지 않다.
 
-## 20. SCOPES-10 신규 scope 이름 입력 배경색 보정
-
-### 20.1 요청 이해
-
-- `data-canvas-owner-item="canvas-role-settings-scope-create-input"`의 배경색은 `data-canvas-owner-item="canvas-role-settings-scope-picker-control-control"`의 배경색과 같아야 한다.
-- `Input` 공용 컴포넌트 기본 배경은 `bg-transparent`라서 역할 탭 rail의 회색 배경이 비쳐 보일 수 있다.
-- scope picker control은 `bg-white`를 직접 갖고 있으므로, 신규 scope 이름 입력도 같은 `bg-white`를 명시한다.
-
-### 20.2 수정 파일
-
-- `src/components/template/TemplateEditWorkspace.tsx`
-- `docs/scopes.md`
-
-### 20.3 수정 전 백업
-
-- `docs/diff/2026-05-27_SCOPES-10_TemplateEditWorkspace.before.tsx`
-- `docs/diff/2026-05-27_SCOPES-10_scopes.before.md`
-
-### 20.4 구현 체크리스트
-
-- [x] `canvas-role-settings-scope-create-input`에 `bg-white`를 명시한다.
-- [x] `canvas-role-settings-scope-picker-control-control`의 배경색과 computed background color가 같은지 확인한다.
-
-### 20.5 테스트 기록
-
-- `git diff --check`: 통과.
-- `npm run check:no-shadow-app`: 통과.
-- Chrome DevTools MCP:
-  - 역할 탭에서 `scope 추가` 상태로 진입했다.
-  - `canvas-role-settings-scope-create-input` computed background color가 `rgb(255, 255, 255)`임을 확인했다.
-  - `canvas-role-settings-scope-picker-control-control` computed background color가 `rgb(255, 255, 255)`임을 확인했다.
-  - 두 요소의 background color가 동일함을 확인했다.
-
 ## 19. SCOPES-09 전역 section padding 제거 및 역할 탭 rail UI 정렬
 
 ### 19.1 요청 이해
