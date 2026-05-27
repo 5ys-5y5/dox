@@ -44,9 +44,9 @@ export const TEMPLATE_CANVAS_VIEW_MODE_DEFINITIONS: readonly TemplateCanvasViewM
   {
     mode: 'metadata2',
     selectionPanelTab: 'metadata2',
-    label: '역할',
-    description: '선택 상자 역할',
-    ownerItem: 'canvas-page-root-button-역할',
+    label: '속성2',
+    description: '키/밸류 속성',
+    ownerItem: 'canvas-page-root-button-속성2',
     metadataVisualMode: true,
     runtimePreviewMode: false,
   },

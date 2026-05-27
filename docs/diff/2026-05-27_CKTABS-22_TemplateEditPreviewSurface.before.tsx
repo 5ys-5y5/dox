@@ -64,7 +64,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   metadataRolePrimaryOverlay,
   metadataRoleSecondaryOverlay,
   metadataRoleTertiaryOverlay,
-  metadata2RoleAssignmentOverlay,
   styleOverlay,
   styleOverlayLabel = '스타일',
   onStyleOverlayCollapsedChange,
@@ -1216,50 +1215,36 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
     ),
   ]);
-  const metadata2OverlayRailSections = compactOverlayRailSections(
-    metadata2RoleAssignmentOverlay
-      ? [
-          renderFloatingOverlaySection(
-            'metadataRolePrimary',
-            '선택한 상자',
-            false,
-            null,
-            finishMetadataRolePrimaryOverlayDrag,
-            metadata2RoleAssignmentOverlay,
-            { alwaysExpanded: true, expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-          ),
-        ]
-      : [
-          renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
-          renderFloatingOverlaySection(
-            'metadataRolePrimary',
-            '상자 역할 - 1',
-            metadata2RolePrimaryOverlayCollapsed,
-            setMetadata2RolePrimaryOverlayCollapsed,
-            finishMetadataRolePrimaryOverlayDrag,
-            metadataRolePrimaryOverlay,
-            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-          ),
-          renderFloatingOverlaySection(
-            'metadataRoleSecondary',
-            '상자 역할 - 2',
-            metadata2RoleSecondaryOverlayCollapsed,
-            setMetadata2RoleSecondaryOverlayCollapsed,
-            finishMetadataRoleSecondaryOverlayDrag,
-            metadataRoleSecondaryOverlay,
-            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-          ),
-          renderFloatingOverlaySection(
-            'metadataRoleTertiary',
-            '상자 연결',
-            metadata2RoleTertiaryOverlayCollapsed,
-            setMetadata2RoleTertiaryOverlayCollapsed,
-            finishMetadataRoleTertiaryOverlayDrag,
-            metadataRoleTertiaryOverlay,
-            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-          ),
-        ]
-  );
+  const metadata2OverlayRailSections = compactOverlayRailSections([
+    renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
+    renderFloatingOverlaySection(
+      'metadataRolePrimary',
+      '상자 역할 - 1',
+      metadata2RolePrimaryOverlayCollapsed,
+      setMetadata2RolePrimaryOverlayCollapsed,
+      finishMetadataRolePrimaryOverlayDrag,
+      metadataRolePrimaryOverlay,
+      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+    ),
+    renderFloatingOverlaySection(
+      'metadataRoleSecondary',
+      '상자 역할 - 2',
+      metadata2RoleSecondaryOverlayCollapsed,
+      setMetadata2RoleSecondaryOverlayCollapsed,
+      finishMetadataRoleSecondaryOverlayDrag,
+      metadataRoleSecondaryOverlay,
+      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+    ),
+    renderFloatingOverlaySection(
+      'metadataRoleTertiary',
+      '상자 연결',
+      metadata2RoleTertiaryOverlayCollapsed,
+      setMetadata2RoleTertiaryOverlayCollapsed,
+      finishMetadataRoleTertiaryOverlayDrag,
+      metadataRoleTertiaryOverlay,
+      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+    ),
+  ]);
   const overlayRailRooms: OverlayRailRoom[] = [
     { tab: 'position', sections: positionOverlayRailSections },
     { tab: 'metadata', sections: metadataOverlayRailSections },

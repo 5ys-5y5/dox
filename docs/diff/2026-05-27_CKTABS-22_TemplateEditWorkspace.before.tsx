@@ -5,11 +5,8 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { flushSync } from 'react-dom';
-import { Badge } from '../ui/Badge';
 import { Card, CardContent } from '../ui/Card';
-import type { EntityPickerOption } from '../ui/EntityPicker';
 import { Input } from '../ui/Input';
-import { MultiEntityPicker } from '../ui/MultiEntityPicker';
 import { applyTemplateExtractEditableTextFit } from '../../lib/templateExtractEditableTextFit';
 import type {
   TemplateEdgeDescriptorDto,
@@ -14952,16 +14949,9 @@ const collectChecklistTargetCanvasSelectionIds = (
   }
 
   const frameNodeById = collectFrameSelectionAnchorByIdMap(root);
-  const rawFrameNodeById = new Map(
-    Array.from(root.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR))
-      .map((node) => [getFrameGroupId(node).trim(), node] as const)
-      .filter(([frameGroupId]) => Boolean(frameGroupId))
-  );
   const frameNodes = Array.from(frameNodeById.values());
   const valueIdsByKeyId = new Map<string, string[]>();
   const keyIdsByValueId = new Map<string, string>();
-  const readMetadataNodeByFrameGroupId = (frameGroupId: string) =>
-    rawFrameNodeById.get(frameGroupId) || frameNodeById.get(frameGroupId) || null;
   const addSelectionCandidate = (candidateIds: Set<string>, rawValue: string | null | undefined) => {
     const normalizedValue = normalizeChecklistTargetToken(rawValue);
 
@@ -14972,9 +14962,8 @@ const collectChecklistTargetCanvasSelectionIds = (
 
   frameNodes.forEach((node) => {
     const frameGroupId = getFrameGroupId(node).trim();
-    const metadataNode = readMetadataNodeByFrameGroupId(frameGroupId) || node;
-    const role = readFrameRole(metadataNode) || readFrameRole(node);
-    const parentGroupId = (readFrameParentGroupId(metadataNode) || readFrameParentGroupId(node)).trim();
+    const role = readFrameRole(node);
+    const parentGroupId = readFrameParentGroupId(node).trim();
 
     if (!frameGroupId || role !== 'value' || !parentGroupId) {
       return;
@@ -15008,9 +14997,8 @@ const collectChecklistTargetCanvasSelectionIds = (
 
     frameNodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node).trim();
-      const metadataNode = readMetadataNodeByFrameGroupId(frameGroupId) || node;
-      const valueKey = normalizeChecklistTargetToken(readFrameValueKey(metadataNode) || readFrameValueKey(node));
-      const label = normalizeChecklistTargetToken(readFrameBoxLabel(metadataNode) || readFrameBoxLabel(node));
+      const valueKey = normalizeChecklistTargetToken(readFrameValueKey(node));
+      const label = normalizeChecklistTargetToken(readFrameBoxLabel(node));
 
       if (!frameGroupId) {
         return;
@@ -15024,9 +15012,8 @@ const collectChecklistTargetCanvasSelectionIds = (
 
   const candidateIds = Array.from(selectionCandidateIds).filter((frameGroupId) => frameNodeById.has(frameGroupId));
   const readRoleByFrameGroupId = (frameGroupId: string) => {
-    const metadataNode = readMetadataNodeByFrameGroupId(frameGroupId);
     const node = frameNodeById.get(frameGroupId);
-    return metadataNode ? readFrameRole(metadataNode) || (node ? readFrameRole(node) : '') : '';
+    return node ? readFrameRole(node) : '';
   };
   const selectedKeyIds = Array.from(
     new Set(
@@ -15164,22 +15151,7 @@ const buildChecklistTargetForCanvasSelectedBox = (box: TemplateCanvasSelectedBox
 const collectCanvasSelectedBoxCanvasSelectionIds = (root: HTMLElement, boxes: TemplateCanvasSelectedBox[]) =>
   Array.from(
     new Set(
-      boxes.flatMap((box) => {
-        const linkedSelectionIds = collectChecklistTargetCanvasSelectionIds(root, buildChecklistTargetForCanvasSelectedBox(box));
-
-        if (linkedSelectionIds.length > 0) {
-          return linkedSelectionIds;
-        }
-
-        return [
-          ...(box.highlightFrameGroupIds || []),
-          box.keyFrameGroupId,
-          box.valueFrameGroupId,
-          box.frameGroupId,
-        ]
-          .map((frameGroupId) => frameGroupId?.trim())
-          .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId));
-      })
+      boxes.flatMap((box) => collectChecklistTargetCanvasSelectionIds(root, buildChecklistTargetForCanvasSelectedBox(box)))
     )
   );
 
@@ -19313,7 +19285,6 @@ export default function TemplateEditWorkspace({
       (checklistSelectableTargets.length > 0 &&
         Boolean(onChecklistSelectableTargetSelect || onChecklistSelectableTargetsSelect)));
   const canvasLinkedSelectionControllerActive = checklistCanvasSelectionModeActive || roleAssignmentTabActive;
-  const canvasEditorPointerHandlersSuppressed = templateUsagePreviewActive || roleAssignmentTabActive;
   const surfaceRenderedPreviewHtml = renderedPreviewHtml;
   const templateUsagePreviewPending =
     templateUsagePreviewActive &&
@@ -21272,7 +21243,19 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      const nextSelectedIdsFromBoxes = collectCanvasSelectedBoxCanvasSelectionIds(root, selectedBoxes);
+      const nextSelectedIdsFromBoxes = Array.from(
+        new Set(
+          selectedBoxes
+            .flatMap((box) => [
+              ...(box.highlightFrameGroupIds || []),
+              box.keyFrameGroupId,
+              box.valueFrameGroupId,
+              box.frameGroupId,
+            ])
+            .map((frameGroupId) => frameGroupId?.trim())
+            .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
+        )
+      );
       const nextSelectedFrameGroupIds = options?.append
         ? Array.from(new Set([...selectedFrameGroupIdsRef.current, ...nextSelectedIdsFromBoxes]))
         : nextSelectedIdsFromBoxes;
@@ -21456,34 +21439,34 @@ export default function TemplateEditWorkspace({
         finalRect.width >= FRAME_MARQUEE_DRAG_THRESHOLD_PX ||
         finalRect.height >= FRAME_MARQUEE_DRAG_THRESHOLD_PX;
 
-      if (shouldCommitMarquee) {
-        updateChecklistSelectableMarquee(state, event.clientX, event.clientY, { force: true });
-        if (state.lastTargets.length > 0) {
-          emitChecklistSelectableTargets(state.lastTargets, { append: state.append });
-        } else if (
-          !state.append &&
-          (checklistRegistrationTargetRef.current ||
-            selectedCanvasBoxesRef.current.length > 0 ||
-            selectedFrameGroupIdsRef.current.length > 0)
-        ) {
-          clearRoleAssignmentSelection();
-          onChecklistSelectionClear?.();
-          onCanvasSelectionChange?.([], { source: 'clear' });
-        }
-        suppressClickAfterMarquee();
-      } else if (state.anchorTarget) {
-        emitChecklistSelectableTargets([state.anchorTarget], { append: state.append });
-        suppressClickAfterMarquee();
-      } else if (
-        !state.append &&
-        (checklistRegistrationTargetRef.current ||
-          selectedCanvasBoxesRef.current.length > 0 ||
-          selectedFrameGroupIdsRef.current.length > 0)
-      ) {
-        clearRoleAssignmentSelection();
-        onChecklistSelectionClear?.();
-        onCanvasSelectionChange?.([], { source: 'clear' });
-      }
+	      if (shouldCommitMarquee) {
+	        updateChecklistSelectableMarquee(state, event.clientX, event.clientY, { force: true });
+	        if (state.lastTargets.length > 0) {
+	          emitChecklistSelectableTargets(state.lastTargets, { append: state.append });
+	        } else if (
+	          !state.append &&
+	          (checklistRegistrationTargetRef.current ||
+	            selectedCanvasBoxesRef.current.length > 0 ||
+	            selectedFrameGroupIdsRef.current.length > 0)
+	        ) {
+	          clearRoleAssignmentSelection();
+	          onChecklistSelectionClear?.();
+	          onCanvasSelectionChange?.([], { source: 'clear' });
+	        }
+	        suppressClickAfterMarquee();
+	      } else if (state.anchorTarget) {
+	        emitChecklistSelectableTargets([state.anchorTarget], { append: state.append });
+	        suppressClickAfterMarquee();
+	      } else if (
+	        !state.append &&
+	        (checklistRegistrationTargetRef.current ||
+	          selectedCanvasBoxesRef.current.length > 0 ||
+	          selectedFrameGroupIdsRef.current.length > 0)
+	      ) {
+	        clearRoleAssignmentSelection();
+	        onChecklistSelectionClear?.();
+	        onCanvasSelectionChange?.([], { source: 'clear' });
+	      }
 
       cleanupChecklistSelectableMarquee();
     }
@@ -21510,19 +21493,19 @@ export default function TemplateEditWorkspace({
       const matchedTarget = findMatchedSelectableTarget(eventTarget);
       const pageInner = eventTarget.closest<HTMLElement>('.page-inner');
 
-      if (!pageInner) {
-        if (
-          !event.shiftKey &&
-          (checklistRegistrationTargetRef.current ||
-            selectedCanvasBoxesRef.current.length > 0 ||
-            selectedFrameGroupIdsRef.current.length > 0)
-        ) {
-          clearRoleAssignmentSelection();
-          onChecklistSelectionClear?.();
-          onCanvasSelectionChange?.([], { source: 'clear' });
-        }
-        return;
-      }
+	      if (!pageInner) {
+	        if (
+	          !event.shiftKey &&
+	          (checklistRegistrationTargetRef.current ||
+	            selectedCanvasBoxesRef.current.length > 0 ||
+	            selectedFrameGroupIdsRef.current.length > 0)
+	        ) {
+	          clearRoleAssignmentSelection();
+	          onChecklistSelectionClear?.();
+	          onCanvasSelectionChange?.([], { source: 'clear' });
+	        }
+	        return;
+	      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -21605,20 +21588,20 @@ export default function TemplateEditWorkspace({
       cleanupChecklistSelectableMarquee();
       clearChecklistAvailability();
     };
-  }, [
-    activeCanvasSelectablePolicy,
-    canvasLinkedSelectionControllerActive,
-    canvasViewMetadataVisualMode,
-    canvasViewSelectionPanelTab,
-    checklistSelectableTargets,
-    onCanvasSelectionChange,
-    onChecklistSelectableTargetsSelect,
-    onChecklistSelectableTargetSelect,
-    onChecklistSelectionClear,
-    roleAssignmentTabActive,
-    surfaceRenderedPreviewHtml,
-    syncEdgeRoleDiagnosticsState,
-  ]);
+	  }, [
+	    activeCanvasSelectablePolicy,
+	    canvasLinkedSelectionControllerActive,
+	    canvasViewMetadataVisualMode,
+	    canvasViewSelectionPanelTab,
+	    checklistSelectableTargets,
+	    onCanvasSelectionChange,
+	    onChecklistSelectableTargetsSelect,
+	    onChecklistSelectableTargetSelect,
+	    onChecklistSelectionClear,
+	    roleAssignmentTabActive,
+	    surfaceRenderedPreviewHtml,
+	    syncEdgeRoleDiagnosticsState,
+	  ]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -32973,9 +32956,9 @@ export default function TemplateEditWorkspace({
     positionActiveSelectionEntityRef,
     previewZoom,
     selectionPanelTab,
-    canvasInteractionMode,
-    selectionOnlyTextInteractions,
-    templateUsagePreviewMode: canvasEditorPointerHandlersSuppressed,
+	    canvasInteractionMode,
+	    selectionOnlyTextInteractions,
+	    templateUsagePreviewMode: templateUsagePreviewActive,
     positionOrderLockSelectionMode,
     positionOrderLockFrameGroupIds,
     positionOrderLockSelectionKindByFrameGroupId,
@@ -33106,7 +33089,7 @@ export default function TemplateEditWorkspace({
     selectedFrameGroupIdsRef,
     edgeSelectionStateRef,
     deferredPreviewEditorStateRef,
-    templateUsagePreviewMode: canvasEditorPointerHandlersSuppressed,
+    templateUsagePreviewMode: templateUsagePreviewActive,
     safeReleasePointerCapture,
     clearTransientCanvasOverlays,
     setSpacePanDragging,
@@ -33119,12 +33102,12 @@ export default function TemplateEditWorkspace({
     stopPointerInteraction,
   });
 
-  const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (canvasEditorPointerHandlersSuppressed) {
-      return;
-    }
+	  const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (templateUsagePreviewActive) {
+	      return;
+	    }
 
-    const deleteTarget = event.target instanceof Element ? event.target : null;
+	    const deleteTarget = event.target instanceof Element ? event.target : null;
     const reviewWarningUi = deleteTarget?.closest<HTMLElement>(
       `.${FRAME_REVIEW_WARNING_BUTTON_CLASS}, .${FRAME_REVIEW_WARNING_POPOVER_CLASS}`
     ) || null;
@@ -33188,7 +33171,7 @@ export default function TemplateEditWorkspace({
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-  }, [canvasEditorPointerHandlersSuppressed, deleteCanvasSelectionEntity, selectionOnlyTextInteractions, syncDraftPreviewHtmlRef]);
+	  }, [deleteCanvasSelectionEntity, selectionOnlyTextInteractions, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
 
 	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
 	    const target = event.target instanceof HTMLElement ? event.target : null;
@@ -33591,315 +33574,6 @@ export default function TemplateEditWorkspace({
     setMetadataRelationSelectionMode({ kind: 'idle' });
     setMessage('박스 연결을 반영했습니다.');
   }, [applySelectionMetadataDraft]);
-
-  const roleAssignmentOwnerItem = React.useCallback((item: string, name: string) => {
-    const normalizedItem = item.trim();
-    const normalizedName = name.trim();
-
-    return {
-      'data-canvas-owner-item': `canvas-role-settings-${normalizedItem}`,
-      'data-canvas-owner-name': `역할 탭 ${normalizedName}`,
-      'data-documents-owner-item': normalizedItem,
-      'data-documents-owner-name': `역할 탭 documents 선택 패널 호환 ${normalizedName}`,
-    };
-  }, []);
-  const roleAssignmentTargetItems = React.useMemo(() => {
-    const root = previewRef.current;
-
-    if (!root) {
-      return [];
-    }
-
-    return collectCanvasSelectionTargetItems(root, ROLE_ASSIGNMENT_CANVAS_SELECTABLE_POLICY);
-  }, [previewDomVersion, renderedPreviewHtml]);
-  const roleAssignmentBoxOptions = React.useMemo<EntityPickerOption[]>(
-    () =>
-      roleAssignmentTargetItems.map(({ selectedBox }, index) => {
-        const boxKindLabel = selectedBox.boxKind ? FRAME_BOX_KIND_BUTTON_LABELS[selectedBox.boxKind] : '타입 없음';
-        const frameRole =
-          selectedBox.frameRole && selectedBox.frameRole !== 'group'
-            ? (selectedBox.frameRole as TemplateFrameRole)
-            : '';
-        const roleLabel = frameRole ? FRAME_ROLE_SHORT_LABELS[frameRole] : '역할 없음';
-        const label = selectedBox.label || selectedBox.valueKey || selectedBox.frameGroupId || `선택한 상자 ${index + 1}`;
-
-        return {
-          id: selectedBox.id,
-          label,
-          meta: `${roleLabel} · ${boxKindLabel}`,
-          keywords: [
-            label,
-            selectedBox.value || '',
-            selectedBox.valueKey || '',
-            selectedBox.keyFrameGroupId || '',
-            selectedBox.valueFrameGroupId || '',
-            selectedBox.frameGroupId || '',
-            roleLabel,
-            boxKindLabel,
-          ],
-        };
-      }),
-    [roleAssignmentTargetItems]
-  );
-  const roleAssignmentSelectedBoxIds = React.useMemo(() => {
-    const selectedCanvasBoxIds = Array.from(
-      new Set(
-        selectedCanvasBoxes
-          .map((box) => box.id || box.valueKey || box.frameGroupId)
-          .map((value) => value?.trim())
-          .filter((value): value is string => Boolean(value))
-      )
-    );
-
-    if (selectedCanvasBoxIds.length > 0) {
-      const availableIdSet = new Set(roleAssignmentTargetItems.map((item) => item.selectedBox.id));
-      return selectedCanvasBoxIds.filter((id) => availableIdSet.has(id));
-    }
-
-    const selectedFrameIdSet = new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
-
-    if (selectedFrameIdSet.size <= 0) {
-      return [];
-    }
-
-    return roleAssignmentTargetItems
-      .filter(({ selectedBox }) =>
-        [
-          selectedBox.frameGroupId,
-          selectedBox.keyFrameGroupId,
-          selectedBox.valueFrameGroupId,
-          selectedBox.valueKey,
-          ...(selectedBox.highlightFrameGroupIds || []),
-        ]
-          .map((value) => value?.trim())
-          .filter((value): value is string => Boolean(value))
-          .some((value) => selectedFrameIdSet.has(value))
-      )
-      .map(({ selectedBox }) => selectedBox.id);
-  }, [roleAssignmentTargetItems, selectedCanvasBoxes, selectedFrameGroupIds]);
-  const roleAssignmentSelectedBoxes = React.useMemo(() => {
-    const selectedIdSet = new Set(roleAssignmentSelectedBoxIds);
-
-    return roleAssignmentTargetItems
-      .filter(({ selectedBox }) => selectedIdSet.has(selectedBox.id))
-      .map(({ selectedBox }) => selectedBox);
-  }, [roleAssignmentSelectedBoxIds, roleAssignmentTargetItems]);
-  const commitRoleAssignmentSelectedBoxes = React.useCallback(
-    (nextSelectedBoxes: TemplateCanvasSelectedBox[], source: TemplateCanvasSelectionChangeOptions['source']) => {
-      const root = previewRef.current;
-      const nextSelectedFrameGroupIds = root
-        ? collectCanvasSelectedBoxCanvasSelectionIds(root, nextSelectedBoxes)
-        : Array.from(
-            new Set(
-              nextSelectedBoxes
-                .flatMap((box) => [
-                  ...(box.highlightFrameGroupIds || []),
-                  box.keyFrameGroupId,
-                  box.valueFrameGroupId,
-                  box.frameGroupId,
-                ])
-                .map((frameGroupId) => frameGroupId?.trim())
-                .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
-            )
-          );
-      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-
-      applyRuntimeSelectionUi(nextSelectedFrameGroupIds, emptyEdgeSelection);
-      flushSync(() => {
-        setSelectedFrameGroupIds(nextSelectedFrameGroupIds);
-        setEdgeSelectionState(emptyEdgeSelection);
-        setSelectionValidationIssues([]);
-        setSelectionReviewIssues([]);
-        setSelectionSaveProgress(defaultSelectionSaveProgressState);
-      });
-      onCanvasSelectionChange?.(nextSelectedBoxes, { source });
-    },
-    [applyRuntimeSelectionUi, onCanvasSelectionChange]
-  );
-  const handleRoleAssignmentBoxIdsChange = React.useCallback(
-    (nextBoxIds: string[]) => {
-      const nextIdSet = new Set(nextBoxIds.map((id) => id.trim()).filter(Boolean));
-      const nextSelectedBoxes = roleAssignmentTargetItems
-        .filter(({ selectedBox }) => nextIdSet.has(selectedBox.id))
-        .map(({ selectedBox }) => selectedBox);
-
-      commitRoleAssignmentSelectedBoxes(nextSelectedBoxes, 'programmatic');
-    },
-    [commitRoleAssignmentSelectedBoxes, roleAssignmentTargetItems]
-  );
-  const roleAssignmentSelectedSummary = React.useMemo(() => {
-    if (roleAssignmentSelectedBoxes.length <= 0) {
-      return '선택된 상자가 없습니다.';
-    }
-
-    return roleAssignmentSelectedBoxes.map((box) => box.label || box.valueKey || box.frameGroupId).join(', ');
-  }, [roleAssignmentSelectedBoxes]);
-  const roleAssignmentSelectedFrameGroupIds = React.useMemo(
-    () =>
-      Array.from(
-        new Set(
-          roleAssignmentSelectedBoxes
-            .flatMap((box) => [
-              ...(box.highlightFrameGroupIds || []),
-              box.keyFrameGroupId,
-              box.valueFrameGroupId,
-              box.frameGroupId,
-            ])
-            .map((frameGroupId) => frameGroupId?.trim())
-            .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
-        )
-      ),
-    [roleAssignmentSelectedBoxes]
-  );
-  const roleAssignmentReviewIssues = React.useMemo(() => {
-    const selectedIdSet = new Set(roleAssignmentSelectedFrameGroupIds);
-
-    if (selectedIdSet.size <= 0) {
-      return [];
-    }
-
-    return visibleMetadataReviewIssues.filter((issue) => selectedIdSet.has(issue.frameGroupId));
-  }, [roleAssignmentSelectedFrameGroupIds, visibleMetadataReviewIssues]);
-  const roleAssignmentOverlayNode = (
-    <div
-      className="space-y-4"
-      {...roleAssignmentOwnerItem('request-link-settings-column', '요청 링크 설정 오른쪽 설정 열')}
-    >
-      <div className="space-y-3" {...roleAssignmentOwnerItem('request-setup-stepper', '요청 링크 설정 단계 선택 영역')}>
-        <div className="grid grid-cols-1 gap-2" {...roleAssignmentOwnerItem('request-setup-step-list', '요청 링크 설정 단계 목록')}>
-          <button
-            type="button"
-            className="rounded-md border border-slate-900 bg-slate-900 px-3 py-2 text-left text-xs font-semibold text-white"
-            {...roleAssignmentOwnerItem('request-setup-step-button', '요청 링크 설정 단계 버튼')}
-          >
-            1. 상자에 역할 지정
-          </button>
-        </div>
-        <div
-          className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
-          {...roleAssignmentOwnerItem('request-setup-active-step-summary', '요청 링크 설정 현재 단계 요약')}
-        >
-          <p className="text-[11px] font-semibold text-slate-500" {...roleAssignmentOwnerItem('request-setup-active-step-count', '요청 링크 설정 현재 단계 번호')}>
-            단계 1 / 1
-          </p>
-          <p className="mt-1 text-sm font-semibold text-slate-900" {...roleAssignmentOwnerItem('request-setup-active-step-title', '요청 링크 설정 현재 단계 제목')}>
-            상자에 역할 지정
-          </p>
-          <p className="mt-1 text-xs text-slate-500" {...roleAssignmentOwnerItem('request-setup-active-step-description', '요청 링크 설정 현재 단계 설명')}>
-            문서 요청 설정과 같은 선택 단위로 key/value 쌍을 고르고, 선택 상자의 타입과 역할을 지정합니다.
-          </p>
-        </div>
-      </div>
-
-      <div className="space-y-4" {...roleAssignmentOwnerItem('request-setup-active-step-panel', '요청 링크 설정 현재 단계 내용')}>
-        <div className="space-y-3" {...roleAssignmentOwnerItem('selected-box-panel', '선택한 상자 패널')}>
-          <div className="flex items-center justify-between gap-3" {...roleAssignmentOwnerItem('selected-box-panel-header', '선택한 상자 패널 머리글')}>
-            <div className="text-sm font-medium text-slate-900" {...roleAssignmentOwnerItem('selected-box-panel-title', '선택한 상자 패널 제목')}>
-              선택한 상자
-            </div>
-            <Badge variant="slate" {...roleAssignmentOwnerItem('selected-box-count-badge', '선택한 상자 개수 배지')}>
-              {roleAssignmentSelectedBoxes.length}개
-            </Badge>
-          </div>
-
-          <div className="space-y-2" {...roleAssignmentOwnerItem('selected-box-field-picker', '선택한 상자 셀렉트 박스 항목')}>
-            <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('selected-box-field-picker-label', '선택한 상자 셀렉트 박스 라벨')}>
-              상자 선택
-            </label>
-            <MultiEntityPicker
-              values={roleAssignmentSelectedBoxIds}
-              options={roleAssignmentBoxOptions}
-              onChange={handleRoleAssignmentBoxIdsChange}
-              placeholder="상자를 선택하세요"
-              searchPlaceholder="키 이름으로 상자 검색"
-              emptyMessage="선택 가능한 상자가 없습니다."
-              optionLayout="inline"
-              allowClear
-              triggerClassName="transition-colors hover:border-slate-400"
-              ownerItemKey="selected-box-field-picker-control"
-              ownerItemName="선택한 상자 셀렉트 박스 선택기"
-              ownerItemAttributes={roleAssignmentOwnerItem}
-            />
-            <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('selected-box-summary', '선택한 상자 요약')}>
-              {roleAssignmentSelectedSummary}
-            </p>
-          </div>
-
-          <div className="space-y-3" {...roleAssignmentOwnerItem('selected-box-role-field', '선택한 상자 역할 지정 영역')}>
-            <div className="space-y-1" {...roleAssignmentOwnerItem('selected-box-role-label', '선택한 상자 역할 지정 설명')}>
-              <p className="text-sm font-medium text-slate-800">상자 타입</p>
-              <p className="text-xs text-slate-500">선택한 상자가 문서에서 출력하거나 입력받을 값의 종류입니다.</p>
-            </div>
-            <div className="grid grid-cols-3 gap-2" {...roleAssignmentOwnerItem('selected-box-kind-button-group', '선택한 상자 타입 버튼 묶음')}>
-              {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
-                const isActive = hasSelectedMetadataTarget && displayedMetadataBoxKinds.has(boxKind);
-
-                return (
-                  <button
-                    key={`role-assignment-box-kind:${boxKind}`}
-                    type="button"
-                    disabled={!hasSelectedMetadataTarget}
-                    onClick={() => stageMetadataBoxKind(boxKind)}
-                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-                      isActive
-                        ? FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES[boxKind]
-                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-                    }`}
-                    {...roleAssignmentOwnerItem(`selected-box-kind-button-${boxKind}`, `선택한 상자 타입 ${FRAME_BOX_KIND_BUTTON_LABELS[boxKind]} 버튼`)}
-                  >
-                    {FRAME_BOX_KIND_BUTTON_LABELS[boxKind]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-3" {...roleAssignmentOwnerItem('selected-box-frame-role-field', '선택한 상자 key value 역할 지정 영역')}>
-            <div className="space-y-1" {...roleAssignmentOwnerItem('selected-box-frame-role-label', '선택한 상자 key value 역할 지정 설명')}>
-              <p className="text-sm font-medium text-slate-800">상자 역할</p>
-              <p className="text-xs text-slate-500">key/value 연결에서 선택한 상자가 맡는 역할입니다.</p>
-            </div>
-            <div className="grid grid-cols-3 gap-2" {...roleAssignmentOwnerItem('selected-box-frame-role-button-group', '선택한 상자 key value 역할 버튼 묶음')}>
-              {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
-                const isActive = hasSelectedMetadataTarget && displayedMetadataRoles.has(role);
-
-                return (
-                  <button
-                    key={`role-assignment-frame-role:${role}`}
-                    type="button"
-                    disabled={!hasSelectedMetadataTarget}
-                    onClick={() => stageMetadataRole(role)}
-                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
-                      isActive
-                        ? FRAME_ROLE_ACTIVE_BUTTON_CLASSES[role]
-                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
-                    }`}
-                    {...roleAssignmentOwnerItem(`selected-box-frame-role-button-${role}`, `선택한 상자 역할 ${FRAME_ROLE_SHORT_LABELS[role]} 버튼`)}
-                  >
-                    {FRAME_ROLE_SHORT_LABELS[role]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {roleAssignmentReviewIssues.length > 0 ? (
-            <div
-              className="space-y-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-              {...roleAssignmentOwnerItem('selected-box-role-review-issues', '선택한 상자 역할 검토 필요 항목')}
-            >
-              <div className="font-semibold">확인 필요</div>
-              {roleAssignmentReviewIssues.slice(0, 3).map((issue, index) => (
-                <p key={`role-assignment-review:${issue.frameGroupId}:${index}`} className="leading-5">
-                  {issue.message}
-                </p>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
 
   const metadataNameOverlayNode = (
     <MetadataNameOverlay
@@ -35495,7 +35169,6 @@ export default function TemplateEditWorkspace({
             metadataRolePrimaryOverlay={metadataRolePrimaryOverlayNode}
             metadataRoleSecondaryOverlay={metadataRoleSecondaryOverlayNode}
             metadataRoleTertiaryOverlay={metadataRoleTertiaryOverlayNode}
-            metadata2RoleAssignmentOverlay={roleAssignmentOverlayNode}
             styleOverlay={positionBoxStyleOverlayNode}
             styleOverlayLabel="상자 스타일"
             onStyleOverlayCollapsedChange={handleStyleOverlayCollapsedChange}

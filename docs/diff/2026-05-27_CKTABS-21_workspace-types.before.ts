@@ -824,7 +824,6 @@ export type TemplateEditPreviewSurfaceProps = {
   metadataRolePrimaryOverlay?: TemplateFloatingOverlayContent;
   metadataRoleSecondaryOverlay?: TemplateFloatingOverlayContent;
   metadataRoleTertiaryOverlay?: TemplateFloatingOverlayContent;
-  metadata2RoleAssignmentOverlay?: TemplateFloatingOverlayContent;
   styleOverlay?: TemplateFloatingOverlayContent;
   styleOverlayLabel?: string;
   onStyleOverlayCollapsedChange?: (collapsed: boolean) => void;

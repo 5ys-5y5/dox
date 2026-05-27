@@ -510,9 +510,9 @@ export const TemplateEditCanvasToolbar = ({
               },
               {
                 key: 'metadata2',
-                label: '역할',
+                label: '속성2',
                 icon: KeyRound,
-                ownerItem: 'canvas-container-상자-편집-탭-역할',
+                ownerItem: 'canvas-container-상자-편집-탭-속성2',
               },
             ] as const satisfies ReadonlyArray<{
               key: CanvasToolbarViewTabKey;

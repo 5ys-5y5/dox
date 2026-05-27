@@ -14952,16 +14952,9 @@ const collectChecklistTargetCanvasSelectionIds = (
   }
 
   const frameNodeById = collectFrameSelectionAnchorByIdMap(root);
-  const rawFrameNodeById = new Map(
-    Array.from(root.querySelectorAll<HTMLElement>(RAW_FRAME_NODE_SELECTOR))
-      .map((node) => [getFrameGroupId(node).trim(), node] as const)
-      .filter(([frameGroupId]) => Boolean(frameGroupId))
-  );
   const frameNodes = Array.from(frameNodeById.values());
   const valueIdsByKeyId = new Map<string, string[]>();
   const keyIdsByValueId = new Map<string, string>();
-  const readMetadataNodeByFrameGroupId = (frameGroupId: string) =>
-    rawFrameNodeById.get(frameGroupId) || frameNodeById.get(frameGroupId) || null;
   const addSelectionCandidate = (candidateIds: Set<string>, rawValue: string | null | undefined) => {
     const normalizedValue = normalizeChecklistTargetToken(rawValue);
 
@@ -14972,9 +14965,8 @@ const collectChecklistTargetCanvasSelectionIds = (
 
   frameNodes.forEach((node) => {
     const frameGroupId = getFrameGroupId(node).trim();
-    const metadataNode = readMetadataNodeByFrameGroupId(frameGroupId) || node;
-    const role = readFrameRole(metadataNode) || readFrameRole(node);
-    const parentGroupId = (readFrameParentGroupId(metadataNode) || readFrameParentGroupId(node)).trim();
+    const role = readFrameRole(node);
+    const parentGroupId = readFrameParentGroupId(node).trim();
 
     if (!frameGroupId || role !== 'value' || !parentGroupId) {
       return;
@@ -15008,9 +15000,8 @@ const collectChecklistTargetCanvasSelectionIds = (
 
     frameNodes.forEach((node) => {
       const frameGroupId = getFrameGroupId(node).trim();
-      const metadataNode = readMetadataNodeByFrameGroupId(frameGroupId) || node;
-      const valueKey = normalizeChecklistTargetToken(readFrameValueKey(metadataNode) || readFrameValueKey(node));
-      const label = normalizeChecklistTargetToken(readFrameBoxLabel(metadataNode) || readFrameBoxLabel(node));
+      const valueKey = normalizeChecklistTargetToken(readFrameValueKey(node));
+      const label = normalizeChecklistTargetToken(readFrameBoxLabel(node));
 
       if (!frameGroupId) {
         return;
@@ -15024,9 +15015,8 @@ const collectChecklistTargetCanvasSelectionIds = (
 
   const candidateIds = Array.from(selectionCandidateIds).filter((frameGroupId) => frameNodeById.has(frameGroupId));
   const readRoleByFrameGroupId = (frameGroupId: string) => {
-    const metadataNode = readMetadataNodeByFrameGroupId(frameGroupId);
     const node = frameNodeById.get(frameGroupId);
-    return metadataNode ? readFrameRole(metadataNode) || (node ? readFrameRole(node) : '') : '';
+    return node ? readFrameRole(node) : '';
   };
   const selectedKeyIds = Array.from(
     new Set(
@@ -15164,22 +15154,7 @@ const buildChecklistTargetForCanvasSelectedBox = (box: TemplateCanvasSelectedBox
 const collectCanvasSelectedBoxCanvasSelectionIds = (root: HTMLElement, boxes: TemplateCanvasSelectedBox[]) =>
   Array.from(
     new Set(
-      boxes.flatMap((box) => {
-        const linkedSelectionIds = collectChecklistTargetCanvasSelectionIds(root, buildChecklistTargetForCanvasSelectedBox(box));
-
-        if (linkedSelectionIds.length > 0) {
-          return linkedSelectionIds;
-        }
-
-        return [
-          ...(box.highlightFrameGroupIds || []),
-          box.keyFrameGroupId,
-          box.valueFrameGroupId,
-          box.frameGroupId,
-        ]
-          .map((frameGroupId) => frameGroupId?.trim())
-          .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId));
-      })
+      boxes.flatMap((box) => collectChecklistTargetCanvasSelectionIds(root, buildChecklistTargetForCanvasSelectedBox(box)))
     )
   );
 
@@ -19313,7 +19288,6 @@ export default function TemplateEditWorkspace({
       (checklistSelectableTargets.length > 0 &&
         Boolean(onChecklistSelectableTargetSelect || onChecklistSelectableTargetsSelect)));
   const canvasLinkedSelectionControllerActive = checklistCanvasSelectionModeActive || roleAssignmentTabActive;
-  const canvasEditorPointerHandlersSuppressed = templateUsagePreviewActive || roleAssignmentTabActive;
   const surfaceRenderedPreviewHtml = renderedPreviewHtml;
   const templateUsagePreviewPending =
     templateUsagePreviewActive &&
@@ -21272,7 +21246,19 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      const nextSelectedIdsFromBoxes = collectCanvasSelectedBoxCanvasSelectionIds(root, selectedBoxes);
+      const nextSelectedIdsFromBoxes = Array.from(
+        new Set(
+          selectedBoxes
+            .flatMap((box) => [
+              ...(box.highlightFrameGroupIds || []),
+              box.keyFrameGroupId,
+              box.valueFrameGroupId,
+              box.frameGroupId,
+            ])
+            .map((frameGroupId) => frameGroupId?.trim())
+            .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
+        )
+      );
       const nextSelectedFrameGroupIds = options?.append
         ? Array.from(new Set([...selectedFrameGroupIdsRef.current, ...nextSelectedIdsFromBoxes]))
         : nextSelectedIdsFromBoxes;
@@ -21456,34 +21442,34 @@ export default function TemplateEditWorkspace({
         finalRect.width >= FRAME_MARQUEE_DRAG_THRESHOLD_PX ||
         finalRect.height >= FRAME_MARQUEE_DRAG_THRESHOLD_PX;
 
-      if (shouldCommitMarquee) {
-        updateChecklistSelectableMarquee(state, event.clientX, event.clientY, { force: true });
-        if (state.lastTargets.length > 0) {
-          emitChecklistSelectableTargets(state.lastTargets, { append: state.append });
-        } else if (
-          !state.append &&
-          (checklistRegistrationTargetRef.current ||
-            selectedCanvasBoxesRef.current.length > 0 ||
-            selectedFrameGroupIdsRef.current.length > 0)
-        ) {
-          clearRoleAssignmentSelection();
-          onChecklistSelectionClear?.();
-          onCanvasSelectionChange?.([], { source: 'clear' });
-        }
-        suppressClickAfterMarquee();
-      } else if (state.anchorTarget) {
-        emitChecklistSelectableTargets([state.anchorTarget], { append: state.append });
-        suppressClickAfterMarquee();
-      } else if (
-        !state.append &&
-        (checklistRegistrationTargetRef.current ||
-          selectedCanvasBoxesRef.current.length > 0 ||
-          selectedFrameGroupIdsRef.current.length > 0)
-      ) {
-        clearRoleAssignmentSelection();
-        onChecklistSelectionClear?.();
-        onCanvasSelectionChange?.([], { source: 'clear' });
-      }
+	      if (shouldCommitMarquee) {
+	        updateChecklistSelectableMarquee(state, event.clientX, event.clientY, { force: true });
+	        if (state.lastTargets.length > 0) {
+	          emitChecklistSelectableTargets(state.lastTargets, { append: state.append });
+	        } else if (
+	          !state.append &&
+	          (checklistRegistrationTargetRef.current ||
+	            selectedCanvasBoxesRef.current.length > 0 ||
+	            selectedFrameGroupIdsRef.current.length > 0)
+	        ) {
+	          clearRoleAssignmentSelection();
+	          onChecklistSelectionClear?.();
+	          onCanvasSelectionChange?.([], { source: 'clear' });
+	        }
+	        suppressClickAfterMarquee();
+	      } else if (state.anchorTarget) {
+	        emitChecklistSelectableTargets([state.anchorTarget], { append: state.append });
+	        suppressClickAfterMarquee();
+	      } else if (
+	        !state.append &&
+	        (checklistRegistrationTargetRef.current ||
+	          selectedCanvasBoxesRef.current.length > 0 ||
+	          selectedFrameGroupIdsRef.current.length > 0)
+	      ) {
+	        clearRoleAssignmentSelection();
+	        onChecklistSelectionClear?.();
+	        onCanvasSelectionChange?.([], { source: 'clear' });
+	      }
 
       cleanupChecklistSelectableMarquee();
     }
@@ -21510,19 +21496,19 @@ export default function TemplateEditWorkspace({
       const matchedTarget = findMatchedSelectableTarget(eventTarget);
       const pageInner = eventTarget.closest<HTMLElement>('.page-inner');
 
-      if (!pageInner) {
-        if (
-          !event.shiftKey &&
-          (checklistRegistrationTargetRef.current ||
-            selectedCanvasBoxesRef.current.length > 0 ||
-            selectedFrameGroupIdsRef.current.length > 0)
-        ) {
-          clearRoleAssignmentSelection();
-          onChecklistSelectionClear?.();
-          onCanvasSelectionChange?.([], { source: 'clear' });
-        }
-        return;
-      }
+	      if (!pageInner) {
+	        if (
+	          !event.shiftKey &&
+	          (checklistRegistrationTargetRef.current ||
+	            selectedCanvasBoxesRef.current.length > 0 ||
+	            selectedFrameGroupIdsRef.current.length > 0)
+	        ) {
+	          clearRoleAssignmentSelection();
+	          onChecklistSelectionClear?.();
+	          onCanvasSelectionChange?.([], { source: 'clear' });
+	        }
+	        return;
+	      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -21605,20 +21591,20 @@ export default function TemplateEditWorkspace({
       cleanupChecklistSelectableMarquee();
       clearChecklistAvailability();
     };
-  }, [
-    activeCanvasSelectablePolicy,
-    canvasLinkedSelectionControllerActive,
-    canvasViewMetadataVisualMode,
-    canvasViewSelectionPanelTab,
-    checklistSelectableTargets,
-    onCanvasSelectionChange,
-    onChecklistSelectableTargetsSelect,
-    onChecklistSelectableTargetSelect,
-    onChecklistSelectionClear,
-    roleAssignmentTabActive,
-    surfaceRenderedPreviewHtml,
-    syncEdgeRoleDiagnosticsState,
-  ]);
+	  }, [
+	    activeCanvasSelectablePolicy,
+	    canvasLinkedSelectionControllerActive,
+	    canvasViewMetadataVisualMode,
+	    canvasViewSelectionPanelTab,
+	    checklistSelectableTargets,
+	    onCanvasSelectionChange,
+	    onChecklistSelectableTargetsSelect,
+	    onChecklistSelectableTargetSelect,
+	    onChecklistSelectionClear,
+	    roleAssignmentTabActive,
+	    surfaceRenderedPreviewHtml,
+	    syncEdgeRoleDiagnosticsState,
+	  ]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -32973,9 +32959,9 @@ export default function TemplateEditWorkspace({
     positionActiveSelectionEntityRef,
     previewZoom,
     selectionPanelTab,
-    canvasInteractionMode,
-    selectionOnlyTextInteractions,
-    templateUsagePreviewMode: canvasEditorPointerHandlersSuppressed,
+	    canvasInteractionMode,
+	    selectionOnlyTextInteractions,
+	    templateUsagePreviewMode: templateUsagePreviewActive,
     positionOrderLockSelectionMode,
     positionOrderLockFrameGroupIds,
     positionOrderLockSelectionKindByFrameGroupId,
@@ -33106,7 +33092,7 @@ export default function TemplateEditWorkspace({
     selectedFrameGroupIdsRef,
     edgeSelectionStateRef,
     deferredPreviewEditorStateRef,
-    templateUsagePreviewMode: canvasEditorPointerHandlersSuppressed,
+    templateUsagePreviewMode: templateUsagePreviewActive,
     safeReleasePointerCapture,
     clearTransientCanvasOverlays,
     setSpacePanDragging,
@@ -33119,12 +33105,12 @@ export default function TemplateEditWorkspace({
     stopPointerInteraction,
   });
 
-  const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (canvasEditorPointerHandlersSuppressed) {
-      return;
-    }
+	  const handlePreviewClickCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (templateUsagePreviewActive) {
+	      return;
+	    }
 
-    const deleteTarget = event.target instanceof Element ? event.target : null;
+	    const deleteTarget = event.target instanceof Element ? event.target : null;
     const reviewWarningUi = deleteTarget?.closest<HTMLElement>(
       `.${FRAME_REVIEW_WARNING_BUTTON_CLASS}, .${FRAME_REVIEW_WARNING_POPOVER_CLASS}`
     ) || null;
@@ -33188,7 +33174,7 @@ export default function TemplateEditWorkspace({
 
     toggleChoiceBoxElement(choiceButton);
     syncDraftPreviewHtmlRef();
-  }, [canvasEditorPointerHandlersSuppressed, deleteCanvasSelectionEntity, selectionOnlyTextInteractions, syncDraftPreviewHtmlRef]);
+	  }, [deleteCanvasSelectionEntity, selectionOnlyTextInteractions, selectionPanelTab, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
 
 	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
 	    const target = event.target instanceof HTMLElement ? event.target : null;
@@ -33686,22 +33672,19 @@ export default function TemplateEditWorkspace({
   }, [roleAssignmentSelectedBoxIds, roleAssignmentTargetItems]);
   const commitRoleAssignmentSelectedBoxes = React.useCallback(
     (nextSelectedBoxes: TemplateCanvasSelectedBox[], source: TemplateCanvasSelectionChangeOptions['source']) => {
-      const root = previewRef.current;
-      const nextSelectedFrameGroupIds = root
-        ? collectCanvasSelectedBoxCanvasSelectionIds(root, nextSelectedBoxes)
-        : Array.from(
-            new Set(
-              nextSelectedBoxes
-                .flatMap((box) => [
-                  ...(box.highlightFrameGroupIds || []),
-                  box.keyFrameGroupId,
-                  box.valueFrameGroupId,
-                  box.frameGroupId,
-                ])
-                .map((frameGroupId) => frameGroupId?.trim())
-                .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
-            )
-          );
+      const nextSelectedFrameGroupIds = Array.from(
+        new Set(
+          nextSelectedBoxes
+            .flatMap((box) => [
+              ...(box.highlightFrameGroupIds || []),
+              box.keyFrameGroupId,
+              box.valueFrameGroupId,
+              box.frameGroupId,
+            ])
+            .map((frameGroupId) => frameGroupId?.trim())
+            .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
+        )
+      );
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
 
       applyRuntimeSelectionUi(nextSelectedFrameGroupIds, emptyEdgeSelection);

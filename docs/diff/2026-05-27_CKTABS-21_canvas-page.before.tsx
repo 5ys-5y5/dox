@@ -218,7 +218,7 @@ const canvasViewModeLabels: Record<CanvasOwnerSettings['canvasViewMode'], string
   preview: '미리보기',
   position: '크기 및 위치',
   metadata: '속성',
-  metadata2: '역할',
+  metadata2: '속성2',
 };
 
 const canvasViewModeOptions: Array<{
