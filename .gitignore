@@ -13,3 +13,5 @@ yarn-error.log*
 pnpm-debug.log*
 docs/*-selection-trace.json
 docs/padding-trace*.json
+
+docs/diff/*_chrome-trace.json

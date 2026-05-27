@@ -78,114 +78,6 @@ const getCanvasToolbarButtonStateClassName = (active: boolean, disabled = false)
   return active ? 'border-slate-300 bg-slate-900 text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-900 hover:bg-slate-50';
 };
 
-const canvasToolbarButtonActiveVisualClassNames = ['bg-slate-900', 'text-white', 'hover:bg-slate-800'] as const;
-const canvasToolbarButtonInactiveVisualClassNames = ['bg-white', 'text-slate-900', 'hover:bg-slate-50'] as const;
-const canvasToolbarButtonDisabledVisualClassNames = ['bg-slate-100', 'text-slate-600', 'hover:bg-slate-100'] as const;
-const canvasToolbarButtonImmediateVisualClassNames = [
-  ...canvasToolbarButtonActiveVisualClassNames,
-  ...canvasToolbarButtonInactiveVisualClassNames,
-  ...canvasToolbarButtonDisabledVisualClassNames,
-] as const;
-
-const applyImmediateSelectionPanelTabVisualState = (
-  clickedButton: HTMLButtonElement,
-  activeTabKey: CanvasToolbarViewTabKey
-) => {
-  const tabRoot = clickedButton.closest<HTMLElement>(
-    '[data-canvas-owner-item="canvas-container-상자-편집-탭"]'
-  );
-
-  if (!tabRoot) {
-    return;
-  }
-
-  tabRoot.setAttribute('data-canvas-toolbar-active-tab', activeTabKey);
-  tabRoot.querySelectorAll<HTMLButtonElement>('[data-canvas-toolbar-view-tab-key]').forEach((button) => {
-    const buttonTabKey = button.getAttribute('data-canvas-toolbar-view-tab-key');
-    const active = buttonTabKey === activeTabKey;
-
-    button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    button.classList.remove(...canvasToolbarButtonImmediateVisualClassNames);
-    button.classList.add(
-      ...(active ? canvasToolbarButtonActiveVisualClassNames : canvasToolbarButtonInactiveVisualClassNames)
-    );
-  });
-
-  const canvasCard = clickedButton.closest<HTMLElement>('.template-edit-canvas-card');
-
-  if (!canvasCard) {
-    return;
-  }
-
-  const editorRoot = canvasCard.querySelector<HTMLElement>('[data-template-canvas-editor-room="true"]');
-  const editorContainer = canvasCard.querySelector<HTMLElement>(
-    '[data-template-canvas-editor-room-container="true"]'
-  );
-  const previewRoot = canvasCard.querySelector<HTMLElement>('[data-template-canvas-preview-room="true"]');
-  const useTemplatePreviewRoom = activeTabKey === 'preview' && Boolean(previewRoot);
-
-  if (editorContainer) {
-    editorContainer.classList.toggle('pointer-events-none', useTemplatePreviewRoom);
-    editorContainer.classList.toggle('z-0', useTemplatePreviewRoom);
-    editorContainer.classList.toggle('z-10', !useTemplatePreviewRoom);
-
-    if (useTemplatePreviewRoom) {
-      editorContainer.setAttribute('aria-hidden', 'true');
-    } else {
-      editorContainer.removeAttribute('aria-hidden');
-    }
-  }
-
-  if (editorRoot) {
-    editorRoot.classList.toggle('pointer-events-none', useTemplatePreviewRoom);
-    editorRoot.classList.toggle('invisible', useTemplatePreviewRoom);
-    editorRoot.classList.toggle('z-0', useTemplatePreviewRoom);
-    editorRoot.classList.toggle('z-10', !useTemplatePreviewRoom);
-    editorRoot.setAttribute('data-canvas-prepared-view-visible', useTemplatePreviewRoom ? 'false' : 'true');
-    editorRoot.setAttribute('data-canvas-prepared-view-match', useTemplatePreviewRoom ? 'false' : 'true');
-
-    if (activeTabKey !== 'preview') {
-      const metadataVisualActive = activeTabKey === 'metadata' || activeTabKey === 'metadata2';
-      editorRoot.removeAttribute('aria-hidden');
-      editorRoot.setAttribute('data-selection-panel-tab', activeTabKey);
-      editorRoot.setAttribute('data-metadata-visual-mode', metadataVisualActive ? 'true' : 'false');
-      editorRoot.setAttribute('data-canvas-prepared-view-mode', activeTabKey);
-      editorRoot.setAttribute('data-canvas-prepared-view-cache-key', `${activeTabKey}:${activeTabKey}`);
-      editorRoot.setAttribute('data-canvas-prepared-view-requested-tab', activeTabKey);
-    } else if (useTemplatePreviewRoom) {
-      editorRoot.setAttribute('aria-hidden', 'true');
-    }
-  }
-
-  if (previewRoot) {
-    previewRoot.classList.toggle('pointer-events-none', !useTemplatePreviewRoom);
-    previewRoot.classList.toggle('invisible', !useTemplatePreviewRoom);
-    previewRoot.classList.toggle('z-0', !useTemplatePreviewRoom);
-    previewRoot.classList.toggle('z-20', useTemplatePreviewRoom);
-    previewRoot.setAttribute('data-canvas-prepared-view-visible', useTemplatePreviewRoom ? 'true' : 'false');
-    previewRoot.setAttribute('data-canvas-prepared-view-match', useTemplatePreviewRoom ? 'true' : 'false');
-
-    if (useTemplatePreviewRoom) {
-      previewRoot.removeAttribute('aria-hidden');
-    } else {
-      previewRoot.setAttribute('aria-hidden', 'true');
-    }
-  }
-
-  if (activeTabKey !== 'preview') {
-    const overlayRail = canvasCard.querySelector<HTMLElement>('[data-template-overlay-rail="true"]');
-
-    overlayRail?.setAttribute('data-template-overlay-rail-active-tab', activeTabKey);
-    overlayRail?.querySelectorAll<HTMLElement>('[data-template-overlay-rail-room]').forEach((room) => {
-      const active = room.getAttribute('data-template-overlay-rail-room') === activeTabKey;
-
-      room.classList.toggle('hidden', !active);
-      room.classList.toggle('flex', active);
-      room.setAttribute('aria-hidden', active ? 'false' : 'true');
-    });
-  }
-};
-
 const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'middle' | 'last') => {
   if (position === 'single') {
     return 'rounded-md';
@@ -530,16 +422,14 @@ export const TemplateEditCanvasToolbar = ({
                   key={`selection-panel-tab:${tab.key}`}
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(shape)} ${getCanvasToolbarButtonStateClassName(isActive)}`}
-                  onClick={(event) => {
+                  onClick={() => {
                     if (isPreviewTab) {
                       if (!templateUsagePreviewMode) {
-                        applyImmediateSelectionPanelTabVisualState(event.currentTarget, tab.key);
                         onToggleTemplateUsagePreviewMode();
                       }
                       return;
                     }
 
-                    applyImmediateSelectionPanelTabVisualState(event.currentTarget, tab.key);
                     onSelectionPanelTabChange(tab.key);
                     if (templateUsagePreviewMode) {
                       onToggleTemplateUsagePreviewMode();
@@ -551,7 +441,6 @@ export const TemplateEditCanvasToolbar = ({
                   title={tab.label}
                   data-canvas-owner-item={tab.ownerItem}
                   data-canvas-owner-name={tab.label}
-                  data-canvas-toolbar-view-tab-key={tab.key}
                 >
                   <TabIcon className="h-4 w-4" />
                   <span className="v106-canvas-toolbar-label">{tab.label}</span>

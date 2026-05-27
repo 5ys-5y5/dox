@@ -393,8 +393,6 @@ const normalizeTemplateEditWorkspaceCanvasViewMode = (
 
 type TemplateUsagePreviewPreparedStatus = 'ready' | 'dirty' | 'building' | 'pending' | 'failed';
 
-const TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS = 560;
-
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR = 'data-template-frame-relative-anchor-group-bottom-gap';
 
 const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, nextValue: string) => {
@@ -18582,29 +18580,10 @@ export default function TemplateEditWorkspace({
   const readMode = workspaceMode === 'read';
   const selectionOnlyTextInteractions = canvasTextInteractionMode === 'selection-only';
   const normalizedCanvasViewMode = normalizeTemplateEditWorkspaceCanvasViewMode(canvasViewMode);
-  const normalizedCanvasViewModeRef = React.useRef(normalizedCanvasViewMode);
-  const previousNormalizedCanvasViewModeRef = React.useRef(normalizedCanvasViewMode);
-  const [canvasViewModeOverride, setCanvasViewModeOverrideState] =
-    React.useState<TemplateEditWorkspaceCanvasViewMode | null>(null);
-  const canvasViewModeOverrideRef = React.useRef<TemplateEditWorkspaceCanvasViewMode | null>(null);
-  const pendingCanvasViewModeRuntimeOverrideRef = React.useRef<TemplateEditWorkspaceCanvasViewMode | null>(null);
-  normalizedCanvasViewModeRef.current = normalizedCanvasViewMode;
-  const setCanvasViewModeRuntimeOverride = React.useCallback((nextMode: TemplateEditWorkspaceCanvasViewMode) => {
-    const nextOverride = nextMode === normalizedCanvasViewModeRef.current ? null : nextMode;
-    pendingCanvasViewModeRuntimeOverrideRef.current = null;
-
-    if (canvasViewModeOverrideRef.current === nextOverride) {
-      return;
-    }
-
-    canvasViewModeOverrideRef.current = nextOverride;
-    setCanvasViewModeOverrideState(nextOverride);
-  }, []);
-  const effectiveCanvasViewMode = canvasViewModeOverride || normalizedCanvasViewMode;
   const canvasViewSelectionPanelTab: SelectionPanelTab =
-    resolveTemplateCanvasSelectionPanelTab(effectiveCanvasViewMode);
-  const canvasViewMetadataVisualMode = isTemplateCanvasMetadataViewMode(effectiveCanvasViewMode);
-  const canvasViewPreviewRequested = effectiveCanvasViewMode === 'preview';
+    resolveTemplateCanvasSelectionPanelTab(normalizedCanvasViewMode);
+  const canvasViewMetadataVisualMode = isTemplateCanvasMetadataViewMode(normalizedCanvasViewMode);
+  const canvasViewPreviewRequested = normalizedCanvasViewMode === 'preview';
   const usagePreviewStabilizeInitialLayout =
     templateUsagePreviewLayoutDebugOptions?.stabilizeInitialLayout !== false;
   const usagePreviewEnableInitialAutoSize = templateUsagePreviewLayoutDebugOptions?.enableInitialAutoSize === true;
@@ -18622,10 +18601,6 @@ export default function TemplateEditWorkspace({
         ? editableValueKeys.map((fieldKey) => String(fieldKey || '').trim()).filter((fieldKey) => Boolean(fieldKey))
         : null,
     [editableValueKeys]
-  );
-  const templateUsagePreviewActivationEditableSignature = React.useMemo(
-    () => (normalizedEditableValueKeys ? normalizedEditableValueKeys.join('\u001f') : '*'),
-    [normalizedEditableValueKeys]
   );
   const normalizedDocumentAttachmentTagOptions = React.useMemo(
     () => normalizeTemplateUsagePreviewAttachmentTagNames(documentAttachmentTagOptions),
@@ -18667,12 +18642,6 @@ export default function TemplateEditWorkspace({
     React.useState<AppearanceCorner[]>(() => [...APPEARANCE_CORNERS]);
   const [frameMetadataDraft, setFrameMetadataDraft] = React.useState<FrameMetadataDraft>(defaultFrameMetadataDraft);
   const [selectionPanelTab, setSelectionPanelTab] = React.useState<SelectionPanelTab>(canvasViewSelectionPanelTab);
-  const deferredSelectionPanelTabCommitFrameRef = React.useRef<number | null>(null);
-  const deferredSelectionPanelTabCommitTimeoutRef = React.useRef<number | null>(null);
-  const pendingSelectionPanelTabCommitRef = React.useRef<{
-    tab: SelectionPanelTab;
-    viewMode: TemplateEditWorkspaceCanvasViewMode;
-  } | null>(null);
   const [editSettingsPanelVisible, setEditSettingsPanelVisible] = React.useState(true);
   const [canvasFullscreen, setCanvasFullscreen] = React.useState(defaultCanvasFullscreen);
   const [todoPanelVisible, setTodoPanelVisible] = React.useState(false);
@@ -18727,8 +18696,6 @@ export default function TemplateEditWorkspace({
   const templateUsagePreviewBuildRafRef = React.useRef<number | null>(null);
   const templateUsagePreviewBuildTimeoutRef = React.useRef<number | null>(null);
   const templateUsagePreviewBuildIdleRef = React.useRef<number | null>(null);
-  const templateUsagePreviewDeferredActivationFrameRef = React.useRef<number | null>(null);
-  const templateUsagePreviewDeferredActivationTimeoutRef = React.useRef<number | null>(null);
   const templateUsagePreviewInitialShrinkGuardPendingRef = React.useRef(false);
   const templateUsagePreviewLastDraftChangeAtRef = React.useRef(0);
   const templateUsagePreviewPreparedSourceHtmlRef = React.useRef('');
@@ -18742,84 +18709,12 @@ export default function TemplateEditWorkspace({
   const [spacePanArmed, setSpacePanArmed] = React.useState(false);
   const [spacePanDragging, setSpacePanDragging] = React.useState(false);
   React.useEffect(() => {
-    if (previousNormalizedCanvasViewModeRef.current === normalizedCanvasViewMode) {
+    if (normalizedCanvasViewMode === 'preview') {
       return;
     }
 
-    previousNormalizedCanvasViewModeRef.current = normalizedCanvasViewMode;
-    pendingCanvasViewModeRuntimeOverrideRef.current = null;
-    canvasViewModeOverrideRef.current = null;
-    setCanvasViewModeOverrideState(null);
-  }, [normalizedCanvasViewMode]);
-
-  const cancelDeferredSelectionPanelTabCommit = React.useCallback(() => {
-    pendingSelectionPanelTabCommitRef.current = null;
-
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (deferredSelectionPanelTabCommitFrameRef.current != null) {
-      window.cancelAnimationFrame(deferredSelectionPanelTabCommitFrameRef.current);
-      deferredSelectionPanelTabCommitFrameRef.current = null;
-    }
-
-    if (deferredSelectionPanelTabCommitTimeoutRef.current != null) {
-      window.clearTimeout(deferredSelectionPanelTabCommitTimeoutRef.current);
-      deferredSelectionPanelTabCommitTimeoutRef.current = null;
-    }
-  }, []);
-
-  const commitSelectionPanelTabAfterImmediatePaint = React.useCallback(
-    (nextTab: SelectionPanelTab, nextViewMode: TemplateEditWorkspaceCanvasViewMode) => {
-      pendingSelectionPanelTabCommitRef.current = null;
-      React.startTransition(() => {
-        setCanvasViewModeRuntimeOverride(nextViewMode);
-        setSelectionPanelTab(nextTab);
-      });
-    },
-    [setCanvasViewModeRuntimeOverride]
-  );
-
-  const scheduleSelectionPanelTabStateCommit = React.useCallback(
-    (nextTab: SelectionPanelTab, nextViewMode: TemplateEditWorkspaceCanvasViewMode) => {
-      cancelDeferredSelectionPanelTabCommit();
-      pendingSelectionPanelTabCommitRef.current = { tab: nextTab, viewMode: nextViewMode };
-
-      if (typeof window === 'undefined') {
-        commitSelectionPanelTabAfterImmediatePaint(nextTab, nextViewMode);
-        return;
-      }
-
-      deferredSelectionPanelTabCommitFrameRef.current = window.requestAnimationFrame(() => {
-        deferredSelectionPanelTabCommitFrameRef.current = window.requestAnimationFrame(() => {
-          deferredSelectionPanelTabCommitFrameRef.current = null;
-          deferredSelectionPanelTabCommitTimeoutRef.current = window.setTimeout(() => {
-            const pendingCommit = pendingSelectionPanelTabCommitRef.current;
-
-            deferredSelectionPanelTabCommitTimeoutRef.current = null;
-            if (!pendingCommit || pendingCommit.tab !== nextTab || pendingCommit.viewMode !== nextViewMode) {
-              return;
-            }
-
-            commitSelectionPanelTabAfterImmediatePaint(nextTab, nextViewMode);
-          }, TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS);
-        });
-      });
-    },
-    [cancelDeferredSelectionPanelTabCommit, commitSelectionPanelTabAfterImmediatePaint]
-  );
-
-  React.useEffect(() => cancelDeferredSelectionPanelTabCommit, [cancelDeferredSelectionPanelTabCommit]);
-
-  React.useEffect(() => {
-    if (effectiveCanvasViewMode === 'preview') {
-      return;
-    }
-
-    cancelDeferredSelectionPanelTabCommit();
     setSelectionPanelTab((current) => (current === canvasViewSelectionPanelTab ? current : canvasViewSelectionPanelTab));
-  }, [cancelDeferredSelectionPanelTabCommit, canvasViewSelectionPanelTab, effectiveCanvasViewMode]);
+  }, [canvasViewSelectionPanelTab, normalizedCanvasViewMode]);
   React.useEffect(() => {
     spacePanArmedRef.current = spacePanArmed;
   }, [spacePanArmed]);
@@ -18860,12 +18755,6 @@ export default function TemplateEditWorkspace({
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const templateUsagePreviewPreparedNodeRef = React.useRef<HTMLDivElement | null>(null);
   const templateUsagePreviewPreparedRuntimeRootRef = React.useRef<HTMLDivElement | null>(null);
-  const templateUsagePreviewPreparedActivationRef = React.useRef<{
-    root: HTMLElement;
-    html: string;
-    readMode: boolean;
-    editableSignature: string;
-  } | null>(null);
   const checklistRegistrationTargetRef = React.useRef<TemplateChecklistRegistrationTarget | null>(null);
   const selectedCanvasBoxesRef = React.useRef<TemplateCanvasSelectedBox[]>([]);
   const [signatureOverlayTarget, setSignatureOverlayTarget] =
@@ -20243,123 +20132,12 @@ export default function TemplateEditWorkspace({
       templateUsagePreviewInitialShrinkGuardPendingRef.current = usagePreviewPreventInitialValueClearShrink;
       pendingPreviewViewportResetRef.current = true;
       setBoxCreationMode(false);
-      setCanvasViewModeRuntimeOverride('preview');
       setTemplateUsagePreviewHtml((previousHtml) => (previousHtml === runtimeHtml ? previousHtml : runtimeHtml));
       setTemplateUsagePreviewMode(true);
       setTemplateUsagePreviewPreparedStatusState('ready');
       setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
     },
-    [
-      renderedPreviewHtml,
-      setCanvasViewModeRuntimeOverride,
-      setTemplateUsagePreviewPreparedStatusState,
-      usagePreviewPreventInitialValueClearShrink,
-    ]
-  );
-
-  const cancelDeferredTemplateUsagePreviewActivation = React.useCallback(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (templateUsagePreviewDeferredActivationFrameRef.current != null) {
-      window.cancelAnimationFrame(templateUsagePreviewDeferredActivationFrameRef.current);
-      templateUsagePreviewDeferredActivationFrameRef.current = null;
-    }
-
-    if (templateUsagePreviewDeferredActivationTimeoutRef.current != null) {
-      window.clearTimeout(templateUsagePreviewDeferredActivationTimeoutRef.current);
-      templateUsagePreviewDeferredActivationTimeoutRef.current = null;
-    }
-  }, []);
-
-  const showPreparedTemplateUsagePreviewDomImmediately = React.useCallback(() => {
-    const preparedRoot = templateUsagePreviewPreparedNodeRef.current;
-
-    if (!preparedRoot) {
-      return false;
-    }
-
-    preparedRoot.classList.remove('pointer-events-none', 'invisible', 'z-0');
-    preparedRoot.classList.add('z-20');
-    preparedRoot.removeAttribute('aria-hidden');
-    preparedRoot.setAttribute('data-canvas-prepared-view-visible', 'true');
-    preparedRoot.setAttribute('data-canvas-prepared-view-match', 'true');
-
-    const editorRoot = previewRef.current;
-
-    if (editorRoot && editorRoot !== preparedRoot) {
-      editorRoot.classList.remove('z-10');
-      editorRoot.classList.add('pointer-events-none', 'invisible', 'z-0');
-      editorRoot.setAttribute('aria-hidden', 'true');
-      editorRoot.setAttribute('data-canvas-prepared-view-visible', 'false');
-      editorRoot.setAttribute('data-canvas-prepared-view-match', 'false');
-    }
-
-    return true;
-  }, []);
-
-  const showEditorPreviewDomImmediately = React.useCallback(() => {
-    const preparedRoot = templateUsagePreviewPreparedNodeRef.current;
-    const editorRoot =
-      preparedRoot?.parentElement?.querySelector<HTMLElement>(
-        `.template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="false"][data-canvas-prepared-view-cache-key]`
-      ) || (previewRef.current && previewRef.current !== preparedRoot ? previewRef.current : null);
-
-    if (!editorRoot) {
-      return false;
-    }
-
-    const editorRoomContainer = editorRoot.parentElement?.parentElement;
-
-    if (editorRoomContainer instanceof HTMLElement) {
-      editorRoomContainer.classList.remove('pointer-events-none', 'z-0');
-      editorRoomContainer.classList.add('z-10');
-      editorRoomContainer.removeAttribute('aria-hidden');
-    }
-
-    editorRoot.classList.remove('pointer-events-none', 'invisible', 'z-0');
-    editorRoot.classList.add('z-10');
-    editorRoot.removeAttribute('aria-hidden');
-    editorRoot.setAttribute('data-canvas-prepared-view-visible', 'true');
-    editorRoot.setAttribute('data-canvas-prepared-view-match', 'true');
-
-    if (preparedRoot && preparedRoot !== editorRoot) {
-      preparedRoot.classList.remove('z-20');
-      preparedRoot.classList.add('pointer-events-none', 'invisible', 'z-0');
-      preparedRoot.setAttribute('aria-hidden', 'true');
-      preparedRoot.setAttribute('data-canvas-prepared-view-visible', 'false');
-      preparedRoot.setAttribute('data-canvas-prepared-view-match', 'false');
-    }
-
-    return true;
-  }, []);
-
-  const activateReadyTemplateUsagePreview = React.useCallback(
-    (sourceHtml: string, runtimeHtml: string, options?: { deferReactCommitUntilAfterPaint?: boolean }) => {
-      if (
-        !options?.deferReactCommitUntilAfterPaint ||
-        typeof window === 'undefined' ||
-        !showPreparedTemplateUsagePreviewDomImmediately()
-      ) {
-        applyReadyTemplateUsagePreview(sourceHtml, runtimeHtml);
-        return;
-      }
-
-      cancelDeferredTemplateUsagePreviewActivation();
-      templateUsagePreviewDeferredActivationFrameRef.current = window.requestAnimationFrame(() => {
-        templateUsagePreviewDeferredActivationFrameRef.current = null;
-        templateUsagePreviewDeferredActivationTimeoutRef.current = window.setTimeout(() => {
-          templateUsagePreviewDeferredActivationTimeoutRef.current = null;
-          applyReadyTemplateUsagePreview(sourceHtml, runtimeHtml);
-        }, TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS);
-      });
-    },
-    [
-      applyReadyTemplateUsagePreview,
-      cancelDeferredTemplateUsagePreviewActivation,
-      showPreparedTemplateUsagePreviewDomImmediately,
-    ]
+    [renderedPreviewHtml, setTemplateUsagePreviewPreparedStatusState, usagePreviewPreventInitialValueClearShrink]
   );
 
   const scheduleTemplateUsagePreviewPreparedBuild = React.useCallback(
@@ -20475,55 +20253,31 @@ export default function TemplateEditWorkspace({
     }
 
     cancelScheduledTemplateUsagePreviewBuild();
-    cancelDeferredTemplateUsagePreviewActivation();
 
-    if (templateUsagePreviewMode || canvasViewPreviewRequested) {
-      const returnCanvasViewMode =
-        pendingCanvasViewModeRuntimeOverrideRef.current ||
-        (canvasViewModeOverrideRef.current && canvasViewModeOverrideRef.current !== 'preview'
-          ? canvasViewModeOverrideRef.current
-          : resolveTemplateCanvasViewModeForSelectionPanelTab(selectionPanelTab));
-      pendingCanvasViewModeRuntimeOverrideRef.current = null;
-
-      const commitReturnToEditor = () => {
-        setCanvasViewModeRuntimeOverride(returnCanvasViewMode);
-        pendingPreviewViewportResetRef.current = true;
-        templateUsagePreviewBuildIdRef.current += 1;
-        templateUsagePreviewBuildSourceHtmlRef.current = '';
-        templateUsagePreviewInitialShrinkGuardPendingRef.current = false;
-        let restoredEditorDomVersion = false;
-        if (
-          templateUsagePreviewRenderSnapshotRef.current.trim() &&
-          templateUsagePreviewRenderSnapshotRef.current !== renderedPreviewHtml
-        ) {
-          setPreviewHtml(templateUsagePreviewRenderSnapshotRef.current);
-          restoredEditorDomVersion = true;
-        }
-        if (templateUsagePreviewEditorDraftSnapshotRef.current.trim()) {
-          draftPreviewHtmlRef.current = templateUsagePreviewEditorDraftSnapshotRef.current;
-        }
-        setTemplateUsagePreviewMode(false);
-        setTemplateUsagePreviewPreparedStatusState(
-          readReadyTemplateUsagePreviewRuntimeHtml(resolveTemplateUsagePreviewSourceHtml()).trim() ? 'ready' : 'dirty'
-        );
-        if (restoredEditorDomVersion) {
-          setPreviewDomVersion((previous) => previous + 1);
-        }
-        setMessage('템플릿 편집 모드로 돌아왔습니다.');
-      };
-
-      if (typeof window !== 'undefined' && showEditorPreviewDomImmediately()) {
-        templateUsagePreviewDeferredActivationFrameRef.current = window.requestAnimationFrame(() => {
-          templateUsagePreviewDeferredActivationFrameRef.current = null;
-          templateUsagePreviewDeferredActivationTimeoutRef.current = window.setTimeout(() => {
-            templateUsagePreviewDeferredActivationTimeoutRef.current = null;
-            commitReturnToEditor();
-          }, TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS);
-        });
-        return;
+    if (templateUsagePreviewMode) {
+      pendingPreviewViewportResetRef.current = true;
+      templateUsagePreviewBuildIdRef.current += 1;
+      templateUsagePreviewBuildSourceHtmlRef.current = '';
+      templateUsagePreviewInitialShrinkGuardPendingRef.current = false;
+      let restoredEditorDomVersion = false;
+      if (
+        templateUsagePreviewRenderSnapshotRef.current.trim() &&
+        templateUsagePreviewRenderSnapshotRef.current !== renderedPreviewHtml
+      ) {
+        setPreviewHtml(templateUsagePreviewRenderSnapshotRef.current);
+        restoredEditorDomVersion = true;
       }
-
-      commitReturnToEditor();
+      if (templateUsagePreviewEditorDraftSnapshotRef.current.trim()) {
+        draftPreviewHtmlRef.current = templateUsagePreviewEditorDraftSnapshotRef.current;
+      }
+      setTemplateUsagePreviewMode(false);
+      setTemplateUsagePreviewPreparedStatusState(
+        readReadyTemplateUsagePreviewRuntimeHtml(resolveTemplateUsagePreviewSourceHtml()).trim() ? 'ready' : 'dirty'
+      );
+      if (restoredEditorDomVersion) {
+        setPreviewDomVersion((previous) => previous + 1);
+      }
+      setMessage('템플릿 편집 모드로 돌아왔습니다.');
       return;
     }
 
@@ -20538,9 +20292,7 @@ export default function TemplateEditWorkspace({
     const cachedRuntimeHtml = readReadyTemplateUsagePreviewRuntimeHtml(cachedEditorDraftHtml);
 
     if (cachedRuntimeHtml.trim()) {
-      activateReadyTemplateUsagePreview(cachedEditorDraftHtml, cachedRuntimeHtml, {
-        deferReactCommitUntilAfterPaint: true,
-      });
+      applyReadyTemplateUsagePreview(cachedEditorDraftHtml, cachedRuntimeHtml);
       return;
     }
 
@@ -20551,27 +20303,21 @@ export default function TemplateEditWorkspace({
     templateUsagePreviewInitialShrinkGuardPendingRef.current = usagePreviewPreventInitialValueClearShrink;
     pendingPreviewViewportResetRef.current = true;
     setBoxCreationMode(false);
-    setCanvasViewModeRuntimeOverride('preview');
     setTemplateUsagePreviewHtml('');
     setTemplateUsagePreviewMode(true);
     setTemplateUsagePreviewPreparedStatusState('pending');
     setMessage('미리보기 준비 중입니다.');
     scheduleTemplateUsagePreviewPreparedBuild({ requested: true });
   }, [
-    activateReadyTemplateUsagePreview,
-    cancelDeferredTemplateUsagePreviewActivation,
+    applyReadyTemplateUsagePreview,
     cancelScheduledTemplateUsagePreviewBuild,
-    canvasViewPreviewRequested,
     documentMode,
     readMode,
     readReadyTemplateUsagePreviewRuntimeHtml,
     renderedPreviewHtml,
     resolveTemplateUsagePreviewSourceHtml,
     scheduleTemplateUsagePreviewPreparedBuild,
-    selectionPanelTab,
-    setCanvasViewModeRuntimeOverride,
     setTemplateUsagePreviewPreparedStatusState,
-    showEditorPreviewDomImmediately,
     templateUsagePreviewMode,
     usagePreviewPreventInitialValueClearShrink,
   ]);
@@ -20689,7 +20435,6 @@ export default function TemplateEditWorkspace({
     return () => {
       templateUsagePreviewBuildIdRef.current += 1;
       cancelScheduledTemplateUsagePreviewBuild();
-      cancelDeferredTemplateUsagePreviewActivation();
       templateUsagePreviewInitialShrinkGuardPendingRef.current = false;
 
       const root = previewRef.current;
@@ -20698,7 +20443,7 @@ export default function TemplateEditWorkspace({
         clearTemplateUsagePreviewAttachmentStateStore(root);
       }
     };
-  }, [cancelDeferredTemplateUsagePreviewActivation, cancelScheduledTemplateUsagePreviewBuild]);
+  }, [cancelScheduledTemplateUsagePreviewBuild]);
 
   React.useLayoutEffect(() => {
     if ((!documentMode && !readMode) || !previewRef.current || !renderedPreviewHtml.trim() || templateUsagePreviewHtml.trim()) {
@@ -20747,78 +20492,6 @@ export default function TemplateEditWorkspace({
     applyTemplateUsagePreviewSelectionOnlyTextInteractions(previewRef.current);
   }, [previewSurfaceNodeVersion, selectionOnlyTextInteractions, templateUsagePreviewHtml]);
 
-  const prepareTemplateUsagePreviewActivationRoot = React.useCallback(
-    (root: HTMLElement) => {
-      if (typeof window === 'undefined') {
-        return () => {};
-      }
-
-      root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readMode ? 'true' : 'false');
-
-      if (readMode) {
-        applyTemplateUsagePreviewReadOnlyState(root);
-        getAttachmentControlsFromRoot(root).forEach((control) => {
-          renderTemplateUsagePreviewAttachmentControl(control);
-        });
-        root
-          .querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`)
-          .forEach((control) => {
-            renderTemplateUsagePreviewSignatureControl(control);
-          });
-      } else {
-        applyTemplateUsagePreviewFieldEditability(root, normalizedEditableValueKeys);
-      }
-
-      const correctTextOverflow = () => {
-        const previewValueAutoHeightFrameGroupIds = Array.from(
-          new Set(
-            collectFrameSelectionAnchors(root)
-              .filter((frameNode) => readFrameAutoHeightBox(frameNode))
-              .map((frameNode) => getFrameGroupId(frameNode).trim())
-              .filter(Boolean)
-          )
-        );
-
-        if (previewValueAutoHeightFrameGroupIds.length <= 0) {
-          return;
-        }
-
-        const overflowResult = applyTemplateAutoHeightTextOverflowCorrections(
-          root,
-          previewValueAutoHeightFrameGroupIds
-        );
-
-        if (overflowResult.changedCount <= 0) {
-          return;
-        }
-
-        syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
-          focusFrameGroupIds: overflowResult.changedFrameGroupIds,
-          axes: resolvePeerStableLayoutAxes(['height']),
-        });
-        applyTemplateUsagePreviewAutoHeightBoundaryFit(root, {
-          focusFrameGroupIds: overflowResult.changedFrameGroupIds,
-        });
-        settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
-        snapTemplateUsagePreviewFrameEdges(root, {
-          focusFrameGroupIds: overflowResult.changedFrameGroupIds,
-          axes: resolvePeerStableLayoutAxes(['height']),
-        });
-        root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
-          updatePageInnerMinHeight(pageInner);
-        });
-        materializeFrameBandTableGeometryInContainer(root);
-      };
-      correctTextOverflow();
-      const overflowCorrectionFrame = window.requestAnimationFrame(correctTextOverflow);
-
-      return () => {
-        window.cancelAnimationFrame(overflowCorrectionFrame);
-      };
-    },
-    [normalizedEditableValueKeys, readMode]
-  );
-
   React.useEffect(() => {
     const root = templateUsagePreviewPreparedNodeRef.current;
 
@@ -20855,32 +20528,18 @@ export default function TemplateEditWorkspace({
       attachmentTagOptions: normalizedDocumentAttachmentTagOptions,
       attachmentTagColorByName: normalizedDocumentAttachmentTagColorByName,
     });
-    const detachActivationPreparation = prepareTemplateUsagePreviewActivationRoot(root);
-    templateUsagePreviewPreparedActivationRef.current = {
-      root,
-      html: templateUsagePreviewHtml,
-      readMode,
-      editableSignature: templateUsagePreviewActivationEditableSignature,
-    };
 
     return () => {
       if (templateUsagePreviewPreparedRuntimeRootRef.current === root) {
         templateUsagePreviewPreparedRuntimeRootRef.current = null;
       }
 
-      if (templateUsagePreviewPreparedActivationRef.current?.root === root) {
-        templateUsagePreviewPreparedActivationRef.current = null;
-      }
-
-      detachActivationPreparation();
       detachRuntimeHandlers();
     };
   }, [
     normalizedDocumentAttachmentTagColorByName,
     normalizedDocumentAttachmentTagOptions,
-    prepareTemplateUsagePreviewActivationRoot,
     readMode,
-    templateUsagePreviewActivationEditableSignature,
     templateUsagePreviewHtml,
     templateUsagePreviewPreparedNodeVersion,
     usagePreviewEnableInitialAutoSize,
@@ -20891,10 +20550,6 @@ export default function TemplateEditWorkspace({
 
   React.useEffect(() => {
     if (!templateUsagePreviewActive || !previewRef.current || readMode) {
-      return undefined;
-    }
-
-    if (templateUsagePreviewMode && templateUsagePreviewPreparedRuntimeRootRef.current) {
       return undefined;
     }
 
@@ -20936,7 +20591,6 @@ export default function TemplateEditWorkspace({
     readMode,
     surfaceRenderedPreviewHtml,
     templateUsagePreviewActive,
-    templateUsagePreviewMode,
     usagePreviewEnableInitialAutoSize,
     usagePreviewMeasurePeerClusterHeightTargets,
     usagePreviewMeasurePeerClusterWidthTargets,
@@ -21753,37 +21407,72 @@ export default function TemplateEditWorkspace({
     }
 
     const root = previewRef.current;
-    const preparedActivation = templateUsagePreviewPreparedActivationRef.current;
+    root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readMode ? 'true' : 'false');
 
-    if (
-      templateUsagePreviewMode &&
-      preparedActivation &&
-      preparedActivation.html === templateUsagePreviewHtml &&
-      preparedActivation.readMode === readMode &&
-      preparedActivation.editableSignature === templateUsagePreviewActivationEditableSignature
-    ) {
-      return;
+    if (readMode) {
+      applyTemplateUsagePreviewReadOnlyState(root);
+      getAttachmentControlsFromRoot(root).forEach((control) => {
+        renderTemplateUsagePreviewAttachmentControl(control);
+      });
+      root
+        .querySelectorAll<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="signature"]`)
+        .forEach((control) => {
+          renderTemplateUsagePreviewSignatureControl(control);
+        });
+    } else {
+      applyTemplateUsagePreviewFieldEditability(root, normalizedEditableValueKeys);
     }
 
-    if (
-      preparedActivation?.root === root &&
-      preparedActivation.html === templateUsagePreviewHtml &&
-      preparedActivation.readMode === readMode &&
-      preparedActivation.editableSignature === templateUsagePreviewActivationEditableSignature
-    ) {
-      return;
+    const correctTextOverflow = () => {
+      const previewValueAutoHeightFrameGroupIds = Array.from(
+        new Set(
+          collectFrameSelectionAnchors(root)
+            .filter((frameNode) => readFrameAutoHeightBox(frameNode))
+            .map((frameNode) => getFrameGroupId(frameNode).trim())
+            .filter(Boolean)
+        )
+      );
+
+      if (previewValueAutoHeightFrameGroupIds.length <= 0) {
+        return;
+      }
+
+      const overflowResult = applyTemplateAutoHeightTextOverflowCorrections(root, previewValueAutoHeightFrameGroupIds);
+
+      if (overflowResult.changedCount <= 0) {
+        return;
+      }
+
+      syncTemplateUsagePreviewNormalizedBandPeerBounds(root, {
+        focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+        axes: resolvePeerStableLayoutAxes(['height']),
+      });
+      applyTemplateUsagePreviewAutoHeightBoundaryFit(root, {
+        focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+      });
+      settleTemplateUsagePreviewVerticalOverlaps(root, { includeAbsolute: true });
+      snapTemplateUsagePreviewFrameEdges(root, {
+        focusFrameGroupIds: overflowResult.changedFrameGroupIds,
+        axes: resolvePeerStableLayoutAxes(['height']),
+      });
+      root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
+        updatePageInnerMinHeight(pageInner);
+      });
+      materializeFrameBandTableGeometryInContainer(root);
+    };
+    correctTextOverflow();
+    const overflowCorrectionFrame = window.requestAnimationFrame(correctTextOverflow);
+
+    if (readMode) {
+      return () => {
+        window.cancelAnimationFrame(overflowCorrectionFrame);
+      };
     }
 
-    return prepareTemplateUsagePreviewActivationRoot(root);
-  }, [
-    prepareTemplateUsagePreviewActivationRoot,
-    readMode,
-    surfaceRenderedPreviewHtml,
-    templateUsagePreviewActivationEditableSignature,
-    templateUsagePreviewActive,
-    templateUsagePreviewHtml,
-    templateUsagePreviewMode,
-  ]);
+    return () => {
+      window.cancelAnimationFrame(overflowCorrectionFrame);
+    };
+  }, [normalizedEditableValueKeys, readMode, surfaceRenderedPreviewHtml, templateUsagePreviewActive]);
 
   const persistTemplateDraftHtml = React.useCallback(
     async (
@@ -27564,12 +27253,6 @@ export default function TemplateEditWorkspace({
 
   const handleSelectionPanelTabChange = React.useCallback(
     (nextTab: SelectionPanelTab) => {
-      const nextCanvasViewMode = resolveTemplateCanvasViewModeForSelectionPanelTab(nextTab);
-
-      if (templateUsagePreviewActive) {
-        pendingCanvasViewModeRuntimeOverrideRef.current = nextCanvasViewMode;
-      }
-
       if (nextTab === selectionPanelTab) {
         return;
       }
@@ -27589,15 +27272,11 @@ export default function TemplateEditWorkspace({
         applyPreviewEditPermissions(root, nextTab, textCanvasEditModeActiveRef.current);
       }
 
-      scheduleSelectionPanelTabStateCommit(nextTab, nextCanvasViewMode);
+      React.startTransition(() => {
+        setSelectionPanelTab(nextTab);
+      });
     },
-    [
-      cancelScheduledPreviewEditorState,
-      positionOrderLockSelectionMode,
-      scheduleSelectionPanelTabStateCommit,
-      selectionPanelTab,
-      templateUsagePreviewActive,
-    ]
+    [cancelScheduledPreviewEditorState, positionOrderLockSelectionMode, selectionPanelTab]
   );
 
   React.useLayoutEffect(() => {
@@ -33304,69 +32983,71 @@ export default function TemplateEditWorkspace({
     />
   );
 
-  const positionBoxStyleOverlayNode = (
-    <TemplateSelectionAppearanceOverlay
-      selectedFrameGroupIds={selectedFrameGroupIds}
-      selectedPositionResolvedFrameGroupIds={selectedPositionResolvedFrameGroupIds}
-      selectionStyleDraft={selectionStyleDraft}
-      styleFieldApplyStatus={styleFieldApplyStatus}
-      selectedTextAutoSizeState={selectedTextAutoSizeState}
-      previewRef={previewRef}
-      selectionAppearanceToolbarWidth={selectionAppearanceToolbarWidth}
-      appearanceBoxModelTarget={appearanceBoxModelTarget}
-      appearanceTargetBorderSides={appearanceTargetBorderSides}
-      appearanceTargetCorners={appearanceTargetCorners}
-      minFrameSizePx={MIN_FRAME_SIZE_PX}
-      handleSelectionAppearanceToolbarRef={handleSelectionAppearanceToolbarRef}
-      setAppearanceTargetBorderSides={setAppearanceTargetBorderSides}
-      setAppearanceTargetCorners={setAppearanceTargetCorners}
-      setAppearanceBoxModelTarget={setAppearanceBoxModelTarget}
-      resolveSelectionAppearanceStyleTargets={resolveSelectionAppearanceStyleTargets}
-      resolveFrameLayoutShell={resolveFrameLayoutShell}
-      readElementBorderSideAppearance={readElementBorderSideAppearance}
-      formatFrameBorderWidthValue={formatFrameBorderWidthValue}
-      readElementBorderAppearance={readElementBorderAppearance}
-      readElementCornerRadiusValue={readElementCornerRadiusValue}
-      readFrameAutoHeightBox={readFrameAutoHeightBox}
-      readFrameAutoWidthBox={readFrameAutoWidthBox}
-      readFrameAutoHeightBaseHeight={readFrameAutoHeightBaseHeight}
-      readFrameAutoWidthBaseWidth={readFrameAutoWidthBaseWidth}
-      colorToHex={(value) => colorToHex(value) || ''}
-      getSharedValue={getSharedValue}
-      onApplyStyleFieldOnBlur={applyStyleFieldOnBlur}
-      onApplyStyleFieldImmediateValue={applyStyleFieldImmediateValue}
-      onSetTextAutoSizeMinimumForSelection={setTextAutoSizeMinimumForSelection}
-      onMessage={(nextMessage) => setMessage(nextMessage)}
-    />
-  );
+  const positionBoxStyleOverlayNode =
+    selectionPanelTab === 'position' ? (
+      <TemplateSelectionAppearanceOverlay
+        selectedFrameGroupIds={selectedFrameGroupIds}
+        selectedPositionResolvedFrameGroupIds={selectedPositionResolvedFrameGroupIds}
+        selectionStyleDraft={selectionStyleDraft}
+        styleFieldApplyStatus={styleFieldApplyStatus}
+        selectedTextAutoSizeState={selectedTextAutoSizeState}
+        previewRef={previewRef}
+        selectionAppearanceToolbarWidth={selectionAppearanceToolbarWidth}
+        appearanceBoxModelTarget={appearanceBoxModelTarget}
+        appearanceTargetBorderSides={appearanceTargetBorderSides}
+        appearanceTargetCorners={appearanceTargetCorners}
+        minFrameSizePx={MIN_FRAME_SIZE_PX}
+        handleSelectionAppearanceToolbarRef={handleSelectionAppearanceToolbarRef}
+        setAppearanceTargetBorderSides={setAppearanceTargetBorderSides}
+        setAppearanceTargetCorners={setAppearanceTargetCorners}
+        setAppearanceBoxModelTarget={setAppearanceBoxModelTarget}
+        resolveSelectionAppearanceStyleTargets={resolveSelectionAppearanceStyleTargets}
+        resolveFrameLayoutShell={resolveFrameLayoutShell}
+        readElementBorderSideAppearance={readElementBorderSideAppearance}
+        formatFrameBorderWidthValue={formatFrameBorderWidthValue}
+        readElementBorderAppearance={readElementBorderAppearance}
+        readElementCornerRadiusValue={readElementCornerRadiusValue}
+        readFrameAutoHeightBox={readFrameAutoHeightBox}
+        readFrameAutoWidthBox={readFrameAutoWidthBox}
+        readFrameAutoHeightBaseHeight={readFrameAutoHeightBaseHeight}
+        readFrameAutoWidthBaseWidth={readFrameAutoWidthBaseWidth}
+        colorToHex={(value) => colorToHex(value) || ''}
+        getSharedValue={getSharedValue}
+        onApplyStyleFieldOnBlur={applyStyleFieldOnBlur}
+        onApplyStyleFieldImmediateValue={applyStyleFieldImmediateValue}
+        onSetTextAutoSizeMinimumForSelection={setTextAutoSizeMinimumForSelection}
+        onMessage={(nextMessage) => setMessage(nextMessage)}
+      />
+    ) : null;
 
-  const positionBoxSizeTypeOverlayNode = (
-    <TemplatePositionBoxSizeOverlay
-      selectedFrameGroupIds={selectedFrameGroupIds}
-      selectedPositionResolvedFrameGroupIds={selectedPositionResolvedFrameGroupIds}
-      selectionStyleDraft={selectionStyleDraft}
-      styleFieldApplyStatus={styleFieldApplyStatus}
-      stylePanelRef={stylePanelRef}
-      selectedTextAutoSizeState={selectedTextAutoSizeState}
-      sizeMatchSourceKind={sizeMatchSourceKind}
-      sizeMatchTargetKind={sizeMatchTargetKind}
-      sizeMatchSourceFrameGroupId={sizeMatchSourceFrameGroupId}
-      textAutoSizePointerHandledRef={textAutoSizePointerHandledRef}
-      onSizeMatchSourceKindChange={setSizeMatchSourceKind}
-      onSizeMatchTargetKindChange={setSizeMatchTargetKind}
-      onSizeMatchSourceFrameGroupIdChange={setSizeMatchSourceFrameGroupId}
-      onSizeMatchSourcePickModeChange={setSizeMatchSourcePickMode}
-      onMessage={(nextMessage) => setMessage(nextMessage)}
-      onWriteTextAutoSizeDescriptionDomState={writeTextAutoSizeDescriptionDomState}
-      onPreviewTextAutoSizeModeDomState={previewTextAutoSizeModeDomState}
-      onSetTextAutoSizeModeForSelection={setTextAutoSizeModeForSelection}
-      onPreviewTextAutoSizeAnchorDomState={previewTextAutoSizeAnchorDomState}
-      onSetTextAutoSizeModeAndAnchorForSelection={setTextAutoSizeModeAndAnchorForSelection}
-      onFitTextAutoSizeSecondaryAxisForSelection={fitTextAutoSizeSecondaryAxisForSelection}
-      onMatchSelectionDimensionFromSource={matchSelectionDimensionFromSource}
-      onApplyStyleFieldOnBlur={applyStyleFieldOnBlur}
-    />
-  );
+  const positionBoxSizeTypeOverlayNode =
+    selectionPanelTab === 'position' ? (
+      <TemplatePositionBoxSizeOverlay
+        selectedFrameGroupIds={selectedFrameGroupIds}
+        selectedPositionResolvedFrameGroupIds={selectedPositionResolvedFrameGroupIds}
+        selectionStyleDraft={selectionStyleDraft}
+        styleFieldApplyStatus={styleFieldApplyStatus}
+        stylePanelRef={stylePanelRef}
+        selectedTextAutoSizeState={selectedTextAutoSizeState}
+        sizeMatchSourceKind={sizeMatchSourceKind}
+        sizeMatchTargetKind={sizeMatchTargetKind}
+        sizeMatchSourceFrameGroupId={sizeMatchSourceFrameGroupId}
+        textAutoSizePointerHandledRef={textAutoSizePointerHandledRef}
+        onSizeMatchSourceKindChange={setSizeMatchSourceKind}
+        onSizeMatchTargetKindChange={setSizeMatchTargetKind}
+        onSizeMatchSourceFrameGroupIdChange={setSizeMatchSourceFrameGroupId}
+        onSizeMatchSourcePickModeChange={setSizeMatchSourcePickMode}
+        onMessage={(nextMessage) => setMessage(nextMessage)}
+        onWriteTextAutoSizeDescriptionDomState={writeTextAutoSizeDescriptionDomState}
+        onPreviewTextAutoSizeModeDomState={previewTextAutoSizeModeDomState}
+        onSetTextAutoSizeModeForSelection={setTextAutoSizeModeForSelection}
+        onPreviewTextAutoSizeAnchorDomState={previewTextAutoSizeAnchorDomState}
+        onSetTextAutoSizeModeAndAnchorForSelection={setTextAutoSizeModeAndAnchorForSelection}
+        onFitTextAutoSizeSecondaryAxisForSelection={fitTextAutoSizeSecondaryAxisForSelection}
+        onMatchSelectionDimensionFromSource={matchSelectionDimensionFromSource}
+        onApplyStyleFieldOnBlur={applyStyleFieldOnBlur}
+      />
+    ) : null;
 
   const closePositionSpacingPanel = React.useCallback(() => {
     setPositionOrderLockSelectionMode(false);
@@ -33386,7 +33067,7 @@ export default function TemplateEditWorkspace({
   }, []);
 
   const positionSpacingPanelNode =
-    positionOrderLockSelectionMode ? (
+    selectionPanelTab === 'position' && positionOrderLockSelectionMode ? (
       <PositionSpacingPanel
         positionSpacingSettingRelations={positionSpacingSettingRelations}
         positionSpacingNewPairSummaries={positionSpacingNewPairSummaries}
@@ -33435,39 +33116,41 @@ export default function TemplateEditWorkspace({
       />
     ) : null;
 
-  const positionActionOverlayNode = (
-    <TemplatePositionActionOverlay
-      positionOrderLockSelectionMode={positionOrderLockSelectionMode}
-      positionGroupEditMode={positionGroupEditMode}
-      hasSelectedPositionBoxes={hasSelectedPositionBoxes}
-      boxCreationMode={boxCreationMode}
-      canCreatePositionGroupFromSelection={canCreatePositionGroupFromSelection}
-      canOpenPositionSpacingSettings={canOpenPositionSpacingSettings}
-      canClearSelectedPositionGroups={canClearSelectedPositionGroups}
-      canRemoveSelectedItemsFromGroup={canRemoveSelectedItemsFromGroup}
-      canAssignSelectedItemsToGroup={canAssignSelectedItemsToGroup}
-      onToggleBoxCreationMode={toggleBoxCreationModeFromCanvasToolbar}
-      onApplySelectedPositionGroupRelation={applySelectedPositionGroupRelationFromCanvasSelection}
-      onStartPositionOrderLockSelection={startPositionOrderLockSelectionFromCurrentCanvasSelection}
-      onClearSelectedPositionGroupRelation={clearSelectedPositionGroupRelation}
-      onStartPositionGroupExcludeMode={startPositionGroupExcludeMode}
-      onStartPositionGroupIncludeMode={startPositionGroupIncludeMode}
-      onCancelPositionGroupEditMode={cancelPositionGroupEditMode}
-      positionSpacingPanel={positionSpacingPanelNode}
-    />
-  );
+  const positionActionOverlayNode =
+    selectionPanelTab === 'position' ? (
+      <TemplatePositionActionOverlay
+        positionOrderLockSelectionMode={positionOrderLockSelectionMode}
+        positionGroupEditMode={positionGroupEditMode}
+        hasSelectedPositionBoxes={hasSelectedPositionBoxes}
+        boxCreationMode={boxCreationMode}
+        canCreatePositionGroupFromSelection={canCreatePositionGroupFromSelection}
+        canOpenPositionSpacingSettings={canOpenPositionSpacingSettings}
+        canClearSelectedPositionGroups={canClearSelectedPositionGroups}
+        canRemoveSelectedItemsFromGroup={canRemoveSelectedItemsFromGroup}
+        canAssignSelectedItemsToGroup={canAssignSelectedItemsToGroup}
+        onToggleBoxCreationMode={toggleBoxCreationModeFromCanvasToolbar}
+        onApplySelectedPositionGroupRelation={applySelectedPositionGroupRelationFromCanvasSelection}
+        onStartPositionOrderLockSelection={startPositionOrderLockSelectionFromCurrentCanvasSelection}
+        onClearSelectedPositionGroupRelation={clearSelectedPositionGroupRelation}
+        onStartPositionGroupExcludeMode={startPositionGroupExcludeMode}
+        onStartPositionGroupIncludeMode={startPositionGroupIncludeMode}
+        onCancelPositionGroupEditMode={cancelPositionGroupEditMode}
+        positionSpacingPanel={positionSpacingPanelNode}
+      />
+    ) : null;
 
-  const positionTextStyleOverlayNode = (
-    <TemplatePositionTextStyleOverlay
-      selectedFrameGroupIds={selectedFrameGroupIds}
-      selectedPositionResolvedFrameGroupIds={selectedPositionResolvedFrameGroupIds}
-      selectionStyleDraft={selectionStyleDraft}
-      styleFieldApplyStatus={styleFieldApplyStatus}
-      onApplyStyleFieldImmediateValue={applyStyleFieldImmediateValue}
-      onApplyStyleFieldOnBlur={applyStyleFieldOnBlur}
-      onColorToHex={(value) => colorToHex(value) || ''}
-    />
-  );
+  const positionTextStyleOverlayNode =
+    !templateUsagePreviewActive && selectionPanelTab === 'position' ? (
+      <TemplatePositionTextStyleOverlay
+        selectedFrameGroupIds={selectedFrameGroupIds}
+        selectedPositionResolvedFrameGroupIds={selectedPositionResolvedFrameGroupIds}
+        selectionStyleDraft={selectionStyleDraft}
+        styleFieldApplyStatus={styleFieldApplyStatus}
+        onApplyStyleFieldImmediateValue={applyStyleFieldImmediateValue}
+        onApplyStyleFieldOnBlur={applyStyleFieldOnBlur}
+        onColorToHex={(value) => colorToHex(value) || ''}
+      />
+    ) : null;
 
   const applySelectionMetadataDraftToCanvas = React.useCallback(() => {
     const metadataResult = applySelectionMetadataDraft();
@@ -35063,28 +34746,42 @@ export default function TemplateEditWorkspace({
             templateUsagePreviewHtml={templateUsagePreviewHtml}
             templateUsagePreviewPending={templateUsagePreviewPending}
             selectionPanelTab={activeCanvasSurfaceSelectionPanelTab}
-            editSettingsPanelVisible={editSettingsPanelVisible}
+            editSettingsPanelVisible={!templateUsagePreviewActive && editSettingsPanelVisible}
             showMetadataIcons={templateUsagePreviewActive ? false : showMetadataIcons}
-            actionOverlay={positionActionOverlayNode}
+            actionOverlay={templateUsagePreviewActive ? null : positionActionOverlayNode}
             actionOverlayLabel={canvasActionOverlayLabel}
             actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
             metadataNameOverlay={
+              !templateUsagePreviewActive &&
+              isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab) &&
               selectedFrameGroupIds.length <= 1
                 ? metadataNameOverlayNode
                 : null
             }
-            metadataRolePrimaryOverlay={metadataRolePrimaryOverlayNode}
-            metadataRoleSecondaryOverlay={metadataRoleSecondaryOverlayNode}
-            metadataRoleTertiaryOverlay={metadataRoleTertiaryOverlayNode}
-            styleOverlay={positionBoxStyleOverlayNode}
+            metadataRolePrimaryOverlay={
+              !templateUsagePreviewActive && isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)
+                ? metadataRolePrimaryOverlayNode
+                : null
+            }
+            metadataRoleSecondaryOverlay={
+              !templateUsagePreviewActive && isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)
+                ? metadataRoleSecondaryOverlayNode
+                : null
+            }
+            metadataRoleTertiaryOverlay={
+              !templateUsagePreviewActive && isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)
+                ? metadataRoleTertiaryOverlayNode
+                : null
+            }
+            styleOverlay={templateUsagePreviewActive ? null : positionBoxStyleOverlayNode}
             styleOverlayLabel="상자 스타일"
             onStyleOverlayCollapsedChange={handleStyleOverlayCollapsedChange}
-            sizeTypeOverlay={positionBoxSizeTypeOverlayNode}
+            sizeTypeOverlay={templateUsagePreviewActive ? null : positionBoxSizeTypeOverlayNode}
             onSizeTypeOverlayCollapsedChange={handleSizeTypeOverlayCollapsedChange}
-            textStyleOverlay={positionTextStyleOverlayNode}
+            textStyleOverlay={templateUsagePreviewActive ? null : positionTextStyleOverlayNode}
             onTextStyleOverlayCollapsedChange={handleTextStyleOverlayCollapsedChange}
             textStyleOverlayExpandedWidthClassName="w-fit max-w-[250px]"
-            summaryOverlay={selectionSummaryOverlayNode}
+            summaryOverlay={templateUsagePreviewActive ? null : selectionSummaryOverlayNode}
             onSummaryOverlayCollapsedChange={handleSummaryOverlayCollapsedChange}
             setPreviewNode={setPreviewNode}
             setTemplateUsagePreviewNode={setTemplateUsagePreviewPreparedNode}

@@ -17,7 +17,6 @@ import {
 } from '../constants';
 import type {
   FloatingOverlayQuadrantGuideState,
-  SelectionPanelTab,
   SummaryOverlayCorner,
   SummaryOverlayDragState,
   TemplateEditPreviewSurfaceProps,
@@ -27,11 +26,6 @@ import type {
 
 type OverlayRailSection = {
   node: React.ReactElement;
-};
-
-type OverlayRailRoom = {
-  tab: SelectionPanelTab;
-  sections: OverlayRailSection[];
 };
 
 function compactOverlayRailSections(sections: Array<OverlayRailSection | null>) {
@@ -935,15 +929,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       }) as React.CSSProperties,
     [normalizedSelectionInactiveOverlayOpacity]
   );
-  const templateUsagePreviewSurfaceStyle = React.useMemo(
-    () =>
-      ({
-        ...previewSurfaceStyle,
-        position: 'absolute',
-        inset: 0,
-      }) as React.CSSProperties,
-    [previewSurfaceStyle]
-  );
 
   const renderFloatingOverlaySection = (
     overlayId: TemplateFloatingOverlayId,
@@ -1051,6 +1036,25 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     : undefined;
   const preparedViewSelectionPanelTab = resolveTemplateCanvasSelectionPanelTab(preparedViewMode);
   const preparedViewMatchesActivePanel = preparedViewSelectionPanelTab === selectionPanelTab;
+  const metadata2Active = selectionPanelTab === 'metadata2';
+  const activeMetadataRolePrimaryOverlayCollapsed = metadata2Active
+    ? metadata2RolePrimaryOverlayCollapsed
+    : metadataRolePrimaryOverlayCollapsed;
+  const activeMetadataRoleSecondaryOverlayCollapsed = metadata2Active
+    ? metadata2RoleSecondaryOverlayCollapsed
+    : metadataRoleSecondaryOverlayCollapsed;
+  const activeMetadataRoleTertiaryOverlayCollapsed = metadata2Active
+    ? metadata2RoleTertiaryOverlayCollapsed
+    : metadataRoleTertiaryOverlayCollapsed;
+  const setActiveMetadataRolePrimaryOverlayCollapsed = metadata2Active
+    ? setMetadata2RolePrimaryOverlayCollapsed
+    : setMetadataRolePrimaryOverlayCollapsed;
+  const setActiveMetadataRoleSecondaryOverlayCollapsed = metadata2Active
+    ? setMetadata2RoleSecondaryOverlayCollapsed
+    : setMetadataRoleSecondaryOverlayCollapsed;
+  const setActiveMetadataRoleTertiaryOverlayCollapsed = metadata2Active
+    ? setMetadata2RoleTertiaryOverlayCollapsed
+    : setMetadataRoleTertiaryOverlayCollapsed;
 
   if (templateUsagePreviewPending) {
     return (
@@ -1113,124 +1117,98 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     );
   }
 
-  const positionOverlayRailSections = compactOverlayRailSections([
-    renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
-    renderFloatingOverlaySection(
-      'style',
-      styleOverlayLabel,
-      styleOverlayCollapsed,
-      setStyleOverlayCollapsed,
-      finishStyleOverlayDrag,
-      styleOverlay,
-      { expandedWidthClassName: 'w-[250px] max-w-[250px]', keepMountedWhenCollapsed: true }
-    ),
-    renderFloatingOverlaySection(
-      'sizeType',
-      '상자 크기 타입',
-      sizeTypeOverlayCollapsed,
-      setSizeTypeOverlayCollapsed,
-      finishSizeTypeOverlayDrag,
-      sizeTypeOverlay,
-      { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
-    ),
-    renderFloatingOverlaySection(
-      'textStyle',
-      '텍스트 스타일',
-      textStyleOverlayCollapsed,
-      setTextStyleOverlayCollapsed,
-      finishTextStyleOverlayDrag,
-      textStyleOverlay,
-      {
-        expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]',
-        keepMountedWhenCollapsed: true,
-      }
-    ),
-    renderFloatingOverlaySection(
-      'action',
-      actionOverlayLabel,
-      actionOverlayCollapsed,
-      setActionOverlayCollapsed,
-      finishActionOverlayDrag,
-      actionOverlay,
-      {
-        expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
-        keepMountedWhenCollapsed: true,
-      }
-    ),
-  ]);
-  const metadataOverlayRailSections = compactOverlayRailSections([
-    renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
-    renderFloatingOverlaySection(
-      'metadataRolePrimary',
-      '상자 역할 - 1',
-      metadataRolePrimaryOverlayCollapsed,
-      setMetadataRolePrimaryOverlayCollapsed,
-      finishMetadataRolePrimaryOverlayDrag,
-      metadataRolePrimaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-    renderFloatingOverlaySection(
-      'metadataRoleSecondary',
-      '상자 역할 - 2',
-      metadataRoleSecondaryOverlayCollapsed,
-      setMetadataRoleSecondaryOverlayCollapsed,
-      finishMetadataRoleSecondaryOverlayDrag,
-      metadataRoleSecondaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-    renderFloatingOverlaySection(
-      'metadataRoleTertiary',
-      '상자 연결',
-      metadataRoleTertiaryOverlayCollapsed,
-      setMetadataRoleTertiaryOverlayCollapsed,
-      finishMetadataRoleTertiaryOverlayDrag,
-      metadataRoleTertiaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-  ]);
-  const metadata2OverlayRailSections = compactOverlayRailSections([
-    renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
-    renderFloatingOverlaySection(
-      'metadataRolePrimary',
-      '상자 역할 - 1',
-      metadata2RolePrimaryOverlayCollapsed,
-      setMetadata2RolePrimaryOverlayCollapsed,
-      finishMetadataRolePrimaryOverlayDrag,
-      metadataRolePrimaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-    renderFloatingOverlaySection(
-      'metadataRoleSecondary',
-      '상자 역할 - 2',
-      metadata2RoleSecondaryOverlayCollapsed,
-      setMetadata2RoleSecondaryOverlayCollapsed,
-      finishMetadataRoleSecondaryOverlayDrag,
-      metadataRoleSecondaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-    renderFloatingOverlaySection(
-      'metadataRoleTertiary',
-      '상자 연결',
-      metadata2RoleTertiaryOverlayCollapsed,
-      setMetadata2RoleTertiaryOverlayCollapsed,
-      finishMetadataRoleTertiaryOverlayDrag,
-      metadataRoleTertiaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-  ]);
-  const overlayRailRooms: OverlayRailRoom[] = [
-    { tab: 'position', sections: positionOverlayRailSections },
-    { tab: 'metadata', sections: metadataOverlayRailSections },
-    { tab: 'metadata2', sections: metadata2OverlayRailSections },
-  ];
-  const hasOverlayRail = editSettingsPanelVisible && overlayRailRooms.some((room) => room.sections.length > 0);
-  const preserveHiddenEditorOverlayRailSpace = templateUsagePreviewMode && editSettingsPanelVisible && !hasOverlayRail;
+  const positionOverlayRailSections =
+    selectionPanelTab === 'position'
+      ? compactOverlayRailSections([
+          renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
+          renderFloatingOverlaySection(
+            'style',
+            styleOverlayLabel,
+            styleOverlayCollapsed,
+            setStyleOverlayCollapsed,
+            finishStyleOverlayDrag,
+            styleOverlay,
+            { expandedWidthClassName: 'w-[250px] max-w-[250px]', keepMountedWhenCollapsed: true }
+          ),
+          renderFloatingOverlaySection(
+            'sizeType',
+            '상자 크기 타입',
+            sizeTypeOverlayCollapsed,
+            setSizeTypeOverlayCollapsed,
+            finishSizeTypeOverlayDrag,
+            sizeTypeOverlay,
+            { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
+          ),
+          renderFloatingOverlaySection(
+            'textStyle',
+            '텍스트 스타일',
+            textStyleOverlayCollapsed,
+            setTextStyleOverlayCollapsed,
+            finishTextStyleOverlayDrag,
+            textStyleOverlay,
+            {
+              expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]',
+              keepMountedWhenCollapsed: true,
+            }
+          ),
+          renderFloatingOverlaySection(
+            'action',
+            actionOverlayLabel,
+            actionOverlayCollapsed,
+            setActionOverlayCollapsed,
+            finishActionOverlayDrag,
+            actionOverlay,
+            {
+              expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
+              keepMountedWhenCollapsed: true,
+            }
+          ),
+        ])
+      : [];
+  const metadataOverlayRailSections =
+    isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)
+      ? compactOverlayRailSections([
+          renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
+          renderFloatingOverlaySection(
+            'metadataRolePrimary',
+            '상자 역할 - 1',
+            activeMetadataRolePrimaryOverlayCollapsed,
+            setActiveMetadataRolePrimaryOverlayCollapsed,
+            finishMetadataRolePrimaryOverlayDrag,
+            metadataRolePrimaryOverlay,
+            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+          ),
+          renderFloatingOverlaySection(
+            'metadataRoleSecondary',
+            '상자 역할 - 2',
+            activeMetadataRoleSecondaryOverlayCollapsed,
+            setActiveMetadataRoleSecondaryOverlayCollapsed,
+            finishMetadataRoleSecondaryOverlayDrag,
+            metadataRoleSecondaryOverlay,
+            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+          ),
+          renderFloatingOverlaySection(
+            'metadataRoleTertiary',
+            '상자 연결',
+            activeMetadataRoleTertiaryOverlayCollapsed,
+            setActiveMetadataRoleTertiaryOverlayCollapsed,
+            finishMetadataRoleTertiaryOverlayDrag,
+            metadataRoleTertiaryOverlay,
+            { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+          ),
+        ])
+      : [];
+  const overlayRailSections = isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)
+    ? metadataOverlayRailSections
+    : positionOverlayRailSections;
+  const hasOverlayRail = editSettingsPanelVisible && overlayRailSections.length > 0;
+  const overlayRailContent = overlayRailSections.map((section) => section.node);
   const previewSurfaceBaseClassName =
     'template-edit-preview template-extract-draft-preview template-extract-preview-surface h-full max-h-full bg-slate-200 template-clone template-clone--raster-first-v2-structured';
   const visibleEditorRoomClassName = `${previewSurfaceBaseClassName} relative z-10`;
-  const hiddenEditorRoomClassName = `${previewSurfaceBaseClassName} pointer-events-none invisible relative z-0`;
+  const hiddenEditorRoomClassName = `${previewSurfaceBaseClassName} pointer-events-none relative z-0`;
   const visibleTemplateUsagePreviewRoomClassName = `${previewSurfaceBaseClassName} absolute inset-0 z-20`;
-  const hiddenTemplateUsagePreviewRoomClassName = `${previewSurfaceBaseClassName} pointer-events-none invisible absolute inset-0 z-0`;
+  const hiddenTemplateUsagePreviewRoomClassName = `${previewSurfaceBaseClassName} pointer-events-none absolute inset-0 z-0`;
 
   return (
     <CardContent
@@ -1238,19 +1216,13 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       className={`relative min-h-0 overflow-hidden bg-slate-200 p-0 ${canvasSurfaceSizingClassName}`}
       style={canvasSurfaceSizingStyle}
     >
-      <div
-        data-template-canvas-editor-room-container="true"
-        className={`flex h-full min-h-0 w-full ${
-          templateUsagePreviewMode ? 'pointer-events-none relative z-0' : 'relative z-10'
-        }`}
-        aria-hidden={templateUsagePreviewMode ? 'true' : undefined}
-      >
+      <div className="flex h-full min-h-0 w-full">
         <div className="relative min-w-0 flex-1">
           <div
             ref={setEditorPreviewSurfaceNode}
             className={templateUsagePreviewMode ? hiddenEditorRoomClassName : visibleEditorRoomClassName}
             aria-hidden={templateUsagePreviewMode ? 'true' : undefined}
-            data-template-canvas-editor-room="true"
+            inert={templateUsagePreviewMode ? true : undefined}
             data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
             data-canvas-icon-scale={canvasIconScale}
             data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
@@ -1274,76 +1246,56 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             onInput={handlePreviewInput}
             dangerouslySetInnerHTML={renderedPreviewMarkup}
           />
+          {hasPreparedTemplateUsagePreviewHtml ? (
+            <div
+              ref={setTemplateUsagePreviewSurfaceNode}
+              className={
+                templateUsagePreviewMode
+                  ? visibleTemplateUsagePreviewRoomClassName
+                  : hiddenTemplateUsagePreviewRoomClassName
+              }
+              aria-hidden={templateUsagePreviewMode ? undefined : 'true'}
+              inert={templateUsagePreviewMode ? undefined : true}
+              data-frame-create-mode="false"
+              data-canvas-icon-scale={canvasIconScale}
+              data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
+              data-space-pan-dragging={spacePanDragging ? 'true' : 'false'}
+              data-metadata-visual-mode="false"
+              data-template-usage-preview-mode="true"
+              data-template-usage-preview-prepared="true"
+              data-selection-panel-tab="position"
+              data-canvas-prepared-view-mode="preview"
+              data-canvas-prepared-view-cache-key="preview:position"
+              data-canvas-prepared-view-match={templateUsagePreviewMode ? 'true' : 'false'}
+              data-canvas-prepared-view-requested-tab="position"
+              data-canvas-prepared-view-visible={templateUsagePreviewMode ? 'true' : 'false'}
+              data-metadata-icon-visual-mode="false"
+              style={previewSurfaceStyle}
+              onPointerDownCapture={handlePreviewPointerDown}
+              onPointerMoveCapture={handlePreviewPointerMove}
+              onPointerUpCapture={handlePreviewPointerUp}
+              onPointerCancelCapture={handlePreviewPointerCancel}
+              onLostPointerCaptureCapture={handlePreviewLostPointerCapture}
+              onClickCapture={handlePreviewClickCapture}
+              onInput={handlePreviewInput}
+              dangerouslySetInnerHTML={templateUsagePreviewMarkup}
+            />
+          ) : null}
         </div>
         {hasOverlayRail ? (
           <aside
             className="h-full w-[300px] shrink-0 overflow-y-auto border-l border-slate-300 bg-white p-0"
             data-template-overlay-rail="true"
-            data-template-overlay-rail-active-tab={selectionPanelTab}
             aria-label="상자 편집 패널"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           >
-            {overlayRailRooms.map((room) => {
-              const active = room.tab === selectionPanelTab;
-
-              return (
-                <div
-                  key={`overlay-rail-room:${room.tab}`}
-                  className={`${active ? 'flex' : 'hidden'} min-h-0 flex-col`}
-                  data-template-overlay-rail-items="true"
-                  data-template-overlay-rail-room={room.tab}
-                  aria-hidden={active ? 'false' : 'true'}
-                >
-                  {room.sections.map((section) => section.node)}
-                </div>
-              );
-            })}
+            <div className="flex min-h-0 flex-col" data-template-overlay-rail-items="true">
+              {overlayRailContent}
+            </div>
           </aside>
-        ) : preserveHiddenEditorOverlayRailSpace ? (
-          <aside
-            className="h-full w-[300px] shrink-0 border-l border-slate-300 bg-white p-0"
-            data-template-overlay-rail-placeholder="true"
-            aria-hidden="true"
-            inert
-          />
         ) : null}
       </div>
-      {hasPreparedTemplateUsagePreviewHtml ? (
-        <div
-          ref={setTemplateUsagePreviewSurfaceNode}
-          className={
-            templateUsagePreviewMode
-              ? visibleTemplateUsagePreviewRoomClassName
-              : hiddenTemplateUsagePreviewRoomClassName
-          }
-          aria-hidden={templateUsagePreviewMode ? undefined : 'true'}
-          data-template-canvas-preview-room="true"
-          data-frame-create-mode="false"
-          data-canvas-icon-scale={canvasIconScale}
-          data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
-          data-space-pan-dragging={spacePanDragging ? 'true' : 'false'}
-          data-metadata-visual-mode="false"
-          data-template-usage-preview-mode="true"
-          data-template-usage-preview-prepared="true"
-          data-selection-panel-tab="position"
-          data-canvas-prepared-view-mode="preview"
-          data-canvas-prepared-view-cache-key="preview:position"
-          data-canvas-prepared-view-match={templateUsagePreviewMode ? 'true' : 'false'}
-          data-canvas-prepared-view-requested-tab="position"
-          data-canvas-prepared-view-visible={templateUsagePreviewMode ? 'true' : 'false'}
-          data-metadata-icon-visual-mode="false"
-          style={templateUsagePreviewSurfaceStyle}
-          onPointerDownCapture={handlePreviewPointerDown}
-          onPointerMoveCapture={handlePreviewPointerMove}
-          onPointerUpCapture={handlePreviewPointerUp}
-          onPointerCancelCapture={handlePreviewPointerCancel}
-          onLostPointerCaptureCapture={handlePreviewLostPointerCapture}
-          onClickCapture={handlePreviewClickCapture}
-          onInput={handlePreviewInput}
-          dangerouslySetInnerHTML={templateUsagePreviewMarkup}
-        />
-      ) : null}
     </CardContent>
   );
 });
