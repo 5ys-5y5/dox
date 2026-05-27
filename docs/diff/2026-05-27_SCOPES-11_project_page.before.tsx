@@ -24,10 +24,9 @@ import {
 import { DocumentsOwnerWorkspace } from '../documents/_owner';
 import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
-import {
-  buildValueKeyByKeyFrameGroupId,
-  type TemplateScopeContextDto,
-  type TemplateScopeSaveScopeInput,
+import type {
+  TemplateScopeContextDto,
+  TemplateScopeSaveScopeInput,
 } from '../../services/canvasScopeDraftService';
 import type {
   TemplateChecklistRegistrationTarget,
@@ -351,21 +350,25 @@ const hasFullDocumentAccessBySiteRole = (role: SiteMemberAccessRole | ManagedSit
 const buildTemplateScopeSaveScopesFromContext = (
   context: TemplateScopeContextDto,
   assignmentsByScopeKey: Record<string, string[]>
-): TemplateScopeSaveScopeInput[] => {
-  const valueKeyByKeyFrameGroupId = buildValueKeyByKeyFrameGroupId(context.registryEntries);
-
-  return context.logicalScopes.map((scope) => ({
+): TemplateScopeSaveScopeInput[] =>
+  context.logicalScopes.map((scope) => ({
     scopeKey: scope.scopeKey,
     displayName: scope.displayName,
     description: scope.description,
     keyFrameGroupIds: scope.keyFrameGroupIds,
     valueKeyByKeyFrameGroupId: scope.keyFrameGroupIds.reduce<Record<string, string | null>>((map, keyFrameGroupId) => {
-      map[keyFrameGroupId] = valueKeyByKeyFrameGroupId[keyFrameGroupId] || null;
+      const registryEntry = context.registryEntries.find(
+        (entry) =>
+          entry.status === 'active' &&
+          entry.scopeKey === scope.scopeKey &&
+          entry.keyFrameGroupId === keyFrameGroupId
+      );
+
+      map[keyFrameGroupId] = registryEntry?.valueKey || null;
       return map;
     }, {}),
     memberIds: assignmentsByScopeKey[scope.scopeKey] || [],
   }));
-};
 
 const formatDate = (value: string | null | undefined) => {
   if (!value) return '-';

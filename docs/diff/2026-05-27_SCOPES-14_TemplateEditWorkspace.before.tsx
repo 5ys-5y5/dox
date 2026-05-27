@@ -663,8 +663,13 @@ const applyImmediateRoleAssignmentPanelDomState = (
   }
 
   const selectedCount = selectedBoxes.length;
+  const selectedSummary =
+    selectedCount > 0 ? selectedBoxes.map(readRoleAssignmentSelectedBoxLabel).join(', ') : '선택된 상자가 없습니다.';
   const countBadge = ownerDocument.querySelector<HTMLElement>(
     '[data-canvas-owner-item="canvas-role-settings-selected-box-count-badge"]'
+  );
+  const summaryNode = ownerDocument.querySelector<HTMLElement>(
+    '[data-canvas-owner-item="canvas-role-settings-selected-box-summary"]'
   );
   const panelNode = ownerDocument.querySelector<HTMLElement>(
     '[data-canvas-owner-item="canvas-role-settings-selected-box-panel"]'
@@ -672,6 +677,10 @@ const applyImmediateRoleAssignmentPanelDomState = (
 
   if (countBadge) {
     countBadge.textContent = `${selectedCount}개`;
+  }
+
+  if (summaryNode) {
+    summaryNode.textContent = selectedSummary;
   }
 
   if (panelNode) {
@@ -34371,6 +34380,13 @@ export default function TemplateEditWorkspace({
     },
     [commitRoleAssignmentSelectedBoxes, roleAssignmentTargetItems]
   );
+  const roleAssignmentSelectedSummary = React.useMemo(() => {
+    if (roleAssignmentSelectedBoxes.length <= 0) {
+      return '선택된 상자가 없습니다.';
+    }
+
+    return roleAssignmentSelectedBoxes.map((box) => box.label || box.valueKey || box.frameGroupId).join(', ');
+  }, [roleAssignmentSelectedBoxes]);
   const roleAssignmentSelectedFrameGroupIds = React.useMemo(
     () =>
       Array.from(
@@ -34404,6 +34420,26 @@ export default function TemplateEditWorkspace({
   const roleAssignmentSelectedValueKeyByKeyFrameGroupId = React.useMemo(
     () => buildSelectedValueKeyByKeyFrameGroupId(roleAssignmentSelectedBoxes),
     [roleAssignmentSelectedBoxes]
+  );
+  const roleAssignmentSelectedScopeKeys = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          roleAssignmentSelectedKeyFrameGroupIds
+            .flatMap((keyFrameGroupId) => {
+              const scopeKeys = scopeDraftSnapshot.scopeKeysByKeyFrameGroupId[keyFrameGroupId] || [];
+              const legacyScopeKey = scopeDraftSnapshot.scopeKeyByKeyFrameGroupId[keyFrameGroupId] || '';
+
+              return scopeKeys.length > 0 ? scopeKeys : [legacyScopeKey];
+            })
+            .filter(Boolean)
+        )
+      ),
+    [
+      roleAssignmentSelectedKeyFrameGroupIds,
+      scopeDraftSnapshot.scopeKeyByKeyFrameGroupId,
+      scopeDraftSnapshot.scopeKeysByKeyFrameGroupId,
+    ]
   );
   const resolveRoleAssignmentSelectedBoxesForKeyFrameGroupIds = React.useCallback(
     (keyFrameGroupIds: string[]) => {
@@ -34451,6 +34487,7 @@ export default function TemplateEditWorkspace({
         })),
     [scopeDraftSnapshot.logicalScopes]
   );
+  const activeScopeSelectedKeyCount = activeLogicalScope?.keyFrameGroupIds.length || 0;
   const activeScopeMembershipSignature = React.useMemo(
     () => buildStringSetSignature(activeLogicalScope?.keyFrameGroupIds || []),
     [activeLogicalScope?.keyFrameGroupIds]
@@ -34463,6 +34500,14 @@ export default function TemplateEditWorkspace({
     () => `${activeScopeKey}::${activeScopeMembershipSignature}::${roleAssignmentTargetItems.length}`,
     [activeScopeKey, activeScopeMembershipSignature, roleAssignmentTargetItems.length]
   );
+  const roleAssignmentScopeSelectionSummary =
+    roleAssignmentSelectedKeyFrameGroupIds.length <= 0
+      ? 'scope에 넣을 key 상자가 선택되지 않았습니다.'
+      : roleAssignmentSelectedScopeKeys.length <= 0
+        ? `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · 아직 scope 없음`
+        : roleAssignmentSelectedScopeKeys.length === 1
+          ? `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · scope ${roleAssignmentSelectedScopeKeys[0]}`
+          : `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · 중첩 scope ${roleAssignmentSelectedScopeKeys.length}개`;
   React.useEffect(
     () => () => {
       if (newScopeDisplayNameCommitTimerRef.current) {
@@ -34871,6 +34916,12 @@ export default function TemplateEditWorkspace({
       >
         {scopeDraftSaving ? '저장 중' : 'scope 저장'}
       </button>
+
+      {scopeDraftMessage ? (
+        <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('scope-draft-message', '권한 scope draft 메시지')}>
+          {scopeDraftMessage}
+        </p>
+      ) : null}
     </div>
   );
   const scopePickerDropdownNode =
@@ -35033,14 +35084,12 @@ export default function TemplateEditWorkspace({
               value={activeLogicalScope.displayName}
               onChange={(event) => handleUpdateActiveScopeDisplayName(event.target.value)}
               placeholder="scope 표시명"
-              className="bg-white"
               {...roleAssignmentOwnerItem('scope-display-name-input', '권한 scope 표시명 입력')}
             />
             <Input
               value={activeLogicalScope.description || ''}
               onChange={(event) => handleUpdateActiveScopeDescription(event.target.value)}
               placeholder="scope 설명"
-              className="bg-white"
               {...roleAssignmentOwnerItem('scope-description-input', '권한 scope 설명 입력')}
             />
           </div>
@@ -35070,6 +35119,12 @@ export default function TemplateEditWorkspace({
               ownerItemName="선택한 상자 셀렉트 박스 선택기"
               ownerItemAttributes={roleAssignmentOwnerItem}
             />
+            <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('selected-box-summary', '선택한 상자 요약')}>
+              {roleAssignmentSelectedSummary}
+            </p>
+            <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('selected-box-scope-summary', '선택한 상자 scope 요약')}>
+              {roleAssignmentScopeSelectionSummary}
+            </p>
           </div>
         ) : null}
 

@@ -137,101 +137,6 @@ const normalizeString = (value: string | null | undefined) => String(value || ''
 const uniqueStrings = (values: Array<string | null | undefined>) =>
   Array.from(new Set(values.map(normalizeString).filter(Boolean)));
 
-const SCOPE_REGISTRY_KEY_FRAME_GROUP_IDS_PREFIX = 'scope-key-frame-group-ids:';
-const SCOPE_REGISTRY_VALUE_KEY_MAP_PREFIX = 'scope-value-key-map:';
-
-export const encodeScopeRegistryKeyFrameGroupIds = (keyFrameGroupIds: string[]) => {
-  const normalizedKeyFrameGroupIds = uniqueStrings(keyFrameGroupIds);
-
-  if (normalizedKeyFrameGroupIds.length <= 1) {
-    return normalizedKeyFrameGroupIds[0] || '';
-  }
-
-  return `${SCOPE_REGISTRY_KEY_FRAME_GROUP_IDS_PREFIX}${JSON.stringify(normalizedKeyFrameGroupIds)}`;
-};
-
-export const decodeScopeRegistryKeyFrameGroupIds = (keyFrameGroupId: string | null | undefined) => {
-  const normalizedKeyFrameGroupId = normalizeString(keyFrameGroupId);
-
-  if (!normalizedKeyFrameGroupId) {
-    return [];
-  }
-
-  if (!normalizedKeyFrameGroupId.startsWith(SCOPE_REGISTRY_KEY_FRAME_GROUP_IDS_PREFIX)) {
-    return [normalizedKeyFrameGroupId];
-  }
-
-  try {
-    const parsed = JSON.parse(normalizedKeyFrameGroupId.slice(SCOPE_REGISTRY_KEY_FRAME_GROUP_IDS_PREFIX.length));
-    return Array.isArray(parsed) ? uniqueStrings(parsed) : [];
-  } catch {
-    return [];
-  }
-};
-
-export const encodeScopeRegistryValueKeyByKeyFrameGroupId = (
-  keyFrameGroupIds: string[],
-  valueKeyByKeyFrameGroupId: Record<string, string | null | undefined>
-) => {
-  const normalizedKeyFrameGroupIds = uniqueStrings(keyFrameGroupIds);
-
-  if (normalizedKeyFrameGroupIds.length <= 1) {
-    const keyFrameGroupId = normalizedKeyFrameGroupIds[0] || '';
-    return normalizeString(valueKeyByKeyFrameGroupId[keyFrameGroupId]) || null;
-  }
-
-  const valueMap = normalizedKeyFrameGroupIds.reduce<Record<string, string>>((map, keyFrameGroupId) => {
-    const valueKey = normalizeString(valueKeyByKeyFrameGroupId[keyFrameGroupId]);
-    if (valueKey) {
-      map[keyFrameGroupId] = valueKey;
-    }
-    return map;
-  }, {});
-
-  if (Object.keys(valueMap).length <= 0) {
-    return null;
-  }
-
-  return `${SCOPE_REGISTRY_VALUE_KEY_MAP_PREFIX}${JSON.stringify(valueMap)}`;
-};
-
-export const decodeScopeRegistryValueKeyByKeyFrameGroupId = (
-  valueKey: string | null | undefined,
-  keyFrameGroupIds: string[]
-) => {
-  const normalizedKeyFrameGroupIds = uniqueStrings(keyFrameGroupIds);
-  const normalizedValueKey = normalizeString(valueKey);
-  const valueKeyByKeyFrameGroupId: Record<string, string | null> = {};
-
-  if (!normalizedValueKey) {
-    normalizedKeyFrameGroupIds.forEach((keyFrameGroupId) => {
-      valueKeyByKeyFrameGroupId[keyFrameGroupId] = null;
-    });
-    return valueKeyByKeyFrameGroupId;
-  }
-
-  if (normalizedValueKey.startsWith(SCOPE_REGISTRY_VALUE_KEY_MAP_PREFIX)) {
-    try {
-      const parsed = JSON.parse(normalizedValueKey.slice(SCOPE_REGISTRY_VALUE_KEY_MAP_PREFIX.length));
-      normalizedKeyFrameGroupIds.forEach((keyFrameGroupId) => {
-        valueKeyByKeyFrameGroupId[keyFrameGroupId] =
-          parsed && typeof parsed === 'object' ? normalizeString(parsed[keyFrameGroupId]) || null : null;
-      });
-      return valueKeyByKeyFrameGroupId;
-    } catch {
-      normalizedKeyFrameGroupIds.forEach((keyFrameGroupId) => {
-        valueKeyByKeyFrameGroupId[keyFrameGroupId] = null;
-      });
-      return valueKeyByKeyFrameGroupId;
-    }
-  }
-
-  normalizedKeyFrameGroupIds.forEach((keyFrameGroupId) => {
-    valueKeyByKeyFrameGroupId[keyFrameGroupId] = normalizedValueKey;
-  });
-  return valueKeyByKeyFrameGroupId;
-};
-
 export const createEmptyCanvasScopeDraftSnapshot = (): CanvasScopeDraftSnapshot => ({
   loadedAt: 0,
   templateId: '',
@@ -255,14 +160,9 @@ export const buildTemplateLogicalScopes = (
     .forEach((entry) => {
       const scopeKey = normalizeString(entry.scopeKey);
       const templateId = normalizeString(entry.templateId);
-      const keyFrameGroupIds = decodeScopeRegistryKeyFrameGroupIds(entry.keyFrameGroupId);
-      const valueKeyByKeyFrameGroupId = decodeScopeRegistryValueKeyByKeyFrameGroupId(
-        entry.valueKey,
-        keyFrameGroupIds
-      );
-      const valueKeys = keyFrameGroupIds.map((keyFrameGroupId) => valueKeyByKeyFrameGroupId[keyFrameGroupId]);
+      const keyFrameGroupId = normalizeString(entry.keyFrameGroupId);
 
-      if (!scopeKey || !templateId || keyFrameGroupIds.length <= 0) {
+      if (!scopeKey || !templateId || !keyFrameGroupId) {
         return;
       }
 
@@ -275,16 +175,16 @@ export const buildTemplateLogicalScopes = (
           displayName: normalizeString(entry.displayName) || scopeKey,
           description: entry.description,
           registryIds: uniqueStrings([entry.id]),
-          keyFrameGroupIds,
-          valueKeys: uniqueStrings(valueKeys),
+          keyFrameGroupIds: uniqueStrings([keyFrameGroupId]),
+          valueKeys: uniqueStrings([entry.valueKey]),
           status: entry.status,
         });
         return;
       }
 
       previous.registryIds = uniqueStrings([...previous.registryIds, entry.id]);
-      previous.keyFrameGroupIds = uniqueStrings([...previous.keyFrameGroupIds, ...keyFrameGroupIds]);
-      previous.valueKeys = uniqueStrings([...previous.valueKeys, ...valueKeys]);
+      previous.keyFrameGroupIds = uniqueStrings([...previous.keyFrameGroupIds, keyFrameGroupId]);
+      previous.valueKeys = uniqueStrings([...previous.valueKeys, entry.valueKey]);
       if (!previous.description && entry.description) {
         previous.description = entry.description;
       }
@@ -330,17 +230,10 @@ export const buildValueKeyByKeyFrameGroupId = (entries: TemplateScopeRegistryEnt
   entries
     .filter((entry) => entry.status === 'active')
     .forEach((entry) => {
-      const keyFrameGroupIds = decodeScopeRegistryKeyFrameGroupIds(entry.keyFrameGroupId);
-      const entryValueKeyByKeyFrameGroupId = decodeScopeRegistryValueKeyByKeyFrameGroupId(
-        entry.valueKey,
-        keyFrameGroupIds
-      );
-
-      Object.entries(entryValueKeyByKeyFrameGroupId).forEach(([keyFrameGroupId, valueKey]) => {
-        if (keyFrameGroupId) {
-          valueKeyByKeyFrameGroupId[keyFrameGroupId] = valueKey;
-        }
-      });
+      const keyFrameGroupId = normalizeString(entry.keyFrameGroupId);
+      if (keyFrameGroupId) {
+        valueKeyByKeyFrameGroupId[keyFrameGroupId] = entry.valueKey;
+      }
     });
 
   return valueKeyByKeyFrameGroupId;

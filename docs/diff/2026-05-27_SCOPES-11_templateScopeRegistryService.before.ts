@@ -1,8 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import {
   buildTemplateLogicalScopes,
-  encodeScopeRegistryKeyFrameGroupIds,
-  encodeScopeRegistryValueKeyByKeyFrameGroupId,
   type TemplateScopeContextDto,
   type TemplateScopeRegistryEntryDto,
   type TemplateScopeSaveScopeInput,
@@ -56,6 +54,9 @@ const normalizeString = (value: string | null | undefined) => String(value || ''
 
 const uniqueStrings = (values: Array<string | null | undefined>) =>
   Array.from(new Set(values.map(normalizeString).filter(Boolean)));
+
+const buildScopeMembershipKey = (keyFrameGroupId: string, scopeKey: string) =>
+  `${normalizeString(keyFrameGroupId)}::${normalizeString(scopeKey)}`;
 
 const toScopeRegistryEntryDto = (row: ScopeRegistryRow): TemplateScopeRegistryEntryDto => ({
   id: row.id,
@@ -141,29 +142,51 @@ export const TemplateScopeRegistryService = {
       displayName: string;
       description: string | null;
       valueKey: string | null;
-    }> = normalizedScopes.map((scope) => ({
-      keyFrameGroupId: encodeScopeRegistryKeyFrameGroupIds(scope.keyFrameGroupIds),
-      scopeKey: scope.scopeKey,
-      displayName: scope.displayName,
-      description: scope.description,
-      valueKey: encodeScopeRegistryValueKeyByKeyFrameGroupId(
-        scope.keyFrameGroupIds,
-        scope.valueKeyByKeyFrameGroupId
-      ),
-    }));
+    }> = [];
+    const desiredEntryByMembershipKey = new Map<
+      string,
+      {
+        keyFrameGroupId: string;
+        scopeKey: string;
+        displayName: string;
+        description: string | null;
+        valueKey: string | null;
+      }
+    >();
+
+    normalizedScopes.forEach((scope) => {
+      scope.keyFrameGroupIds.forEach((keyFrameGroupId) => {
+        const membershipKey = buildScopeMembershipKey(keyFrameGroupId, scope.scopeKey);
+        const desiredEntry = {
+          keyFrameGroupId,
+          scopeKey: scope.scopeKey,
+          displayName: scope.displayName,
+          description: scope.description,
+          valueKey: normalizeString(scope.valueKeyByKeyFrameGroupId[keyFrameGroupId]) || null,
+        };
+
+        if (!desiredEntryByMembershipKey.has(membershipKey)) {
+          desiredEntries.push(desiredEntry);
+        }
+
+        desiredEntryByMembershipKey.set(membershipKey, desiredEntry);
+      });
+    });
 
     const existingRows = await selectRegistryRows(templateId);
-    const existingRowByScopeKey = new Map<string, ScopeRegistryRow>();
+    const existingRowByMembershipKey = new Map<string, ScopeRegistryRow>();
     existingRows.forEach((row) => {
+      const keyFrameGroupId = normalizeString(row.key_frame_group_id);
       const scopeKey = normalizeString(row.scope_key);
+      const membershipKey = buildScopeMembershipKey(keyFrameGroupId, scopeKey);
 
-      if (scopeKey && !existingRowByScopeKey.has(scopeKey)) {
-        existingRowByScopeKey.set(scopeKey, row);
+      if (keyFrameGroupId && scopeKey && !existingRowByMembershipKey.has(membershipKey)) {
+        existingRowByMembershipKey.set(membershipKey, row);
       }
     });
 
     for (const desired of desiredEntries) {
-      const previous = existingRowByScopeKey.get(desired.scopeKey);
+      const previous = existingRowByMembershipKey.get(buildScopeMembershipKey(desired.keyFrameGroupId, desired.scopeKey));
       const payload = {
         template_id: templateId,
         template_revision_id: templateRevisionId,
@@ -181,7 +204,6 @@ export const TemplateScopeRegistryService = {
           .from('scope_registry')
           .update({
             template_revision_id: payload.template_revision_id,
-            key_frame_group_id: payload.key_frame_group_id,
             value_key: payload.value_key,
             scope_key: payload.scope_key,
             display_name: payload.display_name,
@@ -203,11 +225,11 @@ export const TemplateScopeRegistryService = {
       }
     }
 
-    const desiredScopeKeys = new Set(desiredEntries.map((entry) => entry.scopeKey));
+    const desiredMembershipKeys = new Set(desiredEntryByMembershipKey.keys());
     const rowsToDeactivate = existingRows.filter(
       (row) =>
         row.status === 'active' &&
-        !desiredScopeKeys.has(normalizeString(row.scope_key))
+        !desiredMembershipKeys.has(buildScopeMembershipKey(row.key_frame_group_id, row.scope_key))
     );
 
     if (rowsToDeactivate.length > 0) {
