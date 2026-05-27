@@ -643,7 +643,6 @@ type ScopeRuntimeMaps = {
 | `src/components/template/TemplateEditWorkspace.tsx` | 역할 탭 UI 연결, 선택 결과를 scope draft command로 변환 |
 | `src/app/api/scopes/template-scopes/route.ts` | template scope preload/save API 후보 |
 | `src/app/api/scopes/site-scope-assignments/route.ts` | site scope assignment preload/save API 후보 |
-| `src/app/project/page.tsx` | 현장 구성원의 문서 접근을 `보기/편집/서명`이 아니라 template scope 배정으로 전환 |
 | `docs/scopes.md` | 본 설계 문서 유지 |
 
 금지:
@@ -1072,68 +1071,3 @@ type CanvasScopeSetupDraft = {
 
 - `docs/diff/2026-05-27_SCOPES-02_scopes.before.md`
 - `docs/diff/2026-05-27_SCOPES-03_scopes.before.md`
-
-## 14. 2026-05-27 SCOPES-04 구현 기록: 다중 scope membership과 project scope 배정
-
-본 구현은 SCOPES-02/03 보완 설계를 코드에 반영한 기록이다.
-
-수정 전 백업:
-
-- `docs/diff/2026-05-27_SCOPES-04_canvasScopeDraftService.before.ts`
-- `docs/diff/2026-05-27_SCOPES-04_templateScopeRegistryService.before.ts`
-- `docs/diff/2026-05-27_SCOPES-04_canvasPermissionResolver.before.ts`
-- `docs/diff/2026-05-27_SCOPES-04_TemplateEditWorkspace.before.tsx`
-- `docs/diff/2026-05-27_SCOPES-04_project-page.before.tsx`
-- `docs/diff/2026-05-27_SCOPES-04_scopes.before.md`
-
-구현 요약:
-
-- 역할 탭에서 `상자 타입`, `상자 역할` 수정 UI를 제거했다.
-- 역할 탭의 `canvas-aside-상자-편집-패널`에 4단계 흐름을 반영했다.
-  - `1. 상자에 scope 지정`
-  - `2. 필수 사진 등록`
-  - `3. 필수 파일 등록`
-  - `4. 만료 시각 설정`
-- 역할 탭 첫 단계에서 scope 신규 등록, 표시명 수정, 설명 수정, 비활성화, 선택 key 포함, 선택 key 해제를 지원하도록 draft command를 추가했다.
-- 하나의 key 상자가 여러 scope에 동시에 속할 수 있도록 `scopeKeysByKeyFrameGroupId` 다중 index를 추가했다.
-- 기존 단일 index `scopeKeyByKeyFrameGroupId`는 하위 호환용 primary scope index로만 유지한다.
-- `TemplateScopeRegistryService` 저장 기준을 `key_frame_group_id` 단독에서 `key_frame_group_id + scope_key` membership으로 변경했다.
-- 기존 scope row 비활성화 기준도 key 단독이 아니라 membership 조합 기준으로 변경했다.
-- `CanvasPermissionResolver`는 여러 scope 중 하나라도 member에게 배정되어 있으면 편집 가능으로 판정한다.
-- 만료 시간은 값이 있을 때만 제한으로 해석하고, `undefined/null`은 service boundary에서 제한 없음으로 정규화한다.
-- `/project`의 구성원 문서 설정은 `보기/편집/서명` 버튼 대신 문서 템플릿의 scope 선택으로 변경했다.
-- `/project`는 문서가 연결된 template의 scope context를 preload하고, scope 버튼 클릭 시 `site_scope_assignments`가 갱신되도록 `/api/scopes/template-scopes` 저장 계약을 사용한다.
-
-검증 기록:
-
-- `git diff --check` 통과.
-- scope 서비스/API 단독 타입 검사 통과.
-- `TemplateEditWorkspace.tsx`를 포함한 부분 타입 검사는 기존 컴포넌트 타입 오류 때문에 실패한다. SCOPES-04 신규 서비스/API 타입 오류는 확인되지 않았다.
-- `supabase` MCP는 `Auth required`로 프로젝트 URL 확인이 실패했다. DB 직접 수정은 수행하지 않았다.
-- `chrome-devtools` MCP로 `http://localhost:3001/canvas?page=templates&mode=template&templateId=dc080119-76a5-4785-a698-4dca1e1609f1` 확인:
-  - 역할 탭 진입 후 `상자 타입` 편집 UI는 aside에 출력되지 않음.
-  - `상자에 scope 지정`, `필수 사진 등록`, `필수 파일 등록`, `만료 시각 설정` 4단계 출력 확인.
-  - 역할 탭 클릭 return은 약 `2.8ms`.
-  - 4단계 내부 버튼 click return은 `0.1ms~0.5ms`, 다음 frame 반영은 `6.2ms~16.4ms` 범위.
-  - 단계 전환 중 `/api/scopes/template-scopes` 추가 요청 없음.
-- `chrome-devtools` MCP로 `http://localhost:3001/project?projectId=1b75a399-09c0-45b7-ab2a-c7cb4b7d791c` 확인:
-  - 구성원 상세 패널에 `문서 scope` 영역 출력 확인.
-  - 선택 현장의 template scope preload 요청 확인: `/api/scopes/template-scopes?templateId=...&siteId=...`.
-  - 테스트 대상 template에는 등록된 scope가 없어 picker에는 `scope 없음`이 표시됨.
-
-SCOPES-04 체크리스트:
-
-- [x] 역할 탭에서 `상자 타입` 수정 UI 제거
-- [x] 역할 탭에서 `상자 역할` 수정 UI 제거
-- [x] 역할 탭 4단계 request setup UI 반영
-- [x] scope 신규 등록 command 추가
-- [x] scope 표시명/설명 수정 command 추가
-- [x] scope 비활성화 command 추가
-- [x] 선택 key를 scope에 포함하는 command 추가
-- [x] 선택 key를 scope에서 해제하는 command 추가
-- [x] 하나의 key 상자가 여러 scope에 속하는 draft 구조 반영
-- [x] `scope_registry` 저장 기준을 membership 조합으로 변경
-- [x] 권한 판정을 다중 scope OR 조건으로 변경
-- [x] `/project` 구성원 문서 설정을 scope 선택 UI로 변경
-- [x] 저장 전 탭/단계 전환 중 추가 DB 요청 없음 확인
-- [ ] request scope condition의 영구 저장소 확정

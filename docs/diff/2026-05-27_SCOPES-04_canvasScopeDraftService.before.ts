@@ -39,13 +39,6 @@ export type TemplateLogicalScopeDto = {
   status: TemplateScopeStatus;
 };
 
-export type RequestScopeConditionDraft = {
-  scopeKey: string;
-  requiredPhotoTagKeys: string[];
-  requiredFileTagKeys: string[];
-  expiresAt?: string | null;
-};
-
 export type LogicalScopeMemberAssignmentDto = {
   siteId: string;
   templateId: string;
@@ -60,10 +53,8 @@ export type CanvasScopeDraftSnapshot = {
   siteId: string | null;
   logicalScopes: TemplateLogicalScopeDto[];
   assignmentsByScopeKey: Record<string, string[]>;
-  scopeKeysByKeyFrameGroupId: Record<string, string[]>;
   scopeKeyByKeyFrameGroupId: Record<string, string>;
   valueKeyByKeyFrameGroupId: Record<string, string | null>;
-  requestConditionsByScopeKey: Record<string, RequestScopeConditionDraft>;
   dirty: boolean;
 };
 
@@ -75,37 +66,15 @@ export type CanvasScopeDraftCommand =
       description?: string | null;
     }
   | {
-      type: 'update_scope';
-      scopeKey: string;
-      displayName?: string | null;
-      description?: string | null;
-    }
-  | {
-      type: 'deactivate_scope';
-      scopeKey: string;
-    }
-  | {
       type: 'assign_keys_to_scope';
       scopeKey: string;
       keyFrameGroupIds: string[];
       valueKeyByKeyFrameGroupId?: Record<string, string | null>;
     }
   | {
-      type: 'remove_keys_from_scope';
-      scopeKey: string;
-      keyFrameGroupIds: string[];
-    }
-  | {
       type: 'assign_members_to_scope';
       scopeKey: string;
       memberIds: string[];
-    }
-  | {
-      type: 'set_scope_request_condition';
-      scopeKey: string;
-      requiredPhotoTagKeys?: string[];
-      requiredFileTagKeys?: string[];
-      expiresAt?: string | null;
     };
 
 export type TemplateScopeSaveScopeInput = {
@@ -137,10 +106,8 @@ export const createEmptyCanvasScopeDraftSnapshot = (): CanvasScopeDraftSnapshot 
   siteId: null,
   logicalScopes: [],
   assignmentsByScopeKey: {},
-  scopeKeysByKeyFrameGroupId: {},
   scopeKeyByKeyFrameGroupId: {},
   valueKeyByKeyFrameGroupId: {},
-  requestConditionsByScopeKey: {},
   dirty: false,
 });
 
@@ -189,30 +156,16 @@ export const buildTemplateLogicalScopes = (
   );
 };
 
-export const buildScopeKeysByKeyFrameGroupId = (logicalScopes: TemplateLogicalScopeDto[]) => {
-  const scopeKeysByKeyFrameGroupId: Record<string, string[]> = {};
+export const buildScopeKeyByKeyFrameGroupId = (logicalScopes: TemplateLogicalScopeDto[]) => {
+  const scopeKeyByKeyFrameGroupId: Record<string, string> = {};
 
   logicalScopes.forEach((scope) => {
     scope.keyFrameGroupIds.forEach((keyFrameGroupId) => {
       const normalizedKeyFrameGroupId = normalizeString(keyFrameGroupId);
       if (normalizedKeyFrameGroupId) {
-        scopeKeysByKeyFrameGroupId[normalizedKeyFrameGroupId] = uniqueStrings([
-          ...(scopeKeysByKeyFrameGroupId[normalizedKeyFrameGroupId] || []),
-          scope.scopeKey,
-        ]);
+        scopeKeyByKeyFrameGroupId[normalizedKeyFrameGroupId] = scope.scopeKey;
       }
     });
-  });
-
-  return scopeKeysByKeyFrameGroupId;
-};
-
-export const buildScopeKeyByKeyFrameGroupId = (logicalScopes: TemplateLogicalScopeDto[]) => {
-  const scopeKeyByKeyFrameGroupId: Record<string, string> = {};
-  const scopeKeysByKeyFrameGroupId = buildScopeKeysByKeyFrameGroupId(logicalScopes);
-
-  Object.entries(scopeKeysByKeyFrameGroupId).forEach(([keyFrameGroupId, scopeKeys]) => {
-    scopeKeyByKeyFrameGroupId[keyFrameGroupId] = scopeKeys[0] || '';
   });
 
   return scopeKeyByKeyFrameGroupId;
@@ -239,10 +192,8 @@ export const createCanvasScopeDraftSnapshot = (context: TemplateScopeContextDto)
   siteId: context.siteId,
   logicalScopes: context.logicalScopes,
   assignmentsByScopeKey: context.assignmentsByScopeKey,
-  scopeKeysByKeyFrameGroupId: buildScopeKeysByKeyFrameGroupId(context.logicalScopes),
   scopeKeyByKeyFrameGroupId: buildScopeKeyByKeyFrameGroupId(context.logicalScopes),
   valueKeyByKeyFrameGroupId: buildValueKeyByKeyFrameGroupId(context.registryEntries),
-  requestConditionsByScopeKey: {},
   dirty: false,
 });
 
@@ -343,14 +294,6 @@ const upsertLogicalScope = (
   ].sort((left, right) => left.displayName.localeCompare(right.displayName, 'ko'));
 };
 
-const rebuildScopeIndex = (logicalScopes: TemplateLogicalScopeDto[]) => ({
-  scopeKeysByKeyFrameGroupId: buildScopeKeysByKeyFrameGroupId(logicalScopes),
-  scopeKeyByKeyFrameGroupId: buildScopeKeyByKeyFrameGroupId(logicalScopes),
-});
-
-export const normalizeRequestScopeExpiresAt = (value: string | null | undefined): string | null =>
-  normalizeString(value) || null;
-
 export const applyCanvasScopeDraftCommand = (
   snapshot: CanvasScopeDraftSnapshot,
   command: CanvasScopeDraftCommand
@@ -378,60 +321,6 @@ export const applyCanvasScopeDraftCommand = (
     };
   }
 
-  if (command.type === 'update_scope') {
-    const scopeKey = normalizeString(command.scopeKey);
-
-    if (!scopeKey) {
-      return snapshot;
-    }
-
-    return {
-      ...snapshot,
-      logicalScopes: snapshot.logicalScopes.map((scope) =>
-        scope.scopeKey === scopeKey
-          ? {
-              ...scope,
-              displayName: normalizeString(command.displayName) || scope.displayName,
-              description: command.description === undefined ? scope.description : normalizeString(command.description) || null,
-            }
-          : scope
-      ),
-      dirty: true,
-    };
-  }
-
-  if (command.type === 'deactivate_scope') {
-    const scopeKey = normalizeString(command.scopeKey);
-
-    if (!scopeKey) {
-      return snapshot;
-    }
-
-    const nextLogicalScopes = snapshot.logicalScopes.map((scope) =>
-      scope.scopeKey === scopeKey
-        ? {
-            ...scope,
-            status: 'inactive',
-            keyFrameGroupIds: [],
-            valueKeys: [],
-          }
-        : scope
-    );
-    const nextAssignmentsByScopeKey = { ...snapshot.assignmentsByScopeKey };
-    delete nextAssignmentsByScopeKey[scopeKey];
-    const nextRequestConditionsByScopeKey = { ...snapshot.requestConditionsByScopeKey };
-    delete nextRequestConditionsByScopeKey[scopeKey];
-
-    return {
-      ...snapshot,
-      logicalScopes: nextLogicalScopes,
-      assignmentsByScopeKey: nextAssignmentsByScopeKey,
-      requestConditionsByScopeKey: nextRequestConditionsByScopeKey,
-      ...rebuildScopeIndex(nextLogicalScopes),
-      dirty: true,
-    };
-  }
-
   if (command.type === 'assign_keys_to_scope') {
     const scopeKey = normalizeString(command.scopeKey);
     const keyFrameGroupIds = uniqueStrings(command.keyFrameGroupIds);
@@ -443,8 +332,8 @@ export const applyCanvasScopeDraftCommand = (
     const baseScopes = upsertLogicalScope(snapshot.logicalScopes, {
       templateId: snapshot.templateId,
       scopeKey,
-      displayName: snapshot.logicalScopes.find((scope) => scope.scopeKey === scopeKey)?.displayName || scopeKey,
-      description: snapshot.logicalScopes.find((scope) => scope.scopeKey === scopeKey)?.description ?? null,
+      displayName: scopeKey,
+      description: null,
     });
     const nextValueKeyByKeyFrameGroupId = { ...snapshot.valueKeyByKeyFrameGroupId };
     Object.entries(command.valueKeyByKeyFrameGroupId || {}).forEach(([keyFrameGroupId, valueKey]) => {
@@ -453,56 +342,30 @@ export const applyCanvasScopeDraftCommand = (
         nextValueKeyByKeyFrameGroupId[normalizedKeyFrameGroupId] = normalizeString(valueKey) || null;
       }
     });
-    const nextLogicalScopes = baseScopes.map((scope) => {
-      if (scope.scopeKey !== scopeKey) {
-        return scope;
-      }
-
-      const nextKeyFrameGroupIds = uniqueStrings([...scope.keyFrameGroupIds, ...keyFrameGroupIds]);
-
-      return {
-        ...scope,
-        status: 'active',
-        keyFrameGroupIds: nextKeyFrameGroupIds,
-        valueKeys: uniqueStrings(nextKeyFrameGroupIds.map((keyFrameGroupId) => nextValueKeyByKeyFrameGroupId[keyFrameGroupId])),
-      };
+    const nextScopeKeyByKeyFrameGroupId = { ...snapshot.scopeKeyByKeyFrameGroupId };
+    keyFrameGroupIds.forEach((keyFrameGroupId) => {
+      nextScopeKeyByKeyFrameGroupId[keyFrameGroupId] = scopeKey;
     });
 
     return {
       ...snapshot,
-      logicalScopes: nextLogicalScopes,
-      ...rebuildScopeIndex(nextLogicalScopes),
+      logicalScopes: baseScopes.map((scope) => {
+        const currentKeyFrameGroupIds = scope.keyFrameGroupIds.filter(
+          (keyFrameGroupId) => !keyFrameGroupIds.includes(keyFrameGroupId)
+        );
+        const nextKeyFrameGroupIds =
+          scope.scopeKey === scopeKey
+            ? uniqueStrings([...currentKeyFrameGroupIds, ...keyFrameGroupIds])
+            : currentKeyFrameGroupIds;
+
+        return {
+          ...scope,
+          keyFrameGroupIds: nextKeyFrameGroupIds,
+          valueKeys: uniqueStrings(nextKeyFrameGroupIds.map((keyFrameGroupId) => nextValueKeyByKeyFrameGroupId[keyFrameGroupId])),
+        };
+      }),
+      scopeKeyByKeyFrameGroupId: nextScopeKeyByKeyFrameGroupId,
       valueKeyByKeyFrameGroupId: nextValueKeyByKeyFrameGroupId,
-      dirty: true,
-    };
-  }
-
-  if (command.type === 'remove_keys_from_scope') {
-    const scopeKey = normalizeString(command.scopeKey);
-    const keyFrameGroupIds = uniqueStrings(command.keyFrameGroupIds);
-
-    if (!scopeKey || keyFrameGroupIds.length <= 0) {
-      return snapshot;
-    }
-
-    const nextLogicalScopes = snapshot.logicalScopes.map((scope) => {
-      if (scope.scopeKey !== scopeKey) {
-        return scope;
-      }
-
-      const nextKeyFrameGroupIds = scope.keyFrameGroupIds.filter((keyFrameGroupId) => !keyFrameGroupIds.includes(keyFrameGroupId));
-
-      return {
-        ...scope,
-        keyFrameGroupIds: nextKeyFrameGroupIds,
-        valueKeys: uniqueStrings(nextKeyFrameGroupIds.map((keyFrameGroupId) => snapshot.valueKeyByKeyFrameGroupId[keyFrameGroupId])),
-      };
-    });
-
-    return {
-      ...snapshot,
-      logicalScopes: nextLogicalScopes,
-      ...rebuildScopeIndex(nextLogicalScopes),
       dirty: true,
     };
   }
@@ -519,44 +382,6 @@ export const applyCanvasScopeDraftCommand = (
       assignmentsByScopeKey: {
         ...snapshot.assignmentsByScopeKey,
         [scopeKey]: uniqueStrings(command.memberIds),
-      },
-      dirty: true,
-    };
-  }
-
-  if (command.type === 'set_scope_request_condition') {
-    const scopeKey = normalizeString(command.scopeKey);
-
-    if (!scopeKey) {
-      return snapshot;
-    }
-
-    const previousCondition = snapshot.requestConditionsByScopeKey[scopeKey] || {
-      scopeKey,
-      requiredPhotoTagKeys: [],
-      requiredFileTagKeys: [],
-      expiresAt: null,
-    };
-
-    return {
-      ...snapshot,
-      requestConditionsByScopeKey: {
-        ...snapshot.requestConditionsByScopeKey,
-        [scopeKey]: {
-          scopeKey,
-          requiredPhotoTagKeys:
-            command.requiredPhotoTagKeys === undefined
-              ? previousCondition.requiredPhotoTagKeys
-              : uniqueStrings(command.requiredPhotoTagKeys),
-          requiredFileTagKeys:
-            command.requiredFileTagKeys === undefined
-              ? previousCondition.requiredFileTagKeys
-              : uniqueStrings(command.requiredFileTagKeys),
-          expiresAt:
-            command.expiresAt === undefined
-              ? normalizeRequestScopeExpiresAt(previousCondition.expiresAt)
-              : normalizeRequestScopeExpiresAt(command.expiresAt),
-        },
       },
       dirty: true,
     };

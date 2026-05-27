@@ -244,6 +244,7 @@ import {
   DEFAULT_TEMPLATE_FRAME_BORDER_COLOR,
   DEFAULT_TEMPLATE_FRAME_BORDER_STYLE,
   DEFAULT_TEMPLATE_FRAME_BORDER_WIDTH,
+  FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES,
   FRAME_BOX_KIND_BUTTON_LABELS,
   FRAME_BOX_KIND_DESCRIPTIONS,
   FRAME_BOX_KIND_LABELS,
@@ -276,6 +277,7 @@ import {
   FRAME_REVIEW_WARNING_BUTTON_CLASS,
   FRAME_REVIEW_WARNING_POPOVER_CLASS,
   FRAME_RICHTEXT_PREVIEW_CLASS,
+  FRAME_ROLE_ACTIVE_BUTTON_CLASSES,
   FRAME_ROLE_DESCRIPTIONS,
   FRAME_ROLE_LABELS,
   FRAME_ROLE_SHORT_LABELS,
@@ -321,6 +323,7 @@ import {
   TEMPLATE_FRAME_BORDER_STYLE_ATTR,
   TEMPLATE_FRAME_BORDER_WIDTH_ATTR,
   TEMPLATE_FRAME_BOX_KIND_ATTR,
+  TEMPLATE_FRAME_BOX_KIND_OPTIONS,
   TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR,
   TEMPLATE_FRAME_COLOR_GROUP_ATTR,
   TEMPLATE_FRAME_FIELD_TYPE_ATTR,
@@ -19045,6 +19048,8 @@ export default function TemplateEditWorkspace({
   const [scopeDraftMessage, setScopeDraftMessage] = React.useState('');
   const [activeScopeKey, setActiveScopeKey] = React.useState('');
   const [newScopeDisplayName, setNewScopeDisplayName] = React.useState('');
+  const [scopeMemberOptions, setScopeMemberOptions] = React.useState<EntityPickerOption[]>([]);
+  const [scopeMemberLoading, setScopeMemberLoading] = React.useState(false);
   const [signatureOverlayTarget, setSignatureOverlayTarget] =
     React.useState<TemplateChecklistRegistrationTarget | null>(null);
   const [signatureOverlaySubmitting, setSignatureOverlaySubmitting] = React.useState(false);
@@ -33984,10 +33989,7 @@ export default function TemplateEditWorkspace({
         throw new Error(payload.message || 'scope 정보를 불러오지 못했습니다.');
       }
 
-      const nextSnapshot = {
-        ...createCanvasScopeDraftSnapshot(payload.data),
-        requestConditionsByScopeKey: scopeDraftSnapshot.requestConditionsByScopeKey,
-      };
+      const nextSnapshot = createCanvasScopeDraftSnapshot(payload.data);
       setScopeDraftSnapshot(nextSnapshot);
       setActiveScopeKey((previous) => {
         if (previous && nextSnapshot.logicalScopes.some((scope) => scope.scopeKey === previous)) {
@@ -34008,6 +34010,71 @@ export default function TemplateEditWorkspace({
   React.useEffect(() => {
     void loadTemplateScopeDraft();
   }, [loadTemplateScopeDraft]);
+
+  React.useEffect(() => {
+    if (!activeScopeSiteId) {
+      setScopeMemberOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadScopeMembers = async () => {
+      setScopeMemberLoading(true);
+
+      try {
+        const response = await fetch(`/api/member-access/site-members?siteId=${encodeURIComponent(activeScopeSiteId)}`, {
+          cache: 'no-store',
+        });
+        const payload = (await response.json()) as {
+          success?: boolean;
+          data?: unknown;
+          message?: string;
+        };
+
+        if (!response.ok || !payload.success || !Array.isArray(payload.data)) {
+          throw new Error(payload.message || '현장 구성원 목록을 불러오지 못했습니다.');
+        }
+
+        const nextOptions = payload.data
+          .map<EntityPickerOption | null>((record) => {
+            const memberRecord = (record as { member?: { id?: string; displayName?: string | null; phoneNumber?: string } }).member;
+            const memberId = memberRecord?.id?.trim() || '';
+
+            if (!memberId) {
+              return null;
+            }
+
+            return {
+              id: memberId,
+              label: memberRecord?.displayName?.trim() || memberRecord?.phoneNumber || memberId,
+              meta: memberRecord?.phoneNumber || memberId,
+              keywords: [memberRecord?.displayName || '', memberRecord?.phoneNumber || '', memberId],
+            } satisfies EntityPickerOption;
+          })
+          .filter((option): option is EntityPickerOption => Boolean(option));
+
+        if (!cancelled) {
+          setScopeMemberOptions(nextOptions);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setScopeMemberOptions([]);
+          setScopeDraftMessage(error instanceof Error ? error.message : '현장 구성원 목록을 불러오지 못했습니다.');
+        }
+      } finally {
+        if (!cancelled) {
+          setScopeMemberLoading(false);
+        }
+      }
+    };
+
+    void loadScopeMembers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeScopeSiteId]);
 
   const roleAssignmentOwnerItem = React.useCallback((item: string, name: string) => {
     const normalizedItem = item.trim();
@@ -34113,6 +34180,31 @@ export default function TemplateEditWorkspace({
       .filter(({ selectedBox }) => selectedIdSet.has(selectedBox.id))
       .map(({ selectedBox }) => selectedBox);
   }, [roleAssignmentSelectedBoxIds, roleAssignmentTargetItems]);
+  const roleAssignmentHasSelectedTarget = roleAssignmentSelectedBoxes.length > 0;
+  const roleAssignmentDisplayedBoxKinds = React.useMemo(() => {
+    const selectedKinds = new Set<TemplateFrameBoxKind>();
+
+    roleAssignmentSelectedBoxes.forEach((box) => {
+      if (box.boxKind) {
+        selectedKinds.add(box.boxKind);
+      }
+    });
+
+    return selectedKinds.size > 0 ? selectedKinds : displayedMetadataBoxKinds;
+  }, [displayedMetadataBoxKinds, roleAssignmentSelectedBoxes]);
+  const roleAssignmentDisplayedRoles = React.useMemo(() => {
+    const selectedRoles = new Set<TemplateFrameRole>();
+
+    roleAssignmentSelectedBoxes.forEach((box) => {
+      const frameRole = box.frameRole;
+
+      if (TEMPLATE_FRAME_ROLE_OPTIONS.includes(frameRole as TemplateFrameRole)) {
+        selectedRoles.add(frameRole as TemplateFrameRole);
+      }
+    });
+
+    return selectedRoles.size > 0 ? selectedRoles : displayedMetadataRoles;
+  }, [displayedMetadataRoles, roleAssignmentSelectedBoxes]);
   const commitRoleAssignmentSelectedBoxes = React.useCallback(
     (nextSelectedBoxes: TemplateCanvasSelectedBox[], source: TemplateCanvasSelectionChangeOptions['source']) => {
       const root = previewRef.current;
@@ -34174,6 +34266,26 @@ export default function TemplateEditWorkspace({
     },
     [commitRoleAssignmentSelectedBoxes, roleAssignmentTargetItems]
   );
+  const stageRoleAssignmentBoxKind = React.useCallback(
+    (boxKind: TemplateFrameBoxKind) => {
+      if (roleAssignmentHasSelectedTarget) {
+        syncFrameMetadataDraftFromIdsRef.current(selectedFrameGroupIdsRef.current.slice());
+      }
+
+      stageMetadataBoxKind(boxKind);
+    },
+    [roleAssignmentHasSelectedTarget, stageMetadataBoxKind]
+  );
+  const stageRoleAssignmentFrameRole = React.useCallback(
+    (role: TemplateFrameRole) => {
+      if (roleAssignmentHasSelectedTarget) {
+        syncFrameMetadataDraftFromIdsRef.current(selectedFrameGroupIdsRef.current.slice());
+      }
+
+      stageMetadataRole(role);
+    },
+    [roleAssignmentHasSelectedTarget, stageMetadataRole]
+  );
   const roleAssignmentSelectedSummary = React.useMemo(() => {
     if (roleAssignmentSelectedBoxes.length <= 0) {
       return '선택된 상자가 없습니다.';
@@ -34220,36 +34332,15 @@ export default function TemplateEditWorkspace({
       Array.from(
         new Set(
           roleAssignmentSelectedKeyFrameGroupIds
-            .flatMap((keyFrameGroupId) => {
-              const scopeKeys = scopeDraftSnapshot.scopeKeysByKeyFrameGroupId[keyFrameGroupId] || [];
-              const legacyScopeKey = scopeDraftSnapshot.scopeKeyByKeyFrameGroupId[keyFrameGroupId] || '';
-
-              return scopeKeys.length > 0 ? scopeKeys : [legacyScopeKey];
-            })
+            .map((keyFrameGroupId) => scopeDraftSnapshot.scopeKeyByKeyFrameGroupId[keyFrameGroupId] || '')
             .filter(Boolean)
         )
       ),
-    [
-      roleAssignmentSelectedKeyFrameGroupIds,
-      scopeDraftSnapshot.scopeKeyByKeyFrameGroupId,
-      scopeDraftSnapshot.scopeKeysByKeyFrameGroupId,
-    ]
+    [roleAssignmentSelectedKeyFrameGroupIds, scopeDraftSnapshot.scopeKeyByKeyFrameGroupId]
   );
   const activeLogicalScope = React.useMemo(
     () => scopeDraftSnapshot.logicalScopes.find((scope) => scope.scopeKey === activeScopeKey) || null,
     [activeScopeKey, scopeDraftSnapshot.logicalScopes]
-  );
-  const activeScopeRequestCondition = React.useMemo(
-    () =>
-      activeScopeKey
-        ? scopeDraftSnapshot.requestConditionsByScopeKey[activeScopeKey] || {
-            scopeKey: activeScopeKey,
-            requiredPhotoTagKeys: [],
-            requiredFileTagKeys: [],
-            expiresAt: null,
-          }
-        : null,
-    [activeScopeKey, scopeDraftSnapshot.requestConditionsByScopeKey]
   );
   const scopePickerOptions = React.useMemo<EntityPickerOption[]>(
     () =>
@@ -34261,6 +34352,7 @@ export default function TemplateEditWorkspace({
       })),
     [scopeDraftSnapshot.logicalScopes]
   );
+  const activeScopeMemberIds = activeScopeKey ? scopeDraftSnapshot.assignmentsByScopeKey[activeScopeKey] || [] : [];
   const activeScopeSelectedKeyCount = activeLogicalScope?.keyFrameGroupIds.length || 0;
   const roleAssignmentScopeSelectionSummary =
     roleAssignmentSelectedKeyFrameGroupIds.length <= 0
@@ -34268,8 +34360,8 @@ export default function TemplateEditWorkspace({
       : roleAssignmentSelectedScopeKeys.length <= 0
         ? `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · 아직 scope 없음`
         : roleAssignmentSelectedScopeKeys.length === 1
-          ? `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · scope ${roleAssignmentSelectedScopeKeys[0]}`
-          : `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · 중첩 scope ${roleAssignmentSelectedScopeKeys.length}개`;
+          ? `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · 현재 scope ${roleAssignmentSelectedScopeKeys[0]}`
+          : `선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개 · 서로 다른 scope ${roleAssignmentSelectedScopeKeys.length}개`;
   const handleCreateRoleScope = React.useCallback(() => {
     const displayName = newScopeDisplayName.trim();
 
@@ -34315,94 +34407,20 @@ export default function TemplateEditWorkspace({
     );
     setScopeDraftMessage(`선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개를 scope draft에 반영했습니다.`);
   }, [activeScopeKey, roleAssignmentSelectedKeyFrameGroupIds, roleAssignmentSelectedValueKeyByKeyFrameGroupId]);
-  const handleRemoveSelectedKeysFromScope = React.useCallback(() => {
-    if (!activeScopeKey) {
-      setScopeDraftMessage('먼저 scope를 선택하세요.');
-      return;
-    }
-
-    if (roleAssignmentSelectedKeyFrameGroupIds.length <= 0) {
-      setScopeDraftMessage('scope에서 뺄 key 상자를 먼저 선택하세요.');
-      return;
-    }
-
-    setScopeDraftSnapshot((previous) =>
-      applyCanvasScopeDraftCommand(previous, {
-        type: 'remove_keys_from_scope',
-        scopeKey: activeScopeKey,
-        keyFrameGroupIds: roleAssignmentSelectedKeyFrameGroupIds,
-      })
-    );
-    setScopeDraftMessage(`선택 key ${roleAssignmentSelectedKeyFrameGroupIds.length}개를 scope에서 해제했습니다.`);
-  }, [activeScopeKey, roleAssignmentSelectedKeyFrameGroupIds]);
-  const handleUpdateActiveScopeDisplayName = React.useCallback(
-    (displayName: string) => {
+  const handleActiveScopeMembersChange = React.useCallback(
+    (memberIds: string[]) => {
       if (!activeScopeKey) {
         return;
       }
 
       setScopeDraftSnapshot((previous) =>
         applyCanvasScopeDraftCommand(previous, {
-          type: 'update_scope',
+          type: 'assign_members_to_scope',
           scopeKey: activeScopeKey,
-          displayName,
+          memberIds,
         })
       );
-    },
-    [activeScopeKey]
-  );
-  const handleUpdateActiveScopeDescription = React.useCallback(
-    (description: string) => {
-      if (!activeScopeKey) {
-        return;
-      }
-
-      setScopeDraftSnapshot((previous) =>
-        applyCanvasScopeDraftCommand(previous, {
-          type: 'update_scope',
-          scopeKey: activeScopeKey,
-          description,
-        })
-      );
-    },
-    [activeScopeKey]
-  );
-  const handleDeactivateActiveScope = React.useCallback(() => {
-    if (!activeScopeKey) {
-      setScopeDraftMessage('비활성화할 scope를 선택하세요.');
-      return;
-    }
-
-    const targetLabel = activeLogicalScope?.displayName || activeScopeKey;
-
-    if (typeof window !== 'undefined' && !window.confirm(`"${targetLabel}" scope를 비활성화하시겠습니까?`)) {
-      return;
-    }
-
-    setScopeDraftSnapshot((previous) =>
-      applyCanvasScopeDraftCommand(previous, {
-        type: 'deactivate_scope',
-        scopeKey: activeScopeKey,
-      })
-    );
-    setActiveScopeKey('');
-    setScopeDraftMessage(`scope "${targetLabel}" 을(를) 비활성화 draft에 반영했습니다.`);
-  }, [activeLogicalScope?.displayName, activeScopeKey]);
-  const handleUpdateActiveScopeCondition = React.useCallback(
-    (patch: { requiredPhotoTagKeys?: string[]; requiredFileTagKeys?: string[]; expiresAt?: string | null }) => {
-      if (!activeScopeKey) {
-        setScopeDraftMessage('먼저 scope를 선택하세요.');
-        return;
-      }
-
-      setScopeDraftSnapshot((previous) =>
-        applyCanvasScopeDraftCommand(previous, {
-          type: 'set_scope_request_condition',
-          scopeKey: activeScopeKey,
-          ...patch,
-        })
-      );
-      setScopeDraftMessage('scope 요청 조건을 draft에 반영했습니다.');
+      setScopeDraftMessage('scope 구성원 draft를 변경했습니다.');
     },
     [activeScopeKey]
   );
@@ -34459,217 +34477,87 @@ export default function TemplateEditWorkspace({
     activeTemplateScopeTemplateId,
     scopeDraftSnapshot,
   ]);
-  const RoleAssignmentOverlayContent = () => {
-    const [roleAssignmentRequestSetupStep, setRoleAssignmentRequestSetupStep] =
-      React.useState<'scope' | 'photo' | 'file' | 'expiration'>('scope');
-
-    return (
+  const roleAssignmentOverlayNode = (
     <div
       className="space-y-4"
       {...roleAssignmentOwnerItem('request-link-settings-column', '요청 링크 설정 오른쪽 설정 열')}
     >
       <div className="space-y-3" {...roleAssignmentOwnerItem('request-setup-stepper', '요청 링크 설정 단계 선택 영역')}>
-        <div className="grid grid-cols-2 gap-2" {...roleAssignmentOwnerItem('request-setup-step-list', '요청 링크 설정 단계 목록')}>
-          {[
-            { key: 'scope', label: '1. 상자에 scope 지정' },
-            { key: 'photo', label: '2. 필수 사진 등록' },
-            { key: 'file', label: '3. 필수 파일 등록' },
-            { key: 'expiration', label: '4. 만료 시각 설정' },
-          ].map((step) => {
-            const selected = roleAssignmentRequestSetupStep === step.key;
-
-            return (
-              <button
-                key={`role-request-step:${step.key}`}
-                type="button"
-                onClick={() => setRoleAssignmentRequestSetupStep(step.key as typeof roleAssignmentRequestSetupStep)}
-                className={`rounded-md border px-3 py-2 text-left text-xs font-semibold transition ${
-                  selected
-                    ? 'border-slate-900 bg-slate-900 text-white'
-                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                }`}
-                {...roleAssignmentOwnerItem(`request-setup-step-button-${step.key}`, `요청 링크 설정 ${step.label} 버튼`)}
-              >
-                {step.label}
-              </button>
-            );
-          })}
+        <div className="grid grid-cols-1 gap-2" {...roleAssignmentOwnerItem('request-setup-step-list', '요청 링크 설정 단계 목록')}>
+          <button
+            type="button"
+            className="rounded-md border border-slate-900 bg-slate-900 px-3 py-2 text-left text-xs font-semibold text-white"
+            {...roleAssignmentOwnerItem('request-setup-step-button', '요청 링크 설정 단계 버튼')}
+          >
+            1. 상자 권한 scope 설정
+          </button>
         </div>
         <div
           className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
           {...roleAssignmentOwnerItem('request-setup-active-step-summary', '요청 링크 설정 현재 단계 요약')}
         >
           <p className="text-[11px] font-semibold text-slate-500" {...roleAssignmentOwnerItem('request-setup-active-step-count', '요청 링크 설정 현재 단계 번호')}>
-            단계 {roleAssignmentRequestSetupStep === 'scope' ? '1' : roleAssignmentRequestSetupStep === 'photo' ? '2' : roleAssignmentRequestSetupStep === 'file' ? '3' : '4'} / 4
+            단계 1 / 1
           </p>
           <p className="mt-1 text-sm font-semibold text-slate-900" {...roleAssignmentOwnerItem('request-setup-active-step-title', '요청 링크 설정 현재 단계 제목')}>
-            {roleAssignmentRequestSetupStep === 'scope'
-              ? '상자에 scope 지정'
-              : roleAssignmentRequestSetupStep === 'photo'
-                ? '필수 사진 등록'
-                : roleAssignmentRequestSetupStep === 'file'
-                  ? '필수 파일 등록'
-                  : '만료 시각 설정'}
+            상자 권한 scope 설정
           </p>
           <p className="mt-1 text-xs text-slate-500" {...roleAssignmentOwnerItem('request-setup-active-step-description', '요청 링크 설정 현재 단계 설명')}>
-            {roleAssignmentRequestSetupStep === 'scope'
-              ? 'key/value 쌍을 고르고 key 상자를 하나 이상의 scope에 편입합니다.'
-              : roleAssignmentRequestSetupStep === 'photo'
-                ? '선택 scope에 요청할 필수 사진 태그를 draft로 지정합니다.'
-                : roleAssignmentRequestSetupStep === 'file'
-                  ? '선택 scope에 요청할 필수 파일 태그를 draft로 지정합니다.'
-                  : '값이 있을 때만 기한 제한이 있으며, 비어 있으면 기한 제한 없음입니다.'}
+            key/value 쌍을 고르고, key 상자를 scope에 넣은 뒤 현장 구성원을 scope에 배정합니다.
           </p>
         </div>
       </div>
 
       <div className="space-y-4" {...roleAssignmentOwnerItem('request-setup-active-step-panel', '요청 링크 설정 현재 단계 내용')}>
-        {roleAssignmentRequestSetupStep === 'scope' ? (
-          <div className="space-y-3" {...roleAssignmentOwnerItem('selected-box-panel', '선택한 상자 패널')}>
-            <div className="flex items-center justify-between gap-3" {...roleAssignmentOwnerItem('selected-box-panel-header', '선택한 상자 패널 머리글')}>
-              <div className="text-sm font-medium text-slate-900" {...roleAssignmentOwnerItem('selected-box-panel-title', '선택한 상자 패널 제목')}>
-                선택한 key/value 상자
+        <div className="space-y-3" {...roleAssignmentOwnerItem('selected-box-panel', '선택한 상자 패널')}>
+          <div className="flex items-center justify-between gap-3" {...roleAssignmentOwnerItem('selected-box-panel-header', '선택한 상자 패널 머리글')}>
+            <div className="text-sm font-medium text-slate-900" {...roleAssignmentOwnerItem('selected-box-panel-title', '선택한 상자 패널 제목')}>
+              선택한 key/value 상자
+            </div>
+            <Badge variant="slate" {...roleAssignmentOwnerItem('selected-box-count-badge', '선택한 상자 개수 배지')}>
+              {roleAssignmentSelectedBoxes.length}개
+            </Badge>
+          </div>
+
+          <div className="space-y-2" {...roleAssignmentOwnerItem('selected-box-field-picker', '선택한 상자 셀렉트 박스 항목')}>
+            <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('selected-box-field-picker-label', '선택한 상자 셀렉트 박스 라벨')}>
+              상자 선택
+            </label>
+            <MultiEntityPicker
+              values={roleAssignmentSelectedBoxIds}
+              options={roleAssignmentBoxOptions}
+              onChange={handleRoleAssignmentBoxIdsChange}
+              placeholder="상자를 선택하세요"
+              searchPlaceholder="키 이름으로 상자 검색"
+              emptyMessage="선택 가능한 상자가 없습니다."
+              optionLayout="inline"
+              allowClear
+              triggerClassName="transition-colors hover:border-slate-400"
+              ownerItemKey="selected-box-field-picker-control"
+              ownerItemName="선택한 상자 셀렉트 박스 선택기"
+              ownerItemAttributes={roleAssignmentOwnerItem}
+            />
+            <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('selected-box-summary', '선택한 상자 요약')}>
+              {roleAssignmentSelectedSummary}
+            </p>
+            <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('selected-box-scope-summary', '선택한 상자 scope 요약')}>
+              {roleAssignmentScopeSelectionSummary}
+            </p>
+          </div>
+
+          <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3" {...roleAssignmentOwnerItem('selected-box-scope-field', '선택한 key 상자 scope 지정 영역')}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-slate-800">권한 scope</p>
+                <p className="text-xs text-slate-500">선택한 key 상자들을 scope에 넣습니다. 사람은 상자가 아니라 scope에 배정됩니다.</p>
               </div>
-              <Badge variant="slate" {...roleAssignmentOwnerItem('selected-box-count-badge', '선택한 상자 개수 배지')}>
-                {roleAssignmentSelectedBoxes.length}개
+              <Badge variant={scopeDraftSnapshot.dirty ? 'amber' : 'slate'} {...roleAssignmentOwnerItem('scope-draft-status-badge', 'scope draft 상태 배지')}>
+                {scopeDraftSnapshot.dirty ? 'draft' : 'saved'}
               </Badge>
             </div>
 
-            <div className="space-y-2" {...roleAssignmentOwnerItem('selected-box-field-picker', '선택한 상자 셀렉트 박스 항목')}>
-              <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('selected-box-field-picker-label', '선택한 상자 셀렉트 박스 라벨')}>
-                상자 선택
-              </label>
-              <MultiEntityPicker
-                values={roleAssignmentSelectedBoxIds}
-                options={roleAssignmentBoxOptions}
-                onChange={handleRoleAssignmentBoxIdsChange}
-                placeholder="상자를 선택하세요"
-                searchPlaceholder="키 이름으로 상자 검색"
-                emptyMessage="선택 가능한 상자가 없습니다."
-                optionLayout="inline"
-                allowClear
-                triggerClassName="transition-colors hover:border-slate-400"
-                ownerItemKey="selected-box-field-picker-control"
-                ownerItemName="선택한 상자 셀렉트 박스 선택기"
-                ownerItemAttributes={roleAssignmentOwnerItem}
-              />
-              <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('selected-box-summary', '선택한 상자 요약')}>
-                {roleAssignmentSelectedSummary}
-              </p>
-              <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('selected-box-scope-summary', '선택한 상자 scope 요약')}>
-                {roleAssignmentScopeSelectionSummary}
-              </p>
-            </div>
-
-            <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3" {...roleAssignmentOwnerItem('selected-box-scope-field', '선택한 key 상자 scope 지정 영역')}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-slate-800">권한 scope</p>
-                  <p className="text-xs text-slate-500">선택한 key 상자는 여러 scope에 동시에 속할 수 있습니다.</p>
-                </div>
-                <Badge variant={scopeDraftSnapshot.dirty ? 'amber' : 'slate'} {...roleAssignmentOwnerItem('scope-draft-status-badge', 'scope draft 상태 배지')}>
-                  {scopeDraftSnapshot.dirty ? 'draft' : 'saved'}
-                </Badge>
-              </div>
-
-              <div className="space-y-2" {...roleAssignmentOwnerItem('scope-picker-field', '권한 scope 선택 영역')}>
-                <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('scope-picker-label', '권한 scope 선택 라벨')}>
-                  scope 선택
-                </label>
-                <EntityPicker
-                  value={activeScopeKey}
-                  options={scopePickerOptions}
-                  onChange={setActiveScopeKey}
-                  placeholder={scopeDraftLoading ? 'scope 불러오는 중' : 'scope를 선택하세요'}
-                  searchPlaceholder="scope 이름 또는 key 검색"
-                  emptyMessage="아직 생성된 scope가 없습니다."
-                  optionLayout="inline"
-                  disabled={scopeDraftLoading || !activeTemplateScopeTemplateId}
-                  allowClear
-                  triggerClassName="transition-colors hover:border-slate-400"
-                  ownerItemKey="scope-picker-control"
-                  ownerItemName="권한 scope 선택기"
-                  ownerItemAttributes={roleAssignmentOwnerItem}
-                />
-                <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('scope-picker-summary', '선택한 권한 scope 요약')}>
-                  {activeLogicalScope
-                    ? `${activeLogicalScope.displayName} · key ${activeScopeSelectedKeyCount}개`
-                    : '선택된 scope가 없습니다.'}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-[1fr_auto] gap-2" {...roleAssignmentOwnerItem('scope-create-field', '권한 scope 생성 영역')}>
-                <Input
-                  value={newScopeDisplayName}
-                  onChange={(event) => setNewScopeDisplayName(event.target.value)}
-                  placeholder="새 scope 이름"
-                  disabled={!activeTemplateScopeTemplateId}
-                  {...roleAssignmentOwnerItem('scope-create-input', '새 권한 scope 이름 입력')}
-                />
-                <button
-                  type="button"
-                  disabled={!activeTemplateScopeTemplateId || !newScopeDisplayName.trim()}
-                  onClick={handleCreateRoleScope}
-                  className="min-h-9 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  {...roleAssignmentOwnerItem('scope-create-button', '새 권한 scope 생성 버튼')}
-                >
-                  생성
-                </button>
-              </div>
-
-              {activeLogicalScope ? (
-                <div className="grid gap-2" {...roleAssignmentOwnerItem('scope-edit-field', '권한 scope 수정 영역')}>
-                  <Input
-                    value={activeLogicalScope.displayName}
-                    onChange={(event) => handleUpdateActiveScopeDisplayName(event.target.value)}
-                    placeholder="scope 표시명"
-                    {...roleAssignmentOwnerItem('scope-display-name-input', '권한 scope 표시명 입력')}
-                  />
-                  <Input
-                    value={activeLogicalScope.description || ''}
-                    onChange={(event) => handleUpdateActiveScopeDescription(event.target.value)}
-                    placeholder="scope 설명"
-                    {...roleAssignmentOwnerItem('scope-description-input', '권한 scope 설명 입력')}
-                  />
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-2 gap-2" {...roleAssignmentOwnerItem('scope-selected-key-actions', '선택 key scope 편입 해제 버튼 영역')}>
-                <button
-                  type="button"
-                  disabled={!activeScopeKey || roleAssignmentSelectedKeyFrameGroupIds.length <= 0}
-                  onClick={handleAssignSelectedKeysToScope}
-                  className="min-h-9 rounded-md border border-slate-900 bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
-                  {...roleAssignmentOwnerItem('scope-assign-selected-keys-button', '선택 key 상자를 권한 scope에 넣는 버튼')}
-                >
-                  선택 key {roleAssignmentSelectedKeyFrameGroupIds.length}개 포함
-                </button>
-                <button
-                  type="button"
-                  disabled={!activeScopeKey || roleAssignmentSelectedKeyFrameGroupIds.length <= 0}
-                  onClick={handleRemoveSelectedKeysFromScope}
-                  className="min-h-9 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  {...roleAssignmentOwnerItem('scope-remove-selected-keys-button', '선택 key 상자를 권한 scope에서 빼는 버튼')}
-                >
-                  선택 key 해제
-                </button>
-              </div>
-
-              <button
-                type="button"
-                disabled={!activeScopeKey}
-                onClick={handleDeactivateActiveScope}
-                className="min-h-9 w-full rounded-md border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                {...roleAssignmentOwnerItem('scope-deactivate-button', '권한 scope 비활성화 버튼')}
-              >
-                선택 scope 비활성화
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3" {...roleAssignmentOwnerItem('scope-request-condition-panel', 'scope 요청 조건 설정 패널')}>
-            <div className="space-y-2" {...roleAssignmentOwnerItem('scope-condition-picker-field', '요청 조건 scope 선택 영역')}>
-              <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('scope-condition-picker-label', '요청 조건 scope 선택 라벨')}>
+            <div className="space-y-2" {...roleAssignmentOwnerItem('scope-picker-field', '권한 scope 선택 영역')}>
+              <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('scope-picker-label', '권한 scope 선택 라벨')}>
                 scope 선택
               </label>
               <EntityPicker
@@ -34683,97 +34571,170 @@ export default function TemplateEditWorkspace({
                 disabled={scopeDraftLoading || !activeTemplateScopeTemplateId}
                 allowClear
                 triggerClassName="transition-colors hover:border-slate-400"
-                ownerItemKey="scope-condition-picker-control"
-                ownerItemName="요청 조건 scope 선택기"
+                ownerItemKey="scope-picker-control"
+                ownerItemName="권한 scope 선택기"
                 ownerItemAttributes={roleAssignmentOwnerItem}
               />
+              <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('scope-picker-summary', '선택한 권한 scope 요약')}>
+                {activeLogicalScope
+                  ? `${activeLogicalScope.displayName} · key ${activeScopeSelectedKeyCount}개`
+                  : '선택된 scope가 없습니다.'}
+              </p>
             </div>
 
-            {roleAssignmentRequestSetupStep === 'photo' ? (
-              <div className="space-y-2" {...roleAssignmentOwnerItem('scope-required-photo-field', 'scope 필수 사진 태그 영역')}>
-                <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('scope-required-photo-label', 'scope 필수 사진 태그 라벨')}>
-                  필수 사진 태그
-                </label>
-                <Input
-                  value={(activeScopeRequestCondition?.requiredPhotoTagKeys || []).join(', ')}
-                  onChange={(event) =>
-                    handleUpdateActiveScopeCondition({
-                      requiredPhotoTagKeys: event.target.value.split(',').map((tagKey) => tagKey.trim()).filter(Boolean),
-                    })
-                  }
-                  placeholder="예: 현장사진, 신분증"
-                  disabled={!activeScopeKey}
-                  {...roleAssignmentOwnerItem('scope-required-photo-input', 'scope 필수 사진 태그 입력')}
-                />
-              </div>
-            ) : null}
+            <div className="grid grid-cols-[1fr_auto] gap-2" {...roleAssignmentOwnerItem('scope-create-field', '권한 scope 생성 영역')}>
+              <Input
+                value={newScopeDisplayName}
+                onChange={(event) => setNewScopeDisplayName(event.target.value)}
+                placeholder="새 scope 이름"
+                disabled={!activeTemplateScopeTemplateId}
+                {...roleAssignmentOwnerItem('scope-create-input', '새 권한 scope 이름 입력')}
+              />
+              <button
+                type="button"
+                disabled={!activeTemplateScopeTemplateId || !newScopeDisplayName.trim()}
+                onClick={handleCreateRoleScope}
+                className="min-h-9 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                {...roleAssignmentOwnerItem('scope-create-button', '새 권한 scope 생성 버튼')}
+              >
+                생성
+              </button>
+            </div>
 
-            {roleAssignmentRequestSetupStep === 'file' ? (
-              <div className="space-y-2" {...roleAssignmentOwnerItem('scope-required-file-field', 'scope 필수 파일 태그 영역')}>
-                <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('scope-required-file-label', 'scope 필수 파일 태그 라벨')}>
-                  필수 파일 태그
-                </label>
-                <Input
-                  value={(activeScopeRequestCondition?.requiredFileTagKeys || []).join(', ')}
-                  onChange={(event) =>
-                    handleUpdateActiveScopeCondition({
-                      requiredFileTagKeys: event.target.value.split(',').map((tagKey) => tagKey.trim()).filter(Boolean),
-                    })
-                  }
-                  placeholder="예: 사업자등록증, 통장사본"
-                  disabled={!activeScopeKey}
-                  {...roleAssignmentOwnerItem('scope-required-file-input', 'scope 필수 파일 태그 입력')}
-                />
-              </div>
-            ) : null}
+            <button
+              type="button"
+              disabled={!activeScopeKey || roleAssignmentSelectedKeyFrameGroupIds.length <= 0}
+              onClick={handleAssignSelectedKeysToScope}
+              className="min-h-9 w-full rounded-md border border-slate-900 bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
+              {...roleAssignmentOwnerItem('scope-assign-selected-keys-button', '선택 key 상자를 권한 scope에 넣는 버튼')}
+            >
+              선택 key {roleAssignmentSelectedKeyFrameGroupIds.length}개를 scope에 넣기
+            </button>
 
-            {roleAssignmentRequestSetupStep === 'expiration' ? (
-              <div className="space-y-2" {...roleAssignmentOwnerItem('scope-expiration-field', 'scope 만료 시각 영역')}>
-                <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('scope-expiration-label', 'scope 만료 시각 라벨')}>
-                  만료 시각
-                </label>
-                <input
-                  type="datetime-local"
-                  value={activeScopeRequestCondition?.expiresAt || ''}
-                  onChange={(event) => handleUpdateActiveScopeCondition({ expiresAt: event.target.value || null })}
-                  disabled={!activeScopeKey}
-                  className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  {...roleAssignmentOwnerItem('scope-expiration-input', 'scope 만료 시각 입력')}
-                />
-                <button
-                  type="button"
-                  disabled={!activeScopeKey}
-                  onClick={() => handleUpdateActiveScopeCondition({ expiresAt: null })}
-                  className="min-h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  {...roleAssignmentOwnerItem('scope-expiration-clear-button', 'scope 만료 시각 제한 없음 버튼')}
-                >
-                  기한 제한 없음
-                </button>
-              </div>
+            <div className="space-y-2" {...roleAssignmentOwnerItem('scope-member-field', '권한 scope 구성원 배정 영역')}>
+              <label className="text-xs font-medium text-slate-700" {...roleAssignmentOwnerItem('scope-member-label', '권한 scope 구성원 배정 라벨')}>
+                scope 구성원
+              </label>
+              <MultiEntityPicker
+                values={activeScopeMemberIds}
+                options={scopeMemberOptions}
+                onChange={handleActiveScopeMembersChange}
+                placeholder={
+                  !activeScopeSiteId
+                    ? '현장 선택 후 구성원 배정 가능'
+                    : scopeMemberLoading
+                      ? '구성원 불러오는 중'
+                      : '구성원을 선택하세요'
+                }
+                searchPlaceholder="이름 또는 번호 검색"
+                emptyMessage={activeScopeSiteId ? '현장 구성원이 없습니다.' : 'siteId가 없어 구성원을 배정할 수 없습니다.'}
+                optionLayout="inline"
+                disabled={!activeScopeSiteId || !activeScopeKey || scopeMemberLoading}
+                allowClear
+                triggerClassName="transition-colors hover:border-slate-400"
+                ownerItemKey="scope-member-picker-control"
+                ownerItemName="권한 scope 구성원 선택기"
+                ownerItemAttributes={roleAssignmentOwnerItem}
+              />
+              <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('scope-member-summary', '권한 scope 구성원 배정 요약')}>
+                {activeScopeSiteId
+                  ? `scope 구성원 ${activeScopeMemberIds.length}명`
+                  : '현재 템플릿 화면에는 siteId가 없어 scope 정의만 저장합니다.'}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={!activeTemplateScopeTemplateId || scopeDraftSaving || !scopeDraftSnapshot.dirty}
+              onClick={handleSaveRoleScopes}
+              className="min-h-9 w-full rounded-md border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
+              {...roleAssignmentOwnerItem('scope-save-button', '권한 scope 저장 버튼')}
+            >
+              {scopeDraftSaving ? '저장 중' : 'scope 저장'}
+            </button>
+
+            {scopeDraftMessage ? (
+              <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('scope-draft-message', '권한 scope draft 메시지')}>
+                {scopeDraftMessage}
+              </p>
             ) : null}
           </div>
-        )}
 
-        <button
-          type="button"
-          disabled={!activeTemplateScopeTemplateId || scopeDraftSaving || !scopeDraftSnapshot.dirty}
-          onClick={handleSaveRoleScopes}
-          className="min-h-9 w-full rounded-md border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
-          {...roleAssignmentOwnerItem('scope-save-button', '권한 scope 저장 버튼')}
-        >
-          {scopeDraftSaving ? '저장 중' : 'scope 저장'}
-        </button>
+          <div className="space-y-3" {...roleAssignmentOwnerItem('selected-box-role-field', '선택한 상자 역할 지정 영역')}>
+            <div className="space-y-1" {...roleAssignmentOwnerItem('selected-box-role-label', '선택한 상자 역할 지정 설명')}>
+              <p className="text-sm font-medium text-slate-800">상자 타입</p>
+              <p className="text-xs text-slate-500">선택한 상자가 문서에서 출력하거나 입력받을 값의 종류입니다.</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2" {...roleAssignmentOwnerItem('selected-box-kind-button-group', '선택한 상자 타입 버튼 묶음')}>
+              {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
+                const isActive = roleAssignmentHasSelectedTarget && roleAssignmentDisplayedBoxKinds.has(boxKind);
 
-        {scopeDraftMessage ? (
-          <p className="text-xs text-slate-600" {...roleAssignmentOwnerItem('scope-draft-message', '권한 scope draft 메시지')}>
-            {scopeDraftMessage}
-          </p>
-        ) : null}
+                return (
+                  <button
+                    key={`role-assignment-box-kind:${boxKind}`}
+                    type="button"
+                    disabled={!roleAssignmentHasSelectedTarget}
+                    onClick={() => stageRoleAssignmentBoxKind(boxKind)}
+                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                      isActive
+                        ? FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES[boxKind]
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                    }`}
+                    {...roleAssignmentOwnerItem(`selected-box-kind-button-${boxKind}`, `선택한 상자 타입 ${FRAME_BOX_KIND_BUTTON_LABELS[boxKind]} 버튼`)}
+                  >
+                    {FRAME_BOX_KIND_BUTTON_LABELS[boxKind]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-3" {...roleAssignmentOwnerItem('selected-box-frame-role-field', '선택한 상자 key value 역할 지정 영역')}>
+            <div className="space-y-1" {...roleAssignmentOwnerItem('selected-box-frame-role-label', '선택한 상자 key value 역할 지정 설명')}>
+              <p className="text-sm font-medium text-slate-800">상자 역할</p>
+              <p className="text-xs text-slate-500">key/value 연결에서 선택한 상자가 맡는 역할입니다.</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2" {...roleAssignmentOwnerItem('selected-box-frame-role-button-group', '선택한 상자 key value 역할 버튼 묶음')}>
+              {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
+                const isActive = roleAssignmentHasSelectedTarget && roleAssignmentDisplayedRoles.has(role);
+
+                return (
+                  <button
+                    key={`role-assignment-frame-role:${role}`}
+                    type="button"
+                    disabled={!roleAssignmentHasSelectedTarget}
+                    onClick={() => stageRoleAssignmentFrameRole(role)}
+                    className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                      isActive
+                        ? FRAME_ROLE_ACTIVE_BUTTON_CLASSES[role]
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+                    }`}
+                    {...roleAssignmentOwnerItem(`selected-box-frame-role-button-${role}`, `선택한 상자 역할 ${FRAME_ROLE_SHORT_LABELS[role]} 버튼`)}
+                  >
+                    {FRAME_ROLE_SHORT_LABELS[role]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {roleAssignmentReviewIssues.length > 0 ? (
+            <div
+              className="space-y-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              {...roleAssignmentOwnerItem('selected-box-role-review-issues', '선택한 상자 역할 검토 필요 항목')}
+            >
+              <div className="font-semibold">확인 필요</div>
+              {roleAssignmentReviewIssues.slice(0, 3).map((issue, index) => (
+                <p key={`role-assignment-review:${issue.frameGroupId}:${index}`} className="leading-5">
+                  {issue.message}
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
-    );
-  };
-  const roleAssignmentOverlayNode = <RoleAssignmentOverlayContent />;
+  );
 
   const metadataNameOverlayNode = (
     <MetadataNameOverlay

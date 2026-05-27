@@ -4,15 +4,13 @@ export type ResolveFrameEditPermissionInput = {
   frameGroupId: string;
   frameRole: 'key' | 'value' | 'key_value' | 'group' | string;
   parentKeyFrameGroupId?: string | null;
-  scopeKeysByKeyFrameGroupId?: Record<string, string[]>;
-  scopeKeyByKeyFrameGroupId?: Record<string, string>;
+  scopeKeyByKeyFrameGroupId: Record<string, string>;
   memberIdsByScopeKey: Record<string, string[]>;
 };
 
 export type ResolveFrameEditPermissionOutput = {
   editable: boolean;
   scopeKey: string | null;
-  scopeKeys: string[];
   reason:
     | 'member_assigned_to_scope'
     | 'no_scope_for_key'
@@ -33,7 +31,6 @@ export const resolveFrameEditPermission = (
     return {
       editable: false,
       scopeKey: null,
-      scopeKeys: [],
       reason: 'site_context_missing',
     };
   }
@@ -47,42 +44,26 @@ export const resolveFrameEditPermission = (
     return {
       editable: false,
       scopeKey: null,
-      scopeKeys: [],
       reason: 'missing_parent_key',
     };
   }
 
-  const scopeKeys = Array.from(
-    new Set(
-      [
-        ...(input.scopeKeysByKeyFrameGroupId?.[keyFrameGroupId] || []),
-        input.scopeKeyByKeyFrameGroupId?.[keyFrameGroupId] || '',
-      ]
-        .map(normalizeString)
-        .filter(Boolean)
-    )
-  );
+  const scopeKey = normalizeString(input.scopeKeyByKeyFrameGroupId[keyFrameGroupId]);
 
-  if (scopeKeys.length <= 0) {
+  if (!scopeKey) {
     return {
       editable: false,
       scopeKey: null,
-      scopeKeys: [],
       reason: 'no_scope_for_key',
     };
   }
 
-  const editableScopeKey = scopeKeys.find((scopeKey) => {
-    const assignedMemberIds = input.memberIdsByScopeKey[scopeKey] || [];
-
-    return Boolean(memberId && assignedMemberIds.includes(memberId));
-  }) || null;
-  const editable = Boolean(editableScopeKey);
+  const assignedMemberIds = input.memberIdsByScopeKey[scopeKey] || [];
+  const editable = Boolean(memberId && assignedMemberIds.includes(memberId));
 
   return {
     editable,
-    scopeKey: editableScopeKey || scopeKeys[0] || null,
-    scopeKeys,
+    scopeKey,
     reason: editable ? 'member_assigned_to_scope' : 'member_not_assigned_to_scope',
   };
 };

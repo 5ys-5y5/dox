@@ -25,10 +25,6 @@ import { DocumentsOwnerWorkspace } from '../documents/_owner';
 import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
 import type {
-  TemplateScopeContextDto,
-  TemplateScopeSaveScopeInput,
-} from '../../services/canvasScopeDraftService';
-import type {
   TemplateChecklistRegistrationTarget,
   TemplateChecklistSignatureState,
   TemplateChecklistSignatureSubmitParams,
@@ -60,6 +56,7 @@ import type {
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import { formatMemberAccessErrorMessage as getMemberAccessErrorMessage } from '../../lib/memberAccessErrors';
 import type {
+  DocumentMemberAccessRole,
   DocumentMemberRecordDto,
   MemberAccessSessionDto,
   MemberDispatchResultDto,
@@ -196,10 +193,10 @@ type PendingChecklistRegistration =
       linkedPosition?: ProjectChecklistLinkedPosition | null;
     };
 type ManagedSiteMemberAccessRole = 'manager' | 'participant';
+type ManagedDocumentMemberAccessRole = DocumentMemberAccessRole;
 type ProjectDocumentPickerOption = {
   id: string;
   label: string;
-  templateId?: string | null;
   meta?: string;
   keywords?: string[];
 };
@@ -334,6 +331,12 @@ const SITE_MEMBER_ROLE_OPTIONS: Array<{ value: ManagedSiteMemberAccessRole; labe
   { value: 'participant', label: '참여자' },
 ];
 
+const DOCUMENT_MEMBER_ROLE_OPTIONS: Array<{ value: ManagedDocumentMemberAccessRole; label: string }> = [
+  { value: 'viewer', label: '보기' },
+  { value: 'editor', label: '편집' },
+  { value: 'signer', label: '서명' },
+];
+
 const getManagedSiteMemberRole = (role: SiteMemberAccessRole): ManagedSiteMemberAccessRole => {
   if (role === 'owner' || role === 'manager') {
     return 'manager';
@@ -347,28 +350,8 @@ const hasFullDocumentAccessBySiteRole = (role: SiteMemberAccessRole | ManagedSit
   return managedRole === 'manager';
 };
 
-const buildTemplateScopeSaveScopesFromContext = (
-  context: TemplateScopeContextDto,
-  assignmentsByScopeKey: Record<string, string[]>
-): TemplateScopeSaveScopeInput[] =>
-  context.logicalScopes.map((scope) => ({
-    scopeKey: scope.scopeKey,
-    displayName: scope.displayName,
-    description: scope.description,
-    keyFrameGroupIds: scope.keyFrameGroupIds,
-    valueKeyByKeyFrameGroupId: scope.keyFrameGroupIds.reduce<Record<string, string | null>>((map, keyFrameGroupId) => {
-      const registryEntry = context.registryEntries.find(
-        (entry) =>
-          entry.status === 'active' &&
-          entry.scopeKey === scope.scopeKey &&
-          entry.keyFrameGroupId === keyFrameGroupId
-      );
-
-      map[keyFrameGroupId] = registryEntry?.valueKey || null;
-      return map;
-    }, {}),
-    memberIds: assignmentsByScopeKey[scope.scopeKey] || [],
-  }));
+const getManagedDocumentMemberRole = (role: DocumentMemberAccessRole): ManagedDocumentMemberAccessRole =>
+  role === 'editor' || role === 'signer' ? role : 'viewer';
 
 const formatDate = (value: string | null | undefined) => {
   if (!value) return '-';
@@ -913,31 +896,27 @@ function MemberDocumentAccessPicker({
   membership,
   memberLabel,
   options,
-  scopeContextsByTemplateId,
+  documentMemberships,
   savingMemberDocumentAccessKey,
-  onToggleScopeAccess,
-  onClearDocumentScopeAccess,
+  deletingDocumentMemberId,
+  onSaveDocumentAccess,
+  onDeleteDocumentAccess,
   ownerItemKey,
   ownerItemName,
 }: {
   membership: SiteMemberRecordDto;
   memberLabel: string;
   options: ProjectDocumentPickerOption[];
-  scopeContextsByTemplateId: Record<string, TemplateScopeContextDto>;
+  documentMemberships: DocumentMemberRecordDto[];
   savingMemberDocumentAccessKey: string;
-  onToggleScopeAccess: (
+  deletingDocumentMemberId: string;
+  onSaveDocumentAccess: (
     membership: SiteMemberRecordDto,
-    documentId: string,
-    templateId: string,
-    scopeKey: string,
+    documentIds: string[],
+    accessRole: ManagedDocumentMemberAccessRole,
     operationKey: string
   ) => void | Promise<void>;
-  onClearDocumentScopeAccess: (
-    membership: SiteMemberRecordDto,
-    documentId: string,
-    templateId: string,
-    operationKey: string
-  ) => void | Promise<void>;
+  onDeleteDocumentAccess: (membershipId: string, memberLabel: string) => void | Promise<void>;
   ownerItemKey: string;
   ownerItemName: string;
 }) {
@@ -949,23 +928,16 @@ function MemberDocumentAccessPicker({
     (item: string, name: string) => projectOwnerItem(item, name),
     []
   );
-  const selectedDocumentCount = React.useMemo(
-    () =>
-      options.filter((option) => {
-        const templateId = option.templateId?.trim() || '';
-        const context = templateId ? scopeContextsByTemplateId[templateId] : null;
-
-        return Boolean(
-          context?.logicalScopes.some((scope) =>
-            (context.assignmentsByScopeKey[scope.scopeKey] || []).includes(membership.member.id)
-          )
-        );
-      }).length,
-    [membership.member.id, options, scopeContextsByTemplateId]
+  const documentMembershipByDocumentId = React.useMemo(
+    () => new Map(documentMemberships.map((documentMembership) => [documentMembership.documentId, documentMembership])),
+    [documentMemberships]
   );
+  const selectedDocumentCount = documentMemberships.filter((documentMembership) =>
+    options.some((option) => option.id === documentMembership.documentId)
+  ).length;
   const summary = selectedDocumentCount > 0
-    ? `${selectedDocumentCount}개 문서 scope`
-    : '지정 scope 없음';
+    ? `${selectedDocumentCount}개 문서 접근`
+    : '접근 문서 없음';
   const filteredOptions = React.useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
@@ -1003,6 +975,18 @@ function MemberDocumentAccessPicker({
     }
   }, [open]);
 
+  const handleSaveDocumentAccess = React.useCallback(
+    (documentId: string, accessRole: ManagedDocumentMemberAccessRole) => {
+      void onSaveDocumentAccess(
+        membership,
+        [documentId],
+        accessRole,
+        `${membership.membershipId}:${documentId}:${accessRole}`
+      );
+    },
+    [membership, onSaveDocumentAccess]
+  );
+
   return (
     <div ref={rootRef} className="relative w-full" {...ownerAttrs(ownerItemKey, ownerItemName)}>
       <div
@@ -1019,7 +1003,7 @@ function MemberDocumentAccessPicker({
           type="text"
           value={open ? query : summary}
           readOnly={!open}
-          placeholder={open ? '문서 목록 검색' : '문서 scope를 선택하세요'}
+          placeholder={open ? '문서 목록 검색' : '문서 접근 권한을 선택하세요'}
           aria-haspopup="listbox"
           aria-expanded={open}
           onFocus={() => {
@@ -1048,8 +1032,8 @@ function MemberDocumentAccessPicker({
             setOpen((current) => !current);
           }}
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
-          aria-label="문서 scope 목록 열기"
-          title="문서 scope 목록 열기"
+          aria-label="문서 접근 권한 목록 열기"
+          title="문서 접근 권한 목록 열기"
           {...ownerAttrs(`${ownerItemKey}-toggle-button`, `${ownerItemName} 목록 열기 버튼`)}
         >
           <ChevronDown aria-hidden="true" className="h-4 w-4" />
@@ -1066,7 +1050,7 @@ function MemberDocumentAccessPicker({
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
               {...ownerAttrs(`${ownerItemKey}-option-count`, `${ownerItemName} 옵션 개수`)}
             >
-              전체 {options.length}개 중 {selectedDocumentCount}개 문서에 scope 지정
+              전체 {options.length}개 중 {selectedDocumentCount}개 접근 가능
             </div>
             <div
               role="listbox"
@@ -1075,15 +1059,18 @@ function MemberDocumentAccessPicker({
             >
               {filteredOptions.length > 0 ? (
                 filteredOptions.map((option) => {
-                  const templateId = option.templateId?.trim() || '';
-                  const scopeContext = templateId ? scopeContextsByTemplateId[templateId] : null;
-                  const logicalScopes = scopeContext?.logicalScopes || [];
-                  const assignedScopeKeys = logicalScopes
-                    .filter((scope) => (scopeContext?.assignmentsByScopeKey[scope.scopeKey] || []).includes(membership.member.id))
-                    .map((scope) => scope.scopeKey);
-                  const selected = assignedScopeKeys.length > 0;
-                  const savingThisDocument = savingMemberDocumentAccessKey.startsWith(`${membership.membershipId}:${option.id}:`);
-                  const disabled = Boolean(savingThisDocument);
+                  const documentMembership = documentMembershipByDocumentId.get(option.id) || null;
+                  const selected = Boolean(documentMembership);
+                  const currentRole = documentMembership
+                    ? getManagedDocumentMemberRole(documentMembership.accessRole)
+                    : null;
+                  const savingThisDocument = savingMemberDocumentAccessKey.startsWith(
+                    `${membership.membershipId}:${option.id}:`
+                  );
+                  const deletingThisDocument = documentMembership
+                    ? deletingDocumentMemberId === documentMembership.membershipId
+                    : false;
+                  const disabled = Boolean(savingThisDocument || deletingThisDocument);
 
                   return (
                     <div
@@ -1096,8 +1083,15 @@ function MemberDocumentAccessPicker({
                       )}
                       {...ownerAttrs(`${ownerItemKey}-option-${option.id}`, `${ownerItemName} 옵션 - ${option.label}`)}
                     >
-                      <div
-                        className="flex min-w-0 flex-1 flex-col items-start justify-start px-3 py-2.5 text-left"
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          if (!selected) {
+                            handleSaveDocumentAccess(option.id, 'viewer');
+                          }
+                        }}
+                        className="flex min-w-0 flex-1 flex-col items-start justify-start px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-60"
                         {...ownerAttrs(`${ownerItemKey}-option-${option.id}-select-button`, `${ownerItemName} 옵션 선택 버튼 - ${option.label}`)}
                       >
                         <span className="min-w-0 truncate text-sm font-medium leading-5 text-slate-900">
@@ -1108,62 +1102,40 @@ function MemberDocumentAccessPicker({
                             {option.meta}
                           </span>
                         ) : null}
-                        <span className="mt-1 text-[11px] text-slate-500">
-                          {templateId
-                            ? selected
-                              ? `지정 scope ${assignedScopeKeys.length}개`
-                              : '지정 scope 없음'
-                            : 'scope를 지정할 템플릿 연결 없음'}
-                        </span>
-                      </div>
+                      </button>
                       <div
                         className="flex shrink-0 flex-wrap justify-end gap-2 px-2 py-2"
-                        {...ownerAttrs(`${ownerItemKey}-option-${option.id}-scope-buttons`, `${ownerItemName} 옵션 문서 scope 버튼 그룹 - ${option.label}`)}
+                        {...ownerAttrs(`${ownerItemKey}-option-${option.id}-role-buttons`, `${ownerItemName} 옵션 문서 권한 버튼 그룹 - ${option.label}`)}
                       >
-                        {logicalScopes.length > 0 ? (
-                          logicalScopes.map((scope) => {
-                            const active = assignedScopeKeys.includes(scope.scopeKey);
+                        {DOCUMENT_MEMBER_ROLE_OPTIONS.map((roleOption) => {
+                          const active = selected && currentRole === roleOption.value;
 
-                            return (
-                              <button
-                                key={scope.scopeKey}
-                                type="button"
-                                disabled={disabled}
-                                aria-pressed={active}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  if (!templateId) {
-                                    return;
-                                  }
-                                  void onToggleScopeAccess(
-                                    membership,
-                                    option.id,
-                                    templateId,
-                                    scope.scopeKey,
-                                    `${membership.membershipId}:${option.id}:${scope.scopeKey}`
-                                  );
-                                }}
-                                className={cn(
-                                  'inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60',
-                                  active
-                                    ? 'border-slate-900 bg-slate-900 text-white'
-                                    : 'border-slate-300 bg-white text-slate-700'
-                                )}
-                                {...ownerAttrs(
-                                  `${ownerItemKey}-option-${option.id}-scope-${scope.scopeKey}-button`,
-                                  `${ownerItemName} 옵션 ${scope.displayName} scope 버튼 - ${option.label}`
-                                )}
-                              >
-                                {scope.displayName}
-                              </button>
-                            );
-                          })
-                        ) : (
-                          <span className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500">
-                            scope 없음
-                          </span>
-                        )}
+                          return (
+                            <button
+                              key={roleOption.value}
+                              type="button"
+                              disabled={disabled}
+                              aria-pressed={active}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleSaveDocumentAccess(option.id, roleOption.value);
+                              }}
+                              className={cn(
+                                'inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60',
+                                active
+                                  ? 'border-slate-900 bg-slate-900 text-white'
+                                  : 'border-slate-300 bg-white text-slate-700'
+                              )}
+                              {...ownerAttrs(
+                                `${ownerItemKey}-option-${option.id}-role-${roleOption.value}-button`,
+                                `${ownerItemName} 옵션 ${roleOption.label} 권한 버튼 - ${option.label}`
+                              )}
+                            >
+                              {roleOption.label}
+                            </button>
+                          );
+                        })}
                       </div>
                       <div className="mr-1 flex shrink-0 items-center gap-1">
                         <div className="flex h-8 w-8 items-center justify-center rounded-md">
@@ -1171,26 +1143,24 @@ function MemberDocumentAccessPicker({
                         </div>
                         <button
                           type="button"
-                          disabled={!selected || disabled || !templateId}
-                          aria-label={`${memberLabel} ${option.label} 문서 scope 지정 해제`}
-                          title="문서 scope 지정 해제"
+                          disabled={!documentMembership || disabled}
+                          aria-label={`${memberLabel} ${option.label} 문서 접근 권한 삭제`}
+                          title="문서 접근 권한 삭제"
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
 
-                            if (!templateId) {
+                            if (!documentMembership) {
                               return;
                             }
 
-                            void onClearDocumentScopeAccess(
-                              membership,
-                              option.id,
-                              templateId,
-                              `${membership.membershipId}:${option.id}:clear`
+                            void onDeleteDocumentAccess(
+                              documentMembership.membershipId,
+                              `${memberLabel} / ${option.label}`
                             );
                           }}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-                          {...ownerAttrs(`${ownerItemKey}-option-${option.id}-clear-button`, `${ownerItemName} 옵션 문서 scope 해제 버튼 - ${option.label}`)}
+                          {...ownerAttrs(`${ownerItemKey}-option-${option.id}-delete-button`, `${ownerItemName} 옵션 문서 권한 삭제 버튼 - ${option.label}`)}
                         >
                           <Trash2 aria-hidden="true" className="h-4 w-4" />
                         </button>
@@ -1203,7 +1173,7 @@ function MemberDocumentAccessPicker({
                   className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500"
                   {...ownerAttrs(`${ownerItemKey}-empty-state`, `${ownerItemName} 빈 상태`)}
                 >
-                  scope를 지정할 현장 문서가 없습니다.
+                  접근 권한을 줄 현장 문서가 없습니다.
                 </div>
               )}
             </div>
@@ -1630,7 +1600,7 @@ const PROJECT_MEMBER_DOCUMENT_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   },
   {
     key: 'role',
-    label: '문서 scope',
+    label: '문서 권한',
     width: 180,
     minWidth: 156,
     maxWidth: 220,
@@ -2188,8 +2158,6 @@ export default function ProjectPage() {
   const fileRegistrationInputRef = React.useRef<HTMLInputElement | null>(null);
   const [siteMembers, setSiteMembers] = React.useState<SiteMemberRecordDto[]>([]);
   const [siteDocumentMembers, setSiteDocumentMembers] = React.useState<DocumentMemberRecordDto[]>([]);
-  const [templateScopeContextsByTemplateId, setTemplateScopeContextsByTemplateId] = React.useState<Record<string, TemplateScopeContextDto>>({});
-  const [loadingTemplateScopeContexts, setLoadingTemplateScopeContexts] = React.useState(false);
   const [memberAccessSession, setMemberAccessSession] = React.useState<MemberAccessSessionDto | null>(null);
   const [loadingSiteMembers, setLoadingSiteMembers] = React.useState(false);
   const [loadingSiteDocumentMembers, setLoadingSiteDocumentMembers] = React.useState(false);
@@ -2198,10 +2166,11 @@ export default function ProjectPage() {
   const [siteMemberDisplayName, setSiteMemberDisplayName] = React.useState('');
   const [siteMemberRole, setSiteMemberRole] = React.useState<ManagedSiteMemberAccessRole>('participant');
   const [siteMemberDocumentIds, setSiteMemberDocumentIds] = React.useState<string[]>([]);
-  const [siteMemberDocumentScopeKeys, setSiteMemberDocumentScopeKeys] = React.useState<string[]>([]);
+  const [siteMemberDocumentRole, setSiteMemberDocumentRole] = React.useState<ManagedDocumentMemberAccessRole>('viewer');
   const [expandedSiteMemberId, setExpandedSiteMemberId] = React.useState('');
   const [invitingSiteMember, setInvitingSiteMember] = React.useState(false);
   const [deletingSiteMemberId, setDeletingSiteMemberId] = React.useState('');
+  const [deletingDocumentMemberId, setDeletingDocumentMemberId] = React.useState('');
   const [updatingSiteMemberId, setUpdatingSiteMemberId] = React.useState('');
   const [savingMemberDocumentAccessKey, setSavingMemberDocumentAccessKey] = React.useState('');
 
@@ -4283,7 +4252,7 @@ export default function ProjectPage() {
     setSiteMemberDisplayName('');
     setSiteMemberRole('participant');
     setSiteMemberDocumentIds([]);
-    setSiteMemberDocumentScopeKeys([]);
+    setSiteMemberDocumentRole('viewer');
     setExpandedSiteMemberId('');
   }, [selectedSiteId]);
 
@@ -4352,50 +4321,6 @@ export default function ProjectPage() {
     return nextMembers;
   }, []);
 
-  const loadTemplateScopeContexts = React.useCallback(async (siteId: string, siteDocuments: DocumentListItem[]) => {
-    const normalizedSiteId = siteId.trim();
-    const templateIds = Array.from(
-      new Set(siteDocuments.map((item) => item.document.templateId?.trim() || '').filter(Boolean))
-    );
-
-    if (!normalizedSiteId || templateIds.length <= 0) {
-      setTemplateScopeContextsByTemplateId({});
-      return {};
-    }
-
-    setLoadingTemplateScopeContexts(true);
-
-    try {
-      const results = await Promise.allSettled(
-        templateIds.map(async (templateId) => {
-          const response = await fetch(
-            `/api/scopes/template-scopes?templateId=${encodeURIComponent(templateId)}&siteId=${encodeURIComponent(normalizedSiteId)}`,
-            { cache: 'no-store' }
-          );
-          const payload = await response.json();
-
-          if (!response.ok || !payload?.success || !payload?.data) {
-            throw new Error(payload?.message || 'scope 조회에 실패했습니다.');
-          }
-
-          return [templateId, payload.data as TemplateScopeContextDto] as const;
-        })
-      );
-      const nextContexts = results.reduce<Record<string, TemplateScopeContextDto>>((accumulator, result) => {
-        if (result.status === 'fulfilled') {
-          accumulator[result.value[0]] = result.value[1];
-        }
-
-        return accumulator;
-      }, {});
-
-      setTemplateScopeContextsByTemplateId(nextContexts);
-      return nextContexts;
-    } finally {
-      setLoadingTemplateScopeContexts(false);
-    }
-  }, []);
-
   const syncSiteDocuments = React.useCallback(async (siteId: string) => {
     const nextDocuments = await fetchSuccessData<DocumentListItem[]>(
       `/api/documents?siteId=${encodeURIComponent(siteId)}`
@@ -4421,7 +4346,6 @@ export default function ProjectPage() {
   React.useEffect(() => {
     if (!selectedSiteId) {
       setSiteMembers([]);
-      setTemplateScopeContextsByTemplateId({});
       return;
     }
 
@@ -4448,14 +4372,6 @@ export default function ProjectPage() {
 
   React.useEffect(() => {
     if (!selectedSiteId || documentsLoadedSiteId !== selectedSiteId) {
-      return;
-    }
-
-    void loadTemplateScopeContexts(selectedSiteId, documents);
-  }, [documents, documentsLoadedSiteId, loadTemplateScopeContexts, selectedSiteId]);
-
-  React.useEffect(() => {
-    if (!selectedSiteId || documentsLoadedSiteId !== selectedSiteId) {
       setSiteDocumentMembers([]);
       setLoadingSiteDocumentMembers(false);
       return;
@@ -4468,7 +4384,7 @@ export default function ProjectPage() {
       .catch((error) => {
         if (active) {
           setSiteDocumentMembers([]);
-          setMessage(getMemberAccessErrorMessage(error, '구성원별 문서 scope를 불러오지 못했습니다.'));
+          setMessage(getMemberAccessErrorMessage(error, '구성원별 문서 권한을 불러오지 못했습니다.'));
         }
       })
       .finally(() => {
@@ -4688,7 +4604,7 @@ export default function ProjectPage() {
     const normalizedSiteId = selectedSiteId.trim();
     const phoneNumber = siteMemberPhoneNumber.trim();
     const displayName = siteMemberDisplayName.trim() || null;
-    const documentScopeKeysToInvite = siteMemberRole === 'participant' ? siteMemberDocumentScopeKeys : [];
+    const documentIdsToInvite = siteMemberRole === 'participant' ? siteMemberDocumentIds : [];
 
     if (!normalizedSiteId) {
       setMessage('구성원을 초대할 현장을 먼저 선택해 주세요.');
@@ -4721,60 +4637,34 @@ export default function ProjectPage() {
       }
 
       const invitedMember = result.data as SiteMemberInviteResult;
-      const scopeAssignmentsByTemplateId = documentScopeKeysToInvite.reduce<Record<string, string[]>>((accumulator, compositeKey) => {
-        const [templateId, scopeKey] = compositeKey.split('::');
-
-        if (templateId?.trim() && scopeKey?.trim()) {
-          accumulator[templateId] = Array.from(new Set([...(accumulator[templateId] || []), scopeKey]));
-        }
-
-        return accumulator;
-      }, {});
-      const scopePermissionResults = await Promise.allSettled(
-        Object.entries(scopeAssignmentsByTemplateId).map(async ([templateId, scopeKeys]) => {
-          const context = templateScopeContextsByTemplateId[templateId];
-
-          if (!context) {
-            throw new Error('선택한 문서의 scope 정보를 불러오지 못했습니다.');
-          }
-
-          const nextAssignmentsByScopeKey = { ...context.assignmentsByScopeKey };
-          scopeKeys.forEach((scopeKey) => {
-            nextAssignmentsByScopeKey[scopeKey] = Array.from(
-              new Set([...(nextAssignmentsByScopeKey[scopeKey] || []), invitedMember.membership.member.id])
-            );
-          });
-
-          const scopeResponse = await fetch('/api/scopes/template-scopes', {
+      const documentPermissionResults = await Promise.allSettled(
+        documentIdsToInvite.map(async (documentId) => {
+          const documentResponse = await fetch('/api/member-access/document-members', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              templateId,
-              siteId: normalizedSiteId,
-              scopes: buildTemplateScopeSaveScopesFromContext(context, nextAssignmentsByScopeKey),
+              documentId,
+              phoneNumber,
+              displayName,
+              accessRole: siteMemberDocumentRole,
             }),
           });
-          const scopeResult = await scopeResponse.json();
+          const documentResult = await documentResponse.json();
 
-          if (!scopeResponse.ok || !scopeResult?.success || !scopeResult?.data) {
-            throw new Error(scopeResult?.message || '문서 scope 등록에 실패했습니다.');
+          if (!documentResponse.ok || !documentResult?.success) {
+            throw new Error(documentResult?.message || '문서 권한 등록에 실패했습니다.');
           }
-
-          setTemplateScopeContextsByTemplateId((previous) => ({
-            ...previous,
-            [templateId]: scopeResult.data as TemplateScopeContextDto,
-          }));
         })
       );
-      const failedScopePermission = scopePermissionResults.find((permissionResult) => permissionResult.status === 'rejected');
+      const failedDocumentPermission = documentPermissionResults.find((permissionResult) => permissionResult.status === 'rejected');
 
       await Promise.all([
         loadSiteMembers(normalizedSiteId),
         loadSiteDocumentMembers(documents),
       ]);
 
-      if (failedScopePermission?.status === 'rejected') {
-        throw failedScopePermission.reason;
+      if (failedDocumentPermission?.status === 'rejected') {
+        throw failedDocumentPermission.reason;
       }
 
       setShowAddSiteMemberForm(false);
@@ -4782,10 +4672,10 @@ export default function ProjectPage() {
       setSiteMemberDisplayName('');
       setSiteMemberRole('participant');
       setSiteMemberDocumentIds([]);
-      setSiteMemberDocumentScopeKeys([]);
+      setSiteMemberDocumentRole('viewer');
 
       const documentCountMessage =
-        documentScopeKeysToInvite.length > 0 ? ` 문서 scope ${documentScopeKeysToInvite.length}건도 함께 등록했습니다.` : '';
+        documentIdsToInvite.length > 0 ? ` 문서 ${documentIdsToInvite.length}건 권한도 함께 등록했습니다.` : '';
       setMessage(
         `${formatPhoneNumber(invitedMember.membership.member.phoneNumber)} 연락처에 현장 접근 권한을 등록했습니다.${documentCountMessage} ${formatMemberDispatchMessage(invitedMember.dispatch)}`
       );
@@ -4798,12 +4688,12 @@ export default function ProjectPage() {
     loadSiteMembers,
     selectedSiteId,
     siteMemberDisplayName,
-    siteMemberDocumentScopeKeys,
+    siteMemberDocumentIds,
+    siteMemberDocumentRole,
     siteMemberPhoneNumber,
     siteMemberRole,
     documents,
     loadSiteDocumentMembers,
-    templateScopeContextsByTemplateId,
   ]);
 
   const handleUpdateSiteMemberRole = React.useCallback(
@@ -4846,83 +4736,21 @@ export default function ProjectPage() {
     [loadSiteMembers, selectedSiteId, updatingSiteMemberId]
   );
 
-  const handleSaveMemberDocumentScopeAccess = React.useCallback(
+  const handleSaveMemberDocumentAccess = React.useCallback(
     async (
       membership: SiteMemberRecordDto,
-      documentId: string,
-      templateId: string,
-      scopeKey: string,
+      documentIds: string[],
+      accessRole: ManagedDocumentMemberAccessRole,
       operationKey: string
     ) => {
       if (hasFullDocumentAccessBySiteRole(membership.accessRole)) {
-        setMessage('관리자는 모든 scope 권한을 가지고 있습니다.');
+        setMessage('관리자는 모든 문서 권한을 가지고 있습니다.');
         return;
       }
 
-      const normalizedSiteId = selectedSiteId.trim();
-      const normalizedTemplateId = templateId.trim();
-      const normalizedScopeKey = scopeKey.trim();
-      const context = templateScopeContextsByTemplateId[normalizedTemplateId];
+      const normalizedDocumentIds = Array.from(new Set(documentIds.map((documentId) => documentId.trim()).filter(Boolean)));
 
-      if (!normalizedSiteId || !normalizedTemplateId || !normalizedScopeKey || !context || savingMemberDocumentAccessKey) {
-        return;
-      }
-
-      setSavingMemberDocumentAccessKey(operationKey);
-      setMessage(null);
-
-      try {
-        const currentMemberIds = context.assignmentsByScopeKey[normalizedScopeKey] || [];
-        const nextMemberIds = currentMemberIds.includes(membership.member.id)
-          ? currentMemberIds.filter((memberId) => memberId !== membership.member.id)
-          : [...currentMemberIds, membership.member.id];
-        const nextAssignmentsByScopeKey = {
-          ...context.assignmentsByScopeKey,
-          [normalizedScopeKey]: Array.from(new Set(nextMemberIds)),
-        };
-        const response = await fetch('/api/scopes/template-scopes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            templateId: normalizedTemplateId,
-            siteId: normalizedSiteId,
-            scopes: buildTemplateScopeSaveScopesFromContext(context, nextAssignmentsByScopeKey),
-          }),
-        });
-        const result = await response.json();
-
-        if (!response.ok || !result?.success || !result?.data) {
-          throw new Error(result?.message || '문서 scope 저장에 실패했습니다.');
-        }
-
-        setTemplateScopeContextsByTemplateId((previous) => ({
-          ...previous,
-          [normalizedTemplateId]: result.data as TemplateScopeContextDto,
-        }));
-        setMessage(
-          `"${membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber)}"의 문서 scope를 저장했습니다.`
-        );
-      } catch (error) {
-        setMessage(getMemberAccessErrorMessage(error, '문서 scope 저장에 실패했습니다.'));
-      } finally {
-        setSavingMemberDocumentAccessKey('');
-      }
-    },
-    [savingMemberDocumentAccessKey, selectedSiteId, templateScopeContextsByTemplateId]
-  );
-
-  const handleClearMemberDocumentScopeAccess = React.useCallback(
-    async (
-      membership: SiteMemberRecordDto,
-      documentId: string,
-      templateId: string,
-      operationKey: string
-    ) => {
-      const normalizedSiteId = selectedSiteId.trim();
-      const normalizedTemplateId = templateId.trim();
-      const context = templateScopeContextsByTemplateId[normalizedTemplateId];
-
-      if (!normalizedSiteId || !normalizedTemplateId || !context || savingMemberDocumentAccessKey) {
+      if (normalizedDocumentIds.length === 0 || savingMemberDocumentAccessKey) {
         return;
       }
 
@@ -4930,41 +4758,37 @@ export default function ProjectPage() {
       setMessage(null);
 
       try {
-        const nextAssignmentsByScopeKey = Object.fromEntries(
-          Object.entries(context.assignmentsByScopeKey).map(([entryScopeKey, memberIds]) => [
-            entryScopeKey,
-            memberIds.filter((memberId) => memberId !== membership.member.id),
-          ])
+        await Promise.all(
+          normalizedDocumentIds.map(async (documentId) => {
+            const response = await fetch('/api/member-access/document-members', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                documentId,
+                phoneNumber: membership.member.phoneNumber,
+                displayName: membership.member.displayName,
+                accessRole,
+              }),
+            });
+            const result = await response.json();
+
+            if (!response.ok || !result?.success) {
+              throw new Error(result?.message || '문서 권한 저장에 실패했습니다.');
+            }
+          })
         );
-        const response = await fetch('/api/scopes/template-scopes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            templateId: normalizedTemplateId,
-            siteId: normalizedSiteId,
-            scopes: buildTemplateScopeSaveScopesFromContext(context, nextAssignmentsByScopeKey),
-          }),
-        });
-        const result = await response.json();
 
-        if (!response.ok || !result?.success || !result?.data) {
-          throw new Error(result?.message || '문서 scope 해제에 실패했습니다.');
-        }
-
-        setTemplateScopeContextsByTemplateId((previous) => ({
-          ...previous,
-          [normalizedTemplateId]: result.data as TemplateScopeContextDto,
-        }));
+        await loadSiteDocumentMembers(documents);
         setMessage(
-          `"${membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber)}"의 문서 scope를 해제했습니다.`
+          `"${membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber)}"의 문서 권한을 저장했습니다.`
         );
       } catch (error) {
-        setMessage(getMemberAccessErrorMessage(error, '문서 scope 해제에 실패했습니다.'));
+        setMessage(getMemberAccessErrorMessage(error, '문서 권한 저장에 실패했습니다.'));
       } finally {
         setSavingMemberDocumentAccessKey('');
       }
     },
-    [savingMemberDocumentAccessKey, selectedSiteId, templateScopeContextsByTemplateId]
+    [documents, loadSiteDocumentMembers, savingMemberDocumentAccessKey]
   );
 
   const handleDeleteSiteMember = React.useCallback(
@@ -5023,6 +4847,46 @@ export default function ProjectPage() {
       }
     },
     [deletingSiteMemberId, reloadSelectedSiteMembers, selectedSiteId, siteDocumentMembers]
+  );
+
+  const handleDeleteDocumentMember = React.useCallback(
+    async (membershipId: string, memberLabel: string) => {
+      const normalizedMembershipId = membershipId.trim();
+
+      if (!normalizedMembershipId || deletingDocumentMemberId) {
+        return;
+      }
+
+      const confirmed = window.confirm(`"${memberLabel}"의 이 문서 접근 권한을 삭제하시겠습니까?`);
+
+      if (!confirmed) {
+        return;
+      }
+
+      setDeletingDocumentMemberId(normalizedMembershipId);
+      setMessage(null);
+
+      try {
+        const response = await fetch(
+          `/api/member-access/document-members?membershipId=${encodeURIComponent(normalizedMembershipId)}`,
+          { method: 'DELETE' }
+        );
+        const result = await response.json();
+
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.message || '문서 권한 삭제에 실패했습니다.');
+        }
+
+        await loadSiteDocumentMembers(documents);
+
+        setMessage(`"${memberLabel}"의 문서 접근 권한을 삭제했습니다.`);
+      } catch (error) {
+        setMessage(getMemberAccessErrorMessage(error, '문서 권한 삭제에 실패했습니다.'));
+      } finally {
+        setDeletingDocumentMemberId('');
+      }
+    },
+    [deletingDocumentMemberId, documents, loadSiteDocumentMembers]
   );
 
   const siteDocumentRows = React.useMemo<ProjectListRow[]>(
@@ -5188,94 +5052,52 @@ export default function ProjectPage() {
     [handleSelectPhoto, photos, selectedPhotoId]
   );
 
+  const documentTitleById = React.useMemo(
+    () => new Map(documents.map((item) => [item.document.id, item.document.title] as const)),
+    [documents]
+  );
+
+  const memberDocumentMembershipsByMemberId = React.useMemo(() => {
+    const siteDocumentIdSet = new Set(documents.map((item) => item.document.id));
+
+    return siteDocumentMembers.reduce<Record<string, DocumentMemberRecordDto[]>>((accumulator, membership) => {
+      if (!siteDocumentIdSet.has(membership.documentId)) {
+        return accumulator;
+      }
+
+      const memberId = membership.member.id;
+      accumulator[memberId] = [...(accumulator[memberId] || []), membership].sort((left, right) =>
+        (documentTitleById.get(left.documentId) || '').localeCompare(documentTitleById.get(right.documentId) || '', 'ko')
+      );
+      return accumulator;
+    }, {});
+  }, [documentTitleById, documents, siteDocumentMembers]);
+
 	  const siteDocumentPickerOptions = React.useMemo(
 	    () =>
 	      documents.map((item) => ({
         id: item.document.id,
         label: item.document.title,
-        templateId: item.document.templateId,
         meta: `현재 상태 ${getDocumentStatusLabel(item.document.status)}`,
-        keywords: [item.document.title, item.document.id, item.document.templateId || ''],
+        keywords: [item.document.title, item.document.id],
       })),
 	    [documents]
 	  );
-
-  const siteMemberDocumentScopeOptions = React.useMemo(() => {
-    const selectedDocumentIdSet = new Set(siteMemberDocumentIds);
-    const optionByKey = new Map<string, ProjectDocumentPickerOption>();
-
-    documents
-      .filter((item) => selectedDocumentIdSet.has(item.document.id))
-      .forEach((item) => {
-        const templateId = item.document.templateId?.trim() || '';
-        const context = templateId ? templateScopeContextsByTemplateId[templateId] : null;
-
-        if (!templateId || !context) {
-          return;
-        }
-
-        context.logicalScopes.forEach((scope) => {
-          const optionId = `${templateId}::${scope.scopeKey}`;
-
-          if (!optionByKey.has(optionId)) {
-            optionByKey.set(optionId, {
-              id: optionId,
-              label: `${item.document.title} / ${scope.displayName}`,
-              templateId,
-              meta: scope.scopeKey,
-              keywords: [item.document.title, item.document.id, templateId, scope.scopeKey, scope.displayName],
-            });
-          }
-        });
-      });
-
-    return Array.from(optionByKey.values());
-  }, [documents, siteMemberDocumentIds, templateScopeContextsByTemplateId]);
-
-  React.useEffect(() => {
-    const availableScopeOptionIds = new Set(siteMemberDocumentScopeOptions.map((option) => option.id));
-    setSiteMemberDocumentScopeKeys((current) => current.filter((scopeOptionId) => availableScopeOptionIds.has(scopeOptionId)));
-  }, [siteMemberDocumentScopeOptions]);
-
-  const memberScopeDocumentCountByMemberId = React.useMemo(() => {
-    const counts: Record<string, number> = {};
-
-    documents.forEach((item) => {
-      const templateId = item.document.templateId?.trim() || '';
-      const context = templateId ? templateScopeContextsByTemplateId[templateId] : null;
-
-      if (!context) {
-        return;
-      }
-
-      siteMembers.forEach((membership) => {
-        const hasScope = context.logicalScopes.some((scope) =>
-          (context.assignmentsByScopeKey[scope.scopeKey] || []).includes(membership.member.id)
-        );
-
-        if (hasScope) {
-          counts[membership.member.id] = (counts[membership.member.id] || 0) + 1;
-        }
-      });
-    });
-
-    return counts;
-  }, [documents, siteMembers, templateScopeContextsByTemplateId]);
 
 	  const siteMemberRows = React.useMemo<ProjectListRow[]>(
 	    () =>
       siteMembers.map((membership) => {
         const memberLabel = membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber);
-        const memberScopeDocumentCount = memberScopeDocumentCountByMemberId[membership.member.id] || 0;
+        const memberDocumentMemberships = memberDocumentMembershipsByMemberId[membership.member.id] || [];
         const isDeletingMember = deletingSiteMemberId === membership.membershipId;
         const isUpdatingMember = updatingSiteMemberId === membership.membershipId;
         const hasFullDocumentAccess = hasFullDocumentAccessBySiteRole(membership.accessRole);
         const expanded = expandedSiteMemberId === membership.membershipId;
         const scopeLabel = hasFullDocumentAccess
           ? '현장 전체 접근'
-          : memberScopeDocumentCount > 0
-            ? `scope 접근 · ${memberScopeDocumentCount}개 문서`
-            : 'scope 접근 · 지정 없음';
+          : memberDocumentMemberships.length > 0
+            ? `문서별 접근 · ${memberDocumentMemberships.length}개 문서`
+            : '문서별 접근 · 문서 없음';
 
         return {
 	          key: membership.membershipId,
@@ -5297,9 +5119,9 @@ export default function ProjectPage() {
               <span className="min-w-0 truncate text-[10px] text-slate-500">
                 {hasFullDocumentAccess
                   ? '모든 문서 접근 가능'
-                  : memberScopeDocumentCount > 0
-                    ? `${memberScopeDocumentCount}개 문서 scope`
-                    : '지정 scope 없음'}
+                  : memberDocumentMemberships.length > 0
+                    ? `${memberDocumentMemberships.length}개 문서 접근`
+                    : '지정 문서 없음'}
               </span>
             </div>
           ),
@@ -5332,7 +5154,7 @@ export default function ProjectPage() {
 	      deletingSiteMemberId,
 	      expandedSiteMemberId,
 	      handleDeleteSiteMember,
-	      memberScopeDocumentCountByMemberId,
+	      memberDocumentMembershipsByMemberId,
 	      siteMembers,
 	      updatingSiteMemberId,
 	    ]
@@ -5358,9 +5180,9 @@ export default function ProjectPage() {
   const expandedSiteMemberIsDeleting = expandedSiteMember
     ? deletingSiteMemberId === expandedSiteMember.membershipId
     : false;
-  const expandedMemberScopeDocumentCount = expandedSiteMember
-    ? memberScopeDocumentCountByMemberId[expandedSiteMember.member.id] || 0
-    : 0;
+  const expandedMemberDocumentMemberships = expandedSiteMember
+    ? memberDocumentMembershipsByMemberId[expandedSiteMember.member.id] || []
+	    : [];
 
   const dashboardTargetSiteIds = React.useMemo(
     () => (selectedSiteIds.length > 0 ? selectedSiteIds : sites.map((site) => site.id)),
@@ -6442,7 +6264,7 @@ export default function ProjectPage() {
 	                  <div className="space-y-3 border-t border-slate-200 pt-6" {...projectOwnerItem('site-member-section', '구성원 섹션')}>
 	                    <div className="space-y-1" {...projectOwnerItem('site-member-section-heading-group', '구성원 섹션 제목 묶음')}>
 	                      <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-member-section-title', '구성원 섹션 제목')}>구성원</div>
-	                      <p className="text-xs text-slate-500" {...projectOwnerItem('site-member-section-description', '구성원 섹션 설명')}>현장 접근 권한과 문서별 scope를 구성원별로 관리합니다.</p>
+	                      <p className="text-xs text-slate-500" {...projectOwnerItem('site-member-section-description', '구성원 섹션 설명')}>현장 접근 권한과 문서별 권한을 구성원별로 관리합니다.</p>
 	                    </div>
 	                    {selectedSite ? (
 	                      <div className="space-y-5" {...projectOwnerItem('site-member-content', '구성원 내용')}>
@@ -6501,7 +6323,7 @@ export default function ProjectPage() {
 
 		                                      if (nextRole !== 'participant') {
 		                                        setSiteMemberDocumentIds([]);
-		                                        setSiteMemberDocumentScopeKeys([]);
+		                                        setSiteMemberDocumentRole('viewer');
 		                                      }
 		                                    }}
 		                                    className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -6516,36 +6338,31 @@ export default function ProjectPage() {
 	                                </div>
 	                              </div>
 		                              {siteMemberRole === 'participant' ? (
-		                                <div className="space-y-3 border-t border-slate-200 pt-3" {...projectOwnerItem('site-member-add-document-access-section', '현장 구성원 문서 scope 추가 섹션')}>
+		                                <div className="space-y-3 border-t border-slate-200 pt-3" {...projectOwnerItem('site-member-add-document-access-section', '현장 구성원 문서 권한 추가 섹션')}>
 		                                  <div className="space-y-2" {...projectOwnerItem('site-member-add-document-picker-field', '현장 구성원 문서 선택 항목')}>
 		                                    <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-document-picker-label', '현장 구성원 문서 선택 라벨')}>문서</label>
 		                                    <MultiEntityPicker
 		                                      values={siteMemberDocumentIds}
 		                                      options={siteDocumentPickerOptions}
 		                                      onChange={setSiteMemberDocumentIds}
-		                                      placeholder="scope를 등록할 문서를 선택하세요"
+		                                      placeholder="접근 권한을 줄 문서를 선택하세요"
 		                                      searchPlaceholder="문서 목록 검색"
 			                                      emptyMessage="권한을 줄 현장 문서가 없습니다."
 			                                      allowClear
 			                                      ownerItemKey="site-member-add-document-picker"
-			                                      ownerItemName="현장 구성원 문서 scope 문서 선택기"
+			                                      ownerItemName="현장 구성원 문서 권한 문서 선택기"
 			                                      ownerItemAttributes={projectOwnerItem}
 			                                    />
 		                                  </div>
-		                                  <div className="space-y-2" {...projectOwnerItem('site-member-add-document-scope-field', '현장 구성원 문서 scope 선택 항목')}>
-		                                    <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-document-scope-label', '현장 구성원 문서 scope 라벨')}>문서 scope</label>
-		                                    <MultiEntityPicker
-		                                      values={siteMemberDocumentScopeKeys}
-		                                      options={siteMemberDocumentScopeOptions}
-		                                      onChange={setSiteMemberDocumentScopeKeys}
-		                                      placeholder={loadingTemplateScopeContexts ? 'scope 불러오는 중' : '등록할 scope를 선택하세요'}
-		                                      searchPlaceholder="scope 검색"
-			                                      emptyMessage="선택한 문서에 등록된 scope가 없습니다."
-			                                      allowClear
-			                                      ownerItemKey="site-member-add-document-scope-picker"
-			                                      ownerItemName="현장 구성원 문서 scope 선택기"
-			                                      ownerItemAttributes={projectOwnerItem}
-			                                    />
+		                                  <div className="space-y-2" {...projectOwnerItem('site-member-add-document-role-field', '현장 구성원 문서 권한 선택 항목')}>
+		                                    <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-document-role-label', '현장 구성원 문서 권한 라벨')}>문서 권한</label>
+		                                    <RoleSegmentedButtons
+		                                      value={siteMemberDocumentRole}
+		                                      options={DOCUMENT_MEMBER_ROLE_OPTIONS}
+		                                      onChange={(value) => setSiteMemberDocumentRole(value)}
+		                                      ownerItemKey="site-member-add-document-role-buttons"
+		                                      ownerItemName="현장 구성원 문서 권한 선택 버튼 그룹"
+		                                    />
 		                                  </div>
 		                                </div>
 		                              ) : null}
@@ -6569,7 +6386,7 @@ export default function ProjectPage() {
 	                                    setSiteMemberDisplayName('');
 	                                    setSiteMemberRole('participant');
 	                                    setSiteMemberDocumentIds([]);
-	                                    setSiteMemberDocumentScopeKeys([]);
+	                                    setSiteMemberDocumentRole('viewer');
 	                                  }}
 	                                  disabled={invitingSiteMember}
 	                                  {...projectOwnerItem('site-member-add-cancel-button', '현장 구성원 추가 취소 버튼')}
@@ -6618,11 +6435,11 @@ export default function ProjectPage() {
                                       `${expandedSiteMemberLabel} 구성원 접근 범위 요약`
                                     )}
                                   >
-		                                  {expandedSiteMemberHasFullDocumentAccess
-		                                    ? '현장 전체 문서 scope 접근 가능'
-		                                    : expandedMemberScopeDocumentCount > 0
-		                                      ? `${expandedMemberScopeDocumentCount}개 문서 scope`
-		                                      : '지정 scope 없음'}
+	                                  {expandedSiteMemberHasFullDocumentAccess
+	                                    ? '현장 전체 문서 접근 가능'
+	                                    : expandedMemberDocumentMemberships.length > 0
+	                                      ? `${expandedMemberDocumentMemberships.length}개 문서 접근`
+	                                      : '지정 문서 없음'}
 	                                </div>
 	                              </div>
                                 <div
@@ -6658,15 +6475,15 @@ export default function ProjectPage() {
                                   </div>
                                   <div className="rounded-lg border border-slate-200 bg-white p-3" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}`, `${expandedSiteMemberLabel} 구성원 접근 범위 카드`)}>
                                     <div className="text-[10px] font-medium text-slate-500" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-label`, `${expandedSiteMemberLabel} 구성원 접근 범위 라벨`)}>범위</div>
-	                                    <div className="mt-1 text-xs font-semibold text-slate-900" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-value`, `${expandedSiteMemberLabel} 구성원 접근 범위 값`)}>
-	                                      {expandedSiteMemberHasFullDocumentAccess ? '현장 전체' : 'scope별'}
-	                                    </div>
+                                    <div className="mt-1 text-xs font-semibold text-slate-900" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-value`, `${expandedSiteMemberLabel} 구성원 접근 범위 값`)}>
+                                      {expandedSiteMemberHasFullDocumentAccess ? '현장 전체' : '문서별'}
+                                    </div>
                                     <div className="mt-1 truncate text-[10px] text-slate-500" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-description`, `${expandedSiteMemberLabel} 구성원 접근 범위 설명`)}>
-	                                      {expandedSiteMemberHasFullDocumentAccess
-	                                        ? '현장 아래 모든 문서 scope 접근 가능'
-	                                        : expandedMemberScopeDocumentCount > 0
-	                                          ? `${expandedMemberScopeDocumentCount}개 문서 scope`
-	                                          : '지정된 scope 없음'}
+                                      {expandedSiteMemberHasFullDocumentAccess
+                                        ? '현장 아래 모든 문서 접근 가능'
+                                        : expandedMemberDocumentMemberships.length > 0
+                                          ? `${expandedMemberDocumentMemberships.length}개 문서 접근 가능`
+                                          : '접근 가능한 문서 없음'}
                                     </div>
                                   </div>
                                 </div>
@@ -6734,28 +6551,29 @@ export default function ProjectPage() {
                                     className="space-y-2"
                                     {...projectOwnerItem(
                                       `site-member-access-expanded-document-picker-field-${expandedSiteMember.membershipId}`,
-                                      `${expandedSiteMemberLabel} 구성원 문서 scope 선택 항목`
+                                      `${expandedSiteMemberLabel} 구성원 문서 접근 권한 선택 항목`
                                     )}
                                   >
                                     <label
                                       className="text-xs font-medium text-slate-700"
                                       {...projectOwnerItem(
                                         `site-member-access-expanded-document-picker-label-${expandedSiteMember.membershipId}`,
-                                        `${expandedSiteMemberLabel} 구성원 문서 scope 라벨`
+                                        `${expandedSiteMemberLabel} 구성원 문서 접근 권한 라벨`
                                       )}
                                     >
-                                      문서 scope
+                                      문서 접근 권한
                                     </label>
                                     <MemberDocumentAccessPicker
                                       membership={expandedSiteMember}
                                       memberLabel={expandedSiteMemberLabel}
                                       options={siteDocumentPickerOptions}
-                                      scopeContextsByTemplateId={templateScopeContextsByTemplateId}
+                                      documentMemberships={expandedMemberDocumentMemberships}
                                       savingMemberDocumentAccessKey={savingMemberDocumentAccessKey}
-                                      onToggleScopeAccess={handleSaveMemberDocumentScopeAccess}
-                                      onClearDocumentScopeAccess={handleClearMemberDocumentScopeAccess}
+                                      deletingDocumentMemberId={deletingDocumentMemberId}
+                                      onSaveDocumentAccess={handleSaveMemberDocumentAccess}
+                                      onDeleteDocumentAccess={handleDeleteDocumentMember}
                                       ownerItemKey={`site-member-access-expanded-document-picker-${expandedSiteMember.membershipId}`}
-                                      ownerItemName={`${expandedSiteMemberLabel} 구성원 문서 scope 선택기`}
+                                      ownerItemName={`${expandedSiteMemberLabel} 구성원 문서 접근 권한 선택기`}
                                     />
                                   </div>
                                 ) : (
