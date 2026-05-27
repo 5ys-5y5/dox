@@ -767,54 +767,39 @@ member-b는 미배정
 
 따라서 후속 구현은 반드시 scope 서비스를 통해 상자와 사람을 연결해야 하며, 상자 DTO나 캔버스 DOM에 member id를 직접 붙이는 방식은 금지한다.
 
-## 13. 2026-05-27 SCOPES-02 보완 설계: optional 만료 시간, scope CRUD, 중첩 scope
+## 13. 2026-05-27 SCOPES-02 보완 설계: nullable 만료 시간, scope CRUD, 중첩 scope
 
 본 보완 설계는 역할 탭을 "scope 지정과 요청 조건 설정" 화면으로 확정하기 위한 추가 조건이다.
 아래 내용은 기존 설계를 대체하는 것이 아니라, 기존 scope 설계에 반드시 병합되어야 하는 제약이다.
 
-### 13.1 만료 시간은 값이 있을 때만 제한이다
+### 13.1 만료 시간은 nullable이다
 
 scope 기반 요청 설정에서 만료 시간은 필수값이 아니다.
-만료 시간은 실제 timestamp 값이 존재할 때만 "기한 제한 있음"으로 해석한다.
-`undefined`와 `null`은 모두 "기한 제한 없음"으로 동일하게 해석한다.
 
 해석 규칙:
 
 ```text
-expires_at = undefined
-  -> 기한 제한 없음
-
 expires_at = null
   -> 기한 제한 없음
 
-expires_at = timestamp string
+expires_at = timestamp
   -> 해당 시각 이후 요청/편집/업로드/서명 흐름을 만료 처리
-```
-
-정규화 규칙:
-
-```ts
-function normalizeExpiresAt(value: string | null | undefined): string | null {
-  return value ? value : null;
-}
 ```
 
 UI 규칙:
 
 - 만료 시간 단계는 항상 존재한다.
-- 기본 표시 상태는 "기한 제한 없음"이다.
-- draft 값이 `undefined`이거나 `null`이면 모두 "기한 제한 없음"으로 표시한다.
+- 기본값은 `null`이다.
+- `null` 상태는 "기한 제한 없음"으로 표시한다.
 - 사용자가 날짜/시간을 선택한 경우에만 `expires_at` 값을 가진다.
-- 사용자가 "기한 제한 없음"으로 되돌리면 domain draft는 `null` 또는 `undefined` 어느 쪽이어도 무방하지만, service boundary에서는 `null`로 정규화한다.
+- 사용자가 "기한 제한 없음"으로 되돌리면 draft와 저장 payload 모두 `expires_at: null`을 명시한다.
 
 저장 규칙:
 
-- domain 의미에서 `undefined`와 `null`은 구분하지 않는다.
-- 둘 다 "기한 제한 없음"이다.
-- timestamp 문자열이 있을 때만 제한 시간이 저장된다.
-- 부분 수정 API에서 "만료 시간 필드를 변경하지 않음"이 필요하면 `undefined`에 그 의미를 부여하지 않는다.
-- "변경하지 않음"은 `updateExpiresAt: false` 같은 별도 command 플래그로 표현한다.
-- 저장 payload가 request condition 전체를 저장하는 형태라면 `expires_at`은 정규화된 `null` 또는 timestamp 문자열을 가진다.
+- `undefined`와 `null`을 구분한다.
+- `undefined`는 "변경하지 않음"이다.
+- `null`은 "기한 제한 없음으로 저장"이다.
+- DB/API 저장 payload에서 만료 제한 제거를 표현해야 할 때는 필드를 누락하지 말고 `null`을 보낸다.
 
 성능 규칙:
 
@@ -1000,13 +985,13 @@ type RequestScopeConditionDraft = {
   scopeKey: string;
   requiredPhotoTagKeys: string[];
   requiredFileTagKeys: string[];
-  expiresAt?: string | null;
+  expiresAt: string | null;
 };
 ```
 
 금지:
 
-- `expiresAt: null` 또는 `expiresAt: undefined`를 빈 문자열로 변환하지 않는다.
+- `expiresAt: null`을 저장하지 않고 빈 문자열로 변환하지 않는다.
 - 사진/파일/만료 조건을 `scope_registry` row에 직접 저장하지 않는다.
 - scope membership 저장과 request condition 저장을 하나의 DB row에 섞지 않는다.
 
@@ -1035,7 +1020,7 @@ type CanvasScopeSetupDraft = {
     scopeKey: string;
     requiredPhotoTagKeys: string[];
     requiredFileTagKeys: string[];
-    expiresAt?: string | null;
+    expiresAt: string | null;
   }>;
 };
 ```
@@ -1044,7 +1029,7 @@ type CanvasScopeSetupDraft = {
 
 - 하나의 `keyFrameGroupId`가 여러 `scopeKey`에 등장할 수 있다.
 - 하나의 `scopeKey`가 여러 `keyFrameGroupId`를 가질 수 있다.
-- 만료 시간 없음은 `expiresAt: undefined` 또는 `expiresAt: null` 모두 허용하되 service boundary에서 `null`로 정규화한다.
+- 만료 시간 없음은 반드시 `expiresAt: null`이다.
 - scope 삭제는 즉시 DB delete가 아니라 draft status 변경 또는 draft 제거다.
 - 저장 전 탭 전환과 상자 선택은 draft만 읽는다.
 
@@ -1058,11 +1043,9 @@ type CanvasScopeSetupDraft = {
 - [ ] 하나의 scope가 여러 key 상자를 소유할 수 있게 한다.
 - [ ] `template_id + key_frame_group_id` 단독 unique 전제를 제거한다.
 - [ ] 중복 membership 방지 기준을 `template_id + key_frame_group_id + scope_key`로 검토한다.
-- [ ] 만료 시간 기본 상태를 "기한 제한 없음"으로 둔다.
-- [ ] 만료 시간 `undefined`와 `null`을 모두 "기한 제한 없음"으로 표시한다.
-- [ ] timestamp 값이 있을 때만 "기한 제한 있음"으로 저장한다.
-- [ ] service boundary에서 `undefined/null` 만료 시간을 `null`로 정규화한다.
-- [ ] 부분 수정의 "변경 없음"은 `undefined`가 아니라 별도 command 플래그로 표현한다.
+- [ ] 만료 시간 기본값을 `null`로 둔다.
+- [ ] 만료 시간 `null`을 "기한 제한 없음"으로 표시한다.
+- [ ] 만료 시간 제거 저장 시 `expires_at: null`을 명시한다.
 - [ ] 사진/파일/만료 조건을 `scope_registry`와 분리된 request condition으로 유지한다.
 - [ ] 상자 선택, 탭 전환, 날짜 입력 중 DB 요청 0회를 유지한다.
 - [ ] 저장 버튼에서만 scope CRUD와 request condition 저장을 수행한다.
@@ -1070,4 +1053,3 @@ type CanvasScopeSetupDraft = {
 수정 전 백업:
 
 - `docs/diff/2026-05-27_SCOPES-02_scopes.before.md`
-- `docs/diff/2026-05-27_SCOPES-03_scopes.before.md`
