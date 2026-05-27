@@ -10744,18 +10744,6 @@ const clearFrameMetadataRelationOutlineUi = (root: ParentNode) => {
   });
 };
 
-const clearMetadataDerivedSelectionUi = (root: HTMLElement) => {
-  removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-  clearFrameMetadataRelationOutlineUi(root);
-  clearSelectionTonedownOverlays(root, 'metadata');
-  root
-    .querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}], [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`)
-    .forEach((element) => {
-      removeElementAttributeIfPresent(element, TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
-      removeElementAttributeIfPresent(element, TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
-    });
-};
-
 const applyMetadataRelationOutlineEdges = (
   root: ParentNode,
   members: Array<{
@@ -11052,11 +11040,6 @@ const applyFrameRelationSelectionUi = (
   const normalizedSelectedFrameGroupIds = Array.from(
     new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
   );
-
-  if (activeSelectionPanelTab === 'metadata2') {
-    clearMetadataDerivedSelectionUi(root);
-    return;
-  }
 
   if (activeSelectionPanelTab !== 'metadata') {
     removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
@@ -21419,6 +21402,7 @@ export default function TemplateEditWorkspace({
 
     const applyChecklistSelectableMarqueeVisuals = (nextSelectedFrameGroupIds: string[]) => {
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+      const previousSelectedFrameGroupIds = selectedFrameGroupIdsRef.current;
 
       selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
@@ -21433,8 +21417,24 @@ export default function TemplateEditWorkspace({
 
       const frameNodeById = collectFrameSelectionAnchorByIdMap(root);
       if (roleAssignmentTabActive) {
-        const selectionOrderByFrameGroupId = new Map<string, number>();
-        clearMetadataDerivedSelectionUi(root);
+        const nextSelectedFrameGroupIdSet = new Set(nextSelectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
+
+        previousSelectedFrameGroupIds
+          .map((frameGroupId) => frameGroupId.trim())
+          .filter((frameGroupId) => frameGroupId && !nextSelectedFrameGroupIdSet.has(frameGroupId))
+          .forEach((frameGroupId) => {
+            const node = frameNodeById.get(frameGroupId) || null;
+
+            if (!node) {
+              return;
+            }
+
+            node.removeAttribute('data-template-selected');
+            node.removeAttribute('data-template-primary-selected');
+            node.removeAttribute('data-template-selection-order');
+            clearPositionSelectionVisualStyle(node);
+            removeFrameSelectionChromeFromShell(resolveFrameLayoutShell(node));
+          });
 
         nextSelectedFrameGroupIds.forEach((frameGroupId, selectionIndex) => {
           const node = frameNodeById.get(frameGroupId) || null;
@@ -21443,10 +21443,15 @@ export default function TemplateEditWorkspace({
             return;
           }
 
-          selectionOrderByFrameGroupId.set(frameGroupId, selectionIndex + 1);
-          ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, false);
+          setElementAttributeIfChanged(node, 'data-template-edge-host', 'true');
+          setElementAttributeIfChanged(node, 'data-template-selected', 'true');
+          setElementAttributeIfChanged(node, 'data-template-selection-order', String(selectionIndex + 1));
+          if (selectionIndex === 0) {
+            setElementAttributeIfChanged(node, 'data-template-primary-selected', 'true');
+          } else {
+            removeElementAttributeIfPresent(node, 'data-template-primary-selected');
+          }
         });
-        cleanupStaleFrameSelectionChrome(root, nextSelectedFrameGroupIds, selectionOrderByFrameGroupId);
         return;
       }
 
@@ -35362,10 +35367,10 @@ export default function TemplateEditWorkspace({
           content: attr(data-template-selection-order) !important;
           display: inline-flex !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"]) {
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"] {
           opacity: 1 !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"])::after {
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]::after {
           content: '';
           position: absolute;
           inset: -1px;

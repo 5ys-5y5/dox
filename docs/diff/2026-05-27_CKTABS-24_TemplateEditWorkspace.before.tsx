@@ -397,12 +397,6 @@ const normalizeTemplateEditWorkspaceCanvasViewMode = (
 type TemplateUsagePreviewPreparedStatus = 'ready' | 'dirty' | 'building' | 'pending' | 'failed';
 
 const TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS = 560;
-const ROLE_ASSIGNMENT_PARENT_NOTIFY_DELAY_MS = TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS + 160;
-
-type RoleAssignmentRenderSelectionState = {
-  boxes: TemplateCanvasSelectedBox[];
-  hasLocalValue: boolean;
-};
 
 const TEMPLATE_FRAME_RELATIVE_ANCHOR_GROUP_BOTTOM_GAP_ATTR = 'data-template-frame-relative-anchor-group-bottom-gap';
 
@@ -412,91 +406,6 @@ const setElementAttributeIfChanged = (element: HTMLElement, attrName: string, ne
   }
 
   element.setAttribute(attrName, nextValue);
-};
-
-const readRoleAssignmentSelectedBoxIdentity = (box: TemplateCanvasSelectedBox) =>
-  [box.id, box.valueKey, box.frameGroupId, box.keyFrameGroupId, box.valueFrameGroupId]
-    .map((value) => value?.trim())
-    .find((value) => Boolean(value)) || '';
-
-const readRoleAssignmentSelectedBoxLabel = (box: TemplateCanvasSelectedBox) =>
-  [box.label, box.valueKey, box.frameGroupId]
-    .map((value) => value?.trim())
-    .find((value) => Boolean(value)) || '선택한 상자';
-
-const buildRoleAssignmentSelectionSignature = (
-  selectedBoxes: TemplateCanvasSelectedBox[],
-  selectedFrameGroupIds: string[]
-) =>
-  [
-    selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean).sort().join('|'),
-    selectedBoxes
-      .map(readRoleAssignmentSelectedBoxIdentity)
-      .filter(Boolean)
-      .sort()
-      .join('|'),
-  ].join('::');
-
-const collectRoleAssignmentSelectedBoxStoredFrameGroupIds = (selectedBoxes: TemplateCanvasSelectedBox[]) =>
-  Array.from(
-    new Set(
-      selectedBoxes
-        .flatMap((box) => [
-          ...(box.highlightFrameGroupIds || []),
-          box.keyFrameGroupId,
-          box.valueFrameGroupId,
-          box.frameGroupId,
-          box.valueKey,
-        ])
-        .map((frameGroupId) => frameGroupId?.trim())
-        .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
-    )
-  );
-
-const applyImmediateRoleAssignmentPanelDomState = (
-  ownerDocument: Document | null | undefined,
-  selectedBoxes: TemplateCanvasSelectedBox[]
-) => {
-  if (!ownerDocument) {
-    return;
-  }
-
-  const selectedCount = selectedBoxes.length;
-  const selectedSummary =
-    selectedCount > 0 ? selectedBoxes.map(readRoleAssignmentSelectedBoxLabel).join(', ') : '선택된 상자가 없습니다.';
-  const countBadge = ownerDocument.querySelector<HTMLElement>(
-    '[data-canvas-owner-item="canvas-role-settings-selected-box-count-badge"]'
-  );
-  const summaryNode = ownerDocument.querySelector<HTMLElement>(
-    '[data-canvas-owner-item="canvas-role-settings-selected-box-summary"]'
-  );
-  const panelNode = ownerDocument.querySelector<HTMLElement>(
-    '[data-canvas-owner-item="canvas-role-settings-selected-box-panel"]'
-  );
-
-  if (countBadge) {
-    countBadge.textContent = `${selectedCount}개`;
-  }
-
-  if (summaryNode) {
-    summaryNode.textContent = selectedSummary;
-  }
-
-  if (panelNode) {
-    panelNode.setAttribute('data-role-selection-immediate-count', String(selectedCount));
-  }
-
-  ownerDocument
-    .querySelectorAll<HTMLButtonElement>(
-      [
-        '[data-canvas-owner-item^="canvas-role-settings-selected-box-kind-button-"]',
-        '[data-canvas-owner-item^="canvas-role-settings-selected-box-frame-role-button-"]',
-      ].join(',')
-    )
-    .forEach((button) => {
-      button.disabled = selectedCount <= 0;
-      button.setAttribute('aria-disabled', selectedCount <= 0 ? 'true' : 'false');
-    });
 };
 
 const setStylePropertyIfChanged = (style: CSSStyleDeclaration, propertyName: string, nextValue: string) => {
@@ -10744,18 +10653,6 @@ const clearFrameMetadataRelationOutlineUi = (root: ParentNode) => {
   });
 };
 
-const clearMetadataDerivedSelectionUi = (root: HTMLElement) => {
-  removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-  clearFrameMetadataRelationOutlineUi(root);
-  clearSelectionTonedownOverlays(root, 'metadata');
-  root
-    .querySelectorAll<HTMLElement>(`[${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}], [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}]`)
-    .forEach((element) => {
-      removeElementAttributeIfPresent(element, TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
-      removeElementAttributeIfPresent(element, TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
-    });
-};
-
 const applyMetadataRelationOutlineEdges = (
   root: ParentNode,
   members: Array<{
@@ -11052,11 +10949,6 @@ const applyFrameRelationSelectionUi = (
   const normalizedSelectedFrameGroupIds = Array.from(
     new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter((frameGroupId) => Boolean(frameGroupId)))
   );
-
-  if (activeSelectionPanelTab === 'metadata2') {
-    clearMetadataDerivedSelectionUi(root);
-    return;
-  }
 
   if (activeSelectionPanelTab !== 'metadata') {
     removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
@@ -17892,12 +17784,6 @@ const applyFastFrameSelectionUi = (
       TemplateEdgeSelectionService.createEmptyState(),
       [],
       positionSelectionOrderState.normalizedProxySelections
-    ) ||
-    isStableDirectFrameSelectionUiAlreadyApplied(
-      root,
-      selectedIds,
-      TemplateEdgeSelectionService.createEmptyState(),
-      []
     )
   ) {
     syncPositionSelectionVisualStyles(root);
@@ -18112,9 +17998,7 @@ const isStableDirectFrameSelectionUiAlreadyApplied = (
   edgeSelectionState: TemplateEdgeSelectionStateDto,
   edgeMovementMismatchIds: string[]
 ) => {
-  const selectionPanelTab = root.getAttribute('data-selection-panel-tab') as SelectionPanelTab;
-
-  if (!isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)) {
+  if (root.getAttribute('data-selection-panel-tab') !== 'metadata') {
     return false;
   }
 
@@ -18881,9 +18765,6 @@ export default function TemplateEditWorkspace({
   const templateUsagePreviewLastDraftChangeAtRef = React.useRef(0);
   const templateUsagePreviewPreparedSourceHtmlRef = React.useRef('');
   const templateUsagePreviewPreparedStatusRef = React.useRef<TemplateUsagePreviewPreparedStatus>('dirty');
-  // CKTABS-24: tab switches must not re-measure unchanged editor auto-size boxes.
-  // DOM-changing edit/save flows mark this dirty; the global editor measurement pass clears it.
-  const editorAutoSizeLayoutDirtyRef = React.useRef(true);
   const templateUsagePreviewRuntimeCacheRef = React.useRef<{
     sourceHtml: string;
     optionsSignature: string;
@@ -19020,15 +18901,6 @@ export default function TemplateEditWorkspace({
   } | null>(null);
   const checklistRegistrationTargetRef = React.useRef<TemplateChecklistRegistrationTarget | null>(null);
   const selectedCanvasBoxesRef = React.useRef<TemplateCanvasSelectedBox[]>([]);
-  const roleAssignmentSelectedBoxesRef = React.useRef<TemplateCanvasSelectedBox[]>([]);
-  const roleAssignmentSelectionSignatureRef = React.useRef('');
-  const roleAssignmentDeferredCommitTimerRef = React.useRef<number | null>(null);
-  const roleAssignmentParentNotifyTimerRef = React.useRef<number | null>(null);
-  const [roleAssignmentRenderSelection, setRoleAssignmentRenderSelection] =
-    React.useState<RoleAssignmentRenderSelectionState>({
-      boxes: [],
-      hasLocalValue: false,
-    });
   const [signatureOverlayTarget, setSignatureOverlayTarget] =
     React.useState<TemplateChecklistRegistrationTarget | null>(null);
   const [signatureOverlaySubmitting, setSignatureOverlaySubmitting] = React.useState(false);
@@ -19050,20 +18922,6 @@ export default function TemplateEditWorkspace({
   React.useEffect(() => {
     selectedCanvasBoxesRef.current = selectedCanvasBoxes;
   }, [selectedCanvasBoxes]);
-  React.useEffect(
-    () => () => {
-      if (roleAssignmentDeferredCommitTimerRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(roleAssignmentDeferredCommitTimerRef.current);
-        roleAssignmentDeferredCommitTimerRef.current = null;
-      }
-
-      if (roleAssignmentParentNotifyTimerRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(roleAssignmentParentNotifyTimerRef.current);
-        roleAssignmentParentNotifyTimerRef.current = null;
-      }
-    },
-    []
-  );
   const stylePanelRef = React.useRef<HTMLDivElement | null>(null);
   const bumpPositionStructureRevision = React.useCallback(() => {
     setPositionStructureRevision((previous) => previous + 1);
@@ -20310,7 +20168,6 @@ export default function TemplateEditWorkspace({
     const nextDraftHtml = extractEditorHtml(root);
     const nextRenderHtml = extractPreviewRenderHtml(root);
     draftPreviewHtmlRef.current = nextDraftHtml;
-    editorAutoSizeLayoutDirtyRef.current = true;
     templateUsagePreviewLastDraftChangeAtRef.current =
       typeof performance === 'undefined' ? Date.now() : performance.now();
     templateUsagePreviewPreparedSourceHtmlRef.current = '';
@@ -21211,10 +21068,6 @@ export default function TemplateEditWorkspace({
 
     let marqueeState: ChecklistSelectableMarqueeState | null = null;
     let suppressNextClick = false;
-    const preparedMarqueeHitEntriesByPageInner = new WeakMap<HTMLElement, ChecklistSelectableMarqueeHitEntry[]>();
-    let preparedMarqueeHitEntriesScale = 0;
-    let preparedMarqueeHitEntriesTimer: number | null = null;
-    let preparedMarqueeHitEntriesIdle: number | null = null;
 
     const clearChecklistAvailability = () => {
       root.querySelectorAll<HTMLElement>(`[${TEMPLATE_CHECKLIST_SELECTABLE_ATTR}="true"]`).forEach((node) => {
@@ -21300,15 +21153,10 @@ export default function TemplateEditWorkspace({
       ]
         .map((value) => value?.trim())
         .find((value) => Boolean(value)) || '';
-    const selectableTargetItemByKey = new Map(
-      selectableTargets
-        .map((item) => [getTargetKey(item.target), item] as const)
-        .filter(([targetKey]) => Boolean(targetKey))
-    );
 
     const resolveSelectableTargetDisplayLabel = (target: TemplateChecklistRegistrationTarget) => {
       const targetKey = getTargetKey(target);
-      const item = selectableTargetItemByKey.get(targetKey) || null;
+      const item = selectableTargets.find((candidate) => getTargetKey(candidate.target) === targetKey) || null;
       const keyNode =
         item?.nodes.find((node) => readFrameRole(resolveFrameSelectionAnchor(node) || node) === 'key') ||
         item?.nodes.find((node) => readFrameRole(resolveFrameSelectionAnchor(node) || node) === 'key_value') ||
@@ -21330,14 +21178,14 @@ export default function TemplateEditWorkspace({
     const readElementRectInPageInner = (
       element: HTMLElement,
       pageInner: HTMLElement,
-      scale: number,
-      pageRect: DOMRect
+      scale: number
     ): FrameNodeRect | null => {
       if (element.closest<HTMLElement>('.page-inner') !== pageInner) {
         return null;
       }
 
       const elementRect = element.getBoundingClientRect();
+      const pageRect = pageInner.getBoundingClientRect();
 
       if (elementRect.width <= 0 || elementRect.height <= 0) {
         return null;
@@ -21354,14 +21202,12 @@ export default function TemplateEditWorkspace({
     const buildChecklistSelectableMarqueeHitEntries = (
       pageInner: HTMLElement,
       scale: number
-    ): ChecklistSelectableMarqueeHitEntry[] => {
-      const pageRect = pageInner.getBoundingClientRect();
-
-      return selectableTargets
+    ): ChecklistSelectableMarqueeHitEntry[] =>
+      selectableTargets
         .map((item) => {
           const rects = item.nodes
             .map((node) => resolveFrameSelectionAnchor(node) || node)
-            .map((node) => readElementRectInPageInner(node, pageInner, scale, pageRect))
+            .map((node) => readElementRectInPageInner(node, pageInner, scale))
             .filter((rect): rect is FrameNodeRect => Boolean(rect));
 
           if (rects.length <= 0) {
@@ -21381,41 +21227,6 @@ export default function TemplateEditWorkspace({
           };
         })
         .filter((entry): entry is ChecklistSelectableMarqueeHitEntry => Boolean(entry));
-    };
-    const primeChecklistSelectableMarqueeHitEntries = () => {
-      const scale = Math.max(0.1, previewZoomRef.current / 100);
-
-      preparedMarqueeHitEntriesScale = scale;
-      root.querySelectorAll<HTMLElement>('.page-inner').forEach((pageInner) => {
-        preparedMarqueeHitEntriesByPageInner.set(
-          pageInner,
-          buildChecklistSelectableMarqueeHitEntries(pageInner, scale)
-        );
-      });
-    };
-    const scheduleChecklistSelectableMarqueeHitEntryPrime = () => {
-      if (typeof window === 'undefined') {
-        return;
-      }
-
-      const idleWindow = window as Window &
-        typeof globalThis & {
-          requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
-          cancelIdleCallback?: (handle: number) => void;
-        };
-
-      if (typeof idleWindow.requestIdleCallback === 'function') {
-        preparedMarqueeHitEntriesIdle = idleWindow.requestIdleCallback(primeChecklistSelectableMarqueeHitEntries, {
-          timeout: roleAssignmentTabActive ? 900 : 1600,
-        });
-        return;
-      }
-
-      preparedMarqueeHitEntriesTimer = window.setTimeout(
-        primeChecklistSelectableMarqueeHitEntries,
-        roleAssignmentTabActive ? 320 : 900
-      );
-    };
 
     const applyChecklistSelectableMarqueeVisuals = (nextSelectedFrameGroupIds: string[]) => {
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
@@ -21430,89 +21241,9 @@ export default function TemplateEditWorkspace({
         clearPositionOnlyEditorUi(root);
       }
       applyFrameCanvasVisualHints(root);
-
-      const frameNodeById = collectFrameSelectionAnchorByIdMap(root);
-      if (roleAssignmentTabActive) {
-        const selectionOrderByFrameGroupId = new Map<string, number>();
-        clearMetadataDerivedSelectionUi(root);
-
-        nextSelectedFrameGroupIds.forEach((frameGroupId, selectionIndex) => {
-          const node = frameNodeById.get(frameGroupId) || null;
-
-          if (!node) {
-            return;
-          }
-
-          selectionOrderByFrameGroupId.set(frameGroupId, selectionIndex + 1);
-          ensureFrameSelectionChrome(node, frameGroupId, selectionIndex, false);
-        });
-        cleanupStaleFrameSelectionChrome(root, nextSelectedFrameGroupIds, selectionOrderByFrameGroupId);
-        return;
-      }
-
-      applyFastFrameSelectionUi(root, nextSelectedFrameGroupIds, [], frameNodeById);
+      applyFastFrameSelectionUi(root, nextSelectedFrameGroupIds, [], collectFrameSelectionAnchorByIdMap(root));
       applyFrameRelationSelectionUi(root, frameRelationPreviewModeRef.current, nextSelectedFrameGroupIds);
       syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
-    };
-
-    const scheduleRoleAssignmentRenderCommit = (
-      selectedBoxes: TemplateCanvasSelectedBox[],
-      selectionSignature: string
-    ) => {
-      if (!roleAssignmentTabActive || typeof window === 'undefined') {
-        roleAssignmentSelectedBoxesRef.current = selectedBoxes;
-        setRoleAssignmentRenderSelection({
-          boxes: selectedBoxes,
-          hasLocalValue: true,
-        });
-        return;
-      }
-
-      if (roleAssignmentDeferredCommitTimerRef.current !== null) {
-        window.clearTimeout(roleAssignmentDeferredCommitTimerRef.current);
-        roleAssignmentDeferredCommitTimerRef.current = null;
-      }
-
-      roleAssignmentDeferredCommitTimerRef.current = window.setTimeout(() => {
-        roleAssignmentDeferredCommitTimerRef.current = null;
-
-        if (roleAssignmentSelectionSignatureRef.current !== selectionSignature) {
-          return;
-        }
-
-        setRoleAssignmentRenderSelection({
-          boxes: selectedBoxes,
-          hasLocalValue: true,
-        });
-        setEdgeSelectionState(TemplateEdgeSelectionService.createEmptyState());
-        setSelectionValidationIssues([]);
-        setSelectionReviewIssues([]);
-        setSelectionSaveProgress(defaultSelectionSaveProgressState);
-      }, TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS);
-    };
-
-    const scheduleRoleAssignmentParentSelectionChange = (
-      selectedBoxes: TemplateCanvasSelectedBox[],
-      options?: TemplateCanvasSelectionChangeOptions
-    ) => {
-      if (!onCanvasSelectionChange) {
-        return;
-      }
-
-      if (!roleAssignmentTabActive || typeof window === 'undefined') {
-        onCanvasSelectionChange(selectedBoxes, options);
-        return;
-      }
-
-      if (roleAssignmentParentNotifyTimerRef.current !== null) {
-        window.clearTimeout(roleAssignmentParentNotifyTimerRef.current);
-        roleAssignmentParentNotifyTimerRef.current = null;
-      }
-
-      roleAssignmentParentNotifyTimerRef.current = window.setTimeout(() => {
-        roleAssignmentParentNotifyTimerRef.current = null;
-        onCanvasSelectionChange(selectedBoxes, options);
-      }, ROLE_ASSIGNMENT_PARENT_NOTIFY_DELAY_MS);
     };
 
     const clearRoleAssignmentSelection = () => {
@@ -21520,41 +21251,42 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      roleAssignmentSelectedBoxesRef.current = [];
-      roleAssignmentSelectionSignatureRef.current = buildRoleAssignmentSelectionSignature([], []);
+      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+
       applyChecklistSelectableMarqueeVisuals([]);
-      applyImmediateRoleAssignmentPanelDomState(root.ownerDocument, []);
-      scheduleRoleAssignmentRenderCommit([], roleAssignmentSelectionSignatureRef.current);
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      flushSync(() => {
+        setSelectedFrameGroupIds([]);
+        setEdgeSelectionState(emptyEdgeSelection);
+        setSelectionValidationIssues([]);
+        setSelectionReviewIssues([]);
+        setSelectionSaveProgress(defaultSelectionSaveProgressState);
+      });
     };
 
     const commitRoleAssignmentSelection = (
       selectedBoxes: TemplateCanvasSelectedBox[],
       options?: TemplateChecklistSelectableTargetSelectOptions
-    ): boolean => {
+    ) => {
       if (!roleAssignmentTabActive || selectedBoxes.length <= 0) {
-        return false;
+        return;
       }
 
-      const storedSelectedIdsFromBoxes = collectRoleAssignmentSelectedBoxStoredFrameGroupIds(selectedBoxes);
-      const nextSelectedIdsFromBoxes =
-        roleAssignmentTabActive && storedSelectedIdsFromBoxes.length > 0
-          ? storedSelectedIdsFromBoxes
-          : collectCanvasSelectedBoxCanvasSelectionIds(root, selectedBoxes);
+      const nextSelectedIdsFromBoxes = collectCanvasSelectedBoxCanvasSelectionIds(root, selectedBoxes);
       const nextSelectedFrameGroupIds = options?.append
         ? Array.from(new Set([...selectedFrameGroupIdsRef.current, ...nextSelectedIdsFromBoxes]))
         : nextSelectedIdsFromBoxes;
-      const nextSelectionSignature = buildRoleAssignmentSelectionSignature(selectedBoxes, nextSelectedFrameGroupIds);
+      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
 
-      if (roleAssignmentSelectionSignatureRef.current === nextSelectionSignature) {
-        return false;
-      }
-
-      roleAssignmentSelectionSignatureRef.current = nextSelectionSignature;
-      roleAssignmentSelectedBoxesRef.current = selectedBoxes;
       applyChecklistSelectableMarqueeVisuals(nextSelectedFrameGroupIds);
-      applyImmediateRoleAssignmentPanelDomState(root.ownerDocument, selectedBoxes);
-      scheduleRoleAssignmentRenderCommit(selectedBoxes, nextSelectionSignature);
-      return true;
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      flushSync(() => {
+        setSelectedFrameGroupIds(nextSelectedFrameGroupIds);
+        setEdgeSelectionState(emptyEdgeSelection);
+        setSelectionValidationIssues([]);
+        setSelectionReviewIssues([]);
+        setSelectionSaveProgress(defaultSelectionSaveProgressState);
+      });
     };
 
     const emitChecklistSelectableTargets = (
@@ -21565,15 +21297,11 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      const resolvedTargets = roleAssignmentTabActive ? targets : targets.map(resolveSelectableTargetDisplayLabel);
+      const resolvedTargets = targets.map(resolveSelectableTargetDisplayLabel);
       const selectedBoxes = resolvedTargets.map((target) => {
         const targetKey = getTargetKey(target);
-        const matchedItem = selectableTargetItemByKey.get(targetKey) || null;
-        const storedSelectionIds = matchedItem?.selectedBox.highlightFrameGroupIds || [];
-        const selectionIds =
-          roleAssignmentTabActive && storedSelectionIds.length > 0
-            ? storedSelectionIds
-            : collectChecklistTargetCanvasSelectionIds(root, target);
+        const matchedItem = selectableTargets.find((candidate) => getTargetKey(candidate.target) === targetKey) || null;
+        const selectionIds = collectChecklistTargetCanvasSelectionIds(root, target);
         const selectedBox = matchedItem?.selectedBox;
         const label = normalizeCanvasSelectableDisplayText(target.label || selectedBox?.label || '') || targetKey;
 
@@ -21599,21 +21327,13 @@ export default function TemplateEditWorkspace({
         } satisfies TemplateCanvasSelectedBox;
       });
 
-      const roleAssignmentSelectionChanged = commitRoleAssignmentSelection(selectedBoxes, options);
+      commitRoleAssignmentSelection(selectedBoxes, options);
 
       if (onCanvasSelectionChange) {
-        const selectionChangeOptions = {
+        onCanvasSelectionChange(selectedBoxes, {
           append: Boolean(options?.append),
           source: selectedBoxes.length > 1 ? 'drag' : 'click',
-        } satisfies TemplateCanvasSelectionChangeOptions;
-
-        if (!roleAssignmentTabActive || roleAssignmentSelectionChanged) {
-          scheduleRoleAssignmentParentSelectionChange(selectedBoxes, selectionChangeOptions);
-        }
-      }
-
-      if (roleAssignmentTabActive) {
-        return;
+        } satisfies TemplateCanvasSelectionChangeOptions);
       }
 
       if (onChecklistSelectableTargetsSelect) {
@@ -21654,12 +21374,7 @@ export default function TemplateEditWorkspace({
       }
 
       if (!state.hitEntries) {
-        const preparedHitEntries =
-          Math.abs(preparedMarqueeHitEntriesScale - state.scale) < 0.001
-            ? preparedMarqueeHitEntriesByPageInner.get(state.pageInner)
-            : null;
-        state.hitEntries =
-          preparedHitEntries || buildChecklistSelectableMarqueeHitEntries(state.pageInner, state.scale);
+        state.hitEntries = buildChecklistSelectableMarqueeHitEntries(state.pageInner, state.scale);
       }
 
       const nextMode: FrameMarqueeSelectionMode = state.anchorTarget
@@ -21753,7 +21468,7 @@ export default function TemplateEditWorkspace({
         ) {
           clearRoleAssignmentSelection();
           onChecklistSelectionClear?.();
-          scheduleRoleAssignmentParentSelectionChange([], { source: 'clear' });
+          onCanvasSelectionChange?.([], { source: 'clear' });
         }
         suppressClickAfterMarquee();
       } else if (state.anchorTarget) {
@@ -21767,7 +21482,7 @@ export default function TemplateEditWorkspace({
       ) {
         clearRoleAssignmentSelection();
         onChecklistSelectionClear?.();
-        scheduleRoleAssignmentParentSelectionChange([], { source: 'clear' });
+        onCanvasSelectionChange?.([], { source: 'clear' });
       }
 
       cleanupChecklistSelectableMarquee();
@@ -21804,7 +21519,7 @@ export default function TemplateEditWorkspace({
         ) {
           clearRoleAssignmentSelection();
           onChecklistSelectionClear?.();
-          scheduleRoleAssignmentParentSelectionChange([], { source: 'clear' });
+          onCanvasSelectionChange?.([], { source: 'clear' });
         }
         return;
       }
@@ -21882,30 +21597,8 @@ export default function TemplateEditWorkspace({
     root.addEventListener('pointerdown', handleSelectablePointerDown, true);
     root.addEventListener('mousedown', handleSelectableMouseDown, true);
     root.addEventListener('click', handleSelectableTargetClick, true);
-    scheduleChecklistSelectableMarqueeHitEntryPrime();
 
     return () => {
-      const idleWindow = typeof window === 'undefined'
-        ? null
-        : (window as Window &
-            typeof globalThis & {
-              cancelIdleCallback?: (handle: number) => void;
-            });
-
-      if (preparedMarqueeHitEntriesTimer !== null && typeof window !== 'undefined') {
-        window.clearTimeout(preparedMarqueeHitEntriesTimer);
-        preparedMarqueeHitEntriesTimer = null;
-      }
-
-      if (
-        preparedMarqueeHitEntriesIdle !== null &&
-        idleWindow &&
-        typeof idleWindow.cancelIdleCallback === 'function'
-      ) {
-        idleWindow.cancelIdleCallback(preparedMarqueeHitEntriesIdle);
-        preparedMarqueeHitEntriesIdle = null;
-      }
-
       root.removeEventListener('pointerdown', handleSelectablePointerDown, true);
       root.removeEventListener('mousedown', handleSelectableMouseDown, true);
       root.removeEventListener('click', handleSelectableTargetClick, true);
@@ -24096,10 +23789,6 @@ export default function TemplateEditWorkspace({
   );
   const applyEditorAutoSizeBoxesWithPreservedLayout = React.useCallback(
     (root: HTMLElement) => {
-      if (!editorAutoSizeLayoutDirtyRef.current) {
-        return { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
-      }
-
       const autoSizedFrameGroupIds = Array.from(
         new Set(
           collectFrameSelectionAnchors(root)
@@ -24110,13 +23799,10 @@ export default function TemplateEditWorkspace({
       );
 
       if (autoSizedFrameGroupIds.length <= 0) {
-        editorAutoSizeLayoutDirtyRef.current = false;
         return { changedCount: 0, skippedCount: 0, changedFrameGroupIds: [] as string[] };
       }
 
-      const result = applyTemplateAutoSizeBoxesWithPreservedLayout(root, autoSizedFrameGroupIds, { skipWidth: true });
-      editorAutoSizeLayoutDirtyRef.current = false;
-      return result;
+      return applyTemplateAutoSizeBoxesWithPreservedLayout(root, autoSizedFrameGroupIds, { skipWidth: true });
     },
     [applyTemplateAutoSizeBoxesWithPreservedLayout]
   );
@@ -26604,35 +26290,12 @@ export default function TemplateEditWorkspace({
       event.preventDefault();
       clearChecklistCanvasSelection();
       onChecklistSelectionClear?.();
-      if (!onCanvasSelectionChange) {
-        return;
-      }
-
-      if (!roleAssignmentTabActive) {
-        onCanvasSelectionChange([], { source: 'clear' });
-        return;
-      }
-
-      if (roleAssignmentParentNotifyTimerRef.current !== null) {
-        window.clearTimeout(roleAssignmentParentNotifyTimerRef.current);
-        roleAssignmentParentNotifyTimerRef.current = null;
-      }
-
-      roleAssignmentParentNotifyTimerRef.current = window.setTimeout(() => {
-        roleAssignmentParentNotifyTimerRef.current = null;
-        onCanvasSelectionChange([], { source: 'clear' });
-      }, ROLE_ASSIGNMENT_PARENT_NOTIFY_DELAY_MS);
+      onCanvasSelectionChange?.([], { source: 'clear' });
     };
 
 	    window.addEventListener('keydown', handleChecklistSelectionEscape, true);
 	    return () => window.removeEventListener('keydown', handleChecklistSelectionEscape, true);
-	  }, [
-    canvasLinkedSelectionControllerActive,
-    clearChecklistCanvasSelection,
-    onCanvasSelectionChange,
-    onChecklistSelectionClear,
-    roleAssignmentTabActive,
-  ]);
+	  }, [canvasLinkedSelectionControllerActive, clearChecklistCanvasSelection, onCanvasSelectionChange, onChecklistSelectionClear]);
 
   const applyRuntimeSelectionVisuals = React.useCallback(
     (nextSelectedFrameGroupIds: string[], nextEdgeSelectionState: TemplateEdgeSelectionStateDto) => {
@@ -31813,7 +31476,7 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    if (selectedFrameGroupIdsRef.current.length === 0) {
+    if (selectedFrameGroupIds.length === 0) {
       return;
     }
 
@@ -33978,13 +33641,10 @@ export default function TemplateEditWorkspace({
       }),
     [roleAssignmentTargetItems]
   );
-  const roleAssignmentRenderSelectedBoxes = roleAssignmentRenderSelection.hasLocalValue
-    ? roleAssignmentRenderSelection.boxes
-    : selectedCanvasBoxes;
   const roleAssignmentSelectedBoxIds = React.useMemo(() => {
     const selectedCanvasBoxIds = Array.from(
       new Set(
-        roleAssignmentRenderSelectedBoxes
+        selectedCanvasBoxes
           .map((box) => box.id || box.valueKey || box.frameGroupId)
           .map((value) => value?.trim())
           .filter((value): value is string => Boolean(value))
@@ -33994,10 +33654,6 @@ export default function TemplateEditWorkspace({
     if (selectedCanvasBoxIds.length > 0) {
       const availableIdSet = new Set(roleAssignmentTargetItems.map((item) => item.selectedBox.id));
       return selectedCanvasBoxIds.filter((id) => availableIdSet.has(id));
-    }
-
-    if (roleAssignmentRenderSelection.hasLocalValue) {
-      return [];
     }
 
     const selectedFrameIdSet = new Set(selectedFrameGroupIds.map((frameGroupId) => frameGroupId.trim()).filter(Boolean));
@@ -34020,12 +33676,7 @@ export default function TemplateEditWorkspace({
           .some((value) => selectedFrameIdSet.has(value))
       )
       .map(({ selectedBox }) => selectedBox.id);
-  }, [
-    roleAssignmentRenderSelectedBoxes,
-    roleAssignmentRenderSelection.hasLocalValue,
-    roleAssignmentTargetItems,
-    selectedFrameGroupIds,
-  ]);
+  }, [roleAssignmentTargetItems, selectedCanvasBoxes, selectedFrameGroupIds]);
   const roleAssignmentSelectedBoxes = React.useMemo(() => {
     const selectedIdSet = new Set(roleAssignmentSelectedBoxIds);
 
@@ -34033,78 +33684,35 @@ export default function TemplateEditWorkspace({
       .filter(({ selectedBox }) => selectedIdSet.has(selectedBox.id))
       .map(({ selectedBox }) => selectedBox);
   }, [roleAssignmentSelectedBoxIds, roleAssignmentTargetItems]);
-  const roleAssignmentHasSelectedTarget = roleAssignmentSelectedBoxes.length > 0;
-  const roleAssignmentDisplayedBoxKinds = React.useMemo(() => {
-    const selectedKinds = new Set<TemplateFrameBoxKind>();
-
-    roleAssignmentSelectedBoxes.forEach((box) => {
-      if (box.boxKind) {
-        selectedKinds.add(box.boxKind);
-      }
-    });
-
-    return selectedKinds.size > 0 ? selectedKinds : displayedMetadataBoxKinds;
-  }, [displayedMetadataBoxKinds, roleAssignmentSelectedBoxes]);
-  const roleAssignmentDisplayedRoles = React.useMemo(() => {
-    const selectedRoles = new Set<TemplateFrameRole>();
-
-    roleAssignmentSelectedBoxes.forEach((box) => {
-      const frameRole = box.frameRole;
-
-      if (TEMPLATE_FRAME_ROLE_OPTIONS.includes(frameRole as TemplateFrameRole)) {
-        selectedRoles.add(frameRole as TemplateFrameRole);
-      }
-    });
-
-    return selectedRoles.size > 0 ? selectedRoles : displayedMetadataRoles;
-  }, [displayedMetadataRoles, roleAssignmentSelectedBoxes]);
   const commitRoleAssignmentSelectedBoxes = React.useCallback(
     (nextSelectedBoxes: TemplateCanvasSelectedBox[], source: TemplateCanvasSelectionChangeOptions['source']) => {
       const root = previewRef.current;
-      const storedSelectedFrameGroupIds = collectRoleAssignmentSelectedBoxStoredFrameGroupIds(nextSelectedBoxes);
-      const nextSelectedFrameGroupIds =
-        storedSelectedFrameGroupIds.length > 0
-          ? storedSelectedFrameGroupIds
-          : root
-            ? collectCanvasSelectedBoxCanvasSelectionIds(root, nextSelectedBoxes)
-            : [];
+      const nextSelectedFrameGroupIds = root
+        ? collectCanvasSelectedBoxCanvasSelectionIds(root, nextSelectedBoxes)
+        : Array.from(
+            new Set(
+              nextSelectedBoxes
+                .flatMap((box) => [
+                  ...(box.highlightFrameGroupIds || []),
+                  box.keyFrameGroupId,
+                  box.valueFrameGroupId,
+                  box.frameGroupId,
+                ])
+                .map((frameGroupId) => frameGroupId?.trim())
+                .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
+            )
+          );
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-      const nextSelectionSignature = buildRoleAssignmentSelectionSignature(
-        nextSelectedBoxes,
-        nextSelectedFrameGroupIds
-      );
 
-      roleAssignmentSelectionSignatureRef.current = nextSelectionSignature;
-      roleAssignmentSelectedBoxesRef.current = nextSelectedBoxes;
       applyRuntimeSelectionUi(nextSelectedFrameGroupIds, emptyEdgeSelection);
-      applyImmediateRoleAssignmentPanelDomState(root?.ownerDocument, nextSelectedBoxes);
-      setRoleAssignmentRenderSelection({
-        boxes: nextSelectedBoxes,
-        hasLocalValue: true,
+      flushSync(() => {
+        setSelectedFrameGroupIds(nextSelectedFrameGroupIds);
+        setEdgeSelectionState(emptyEdgeSelection);
+        setSelectionValidationIssues([]);
+        setSelectionReviewIssues([]);
+        setSelectionSaveProgress(defaultSelectionSaveProgressState);
       });
-      setEdgeSelectionState(emptyEdgeSelection);
-      setSelectionValidationIssues([]);
-      setSelectionReviewIssues([]);
-      setSelectionSaveProgress(defaultSelectionSaveProgressState);
-
-      if (!onCanvasSelectionChange) {
-        return;
-      }
-
-      if (roleAssignmentParentNotifyTimerRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(roleAssignmentParentNotifyTimerRef.current);
-        roleAssignmentParentNotifyTimerRef.current = null;
-      }
-
-      if (typeof window === 'undefined') {
-        onCanvasSelectionChange(nextSelectedBoxes, { source });
-        return;
-      }
-
-      roleAssignmentParentNotifyTimerRef.current = window.setTimeout(() => {
-        roleAssignmentParentNotifyTimerRef.current = null;
-        onCanvasSelectionChange(nextSelectedBoxes, { source });
-      }, ROLE_ASSIGNMENT_PARENT_NOTIFY_DELAY_MS);
+      onCanvasSelectionChange?.(nextSelectedBoxes, { source });
     },
     [applyRuntimeSelectionUi, onCanvasSelectionChange]
   );
@@ -34118,26 +33726,6 @@ export default function TemplateEditWorkspace({
       commitRoleAssignmentSelectedBoxes(nextSelectedBoxes, 'programmatic');
     },
     [commitRoleAssignmentSelectedBoxes, roleAssignmentTargetItems]
-  );
-  const stageRoleAssignmentBoxKind = React.useCallback(
-    (boxKind: TemplateFrameBoxKind) => {
-      if (roleAssignmentHasSelectedTarget) {
-        syncFrameMetadataDraftFromIdsRef.current(selectedFrameGroupIdsRef.current.slice());
-      }
-
-      stageMetadataBoxKind(boxKind);
-    },
-    [roleAssignmentHasSelectedTarget, stageMetadataBoxKind]
-  );
-  const stageRoleAssignmentFrameRole = React.useCallback(
-    (role: TemplateFrameRole) => {
-      if (roleAssignmentHasSelectedTarget) {
-        syncFrameMetadataDraftFromIdsRef.current(selectedFrameGroupIdsRef.current.slice());
-      }
-
-      stageMetadataRole(role);
-    },
-    [roleAssignmentHasSelectedTarget, stageMetadataRole]
   );
   const roleAssignmentSelectedSummary = React.useMemo(() => {
     if (roleAssignmentSelectedBoxes.length <= 0) {
@@ -34244,14 +33832,14 @@ export default function TemplateEditWorkspace({
             </div>
             <div className="grid grid-cols-3 gap-2" {...roleAssignmentOwnerItem('selected-box-kind-button-group', '선택한 상자 타입 버튼 묶음')}>
               {TEMPLATE_FRAME_BOX_KIND_OPTIONS.map((boxKind) => {
-                const isActive = roleAssignmentHasSelectedTarget && roleAssignmentDisplayedBoxKinds.has(boxKind);
+                const isActive = hasSelectedMetadataTarget && displayedMetadataBoxKinds.has(boxKind);
 
                 return (
                   <button
                     key={`role-assignment-box-kind:${boxKind}`}
                     type="button"
-                    disabled={!roleAssignmentHasSelectedTarget}
-                    onClick={() => stageRoleAssignmentBoxKind(boxKind)}
+                    disabled={!hasSelectedMetadataTarget}
+                    onClick={() => stageMetadataBoxKind(boxKind)}
                     className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
                       isActive
                         ? FRAME_BOX_KIND_ACTIVE_BUTTON_CLASSES[boxKind]
@@ -34273,14 +33861,14 @@ export default function TemplateEditWorkspace({
             </div>
             <div className="grid grid-cols-3 gap-2" {...roleAssignmentOwnerItem('selected-box-frame-role-button-group', '선택한 상자 key value 역할 버튼 묶음')}>
               {TEMPLATE_FRAME_ROLE_OPTIONS.map((role) => {
-                const isActive = roleAssignmentHasSelectedTarget && roleAssignmentDisplayedRoles.has(role);
+                const isActive = hasSelectedMetadataTarget && displayedMetadataRoles.has(role);
 
                 return (
                   <button
                     key={`role-assignment-frame-role:${role}`}
                     type="button"
-                    disabled={!roleAssignmentHasSelectedTarget}
-                    onClick={() => stageRoleAssignmentFrameRole(role)}
+                    disabled={!hasSelectedMetadataTarget}
+                    onClick={() => stageMetadataRole(role)}
                     className={`min-h-9 rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
                       isActive
                         ? FRAME_ROLE_ACTIVE_BUTTON_CLASSES[role]
@@ -35362,10 +34950,10 @@ export default function TemplateEditWorkspace({
           content: attr(data-template-selection-order) !important;
           display: inline-flex !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"]) {
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"] {
           opacity: 1 !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"])::after {
+        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]::after {
           content: '';
           position: absolute;
           inset: -1px;
