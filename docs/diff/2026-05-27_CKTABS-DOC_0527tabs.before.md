@@ -785,10 +785,10 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-00 이해 확정
 
-- [x] 사용자에게 구현 이해 목록 제시
-- [x] 사용자 명시 확정 수신
-- [x] 화이트리스트 파일 재확인
-- [x] 구현 중단 조건 재확인
+- [ ] 사용자에게 구현 이해 목록 제시
+- [ ] 사용자 명시 확정 수신
+- [ ] 화이트리스트 파일 재확인
+- [ ] 구현 중단 조건 재확인
 
 완료 기록 위치:
 
@@ -797,10 +797,10 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-01 diff 백업
 
-- [x] 수정 대상 파일별 before 기록 생성
-- [x] 새 파일 생성 대상은 "파일 없음" 기록 생성
-- [x] 각 diff 기록에 체크리스트 ID 포함
-- [x] diff 기록 후에만 코드 수정 시작
+- [ ] 수정 대상 파일별 before 기록 생성
+- [ ] 새 파일 생성 대상은 "파일 없음" 기록 생성
+- [ ] 각 diff 기록에 체크리스트 ID 포함
+- [ ] diff 기록 후에만 코드 수정 시작
 
 예상 diff 기록:
 
@@ -811,11 +811,11 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-02 view mode 계약 추가
 
-- [x] `metadata2` 타입 추가
-- [x] normalize 함수가 `metadata2`를 보존
-- [x] owner settings 저장/복원에서 `metadata2` 유지
-- [x] `preview`, `position`, `metadata`, `metadata2` definition을 단일 계약으로 제공
-- [x] `metadata2`가 `metadata`로 fallback되지 않는지 확인
+- [ ] `metadata2` 타입 추가
+- [ ] normalize 함수가 `metadata2`를 보존
+- [ ] owner settings 저장/복원에서 `metadata2` 유지
+- [ ] `preview`, `position`, `metadata`, `metadata2` definition을 단일 계약으로 제공
+- [ ] `metadata2`가 `metadata`로 fallback되지 않는지 확인
 
 수정 후보:
 
@@ -826,12 +826,12 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-03 owner page 버튼 구현
 
-- [x] owner root view 버튼 4개 출력
-- [x] `속성2`가 기존 `속성` 오른쪽에 위치
-- [x] `미리보기`가 같은 버튼 그룹에 유지
-- [x] 각 버튼에 명시 `data-canvas-owner-item` 부여
-- [x] `data-canvas-owner-item="canvas-container"` 명시 부여
-- [x] active 상태가 `settings.canvasViewMode` 기준으로 독립 반영
+- [ ] owner root view 버튼 4개 출력
+- [ ] `속성2`가 기존 `속성` 오른쪽에 위치
+- [ ] `미리보기`가 같은 버튼 그룹에 유지
+- [ ] 각 버튼에 명시 `data-canvas-owner-item` 부여
+- [ ] `data-canvas-owner-item="canvas-container"` 명시 부여
+- [ ] active 상태가 `settings.canvasViewMode` 기준으로 독립 반영
 
 수정 후보:
 
@@ -841,11 +841,10 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 ### CKTABS-04 내부 toolbar 버튼 구현
 
 - [ ] toolbar도 view mode definition을 사용
-- [x] 내부 toolbar에서 `미리보기/크기 및 위치/속성/속성2`가 같은 위계 버튼으로 출력
-- [x] 내부 toolbar의 `미리보기` 버튼을 `data-canvas-owner-item="canvas-container-상자-편집-탭"` 그룹 안으로 통합
-- [x] 4개 내부 toolbar 버튼 shape가 `first/middle/middle/last`로 안정 출력
-- [x] `속성2` 클릭이 `metadata2` command를 발생
-- [x] preview 클릭이 runtime preview view mode로 연결
+- [ ] `미리보기/크기 및 위치/속성/속성2`가 같은 위계 버튼인지 사용자 확정 범위에 맞춰 구현
+- [ ] 4개 버튼 shape가 `first/middle/middle/last`로 안정 출력
+- [ ] `속성2` 클릭이 `metadata2` command를 발생
+- [ ] preview 클릭이 runtime preview view mode로 연결
 
 수정 후보:
 
@@ -854,12 +853,12 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-05 metadata2 독립 state 연결
 
-- [x] `metadata2` selection/view state 추가
-- [x] `metadata2` overlay collapsed state가 `metadata`와 독립
-- [ ] `metadata2` relation/marker render signature의 별도 namespace cache는 미구현
-- [x] 초기 기능은 `metadata`와 동일하게 출력
-- [x] `metadata` 변경이 `metadata2` active/collapsed state를 변경하지 않음
-- [x] `metadata2` 변경이 `metadata` active/collapsed state를 변경하지 않음
+- [ ] `metadata2` selection/view state 추가
+- [ ] `metadata2` overlay collapsed state가 `metadata`와 독립
+- [ ] `metadata2` relation/marker render signature가 `metadata`와 독립
+- [ ] 초기 기능은 `metadata`와 동일하게 출력
+- [ ] `metadata` 변경이 `metadata2` active/collapsed/cache state를 변경하지 않음
+- [ ] `metadata2` 변경이 `metadata` active/collapsed/cache state를 변경하지 않음
 
 수정 후보:
 
@@ -868,20 +867,20 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-06 derived view cache
 
-- [x] view별 cache key DTO 추가
-- [x] prepared view DTO에 `viewMode`를 중복 기록해 key와 payload가 같은 view인지 검증 가능하게 함
-- [x] `assertPreparedViewMatchesRequest(...)` 또는 동등한 guard 추가
-- [x] guard 실패 시 prepared view 렌더 금지
-- [x] guard 실패 시 다른 view cache fallback 금지
-- [x] revision signature 정의
-- [x] position view DOM은 tab-only switch에서 삭제하지 않고 CSS 숨김으로 보존
-- [x] metadata relation badge DOM은 tab-only switch에서 삭제하지 않고 CSS 숨김으로 보존
-- [ ] metadata2 relation/marker 전용 cache store 준비
-- [x] preview runtime HTML cache 준비
-- [x] tab switch에서 초기 editor auto-size rehydrate effect 재실행 방지
-- [x] cache hit이어도 `preparedView.key.viewMode !== requestedViewMode`이면 cache miss로 처리하는 서비스 계약 추가
-- [x] `metadata2` 요청에서 `metadata` prepared view 렌더 금지 guard 추가
-- [x] `metadata` 요청에서 `metadata2` prepared view 렌더 금지 guard 추가
+- [ ] view별 cache key DTO 추가
+- [ ] prepared view DTO에 `viewMode`를 중복 기록해 key와 payload가 같은 view인지 검증 가능하게 함
+- [ ] `assertPreparedViewMatchesRequest(...)` 또는 동등한 guard 추가
+- [ ] guard 실패 시 prepared view 렌더 금지
+- [ ] guard 실패 시 다른 view cache fallback 금지
+- [ ] revision signature 정의
+- [ ] position view cache 준비
+- [ ] metadata view cache 준비
+- [ ] metadata2 view cache 준비
+- [ ] preview runtime cache 준비
+- [ ] tab switch에서 cache hit이면 heavy recompute를 호출하지 않음
+- [ ] cache hit이어도 `preparedView.key.viewMode !== requestedViewMode`이면 cache miss로 처리
+- [ ] `metadata2` cache miss 시 `metadata` cache를 사용하지 않음
+- [ ] `metadata` cache miss 시 `metadata2` cache를 사용하지 않음
 
 수정 후보:
 
@@ -890,13 +889,12 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-07 tab switch rehydrate gate
 
-- [x] `useCanvasEditorStateSync`에서 tab-only switch와 content/layout 변경을 구분
-- [x] tab-only switch에서 초기 `applyEditorAutoSizeBoxesWithPreservedLayout` effect 재실행 방지
-- [x] tab-only switch에서 `schedulePreviewEditorState`를 suppression window로 차단
-- [x] tab-only switch에서 position edge button DOM을 제거하지 않음
-- [x] tab-only switch에서 metadata relation badge DOM을 제거하지 않음
-- [x] 기존 scheduled editor state는 초기 load/content mutation 중심으로 유지
-- [x] 기존 peer edge 안정성 검증 기준은 삭제하지 않음
+- [ ] tab-only switch와 content/layout 변경을 구분
+- [ ] tab-only switch에서 `applyEditorAutoSizeBoxesWithPreservedLayout` 미실행
+- [ ] tab-only switch에서 `extractPreviewRenderHtml` 미실행
+- [ ] tab-only switch에서 edge topology rebuild 미실행
+- [ ] 필요 시 기존 scheduled editor state는 초기 load/content mutation에만 유지
+- [ ] 기존 peer edge 안정성 검증 기준은 유지
 
 수정 후보:
 
@@ -906,13 +904,11 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-08 preview prebuild
 
-- [x] runtime preview input hash 정의
-- [x] draft/layout 변경 후 idle prewarm scheduling
-- [x] preview click 시 cache hit 우선 사용
+- [ ] runtime preview input hash 정의
+- [ ] draft/layout 변경 후 prebuild scheduling
+- [ ] preview click 시 cache hit 우선 사용
 - [ ] cache miss fallback은 명시 pending 상태로 처리
 - [ ] preview runtime HTML이 editor draft geometry를 오염시키지 않음
-
-현재 구현은 컴포넌트 생명주기 내부 runtime preview cache이다. 별도 서비스/저장소로 분리 가능한 계약화는 후속 작업 대상이다.
 
 수정 후보:
 
@@ -921,20 +917,20 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-09 browser/MCP 검증
 
-- [x] Chrome에서 `/canvas?page=canvas&mode=template&templateId=...` 직접 열기
-- [x] 4개 owner root 버튼 selector 확인
-- [x] `canvas-container` selector 확인
-- [x] `position -> metadata -> metadata2 -> preview -> position` 전환 확인
-- [x] 각 전환에서 active state와 prepared view mode 확인
-- [x] `metadata` 렌더 결과의 `data-canvas-prepared-view-mode="metadata"` 확인
-- [x] `metadata2` 렌더 결과의 `data-canvas-prepared-view-mode="metadata2"` 확인
-- [x] `metadata`와 `metadata2` overlay collapsed state 독립성 확인
-- [x] `metadata2` 요청에서 `metadata` prepared view를 렌더하지 않는지 확인
-- [x] prepared view mismatch 상황에서 fallback 렌더가 아니라 pending/mismatch 처리되는 코드 경로 추가
-- [x] tab-only switch에서 core canvas childList mutation 0회 경로 확인
-- [x] tab-only switch에서 edge button DOM 보존 확인
-- [x] Chrome Performance trace로 forced reflow 감소 확인
-- [x] Supabase MCP advisor 실행 결과 기록
+- [ ] Chrome에서 `/canvas?page=canvas&mode=template&templateId=...` 직접 열기
+- [ ] 4개 owner root 버튼 selector 확인
+- [ ] `canvas-container` selector 확인
+- [ ] `position -> metadata -> metadata2 -> preview -> position` 전환 확인
+- [ ] 각 전환에서 active state와 `data-canvas-owner-view-mode` 확인
+- [ ] `metadata` 렌더 결과의 `data-canvas-prepared-view-mode="metadata"` 확인
+- [ ] `metadata2` 렌더 결과의 `data-canvas-prepared-view-mode="metadata2"` 확인
+- [ ] `metadata`와 `metadata2` 상태 독립성 확인
+- [ ] `metadata2` cache miss 상황에서 `metadata` prepared view를 렌더하지 않는지 확인
+- [ ] prepared view mismatch 상황에서 fallback 렌더가 아니라 pending/mismatch 처리되는지 확인
+- [ ] tab-only switch에서 `innerHTML` set 미발생 확인
+- [ ] tab-only switch에서 auto-size/edge topology rebuild 미발생 확인
+- [ ] Chrome Performance trace로 forced reflow 감소 확인
+- [ ] Supabase MCP advisor 실행 결과 기록
 
 목표 기준:
 
@@ -948,10 +944,10 @@ Chrome MCP 테스트는 단순히 버튼이 보이는지 확인하지 않는다.
 
 ### CKTABS-10 롤백 확인
 
-- [x] 각 변경 파일의 before diff 존재 확인
-- [x] 변경 파일 목록과 diff 파일 목록 1:1 매칭
-- [x] 테스트 실패 시 롤백 순서 기록
-- [x] 사용자에게 실패 지점과 롤백 가능 상태 보고
+- [ ] 각 변경 파일의 before diff 존재 확인
+- [ ] 변경 파일 목록과 diff 파일 목록 1:1 매칭
+- [ ] 테스트 실패 시 롤백 순서 기록
+- [ ] 사용자에게 실패 지점과 롤백 가능 상태 보고
 
 ## 10. 금지 구현 예시
 
@@ -1081,496 +1077,3 @@ if (match.ok) {
 - DB schema/data 수정 없음.
 - Chrome MCP 확인: 현재 구현 전 baseline에서 `data-canvas-prepared-view-mode`는 존재하지 않고 `속성2` 버튼도 아직 존재하지 않음을 확인했다. 이는 보강 설계의 후속 구현 대상이다.
 - Supabase MCP 확인: `get_advisors(type="security")`를 실행했으며 기존 프로젝트 advisory가 반환됐다. 이번 문서 보강은 DB 변경을 포함하지 않아 SQL 적용 없음.
-
-## 15. 구현 실행 기록
-
-실행 시각: 2026-05-27 구현 확정 이후
-
-- 구현 범위:
-  - owner root의 `미리보기`, `크기 및 위치`, `속성`, `속성2` 버튼을 명시 owner item 계약으로 출력.
-  - `metadata2` view mode, selection tab, owner settings normalize/persist 계약 추가.
-  - 내부 toolbar에 `속성2` 탭 추가. 이 1차 구현 당시 내부 toolbar는 `크기 및 위치/속성/속성2` 3개 편집 탭으로 유지했다.
-  - `metadata`와 `metadata2` overlay collapsed state를 분리.
-  - active surface의 `data-canvas-prepared-view-mode`, `data-canvas-prepared-view-match`, `data-canvas-prepared-view-requested-tab`을 추가해 다른 view 결과를 조용히 보여주지 않도록 guard 추가.
-  - `useCanvasEditorStateSync`의 초기 editor auto-size effect가 tab 변경만으로 재실행되지 않도록 callback ref 기반 gate 적용.
-- 관련 체크리스트:
-  - 완료: CKTABS-00, CKTABS-01, CKTABS-02, CKTABS-03, CKTABS-05 일부, CKTABS-07 일부, CKTABS-09
-  - 미완료: runtime preview prebuild store, 실제 per-view derived cache store, 모든 tab-only switch의 `innerHTML`/edge rebuild 0회 직접 계측
-- 수정 파일:
-  - `src/lib/templateCanvasViewDtos.ts`
-  - `src/services/templateCanvasViewModeService.ts`
-  - `src/services/templateCanvasDerivedViewCacheService.ts`
-  - `src/app/canvas/page.tsx`
-  - `src/app/canvas/ownerSettings.ts`
-  - `src/app/canvas/ownerPolicy.tsx`
-  - `src/components/template/workspace/types.ts`
-  - `src/components/template/TemplateEditWorkspace.tsx`
-  - `src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx`
-  - `src/components/template/workspace/canvas/TemplateEditPreviewSurface.tsx`
-  - `src/components/template/workspace/canvas/useCanvasEditorStateSync.ts`
-- diff 기록:
-  - `docs/diff/2026-05-27_CKTABS-DOC_0527tabs.before.md`
-  - `docs/diff/2026-05-27_CKTABS-02_templateCanvasViewDtos.before.md`
-  - `docs/diff/2026-05-27_CKTABS-02_templateCanvasViewModeService.before.md`
-  - `docs/diff/2026-05-27_CKTABS-06_templateCanvasDerivedViewCacheService.before.md`
-  - `docs/diff/2026-05-27_CKTABS-02_ownerSettings.before.ts`
-  - `docs/diff/2026-05-27_CKTABS-02_workspace-types.before.ts`
-  - `docs/diff/2026-05-27_CKTABS-03_canvas-page.before.tsx`
-  - `docs/diff/2026-05-27_CKTABS-03_ownerPolicy.before.tsx`
-  - `docs/diff/2026-05-27_CKTABS-04_TemplateEditCanvasToolbar.before.tsx`
-  - `docs/diff/2026-05-27_CKTABS-05_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-27_CKTABS-07_TemplateEditPreviewSurface.before.tsx`
-  - `docs/diff/2026-05-27_CKTABS-07_useCanvasEditorStateSync.before.ts`
-  - `docs/diff/2026-05-27_CKTABS-08_chrome-trace.json`
-- Chrome URL:
-  - `http://localhost:3001/canvas?page=canvas&mode=template&templateId=dc080119-76a5-4785-a698-4dca1e1609f1`
-- Chrome 확인:
-  - owner root buttons:
-    - `data-canvas-owner-item="canvas-page-root-button-미리보기"` 존재
-    - `data-canvas-owner-item="canvas-page-root-button-크기-및-위치"` 존재
-    - `data-canvas-owner-item="canvas-page-root-button-속성"` 존재
-    - `data-canvas-owner-item="canvas-page-root-button-속성2"` 존재
-  - canvas container selector:
-    - `data-canvas-owner-item="canvas-container"` 존재
-  - root 전환 측정:
-    - `position -> metadata`: 222ms, mutations 600
-    - `metadata -> metadata2`: 200ms, mutations 340
-    - `metadata2 -> preview`: 2820ms, mutations 4231
-    - `preview -> position`: 1961ms, mutations 8031
-    - 안정화 후 `metadata -> position`: 426ms, mutations 1620
-  - 내부 toolbar 전환 측정:
-    - `position -> metadata2`: 82ms
-    - `metadata2 -> metadata`: 85ms
-    - `metadata -> position`: 782ms
-  - prepared view 확인:
-    - `metadata`: `data-canvas-prepared-view-mode="metadata"`, `data-canvas-prepared-view-match="true"`
-    - `metadata2`: `data-canvas-prepared-view-mode="metadata2"`, `data-canvas-prepared-view-match="true"`
-    - `preview`: `data-canvas-prepared-view-mode="preview"`, `data-selection-panel-tab="position"`
-  - 독립 상태 확인:
-    - `metadata`에서 `상자 역할 - 1` overlay를 열어 둔 뒤 `metadata2`로 전환하면 `metadata2`의 같은 overlay는 닫힌 초기 상태였다.
-    - 다시 `metadata`로 돌아오면 `metadata`의 `상자 역할 - 1` overlay 열린 상태가 복원됐다.
-  - console:
-    - error/warn 없음.
-  - Performance trace:
-    - Forced reflow total: 94ms.
-    - 이전 조사 baseline 225ms 대비 감소.
-    - 남은 주요 병목: `readPreviewSourceRect` 94ms, `measureNaturalTextControlWidth` 13ms, DOM 3180 elements, style recalculation 93ms.
-- Supabase MCP:
-  - 실행 도구: `get_advisors(type="security")`, `get_advisors(type="performance")`, `get_logs(service="api")`
-  - 결과:
-    - DB schema/data 변경 없음.
-    - security advisory는 기존 프로젝트 항목이 반환됐다. 주요 예: `policy_exists_rls_disabled`, `rls_disabled_in_public`, `sensitive_columns_exposed`, `function_search_path_mutable`, `security_definer_view`.
-    - performance advisory는 기존 프로젝트 항목이 반환됐다. 주요 예: `unindexed_foreign_keys`, `auth_rls_initplan`, `unused_index`, `multiple_permissive_policies`.
-    - API log sample은 200/204 응답 중심이며 이번 UI 변경과 직접 관련된 DB 오류는 확인되지 않았다.
-  - 사용자 실행 SQL 제공 여부: DB 변경이 없으므로 해당 없음.
-- 정적 검사:
-  - `npm run check:no-shadow-app`: 통과.
-  - `npm run lint`: 실패. 원인: ESLint 9가 `eslint.config.(js|mjs|cjs)`를 찾지 못하는 기존 설정 문제.
-  - `npx tsc --noEmit --pretty false`: 기본 Node heap에서 OOM.
-  - `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit --pretty false`: `docs/diff/2026-04-17_ENHANCE-07_templateExtractReplicaHtmlNormalizerService.before.ts`의 기존 백업 파일 parse error로 실패.
-  - 변경 파일 중심 `tsc` 실행: 기존 대형 template workspace 타입 오류가 다수 노출되어 실패. 이번 구현 검증은 Chrome 런타임과 no-shadow 검사 중심으로 기록한다.
-- 남은 위험:
-  - 이 1차 기록 당시 runtime preview 전환은 느렸다. 16절에서 컴포넌트 내부 cache/idle prewarm을 보강했지만, 별도 독립 서비스 store 분리는 아직 필요하다.
-  - 실제 per-view derived cache store는 계약/guard만 추가했고 저장소 구현은 남아 있다.
-  - position 복귀 시 edge topology와 geometry 재계산이 아직 일부 발생한다.
-- 롤백 가능 상태:
-  - 신규 파일 3개 삭제.
-  - 위 diff 기록의 before 파일을 각 수정 파일에 복원.
-  - `docs/diff/2026-05-27_CKTABS-08_chrome-trace.json`은 검증 산출물이므로 코드 롤백에는 영향 없음.
-
-## 16. 미리보기 탭 복구 및 tab-only 재계산 제거 보강 기록
-
-실행 시각: 2026-05-27 사용자 재요청 이후
-
-- 사용자 재요청 핵심:
-  - `http://localhost:3001/canvas?page=templates&mode=template&templateId=dc080119-76a5-4785-a698-4dca1e1609f1`에서 `data-canvas-owner-item="canvas-container-상자-편집-탭"` 그룹 안에 `미리보기` 항목이 보여야 한다.
-  - `showPreviewToggle` 설정을 켜도 보이지 않는 상태를 해결해야 한다.
-  - 탭 전환은 "방에 가구 배치를 바꾸지 않았으면 다시 정리하지 않는다"는 기준으로 구현해야 한다.
-  - 변경 사항이 없는 tab-only switch에서는 position edge, metadata relation 같은 캔버스 가구를 삭제했다가 다시 만들지 않는다.
-- 추가 구현 범위:
-  - 내부 상자 편집 탭 그룹을 `미리보기 / 크기 및 위치 / 속성 / 속성2` 4개 버튼으로 구성했다.
-  - `미리보기`는 `data-canvas-owner-item="canvas-container-상자-편집-탭-미리보기"`를 가진 같은 위계의 버튼이다.
-  - `크기 및 위치`, `속성`, `속성2`도 각각 독립 owner item을 가진다.
-  - selection tab 그룹이 렌더되는 경우 기존 단독 preview toggle은 숨기고, preview 진입은 같은 탭 그룹의 `미리보기` 버튼에서 수행한다.
-  - 사용자가 편집 탭을 클릭하면 React state commit을 기다리기 전에 `data-selection-panel-tab` 등 캔버스 root attribute를 즉시 동기화한다.
-  - tab-only switch 동안 `schedulePreviewEditorState` 예약과 RAF 내부 실행을 suppression window로 차단한다.
-  - `useCanvasEditorStateSync`의 초기 editor auto-size effect dependency에서 `selectionPanelTab`을 제거하고 ref로 읽어, 탭 변경만으로 auto-size rehydrate가 재실행되지 않게 했다.
-  - position 전용 edge button, resize handle, delete button은 탭 변경 시 삭제하지 않고 DOM에 유지한다.
-  - metadata relation badge도 탭 변경 시 삭제하지 않고 DOM에 유지한다.
-  - 현재 탭이 해당 view가 아닐 때는 CSS로 숨겨, 다른 view의 가구가 화면에 보이지 않게 한다.
-  - metadata review issue 계산은 active tab 여부와 분리해 미리 계산 가능한 상태로 유지한다.
-  - runtime preview HTML은 source/options signature 기준 cache와 idle prewarm을 추가했다.
-- 관련 체크리스트:
-  - 완료: CKTABS-04 내부 toolbar preview 통합
-  - 완료: CKTABS-06 position/metadata DOM 보존 및 preview runtime cache
-  - 완료: CKTABS-07 tab-only rehydrate gate 보강
-  - 완료: CKTABS-09 browser/MCP 재검증
-- 수정 파일:
-  - `src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx`
-  - `src/components/template/TemplateEditWorkspace.tsx`
-  - `src/components/template/workspace/canvas/useCanvasEditorStateSync.ts`
-  - `docs/0527tabs.md`
-- 추가 diff 기록:
-  - `docs/diff/2026-05-27_CKTABS-11_0527tabs.before.md`
-  - `docs/diff/2026-05-27_CKTABS-11_TemplateEditCanvasToolbar.before.tsx`
-  - `docs/diff/2026-05-27_CKTABS-12_TemplateEditWorkspace.before.tsx`
-  - `docs/diff/2026-05-27_CKTABS-12_useCanvasEditorStateSync.before.ts`
-- Chrome MCP 확인:
-  - URL: `http://localhost:3001/canvas?page=templates&mode=template&templateId=dc080119-76a5-4785-a698-4dca1e1609f1`
-  - `data-canvas-owner-item="canvas-container-상자-편집-탭"` text: `미리보기크기 및 위치속성속성2`
-  - 확인된 버튼:
-    - `data-canvas-owner-item="canvas-container-상자-편집-탭-미리보기"`
-    - `data-canvas-owner-item="canvas-container-상자-편집-탭-크기-및-위치"`
-    - `data-canvas-owner-item="canvas-container-상자-편집-탭-속성"`
-    - `data-canvas-owner-item="canvas-container-상자-편집-탭-속성2"`
-  - 초기 position 상태:
-    - edge button DOM: 216개
-    - visible edge button: 216개
-    - relation badge DOM: 79개
-    - visible relation badge: 0개
-  - tab-only 전환 측정:
-    - `속성2` 클릭 반환: 0.6ms
-    - 클릭 직후 root `data-selection-panel-tab`: `metadata2`
-    - edge button DOM: 216개 유지
-    - visible edge button: 0개
-  - 안정화 후 반복 전환 측정:
-    - `metadata2`: click return 0.6ms, immediate tab `metadata2`, after 140ms prepared mode `metadata2`, childList mutations 0, added nodes 0, removed nodes 0, edge button 216개 유지 숨김, relation badge 79개 유지 숨김
-    - `position`: click return 0.3ms, immediate tab `position`, after 140ms prepared mode `position`, childList mutations 0, edge button 216개 표시, relation badge 79개 숨김
-    - `metadata`: click return 0.3ms, immediate tab `metadata`, after 140ms prepared mode `metadata`, childList mutations 11, added nodes 6, removed nodes 5, edge button 216개 유지 숨김, relation badge 79개 표시
-    - `position`: click return 0.3ms, immediate tab `position`, after 140ms prepared mode `position`, childList mutations 1, added nodes 0, removed nodes 1
-  - preview 버튼 측정:
-    - `미리보기` 클릭 반환: 15ms
-    - 클릭 직후 runtime preview attribute: `true`
-    - 500ms 후 prepared mode: `preview`
-    - `크기 및 위치` 복귀 클릭 반환: 0.2ms
-    - 500ms 후 prepared mode: `position`, runtime preview attribute: `false`
-  - 해석:
-    - 핵심 캔버스 가구인 position edge button과 metadata relation badge는 tab-only switch에서 삭제 후 재생성하지 않는다.
-    - `속성2 <-> 크기 및 위치` 경로는 core canvas childList mutation 0회로 확인됐다.
-    - `속성` 진입의 소량 mutation은 review warning button 1개 수준의 보조 UI 변동이며, edge topology/geometry 재계산이 아니다.
-    - `preparedViewMode`와 `aria-pressed` 같은 React commit 기반 상태는 클릭 직후가 아니라 transition 이후 갱신될 수 있으나, 캔버스 root tab attribute와 화면 가시성은 클릭 즉시 반영된다.
-  - console:
-    - runtime error 없음.
-    - 접근성 관련 warning만 존재하며 이번 변경 범위 외 항목이다.
-- Supabase MCP 확인:
-  - 실행 도구: `get_advisors(type="security")`, `get_logs(service="api")`
-  - 결과:
-    - 이번 보강은 DB schema/data 변경 없음.
-    - SQL 제공/실행 대상 없음.
-    - security advisor는 기존 프로젝트 advisory를 반환했다. 주요 예: RLS disabled/no policy, security definer view, function search_path, extension public schema, sensitive columns exposed, leaked password protection disabled.
-    - API log는 200/201/204 응답 중심이며 이번 UI 변경과 직접 연결된 DB 오류는 확인되지 않았다.
-- 정적 검사:
-  - `git diff --check`: 통과.
-  - `npm run check:no-shadow-app`: 통과.
-  - `npm run lint`: 실패. 원인: ESLint 9가 `eslint.config.(js|mjs|cjs)`를 찾지 못하는 기존 설정 문제.
-  - `npx tsc --noEmit --pretty false`: 기본 Node heap에서 OOM.
-  - `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit --pretty false`: `docs/diff/2026-04-17_ENHANCE-07_templateExtractReplicaHtmlNormalizerService.before.ts`의 기존 백업 파일 parse error로 실패.
-  - 변경 파일 중심 `tsc`: 기존 대형 workspace 타입 오류가 다수 노출되어 실패.
-- 남은 한계:
-  - `metadata` 탭 진입 시 review warning 보조 UI의 소량 DOM mutation이 남아 있다.
-  - runtime preview cache는 컴포넌트 내부 cache이며, 별도 독립 서비스/저장소 상품화 수준의 분리는 후속 작업이다.
-
-## 17. CKTABS-13 prepared view 보장형 재설계 보강
-
-작성 시각: 2026-05-27 사용자 추가 지적 이후
-
-### 17.1 정정 사항
-
-이전 대화에서 언급된 "대규모 canonical store 전환"은 후속 구현의 1차 솔루션으로 채택하지 않는다.
-
-이유:
-
-- 현재 상자 편집 캔버스는 DOM, draft HTML, auto-size 계산, peer edge 계산, relation UI 계산이 얽혀 있다.
-- canonical store를 한 번에 source of truth로 바꾸면 기존 기능이 정상 작동한다는 보장이 없다.
-- 사용자의 요구는 실험적 재설계가 아니라, 현재 정상 동작을 보존하면서 속도 개선까지 보장하는 것이다.
-
-따라서 후속 구현 원칙은 다음으로 확정한다.
-
-- 기존 정상 계산 로직을 "정답 계산기"로 유지한다.
-- 계산 로직을 새로 작성하지 않는다.
-- 클릭, 입력, 드래그 순간에 정답 계산기를 동기 실행하지 않는다.
-- 기존 정답 계산기가 만든 결과를 브라우저 메모리 prepared cache에 저장한다.
-- 4개 view는 원본 값을 중복 저장하지 않고, 같은 브라우저 메모리 cache/revision을 기준으로 prepared projection만 따로 가진다.
-- DB 통신은 최초 로드와 저장 버튼에서만 허용한다. 상자 편집 중 값 입력, 크기 변경, 위치 변경, 역할 변경, 탭 전환에서는 DB 저장/조회가 발생하면 실패로 본다.
-
-### 17.2 보장해야 하는 결과
-
-후속 구현은 아래 두 가지를 동시에 만족해야 한다.
-
-1. 기능 정상 작동 보장
-2. 속도 개선 보장
-
-둘 중 하나만 만족하면 실패다.
-
-기능 정상 작동 보장의 기준:
-
-- 기존 계산 경로가 만든 결과와 prepared view 결과가 같아야 한다.
-- 비교 단위는 문자열 전체 비교가 아니라 다음 계약 단위다.
-  - frame group id
-  - frame geometry: left, top, width, height
-  - auto height/auto width 결과
-  - peer edge 관계와 edge role
-  - value key와 입력값
-  - metadata role과 relation marker
-  - position group wrapper
-  - preview runtime control: input, file, signature
-- prepared 결과가 기존 정답 계산기 결과와 다르면 그 prepared view는 표시하지 않는다.
-- 불일치가 발생하면 `pending` 또는 `failed` 상태로 두고, stale view를 조용히 보여주지 않는다.
-
-속도 개선 보장의 기준:
-
-- prepared view가 ready인 tab 전환 handler는 10ms 미만이어야 한다.
-- ready tab 전환에서는 runtime HTML build, auto-size, peer bounds 계산, 전체 HTML 추출, DB 호출이 없어야 한다.
-- 값 입력 handler에서는 DB 호출 0회, 전체 `innerHTML` 교체 0회, 전체 frame tree scan 0회를 목표로 한다.
-- 크기/위치 drag 중에는 숨은 view build를 중단하거나 지연한다.
-- 숨은 view build는 idle/chunk 단위로 실행하고, slice budget은 3~5ms를 넘기지 않는다.
-- 상자 변경 직후 hidden view가 아직 최신이 아니면, 전환 시 동기 계산하지 않고 즉시 pending을 표시한다.
-
-### 17.3 "계산하지 않는다"의 의미 정정
-
-"입력/크기 변경 handler 안에서 10ms 넘는 계산을 넣지 않는다"는 말은 계산을 생략한다는 뜻이 아니다.
-
-정확한 의미:
-
-- 반드시 필요한 현재 view의 계산은 한다.
-- 다만 같은 사실을 4개 view에서 각각 다시 계산하거나 저장하지 않는다.
-- 숨은 view의 무거운 표현 준비는 handler 안에서 하지 않는다.
-- DB 통신, 전체 HTML 추출, preview runtime HTML 생성, hidden view auto-size 계산은 handler 밖으로 분리한다.
-
-예를 들어 상자 높이가 변경되면:
-
-1. 현재 view의 화면 높이와 관련 edge 표시를 즉시 맞춘다.
-2. 같은 높이 값을 view별로 중복 저장하지 않는다.
-3. 변경 revision을 브라우저 메모리 cache에 기록한다.
-4. `position`, `metadata`, `metadata2`, `preview` prepared projection 중 영향받는 view를 dirty로 표시한다.
-5. 현재 보고 있지 않은 view는 background에서 기존 정답 계산기로 준비한다.
-6. 사용자가 dirty view로 이동하면 동기 계산하지 않고 pending을 보여준다.
-
-### 17.4 브라우저 메모리 cache 계약
-
-후속 구현은 브라우저 메모리에 아래 cache 계층을 둔다.
-
-```ts
-type CanvasPreparedViewMode = 'position' | 'metadata' | 'metadata2' | 'preview';
-
-type CanvasPreparedViewStatus = 'ready' | 'dirty' | 'building' | 'pending' | 'failed';
-
-type CanvasEditRevisionKey = {
-  structureRevision: number;
-  layoutRevision: number;
-  valueRevision: number;
-  metadataRevision: number;
-  styleRevision: number;
-  attachmentRevision: number;
-};
-
-type CanvasPreparedViewCacheEntry = {
-  viewMode: CanvasPreparedViewMode;
-  revisionKey: CanvasEditRevisionKey;
-  status: CanvasPreparedViewStatus;
-  html: string;
-  validationSignature: string;
-  preparedAt: number;
-  buildSource: 'current-correct-calculator';
-};
-```
-
-중요한 제한:
-
-- 이 cache는 DB 저장소가 아니다.
-- 이 cache는 독립 source of truth가 아니다.
-- 이 cache는 현재 정답 계산기가 만든 prepared 결과 저장소다.
-- 상자 원본 상태를 4개 view별로 따로 저장하지 않는다.
-- prepared view별로 따로 가질 수 있는 것은 HTML/projection, overlay open state, pending/ready 상태뿐이다.
-- height, width, left, top, value, role 같은 원본 값은 view별 중복 저장 대상이 아니다.
-
-### 17.5 view 전환 정책
-
-view 전환 시에는 아래 분기만 허용한다.
-
-```ts
-const entry = preparedViewCache.get(requestedViewMode);
-
-if (entry?.status === 'ready' && revisionKeysEqual(entry.revisionKey, currentRevisionKey)) {
-  showPreparedView(entry);
-  return;
-}
-
-showPendingView(requestedViewMode);
-schedulePreparedViewBuild(requestedViewMode, currentRevisionKey);
-```
-
-금지:
-
-- view 클릭 순간 `buildTemplateUsagePreviewHtml(...)` 실행 금지
-- view 클릭 순간 `extractPreviewRenderHtml(...)` 실행 금지
-- view 클릭 순간 `applyTemplateAutoSizeBoxes(...)` 전체 실행 금지
-- view 클릭 순간 DB 호출 금지
-- cache miss 시 다른 view의 prepared result fallback 금지
-- `metadata2` cache miss 시 `metadata` 결과를 보여주기 금지
-- `preview` cache miss 시 editor HTML을 runtime preview인 것처럼 보여주기 금지
-
-### 17.6 미리보기 pending 정책
-
-미리보기는 다음처럼 동작해야 한다.
-
-- `preview` prepared cache가 최신이면 즉시 preview surface를 표시한다.
-- `preview` prepared cache가 dirty/building이면 즉시 pending surface를 표시한다.
-- pending surface는 "미리보기 준비 중" 상태만 표시하고 계산을 동기 실행하지 않는다.
-- background build가 완료되면 같은 requested view가 여전히 `preview`일 때만 preview surface로 교체한다.
-- build 중 사용자가 다시 상자를 수정하면 기존 preview build는 abort 또는 obsolete 처리한다.
-- obsolete build 결과는 절대 표시하지 않는다.
-
-### 17.7 현재 기능 보존 전략
-
-기능 보존은 "새 계산기를 믿는 방식"이 아니라 "기존 정답 계산기 결과와 비교하는 방식"으로 보장한다.
-
-단계:
-
-1. 기존 화면 계산은 그대로 둔다.
-2. background에서 같은 입력으로 prepared view를 만든다.
-3. 기존 정답 계산기 결과에서 validation signature를 만든다.
-4. prepared view 결과에서도 validation signature를 만든다.
-5. signature가 같으면 ready로 승격한다.
-6. signature가 다르면 failed 또는 pending으로 유지하고 표시하지 않는다.
-
-validation signature 예시:
-
-```ts
-type CanvasPreparedValidationSignature = {
-  frameGeometryById: Record<string, { left: number; top: number; width: number; height: number }>;
-  valueByKey: Record<string, string>;
-  roleByFrameId: Record<string, string>;
-  peerEdgesByFrameId: Record<string, string[]>;
-  relationMarkersByFrameId: Record<string, string[]>;
-  runtimeControlsByValueKey?: Record<string, 'input' | 'file' | 'signature'>;
-};
-```
-
-signature 비교는 rounding/tolerance 규칙을 명시한다.
-
-- geometry tolerance: 0.5px 이하
-- string/value/role/relation: exact match
-- runtime control type: exact match
-
-### 17.8 상자 변경 처리 정책
-
-상자 변경 이벤트는 아래 도메인 중 하나 이상을 dirty로 만든다.
-
-- 상자 추가/삭제/타입 변경: `structureRevision`
-- 크기/위치 변경: `layoutRevision`
-- 값 입력: `valueRevision`
-- 역할/속성 변경: `metadataRevision`
-- 색상/테두리/폰트 변경: `styleRevision`
-- 파일/서명 변경: `attachmentRevision`
-
-처리 원칙:
-
-- 현재 view에 필요한 최소 계산은 즉시 수행한다.
-- 변경과 직접 관계없는 hidden view 계산은 실행하지 않는다.
-- dirty marking은 즉시 한다.
-- prepared build는 idle queue로 넘긴다.
-- 같은 도메인 변경이 연속으로 들어오면 마지막 revision만 build한다.
-- build 도중 더 최신 revision이 오면 이전 build result는 폐기한다.
-
-### 17.9 DB 통신 정책
-
-상자 편집 중 DB 통신은 속도 보장 실패 원인이므로 다음 정책을 강제한다.
-
-허용:
-
-- 페이지 최초 로드
-- 사용자가 저장 버튼을 누른 경우
-- 사용자가 명시적으로 불러오기를 실행한 경우
-
-금지:
-
-- 값 입력마다 DB 저장/조회
-- 상자 크기 변경마다 DB 저장/조회
-- 위치 drag 중 DB 저장/조회
-- 역할 변경 즉시 DB 저장/조회
-- tab 전환 시 DB 저장/조회
-- preview prepared build 중 DB 조회
-
-파일/서명 등 외부 리소스가 필요한 경우도 preview build 중 네트워크를 기다리지 않는다. 이미 로드된 브라우저 상태와 현재 draft 상태만 사용하고, 외부 상태가 없으면 pending/placeholder 계약을 사용한다.
-
-### 17.10 성능 테스트 기준
-
-후속 구현은 Chrome MCP로 아래를 직접 측정해야 한다.
-
-- 값 입력 20회 반복:
-  - input event handler 평균 10ms 미만
-  - DB request 0회
-  - 전체 surface `innerHTML` replacement 0회
-- 크기 변경 drag:
-  - pointermove handler 평균 10ms 미만
-  - hidden view build 중단 또는 지연 확인
-  - drag 중 preview build 실행 0회
-- ready view 전환:
-  - click return 10ms 미만
-  - childList mutation 0회 또는 prepared surface visibility swap 수준
-  - `buildTemplateUsagePreviewHtml` 호출 0회
-  - `extractPreviewRenderHtml` 호출 0회
-  - DB request 0회
-- dirty preview 전환:
-  - click return 10ms 미만
-  - pending surface 즉시 표시
-  - 동기 preview build 0회
-  - background build 완료 후 ready surface 표시
-- stale build 방지:
-  - build 중 상자 변경 발생
-  - 이전 revision build result 폐기 확인
-  - stale preview 표시 0회
-
-### 17.11 구현 후보 파일
-
-아래 파일만 후속 구현 후보로 제안한다. 추가 파일이 필요하면 사용자 승인 전까지 중단한다.
-
-- `src/services/templateCanvasDerivedViewCacheService.ts`
-  - prepared view cache entry, revision key, validation guard 계약 확장
-- `src/services/templateCanvasViewModeService.ts`
-  - view mode 전환 정책과 pending 상태 normalize
-- `src/components/template/TemplateEditWorkspace.tsx`
-  - dirty marking, build scheduling, pending surface routing, current view immediate patch 연결
-- `src/components/template/workspace/canvas/TemplateEditPreviewSurface.tsx`
-  - ready/pending/failed prepared surface 표시 계약
-- `src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx`
-  - view별 ready/dirty/building 표시가 필요할 경우 최소 상태 표시
-- `src/components/template/workspace/canvas/useCanvasPointerHandlers.ts`
-  - drag 중 hidden build pause/resume hook 연결이 필요할 경우
-- `src/components/template/workspace/canvas/useCanvasEditorStateSync.ts`
-  - tab/view 전환과 editor sync 분리 보강이 필요할 경우
-- `docs/0527tabs.md`
-  - 실행 체크리스트와 검증 결과 기록
-
-### 17.12 CKTABS-13 체크리스트
-
-- [ ] 수정 전 사용자 이해 확정 수신
-- [ ] 수정 대상 파일별 `docs/diff` before 기록 생성
-- [ ] DB 통신 금지 계측 추가
-- [ ] prepared view revision key 정의
-- [ ] current correct calculator 기반 prepared build 구현
-- [ ] validation signature 생성 및 비교 구현
-- [ ] ready view 전환에서 동기 계산 0회 확인
-- [ ] dirty preview 전환에서 pending 즉시 표시 확인
-- [ ] hidden build idle/chunk queue 구현
-- [ ] drag 중 hidden build pause/resume 확인
-- [ ] stale build result 폐기 확인
-- [ ] Chrome MCP 성능 측정 기록
-- [ ] Supabase MCP advisor/log 확인 및 DB 변경 없음 기록
-
-### 17.13 이번 문서 보강 기록
-
-- 수정 파일: `docs/0527tabs.md`
-- diff 기록: `docs/diff/2026-05-27_CKTABS-13_0527tabs.before.md`
-- 코드 수정 없음.
-- DB schema/data 수정 없음.
-- SQL 제공 대상 없음.
-- Chrome MCP:
-  - `list_pages` 실행.
-  - 선택된 페이지: `http://localhost:3001/canvas?page=templates&mode=template&templateId=dc080119-76a5-4785-a698-4dca1e1609f1`
-  - 이번 변경은 문서 보강이므로 화면 동작 변경 없음.
-- Supabase MCP:
-  - `get_advisors(type="security")`, `get_logs(service="api")` 실행.
-  - security advisor는 기존 프로젝트 advisory를 반환했다. 주요 예: `policy_exists_rls_disabled`, `rls_enabled_no_policy`, `security_definer_view`, `function_search_path_mutable`, `rls_disabled_in_public`, `sensitive_columns_exposed`.
-  - API log는 200/201/204 응답 중심이며, 이번 문서 보강과 관련된 DB schema/data 변경은 없다.

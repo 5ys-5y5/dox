@@ -72,7 +72,6 @@ import {
   materializeDocumentCanvasHtml,
   stringifyDocumentValue,
 } from '../../lib/documentCanvasState';
-import { TEMPLATE_CANVAS_VIEW_MODE_DEFINITIONS } from '../../services/templateCanvasViewModeService';
 import { watchOwnerUnnamedElements } from '../../lib/ownerDomNaming';
 import type { DocumentDetailResult, DocumentListItem, DocumentRequestTaskDto } from '../../lib/documentDtos';
 import type { DocumentMemberRecordDto, SiteMemberRecordDto } from '../../lib/memberAccessDtos';
@@ -218,20 +217,13 @@ const canvasViewModeLabels: Record<CanvasOwnerSettings['canvasViewMode'], string
   preview: '미리보기',
   position: '크기 및 위치',
   metadata: '속성',
-  metadata2: '속성2',
 };
 
-const canvasViewModeOptions: Array<{
-  value: CanvasOwnerSettings['canvasViewMode'];
-  label: string;
-  description: string;
-  ownerItem: string;
-}> = TEMPLATE_CANVAS_VIEW_MODE_DEFINITIONS.map((definition) => ({
-  value: definition.mode,
-  label: canvasViewModeLabels[definition.mode],
-  description: definition.description,
-  ownerItem: definition.ownerItem,
-}));
+const canvasViewModeOptions: Array<{ value: CanvasOwnerSettings['canvasViewMode']; label: string }> = [
+  { value: 'preview', label: canvasViewModeLabels.preview },
+  { value: 'position', label: canvasViewModeLabels.position },
+  { value: 'metadata', label: canvasViewModeLabels.metadata },
+];
 
 const canvasOwnerItem = (item: string, name: string) => ({
   'data-canvas-owner-item': item,
@@ -2223,7 +2215,7 @@ export default function CanvasOwnerPage() {
     </div>
   );
   const renderCanvasViewModeButtons = () => (
-    <div className="grid gap-1.5 sm:grid-cols-4">
+    <div className="grid gap-1.5 sm:grid-cols-3">
       {canvasViewModeOptions.map((option) => {
         const active = settings.canvasViewMode === option.value;
 
@@ -2234,12 +2226,15 @@ export default function CanvasOwnerPage() {
             variant={active ? 'default' : 'outline'}
             className="h-auto min-h-9 justify-start px-2 py-1.5 text-left text-xs"
             onClick={() => handleSelectCanvasViewMode(option.value)}
-            {...canvasOwnerItem(option.ownerItem, option.label)}
           >
             <span className="min-w-0">
               <span className="block truncate font-semibold">{option.label}</span>
               <span className="block truncate text-[10px] font-normal opacity-80">
-                {option.description}
+                {option.value === 'preview'
+                  ? '실제 사용 화면'
+                  : option.value === 'metadata'
+                    ? '키/밸류 속성'
+                    : '크기와 위치'}
               </span>
             </span>
           </Button>

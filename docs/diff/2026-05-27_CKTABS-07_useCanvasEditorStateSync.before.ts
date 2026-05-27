@@ -51,31 +51,6 @@ export const useCanvasEditorStateSync = ({
   cancelScheduledPreviewEditorState,
   syncPreviewSurfaceScale,
 }: UseCanvasEditorStateSyncOptions) => {
-  const selectionPanelTabRef = React.useRef(selectionPanelTab);
-  const applyEditorAutoSizeBoxesWithPreservedLayoutRef = React.useRef(applyEditorAutoSizeBoxesWithPreservedLayout);
-  const syncDraftPreviewHtmlRefCallback = React.useRef(syncDraftPreviewHtmlRef);
-  const requestPreviewTextFitRef = React.useRef(requestPreviewTextFit);
-  const schedulePreviewEditorStateRef = React.useRef(schedulePreviewEditorState);
-  const cancelScheduledPreviewEditorStateRef = React.useRef(cancelScheduledPreviewEditorState);
-
-  React.useEffect(() => {
-    selectionPanelTabRef.current = selectionPanelTab;
-  }, [selectionPanelTab]);
-
-  React.useEffect(() => {
-    applyEditorAutoSizeBoxesWithPreservedLayoutRef.current = applyEditorAutoSizeBoxesWithPreservedLayout;
-    syncDraftPreviewHtmlRefCallback.current = syncDraftPreviewHtmlRef;
-    requestPreviewTextFitRef.current = requestPreviewTextFit;
-    schedulePreviewEditorStateRef.current = schedulePreviewEditorState;
-    cancelScheduledPreviewEditorStateRef.current = cancelScheduledPreviewEditorState;
-  }, [
-    applyEditorAutoSizeBoxesWithPreservedLayout,
-    cancelScheduledPreviewEditorState,
-    requestPreviewTextFit,
-    schedulePreviewEditorState,
-    syncDraftPreviewHtmlRef,
-  ]);
-
   const isRuntimePreviewRoot = React.useCallback(
     (root: HTMLElement | null | undefined) =>
       Boolean(root && (templateUsagePreviewActive || root.getAttribute(templateUsagePreviewModeAttr) === 'true')),
@@ -106,23 +81,23 @@ export const useCanvasEditorStateSync = ({
         return;
       }
 
-      const result = applyEditorAutoSizeBoxesWithPreservedLayoutRef.current(root);
+      const result = applyEditorAutoSizeBoxesWithPreservedLayout(root);
       if (result.changedCount <= 0) {
         return;
       }
 
-      syncDraftPreviewHtmlRefCallback.current({
+      syncDraftPreviewHtmlRef({
         materializePositionGroups: false,
         recordHistory: false,
         updatePreviewDomVersion: false,
         updateRenderedHtml: true,
       });
-      requestPreviewTextFitRef.current();
+      requestPreviewTextFit();
     };
 
     const applyEditorState = async () => {
       applyInitialEditorAutoSize();
-      schedulePreviewEditorStateRef.current();
+      schedulePreviewEditorState();
       await document.fonts?.ready?.catch(() => undefined);
 
       if (cancelled) {
@@ -130,7 +105,7 @@ export const useCanvasEditorStateSync = ({
       }
 
       applyInitialEditorAutoSize();
-      schedulePreviewEditorStateRef.current();
+      schedulePreviewEditorState();
     };
 
     const pageInnerObservers = Array.from(root.querySelectorAll<HTMLElement>('.page-inner')).map((pageInner) => {
@@ -139,8 +114,8 @@ export const useCanvasEditorStateSync = ({
           return;
         }
 
-        if (selectionPanelTabRef.current === 'position' && !root.querySelector(frameEdgeButtonSelector)) {
-          schedulePreviewEditorStateRef.current();
+        if (selectionPanelTab === 'position' && !root.querySelector(frameEdgeButtonSelector)) {
+          schedulePreviewEditorState();
         }
       });
       observer.observe(pageInner, { childList: true });
@@ -152,16 +127,22 @@ export const useCanvasEditorStateSync = ({
     return () => {
       cancelled = true;
       previewEditorStateRetryCountRef.current = 0;
-      cancelScheduledPreviewEditorStateRef.current();
+      cancelScheduledPreviewEditorState();
       pageInnerObservers.forEach((observer) => observer.disconnect());
     };
   }, [
+    applyEditorAutoSizeBoxesWithPreservedLayout,
+    cancelScheduledPreviewEditorState,
     draftPreviewHtmlRef,
     frameEdgeButtonSelector,
     isRuntimePreviewRoot,
     previewEditorStateRetryCountRef,
     previewRef,
     renderedPreviewHtml,
+    requestPreviewTextFit,
+    schedulePreviewEditorState,
+    selectionPanelTab,
+    syncDraftPreviewHtmlRef,
     templateFrameVisualHintsSignatureAttr,
     templateMetadataRelationRenderSignatureAttr,
     templatePreviewContentStabilizedAttr,
@@ -175,7 +156,7 @@ export const useCanvasEditorStateSync = ({
       !root ||
       !renderedPreviewHtml ||
       typeof window === 'undefined' ||
-      selectionPanelTabRef.current !== 'position' ||
+      selectionPanelTab !== 'position' ||
       isRuntimePreviewRoot(root)
     ) {
       return;
@@ -210,7 +191,7 @@ export const useCanvasEditorStateSync = ({
     return () => {
       window.clearInterval(timerId);
     };
-  }, [frameEdgeButtonSelector, isRuntimePreviewRoot, previewRef, renderedPreviewHtml, schedulePreviewEditorState]);
+  }, [frameEdgeButtonSelector, isRuntimePreviewRoot, previewRef, renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -219,7 +200,7 @@ export const useCanvasEditorStateSync = ({
       !root ||
       !renderedPreviewHtml ||
       typeof window === 'undefined' ||
-      selectionPanelTabRef.current !== 'position' ||
+      selectionPanelTab !== 'position' ||
       isRuntimePreviewRoot(root)
     ) {
       return;
@@ -244,6 +225,7 @@ export const useCanvasEditorStateSync = ({
     previewRef,
     renderedPreviewHtml,
     schedulePreviewEditorState,
+    selectionPanelTab,
   ]);
 
   React.useLayoutEffect(() => {

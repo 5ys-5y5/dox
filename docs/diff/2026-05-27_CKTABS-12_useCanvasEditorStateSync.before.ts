@@ -175,7 +175,7 @@ export const useCanvasEditorStateSync = ({
       !root ||
       !renderedPreviewHtml ||
       typeof window === 'undefined' ||
-      selectionPanelTabRef.current !== 'position' ||
+      selectionPanelTab !== 'position' ||
       isRuntimePreviewRoot(root)
     ) {
       return;
@@ -210,7 +210,7 @@ export const useCanvasEditorStateSync = ({
     return () => {
       window.clearInterval(timerId);
     };
-  }, [frameEdgeButtonSelector, isRuntimePreviewRoot, previewRef, renderedPreviewHtml, schedulePreviewEditorState]);
+  }, [frameEdgeButtonSelector, isRuntimePreviewRoot, previewRef, renderedPreviewHtml, schedulePreviewEditorState, selectionPanelTab]);
 
   React.useEffect(() => {
     const root = previewRef.current;
@@ -219,7 +219,7 @@ export const useCanvasEditorStateSync = ({
       !root ||
       !renderedPreviewHtml ||
       typeof window === 'undefined' ||
-      selectionPanelTabRef.current !== 'position' ||
+      selectionPanelTab !== 'position' ||
       isRuntimePreviewRoot(root)
     ) {
       return;
@@ -244,6 +244,7 @@ export const useCanvasEditorStateSync = ({
     previewRef,
     renderedPreviewHtml,
     schedulePreviewEditorState,
+    selectionPanelTab,
   ]);
 
   React.useLayoutEffect(() => {

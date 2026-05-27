@@ -203,7 +203,6 @@ export function CanvasOwnedWorkspace({
   return (
     <div
       style={{ display: 'contents' }}
-      data-canvas-owner-item="canvas-container"
       data-canvas-owner-surface={ownedWorkspaceProps.surface}
       data-canvas-owner-mode={resolvedWorkspaceProps.workspaceMode || 'template'}
       data-canvas-owner-access-role={effectiveCanvasAccessRole}

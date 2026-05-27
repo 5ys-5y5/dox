@@ -19,10 +19,6 @@ import type {
   TemplateFrameRole,
   TemplateFrameRuntimeMode,
 } from '../../../lib/templateFrameEditDtos';
-import type {
-  TemplateCanvasSelectionPanelTab,
-  TemplateCanvasViewMode,
-} from '../../../lib/templateCanvasViewDtos';
 
 export type TemplateOption = {
   id: string;
@@ -190,7 +186,7 @@ export type FrameRelationPreviewMode =
   | { kind: 'value-select'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] }
   | { kind: 'value-linked'; sourceKeyFrameGroupId: string; targetFrameGroupIds: string[] };
 
-export type SelectionPanelTab = TemplateCanvasSelectionPanelTab;
+export type SelectionPanelTab = 'metadata' | 'position';
 export type CanvasInteractionMode = 'select' | 'move';
 export type CanvasIconScale = 's' | 'm' | 'l';
 
@@ -644,7 +640,7 @@ export type TemplateEditWorkspaceCanvasToolbarVisibility = {
   showSelectionPanelTabs?: boolean;
 };
 
-export type TemplateEditWorkspaceCanvasViewMode = TemplateCanvasViewMode;
+export type TemplateEditWorkspaceCanvasViewMode = 'preview' | 'position' | 'metadata';
 
 export type TemplateEditWorkspacePersistenceVisibility = {
   showTemplateList?: boolean;
@@ -808,7 +804,6 @@ export type TemplateEditPreviewSurfaceProps = {
   spacePanArmed: boolean;
   spacePanDragging: boolean;
   metadataVisualMode: boolean;
-  preparedViewMode: TemplateEditWorkspaceCanvasViewMode;
   selectionInactiveOverlayOpacity?: number;
   templateUsagePreviewMode: boolean;
   selectionPanelTab: SelectionPanelTab;

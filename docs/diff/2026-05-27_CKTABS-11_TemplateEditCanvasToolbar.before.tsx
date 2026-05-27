@@ -62,8 +62,6 @@ type TemplateEditCanvasToolbarProps = {
   onToggleTodoPanel?: () => void;
 };
 
-type CanvasToolbarViewTabKey = 'preview' | SelectionPanelTab;
-
 const canvasToolbarGroupClassName = 'min-w-0 rounded-md bg-white';
 const canvasZoomButtonClassName =
   'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900';
@@ -145,10 +143,10 @@ export const TemplateEditCanvasToolbar = ({
   const renderTemplateNameInput = !documentMode && !readMode && showTemplateNameInput;
   const renderSaveButton = !readMode && showSaveButton;
   const renderTodoButton = !readMode && showTodoButton && Boolean(onToggleTodoPanel);
+  const renderPreviewToggle = !readMode && showPreviewToggle;
   const renderInteractionModeControls = !documentMode && !readMode && showInteractionModeControls;
   const renderEditSettingsToggle = !documentMode && !readMode && showEditSettingsToggle;
   const renderSelectionPanelTabs = !documentMode && !readMode && showSelectionPanelTabs;
-  const renderPreviewToggle = !readMode && showPreviewToggle && !renderSelectionPanelTabs;
   const renderHistoryControls = !readMode && showHistoryControls;
   const renderZoomControls = showZoomControls;
   const renderFullscreenControl = showFullscreenControl;
@@ -375,46 +373,14 @@ export const TemplateEditCanvasToolbar = ({
           </div>
         ) : null}
         {renderSelectionPanelTabs ? (
-          <div
-            className={`inline-grid h-9 shrink-0 grid-cols-4 ${canvasToolbarGroupClassName}`}
-            aria-label="상자 편집 탭"
-            data-canvas-owner-item="canvas-container-상자-편집-탭"
-            data-canvas-owner-name="상자 편집 탭"
-          >
+          <div className={`inline-grid h-9 shrink-0 grid-cols-3 ${canvasToolbarGroupClassName}`} aria-label="상자 편집 탭">
             {([
-              {
-                key: 'preview',
-                label: '미리보기',
-                icon: Eye,
-                ownerItem: 'canvas-container-상자-편집-탭-미리보기',
-              },
-              {
-                key: 'position',
-                label: '크기 및 위치',
-                icon: Move,
-                ownerItem: 'canvas-container-상자-편집-탭-크기-및-위치',
-              },
-              {
-                key: 'metadata',
-                label: '속성',
-                icon: KeyRound,
-                ownerItem: 'canvas-container-상자-편집-탭-속성',
-              },
-              {
-                key: 'metadata2',
-                label: '속성2',
-                icon: KeyRound,
-                ownerItem: 'canvas-container-상자-편집-탭-속성2',
-              },
-            ] as const satisfies ReadonlyArray<{
-              key: CanvasToolbarViewTabKey;
-              label: string;
-              icon: LucideIcon;
-              ownerItem: string;
-            }>).map((tab, index, tabs) => {
+              { key: 'position', label: '크기 및 위치', icon: Move },
+              { key: 'metadata', label: '속성', icon: KeyRound },
+              { key: 'metadata2', label: '속성2', icon: KeyRound },
+            ] as const satisfies ReadonlyArray<{ key: SelectionPanelTab; label: string; icon: LucideIcon }>).map((tab, index, tabs) => {
               const TabIcon = tab.icon;
-              const isPreviewTab = tab.key === 'preview';
-              const isActive = isPreviewTab ? templateUsagePreviewMode : !templateUsagePreviewMode && selectionPanelTab === tab.key;
+              const isActive = selectionPanelTab === tab.key;
               const shape = tabs.length === 1 ? 'single' : index === 0 ? 'first' : index === tabs.length - 1 ? 'last' : 'middle';
 
               return (
@@ -422,25 +388,10 @@ export const TemplateEditCanvasToolbar = ({
                   key={`selection-panel-tab:${tab.key}`}
                   type="button"
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(shape)} ${getCanvasToolbarButtonStateClassName(isActive)}`}
-                  onClick={() => {
-                    if (isPreviewTab) {
-                      if (!templateUsagePreviewMode) {
-                        onToggleTemplateUsagePreviewMode();
-                      }
-                      return;
-                    }
-
-                    onSelectionPanelTabChange(tab.key);
-                    if (templateUsagePreviewMode) {
-                      onToggleTemplateUsagePreviewMode();
-                    }
-                  }}
-                  disabled={isPreviewTab && !renderedPreviewHtml.trim()}
+                  onClick={() => onSelectionPanelTabChange(tab.key)}
                   aria-pressed={isActive}
                   aria-label={tab.label}
                   title={tab.label}
-                  data-canvas-owner-item={tab.ownerItem}
-                  data-canvas-owner-name={tab.label}
                 >
                   <TabIcon className="h-4 w-4" />
                   <span className="v106-canvas-toolbar-label">{tab.label}</span>

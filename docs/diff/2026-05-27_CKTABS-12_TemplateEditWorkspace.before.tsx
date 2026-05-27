@@ -10695,7 +10695,10 @@ const applyMetadataRelationOutlineEdges = (
       return;
     }
 
-    const shouldRenderConnectors = options.renderConnectors ?? true;
+    const shouldRenderConnectors =
+      root instanceof HTMLElement &&
+      root.getAttribute('data-selection-panel-tab') === 'metadata' &&
+      (options.renderConnectors ?? true);
     const minLeft = Math.min(...entries.map((entry) => entry.rect.left));
     const minTop = Math.min(...entries.map((entry) => entry.rect.top));
     const maxRight = Math.max(...entries.map((entry) => entry.rect.left + entry.rect.width));
@@ -10940,8 +10943,22 @@ const applyFrameRelationSelectionUi = (
   );
 
   if (activeSelectionPanelTab !== 'metadata') {
-    removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-    clearSelectionTonedownOverlays(root, 'metadata');
+    if (
+      root.hasAttribute(TEMPLATE_METADATA_RELATION_RENDER_SIGNATURE_ATTR) ||
+      root.hasAttribute(TEMPLATE_METADATA_ACTIVE_FILTER_ATTR) ||
+      root.querySelector(
+        `[${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}], [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}], [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}], .${FRAME_RELATION_BADGE_CLASS}`
+      )
+    ) {
+      clearFrameMetadataRelationOutlineUi(root);
+      collectFrameSelectionAnchors(root).forEach((node) => {
+        removeElementAttributeIfPresent(node, TEMPLATE_FRAME_RELATION_SELECTION_ATTR);
+        removeElementAttributeIfPresent(node, TEMPLATE_FRAME_METADATA_FOCUS_ATTR);
+      });
+      removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
+      clearSelectionTonedownOverlays(root, 'metadata');
+    }
+    return;
   }
 
   const relationRenderSignature = JSON.stringify({
@@ -17545,6 +17562,9 @@ const clearPositionOnlyEditorUi = (root: HTMLElement) => {
   root
     .querySelectorAll<HTMLElement>(
       [
+        FRAME_EDGE_BUTTON_SELECTOR,
+        FRAME_RESIZE_HANDLE_SELECTOR,
+        `.${FRAME_DELETE_BUTTON_CLASS}`,
         `[${FRAME_OUTLINE_OVERLAY_ATTR}="true"]`,
         `[${FRAME_CLUSTER_OUTLINE_OVERLAY_ATTR}="true"]`,
       ].join(', ')
@@ -18692,11 +18712,6 @@ export default function TemplateEditWorkspace({
   const templateUsagePreviewBuildRafRef = React.useRef<number | null>(null);
   const templateUsagePreviewBuildTimeoutRef = React.useRef<number | null>(null);
   const templateUsagePreviewInitialShrinkGuardPendingRef = React.useRef(false);
-  const templateUsagePreviewRuntimeCacheRef = React.useRef<{
-    sourceHtml: string;
-    optionsSignature: string;
-    runtimeHtml: string;
-  } | null>(null);
   const [canvasInteractionMode, setCanvasInteractionMode] = React.useState<CanvasInteractionMode>('select');
   const [spacePanArmed, setSpacePanArmed] = React.useState(false);
   const [spacePanDragging, setSpacePanDragging] = React.useState(false);
@@ -18991,7 +19006,6 @@ export default function TemplateEditWorkspace({
   const canvasPanStateRef = React.useRef<CanvasPanState | null>(null);
   const spacePanArmedRef = React.useRef(false);
   const previewEditorStateFrameRef = React.useRef<number | null>(null);
-  const previewEditorStateTabSwitchSuppressedUntilRef = React.useRef(0);
   const immediateSelectionPanelSyncFrameRef = React.useRef<number | null>(null);
   const deferredTextAutoSizeSyncTimeoutRef = React.useRef<number | null>(null);
   const deferredStylePanelSyncTimeoutRef = React.useRef<number | null>(null);
@@ -19048,9 +19062,6 @@ export default function TemplateEditWorkspace({
       }
     >
   >(new WeakMap());
-  const selectionPanelRenderGateRef = React.useRef<{ tab: SelectionPanelTab; signature: string } | null>(null);
-  const selectionPanelUserTabSwitchRef = React.useRef<{ tab: SelectionPanelTab } | null>(null);
-  const selectionPanelSkipRuntimeVisualSyncRef = React.useRef<{ tab: SelectionPanelTab } | null>(null);
   const canvasHistoryEntriesRef = React.useRef<CanvasHistoryEntry[]>([]);
   const canvasHistoryIndexRef = React.useRef(-1);
   const canvasHistoryNavigationInProgressRef = React.useRef(false);
@@ -19136,12 +19147,6 @@ export default function TemplateEditWorkspace({
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
   const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode || canvasViewPreviewRequested;
-  const templateUsagePreviewRuntimeOptionsSignature = [
-    usagePreviewStabilizeInitialLayout ? 'stabilize' : 'raw-layout',
-    usagePreviewPreventInitialValueClearShrink ? 'guard-initial-shrink' : 'allow-initial-shrink',
-    usagePreviewMeasurePeerClusterHeightTargets ? 'measure-peer-height' : 'skip-peer-height',
-    usagePreviewMeasurePeerClusterWidthTargets ? 'measure-peer-width' : 'skip-peer-width',
-  ].join('|');
   const activeCanvasSurfaceSelectionPanelTab: SelectionPanelTab = templateUsagePreviewActive ? 'position' : selectionPanelTab;
   const activeCanvasPreparedViewMode: TemplateEditWorkspaceCanvasViewMode = templateUsagePreviewActive
     ? 'preview'
@@ -19371,6 +19376,10 @@ export default function TemplateEditWorkspace({
     [selectionValidationIssues]
   );
   const templateMetadataReviewIssues = React.useMemo(() => {
+    if (!isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)) {
+      return [] as FrameMetadataReviewIssue[];
+    }
+
     let root: ParentNode | null = previewRef.current;
 
     if (!root && typeof document !== 'undefined' && renderedPreviewHtml) {
@@ -19380,7 +19389,7 @@ export default function TemplateEditWorkspace({
     }
 
     return root ? collectFrameMetadataReviewIssues(root, virtualFrameDefinitions) : ([] as FrameMetadataReviewIssue[]);
-  }, [previewDomVersion, renderedPreviewHtml, virtualFrameDefinitions]);
+  }, [previewDomVersion, renderedPreviewHtml, selectionPanelTab, virtualFrameDefinitions]);
   const visibleMetadataReviewIssues = React.useMemo(() => {
     const issueByKey = new Map<string, FrameMetadataReviewIssue>();
 
@@ -19973,50 +19982,6 @@ export default function TemplateEditWorkspace({
 	    return nextDraftHtml;
 	  }, [pushCanvasHistoryEntry]);
 
-  const buildCachedTemplateUsagePreviewHtml = React.useCallback(
-    (sourceHtml: string) => {
-      const normalizedSourceHtml = sourceHtml.trim();
-
-      if (!normalizedSourceHtml) {
-        return '';
-      }
-
-      const cachedPreview = templateUsagePreviewRuntimeCacheRef.current;
-
-      if (
-        cachedPreview &&
-        cachedPreview.sourceHtml === normalizedSourceHtml &&
-        cachedPreview.optionsSignature === templateUsagePreviewRuntimeOptionsSignature
-      ) {
-        return cachedPreview.runtimeHtml;
-      }
-
-      const runtimeHtml = buildTemplateUsagePreviewHtml(normalizedSourceHtml, {
-        stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
-        preventInitialValueClearShrink: usagePreviewPreventInitialValueClearShrink,
-        measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
-        measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
-      });
-
-      if (runtimeHtml.trim()) {
-        templateUsagePreviewRuntimeCacheRef.current = {
-          sourceHtml: normalizedSourceHtml,
-          optionsSignature: templateUsagePreviewRuntimeOptionsSignature,
-          runtimeHtml,
-        };
-      }
-
-      return runtimeHtml;
-    },
-    [
-      templateUsagePreviewRuntimeOptionsSignature,
-      usagePreviewMeasurePeerClusterHeightTargets,
-      usagePreviewMeasurePeerClusterWidthTargets,
-      usagePreviewPreventInitialValueClearShrink,
-      usagePreviewStabilizeInitialLayout,
-    ]
-  );
-
   const toggleTemplateUsagePreviewMode = React.useCallback(() => {
     if (documentMode || readMode) {
       return;
@@ -20037,22 +20002,15 @@ export default function TemplateEditWorkspace({
       templateUsagePreviewBuildIdRef.current += 1;
       templateUsagePreviewBuildSourceHtmlRef.current = '';
       templateUsagePreviewInitialShrinkGuardPendingRef.current = false;
-      let restoredEditorDomVersion = false;
-      if (
-        templateUsagePreviewRenderSnapshotRef.current.trim() &&
-        templateUsagePreviewRenderSnapshotRef.current !== renderedPreviewHtml
-      ) {
+      if (templateUsagePreviewRenderSnapshotRef.current.trim()) {
         setPreviewHtml(templateUsagePreviewRenderSnapshotRef.current);
-        restoredEditorDomVersion = true;
       }
       if (templateUsagePreviewEditorDraftSnapshotRef.current.trim()) {
         draftPreviewHtmlRef.current = templateUsagePreviewEditorDraftSnapshotRef.current;
       }
       setTemplateUsagePreviewMode(false);
       setTemplateUsagePreviewHtml('');
-      if (restoredEditorDomVersion) {
-        setPreviewDomVersion((previous) => previous + 1);
-      }
+      setPreviewDomVersion((previous) => previous + 1);
       setMessage('템플릿 편집 모드로 돌아왔습니다.');
       return;
     }
@@ -20064,35 +20022,9 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    const cachedEditorDraftHtml = draftPreviewHtmlRef.current.trim() || renderedPreviewHtml.trim();
-    const cachedRuntimeHtml =
-      templateUsagePreviewRuntimeCacheRef.current?.sourceHtml === cachedEditorDraftHtml &&
-      templateUsagePreviewRuntimeCacheRef.current?.optionsSignature === templateUsagePreviewRuntimeOptionsSignature
-        ? templateUsagePreviewRuntimeCacheRef.current.runtimeHtml
-        : '';
-
-    if (cachedRuntimeHtml.trim()) {
-      draftPreviewHtmlRef.current = cachedEditorDraftHtml;
-      templateUsagePreviewEditorDraftSnapshotRef.current = cachedEditorDraftHtml;
-      templateUsagePreviewRenderSnapshotRef.current = renderedPreviewHtml;
-      templateUsagePreviewBuildSourceHtmlRef.current = cachedEditorDraftHtml;
-      templateUsagePreviewInitialShrinkGuardPendingRef.current = usagePreviewPreventInitialValueClearShrink;
-      root.setAttribute(TEMPLATE_USAGE_PREVIEW_MODE_ATTR, 'true');
-      root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, 'false');
-      root.setAttribute('data-frame-create-mode', 'false');
-      pendingPreviewViewportResetRef.current = true;
-      React.startTransition(() => {
-        setBoxCreationMode(false);
-        setTemplateUsagePreviewHtml(cachedRuntimeHtml);
-        setTemplateUsagePreviewMode(true);
-        setMessage('실제 사용 미리보기: 입력, 파일, 서명은 화면 확인용이며 저장되지 않습니다.');
-      });
-      return;
-    }
-
     syncFormControlMarkup(root);
     const liveEditorDraftHtml = extractEditorHtml(root).trim();
-    const editorDraftHtml = liveEditorDraftHtml || cachedEditorDraftHtml;
+    const editorDraftHtml = liveEditorDraftHtml || draftPreviewHtmlRef.current.trim() || renderedPreviewHtml.trim();
     draftPreviewHtmlRef.current = editorDraftHtml;
     templateUsagePreviewEditorDraftSnapshotRef.current = editorDraftHtml;
     templateUsagePreviewRenderSnapshotRef.current = renderedPreviewHtml;
@@ -20114,7 +20046,12 @@ export default function TemplateEditWorkspace({
           return;
         }
 
-        const runtimeHtml = buildCachedTemplateUsagePreviewHtml(editorDraftHtml);
+        const runtimeHtml = buildTemplateUsagePreviewHtml(editorDraftHtml, {
+          stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
+          preventInitialValueClearShrink: usagePreviewPreventInitialValueClearShrink,
+          measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+          measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
+        });
 
         if (buildId !== templateUsagePreviewBuildIdRef.current || !runtimeHtml.trim()) {
           return;
@@ -20130,12 +20067,13 @@ export default function TemplateEditWorkspace({
     });
   }, [
     documentMode,
-    buildCachedTemplateUsagePreviewHtml,
     readMode,
     renderedPreviewHtml,
     templateUsagePreviewMode,
-    templateUsagePreviewRuntimeOptionsSignature,
+    usagePreviewMeasurePeerClusterHeightTargets,
+    usagePreviewMeasurePeerClusterWidthTargets,
     usagePreviewPreventInitialValueClearShrink,
+    usagePreviewStabilizeInitialLayout,
   ]);
 
   React.useLayoutEffect(() => {
@@ -20160,7 +20098,12 @@ export default function TemplateEditWorkspace({
     templateUsagePreviewBuildSourceHtmlRef.current = editorDraftHtml;
     templateUsagePreviewInitialShrinkGuardPendingRef.current = usagePreviewPreventInitialValueClearShrink;
 
-    const runtimeHtml = buildCachedTemplateUsagePreviewHtml(editorDraftHtml);
+    const runtimeHtml = buildTemplateUsagePreviewHtml(editorDraftHtml, {
+      stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
+      preventInitialValueClearShrink: usagePreviewPreventInitialValueClearShrink,
+      measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
+      measurePeerClusterWidthTargets: usagePreviewMeasurePeerClusterWidthTargets,
+    });
 
     if (runtimeHtml.trim()) {
       setBoxCreationMode(false);
@@ -20168,67 +20111,14 @@ export default function TemplateEditWorkspace({
     }
   }, [
     canvasViewPreviewRequested,
-    buildCachedTemplateUsagePreviewHtml,
     documentMode,
     readMode,
     renderedPreviewHtml,
     templateUsagePreviewHtml,
+    usagePreviewMeasurePeerClusterHeightTargets,
+    usagePreviewMeasurePeerClusterWidthTargets,
     usagePreviewPreventInitialValueClearShrink,
-  ]);
-
-  React.useEffect(() => {
-    if (
-      documentMode ||
-      readMode ||
-      templateUsagePreviewActive ||
-      !renderedPreviewHtml.trim() ||
-      typeof window === 'undefined'
-    ) {
-      return;
-    }
-
-    const sourceHtml = draftPreviewHtmlRef.current.trim() || renderedPreviewHtml.trim();
-    const cachedPreview = templateUsagePreviewRuntimeCacheRef.current;
-
-    if (
-      cachedPreview &&
-      cachedPreview.sourceHtml === sourceHtml &&
-      cachedPreview.optionsSignature === templateUsagePreviewRuntimeOptionsSignature
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    const idleWindow = window as Window &
-      typeof globalThis & {
-        requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
-        cancelIdleCallback?: (id: number) => void;
-      };
-    const prebuild = () => {
-      if (!cancelled) {
-        buildCachedTemplateUsagePreviewHtml(sourceHtml);
-      }
-    };
-    const idleId =
-      typeof idleWindow.requestIdleCallback === 'function'
-        ? idleWindow.requestIdleCallback(prebuild, { timeout: 800 })
-        : window.setTimeout(prebuild, 160);
-
-    return () => {
-      cancelled = true;
-      if (typeof idleWindow.cancelIdleCallback === 'function') {
-        idleWindow.cancelIdleCallback(idleId);
-      } else {
-        window.clearTimeout(idleId);
-      }
-    };
-  }, [
-    buildCachedTemplateUsagePreviewHtml,
-    documentMode,
-    readMode,
-    renderedPreviewHtml,
-    templateUsagePreviewActive,
-    templateUsagePreviewRuntimeOptionsSignature,
+    usagePreviewStabilizeInitialLayout,
   ]);
 
   React.useEffect(() => {
@@ -25151,10 +25041,6 @@ export default function TemplateEditWorkspace({
 	      return;
 	    }
 
-    if (Date.now() < previewEditorStateTabSwitchSuppressedUntilRef.current) {
-      return;
-    }
-
     if (hasActivePointerInteraction()) {
       deferredPreviewEditorStateRef.current = true;
       return;
@@ -25163,10 +25049,6 @@ export default function TemplateEditWorkspace({
     cancelScheduledPreviewEditorState();
     previewEditorStateFrameRef.current = window.requestAnimationFrame(() => {
       previewEditorStateFrameRef.current = null;
-
-      if (Date.now() < previewEditorStateTabSwitchSuppressedUntilRef.current) {
-        return;
-      }
 
       if (hasActivePointerInteraction()) {
         deferredPreviewEditorStateRef.current = true;
@@ -27002,86 +26884,10 @@ export default function TemplateEditWorkspace({
     applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
   }, [renderedPreviewHtml, selectionPanelTab]);
 
-  const selectionPanelRenderSignature = React.useMemo(
-    () =>
-      [
-        renderedPreviewHtml,
-        selectedFrameGroupIds.join('|'),
-        JSON.stringify(edgeSelectionState),
-        positionRelationAnchorFrameGroupId,
-        previewRelativeGuideFrameGroupId,
-        positionBoxGroups.map((group) => `${group.id}:${group.frameGroupIds.join(',')}`).join('|'),
-        JSON.stringify(highlightedDefinedPositionRelativeRelations),
-        JSON.stringify(positionSpacingGuideRelations),
-      ].join('\n'),
-    [
-      edgeSelectionState,
-      highlightedDefinedPositionRelativeRelations,
-      positionBoxGroups,
-      positionRelationAnchorFrameGroupId,
-      positionSpacingGuideRelations,
-      previewRelativeGuideFrameGroupId,
-      renderedPreviewHtml,
-      selectedFrameGroupIds,
-    ]
-  );
-
-  const handleSelectionPanelTabChange = React.useCallback(
-    (nextTab: SelectionPanelTab) => {
-      if (nextTab === selectionPanelTab) {
-        return;
-      }
-
-      selectionPanelUserTabSwitchRef.current = { tab: nextTab };
-      selectionPanelSkipRuntimeVisualSyncRef.current = { tab: nextTab };
-      previewEditorStateTabSwitchSuppressedUntilRef.current = Date.now() + 1200;
-      cancelScheduledPreviewEditorState();
-      const root = previewRef.current;
-
-      if (root) {
-        syncPreviewSurfaceSelectionPanelTabAttr(root, nextTab);
-        syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-          root,
-          nextTab === 'position' && positionOrderLockSelectionMode
-        );
-        applyPreviewEditPermissions(root, nextTab, textCanvasEditModeActiveRef.current);
-      }
-
-      React.startTransition(() => {
-        setSelectionPanelTab(nextTab);
-      });
-    },
-    [cancelScheduledPreviewEditorState, positionOrderLockSelectionMode, selectionPanelTab]
-  );
-
   React.useLayoutEffect(() => {
     const root = previewRef.current;
 
     if (!root) {
-      return;
-    }
-
-    const previousRenderGate = selectionPanelRenderGateRef.current;
-    const tabOnlySwitch =
-      Boolean(previousRenderGate) &&
-      previousRenderGate?.signature === selectionPanelRenderSignature &&
-      previousRenderGate?.tab !== selectionPanelTab;
-    const userTabOnlySwitch = selectionPanelUserTabSwitchRef.current?.tab === selectionPanelTab;
-
-    selectionPanelRenderGateRef.current = {
-      tab: selectionPanelTab,
-      signature: selectionPanelRenderSignature,
-    };
-    selectionPanelUserTabSwitchRef.current = null;
-
-    if (userTabOnlySwitch || tabOnlySwitch) {
-      selectionPanelSkipRuntimeVisualSyncRef.current = { tab: selectionPanelTab };
-      syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
-      syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-        root,
-        selectionPanelTab === 'position' && positionOrderLockSelectionMode
-      );
-      applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
       return;
     }
 
@@ -27224,7 +27030,6 @@ export default function TemplateEditWorkspace({
       positionSpacingGuideRelations,
       visibleMetadataReviewIssues,
       showMetadataIcons,
-      selectionPanelRenderSignature,
   ]);
 
   React.useLayoutEffect(() => {
@@ -27255,17 +27060,10 @@ export default function TemplateEditWorkspace({
       return;
     }
 
-    const skipRuntimeVisualSync = selectionPanelSkipRuntimeVisualSyncRef.current?.tab === selectionPanelTab;
-    if (skipRuntimeVisualSync) {
-      selectionPanelSkipRuntimeVisualSyncRef.current = null;
-    }
-
-    if (!skipRuntimeVisualSync) {
-      applyRuntimeSelectionVisuals(selectedFrameGroupIdsRef.current, edgeSelectionStateRef.current);
-    }
+    applyRuntimeSelectionVisuals(selectedFrameGroupIdsRef.current, edgeSelectionStateRef.current);
     applyFrameValidationErrorUi(root, selectionValidationErrorFrameIds);
     applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
-  }, [applyRuntimeSelectionVisuals, selectionPanelTab, selectionValidationErrorFrameIds, showMetadataIcons, visibleMetadataReviewIssues]);
+  }, [applyRuntimeSelectionVisuals, selectionValidationErrorFrameIds, showMetadataIcons, visibleMetadataReviewIssues]);
 
   React.useLayoutEffect(() => {
     const root = previewRef.current;
@@ -33371,21 +33169,6 @@ export default function TemplateEditWorkspace({
         .template-edit-preview[${TEMPLATE_USAGE_PREVIEW_MODE_ATTR}="true"] ${FRAME_RESIZE_HANDLE_SELECTOR} {
           display: none !important;
         }
-        .template-edit-preview:not([data-selection-panel-tab="position"]) ${FRAME_EDGE_BUTTON_SELECTOR},
-        .template-edit-preview:not([data-selection-panel-tab="position"]) ${FRAME_RESIZE_HANDLE_SELECTOR},
-        .template-edit-preview:not([data-selection-panel-tab="position"]) .${FRAME_DELETE_BUTTON_CLASS},
-        .template-edit-preview:not([data-selection-panel-tab="position"]) [data-v106-position-group-proxy-overlay],
-        .template-edit-preview:not([data-selection-panel-tab="position"]) [data-v106-position-group-catalog-overlay],
-        .template-edit-preview:not([data-selection-panel-tab="position"]) [data-v106-position-spacing-guide="true"],
-        .template-edit-preview:not([data-selection-panel-tab="position"]) .${FRAME_RELATIVE_ANCHOR_GUIDE_CLASS},
-        .template-edit-preview:not([data-selection-panel-tab="position"]) .${FRAME_RELATIVE_ANCHOR_BADGE_CLASS} {
-          display: none !important;
-          pointer-events: none !important;
-        }
-        .template-edit-preview:not([data-selection-panel-tab="metadata"]) .${FRAME_RELATION_BADGE_CLASS} {
-          display: none !important;
-          pointer-events: none !important;
-        }
         .template-edit-preview [data-template-selected="true"] {
           --v106-selection-centered-border-color: var(--template-selection-outline-color, rgba(37, 99, 235, .96));
           position: relative;
@@ -34485,7 +34268,7 @@ export default function TemplateEditWorkspace({
             onUpdatePreviewZoom={updatePreviewZoom}
             onToggleCanvasFullscreen={toggleCanvasFullscreen}
             onToggleEditSettingsPanel={toggleEditSettingsPanelVisible}
-            onSelectionPanelTabChange={handleSelectionPanelTabChange}
+            onSelectionPanelTabChange={setSelectionPanelTab}
             onToggleTemplateUsagePreviewMode={toggleTemplateUsagePreviewMode}
             onCanvasInteractionModeChange={setCanvasInteractionMode}
             onUndoCanvasHistory={handleDocumentModeUndo}

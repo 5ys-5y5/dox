@@ -4,10 +4,6 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import * as React from 'react';
 import { CardContent } from '../../../ui/Card';
 import {
-  isTemplateCanvasMetadataSelectionPanelTab,
-  resolveTemplateCanvasSelectionPanelTab,
-} from '../../../../services/templateCanvasViewModeService';
-import {
   FLOATING_OVERLAY_STACK_GAP_PX,
   METADATA_FLOATING_OVERLAY_STACK_ORDER,
   POSITION_FLOATING_OVERLAY_STACK_ORDER,
@@ -42,7 +38,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   spacePanArmed,
   spacePanDragging,
   metadataVisualMode,
-  preparedViewMode,
   selectionInactiveOverlayOpacity = 0.5,
   templateUsagePreviewMode,
   selectionPanelTab,
@@ -128,10 +123,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const [metadataRolePrimaryOverlayCollapsed, setMetadataRolePrimaryOverlayCollapsed] = React.useState(true);
   const [metadataRoleSecondaryOverlayCollapsed, setMetadataRoleSecondaryOverlayCollapsed] = React.useState(true);
   const [metadataRoleTertiaryOverlayCollapsed, setMetadataRoleTertiaryOverlayCollapsed] = React.useState(true);
-  const [metadata2NameOverlayCollapsed, setMetadata2NameOverlayCollapsed] = React.useState(true);
-  const [metadata2RolePrimaryOverlayCollapsed, setMetadata2RolePrimaryOverlayCollapsed] = React.useState(true);
-  const [metadata2RoleSecondaryOverlayCollapsed, setMetadata2RoleSecondaryOverlayCollapsed] = React.useState(true);
-  const [metadata2RoleTertiaryOverlayCollapsed, setMetadata2RoleTertiaryOverlayCollapsed] = React.useState(true);
   const [floatingOverlayViewportRevision, setFloatingOverlayViewportRevision] = React.useState(0);
   const hasSummaryOverlay = Boolean(summaryOverlay);
   const hasStyleOverlay = Boolean(styleOverlay);
@@ -221,10 +212,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     metadataRolePrimaryOverlayCollapsed,
     metadataRoleSecondaryOverlayCollapsed,
     metadataRoleTertiaryOverlayCollapsed,
-    metadata2NameOverlayCollapsed,
-    metadata2RolePrimaryOverlayCollapsed,
-    metadata2RoleSecondaryOverlayCollapsed,
-    metadata2RoleTertiaryOverlayCollapsed,
     hasSummaryOverlay,
     hasStyleOverlay,
     hasSizeTypeOverlay,
@@ -284,8 +271,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   }, [floatingOverlayViewportRevision]);
 
   const readFloatingOverlayCollapsed = (overlayId: TemplateFloatingOverlayId) => {
-    const metadata2Active = selectionPanelTab === 'metadata2';
-
     switch (overlayId) {
       case 'summary':
         return summaryOverlayCollapsed;
@@ -298,13 +283,13 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       case 'action':
         return actionOverlayCollapsed;
       case 'metadataName':
-        return metadata2Active ? metadata2NameOverlayCollapsed : metadataNameOverlayCollapsed;
+        return metadataNameOverlayCollapsed;
       case 'metadataRolePrimary':
-        return metadata2Active ? metadata2RolePrimaryOverlayCollapsed : metadataRolePrimaryOverlayCollapsed;
+        return metadataRolePrimaryOverlayCollapsed;
       case 'metadataRoleSecondary':
-        return metadata2Active ? metadata2RoleSecondaryOverlayCollapsed : metadataRoleSecondaryOverlayCollapsed;
+        return metadataRoleSecondaryOverlayCollapsed;
       case 'metadataRoleTertiary':
-        return metadata2Active ? metadata2RoleTertiaryOverlayCollapsed : metadataRoleTertiaryOverlayCollapsed;
+        return metadataRoleTertiaryOverlayCollapsed;
       default:
         return true;
     }
@@ -336,7 +321,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   };
 
   const readFloatingOverlayStackOrder = () => {
-    if (isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)) {
+    if (selectionPanelTab === 'metadata') {
       return METADATA_FLOATING_OVERLAY_STACK_ORDER;
     }
 
@@ -794,55 +779,27 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   );
   const finishMetadataNameOverlayDrag = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => {
-        if (selectionPanelTab === 'metadata2') {
-          setMetadata2NameOverlayCollapsed((current) => !current);
-          return;
-        }
-
-        setMetadataNameOverlayCollapsed((current) => !current);
-      });
+      finishFloatingOverlayDrag(event, () => setMetadataNameOverlayCollapsed((current) => !current));
     },
-    [finishFloatingOverlayDrag, selectionPanelTab]
+    [finishFloatingOverlayDrag]
   );
   const finishMetadataRolePrimaryOverlayDrag = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => {
-        if (selectionPanelTab === 'metadata2') {
-          setMetadata2RolePrimaryOverlayCollapsed((current) => !current);
-          return;
-        }
-
-        setMetadataRolePrimaryOverlayCollapsed((current) => !current);
-      });
+      finishFloatingOverlayDrag(event, () => setMetadataRolePrimaryOverlayCollapsed((current) => !current));
     },
-    [finishFloatingOverlayDrag, selectionPanelTab]
+    [finishFloatingOverlayDrag]
   );
   const finishMetadataRoleSecondaryOverlayDrag = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => {
-        if (selectionPanelTab === 'metadata2') {
-          setMetadata2RoleSecondaryOverlayCollapsed((current) => !current);
-          return;
-        }
-
-        setMetadataRoleSecondaryOverlayCollapsed((current) => !current);
-      });
+      finishFloatingOverlayDrag(event, () => setMetadataRoleSecondaryOverlayCollapsed((current) => !current));
     },
-    [finishFloatingOverlayDrag, selectionPanelTab]
+    [finishFloatingOverlayDrag]
   );
   const finishMetadataRoleTertiaryOverlayDrag = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
-      finishFloatingOverlayDrag(event, () => {
-        if (selectionPanelTab === 'metadata2') {
-          setMetadata2RoleTertiaryOverlayCollapsed((current) => !current);
-          return;
-        }
-
-        setMetadataRoleTertiaryOverlayCollapsed((current) => !current);
-      });
+      finishFloatingOverlayDrag(event, () => setMetadataRoleTertiaryOverlayCollapsed((current) => !current));
     },
-    [finishFloatingOverlayDrag, selectionPanelTab]
+    [finishFloatingOverlayDrag]
   );
 
   const cancelFloatingOverlayDrag = React.useCallback(
@@ -987,48 +944,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const canvasSurfaceSizingStyle = hasSpecifiedCanvasSurfaceHeight
     ? ({ height: resolvedCanvasSurfaceHeight, maxHeight: resolvedCanvasSurfaceHeight } as React.CSSProperties)
     : undefined;
-  const preparedViewSelectionPanelTab = resolveTemplateCanvasSelectionPanelTab(preparedViewMode);
-  const preparedViewMatchesActivePanel = preparedViewSelectionPanelTab === selectionPanelTab;
-  const metadata2Active = selectionPanelTab === 'metadata2';
-  const activeMetadataRolePrimaryOverlayCollapsed = metadata2Active
-    ? metadata2RolePrimaryOverlayCollapsed
-    : metadataRolePrimaryOverlayCollapsed;
-  const activeMetadataRoleSecondaryOverlayCollapsed = metadata2Active
-    ? metadata2RoleSecondaryOverlayCollapsed
-    : metadataRoleSecondaryOverlayCollapsed;
-  const activeMetadataRoleTertiaryOverlayCollapsed = metadata2Active
-    ? metadata2RoleTertiaryOverlayCollapsed
-    : metadataRoleTertiaryOverlayCollapsed;
-  const setActiveMetadataRolePrimaryOverlayCollapsed = metadata2Active
-    ? setMetadata2RolePrimaryOverlayCollapsed
-    : setMetadataRolePrimaryOverlayCollapsed;
-  const setActiveMetadataRoleSecondaryOverlayCollapsed = metadata2Active
-    ? setMetadata2RoleSecondaryOverlayCollapsed
-    : setMetadataRoleSecondaryOverlayCollapsed;
-  const setActiveMetadataRoleTertiaryOverlayCollapsed = metadata2Active
-    ? setMetadata2RoleTertiaryOverlayCollapsed
-    : setMetadataRoleTertiaryOverlayCollapsed;
-
-  if (renderedPreviewHtml && !preparedViewMatchesActivePanel) {
-    return (
-      <CardContent
-        className={`min-h-0 bg-slate-200 p-6 ${canvasSurfaceSizingClassName}`}
-        data-canvas-prepared-view-match="false"
-        data-canvas-prepared-view-mode={preparedViewMode}
-        data-canvas-prepared-view-requested-tab={preparedViewSelectionPanelTab}
-        data-selection-panel-tab={selectionPanelTab}
-        style={canvasSurfaceSizingStyle}
-      >
-        <div
-          className={`flex items-center justify-center text-sm text-slate-500 ${
-            hasSpecifiedCanvasSurfaceHeight || canvasSurfaceFillAvailableHeight ? 'h-full min-h-0' : 'min-h-[560px]'
-          }`}
-        >
-          캔버스 뷰를 준비 중입니다.
-        </div>
-      </CardContent>
-    );
-  }
 
   if (!renderedPreviewHtml) {
     return (
@@ -1096,14 +1011,14 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
         ])
       : [];
   const metadataOverlayRailSections =
-    isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)
+    selectionPanelTab === 'metadata'
       ? compactOverlayRailSections([
           renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
           renderFloatingOverlaySection(
             'metadataRolePrimary',
             '상자 역할 - 1',
-            activeMetadataRolePrimaryOverlayCollapsed,
-            setActiveMetadataRolePrimaryOverlayCollapsed,
+            metadataRolePrimaryOverlayCollapsed,
+            setMetadataRolePrimaryOverlayCollapsed,
             finishMetadataRolePrimaryOverlayDrag,
             metadataRolePrimaryOverlay,
             { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
@@ -1111,8 +1026,8 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
           renderFloatingOverlaySection(
             'metadataRoleSecondary',
             '상자 역할 - 2',
-            activeMetadataRoleSecondaryOverlayCollapsed,
-            setActiveMetadataRoleSecondaryOverlayCollapsed,
+            metadataRoleSecondaryOverlayCollapsed,
+            setMetadataRoleSecondaryOverlayCollapsed,
             finishMetadataRoleSecondaryOverlayDrag,
             metadataRoleSecondaryOverlay,
             { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
@@ -1120,17 +1035,15 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
           renderFloatingOverlaySection(
             'metadataRoleTertiary',
             '상자 연결',
-            activeMetadataRoleTertiaryOverlayCollapsed,
-            setActiveMetadataRoleTertiaryOverlayCollapsed,
+            metadataRoleTertiaryOverlayCollapsed,
+            setMetadataRoleTertiaryOverlayCollapsed,
             finishMetadataRoleTertiaryOverlayDrag,
             metadataRoleTertiaryOverlay,
             { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
           ),
         ])
       : [];
-  const overlayRailSections = isTemplateCanvasMetadataSelectionPanelTab(selectionPanelTab)
-    ? metadataOverlayRailSections
-    : positionOverlayRailSections;
+  const overlayRailSections = selectionPanelTab === 'metadata' ? metadataOverlayRailSections : positionOverlayRailSections;
   const hasOverlayRail = editSettingsPanelVisible && overlayRailSections.length > 0;
   const overlayRailContent = overlayRailSections.map((section) => section.node);
   return (
@@ -1151,10 +1064,6 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
             data-template-usage-preview-mode={templateUsagePreviewMode ? 'true' : 'false'}
             data-selection-panel-tab={selectionPanelTab}
-            data-canvas-prepared-view-mode={preparedViewMode}
-            data-canvas-prepared-view-cache-key={`${preparedViewMode}:${selectionPanelTab}`}
-            data-canvas-prepared-view-match={preparedViewMatchesActivePanel ? 'true' : 'false'}
-            data-canvas-prepared-view-requested-tab={preparedViewSelectionPanelTab}
             data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
             style={previewSurfaceStyle}
             onPointerDownCapture={handlePreviewPointerDown}

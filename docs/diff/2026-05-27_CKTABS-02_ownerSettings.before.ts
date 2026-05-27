@@ -7,7 +7,6 @@ import type {
   TemplateEditWorkspacePersistenceVisibility,
   TemplateEditWorkspaceProps,
 } from '../../components/template/workspace/types';
-import { normalizeTemplateCanvasViewMode } from '../../services/templateCanvasViewModeService';
 
 export type CanvasWorkspaceMode = NonNullable<TemplateEditWorkspaceProps['workspaceMode']>;
 export type CanvasOwnerAccessRole = 'editor' | 'viewer' | 'signer';
@@ -164,7 +163,8 @@ const normalizeCanvasReadModeInteractionMode = (
 const normalizeCanvasViewMode = (
   value: unknown,
   fallback: CanvasOwnerViewMode = 'position'
-): CanvasOwnerViewMode => normalizeTemplateCanvasViewMode(value, fallback);
+): CanvasOwnerViewMode =>
+  value === 'preview' || value === 'position' || value === 'metadata' ? value : fallback;
 
 export const normalizeCanvasWorkspaceMode = (value: string | null | undefined): CanvasWorkspaceMode => {
   if (value === 'document' || value === 'read') {
