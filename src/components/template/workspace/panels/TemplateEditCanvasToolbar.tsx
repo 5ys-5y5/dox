@@ -20,9 +20,8 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '../../../ui/Button';
-import { CardContent, CardHeader, CardTitle } from '../../../ui/Card';
+import { CardContent } from '../../../ui/Card';
 import type { SelectionPanelTab, TemplateEditWorkspaceCanvasToolbarVisibility } from '../types';
-import { DeferredValueInput } from './DeferredValueInput';
 
 type TemplateEditCanvasToolbarProps = {
   documentDraftSaveEnabled: boolean;
@@ -212,11 +211,8 @@ const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'mi
 export const TemplateEditCanvasToolbar = ({
   documentDraftSaveEnabled,
   readOnlyDraftOutput,
-  nameFieldLabel,
   saveButtonLabel,
-  templateNameReadOnly,
   saveDisabled,
-  templateName,
   loading,
   saving,
   canvasFullscreen,
@@ -242,12 +238,9 @@ export const TemplateEditCanvasToolbar = ({
   onCanvasInteractionModeChange,
   onUndoCanvasHistory,
   onRedoCanvasHistory,
-  onTemplateNameChange,
   onSave,
   onToggleTodoPanel,
 }: TemplateEditCanvasToolbarProps) => {
-  const showCanvasTitle = visibility?.showCanvasTitle !== false;
-  const showTemplateNameInput = visibility?.showTemplateNameInput !== false;
   const showSaveButton = visibility?.showSaveButton !== false;
   const showTodoButton = visibility?.showTodoButton !== false;
   const showPreviewToggle = visibility?.showPreviewToggle !== false;
@@ -257,7 +250,6 @@ export const TemplateEditCanvasToolbar = ({
   const showFullscreenControl = visibility?.showFullscreenControl !== false;
   const showEditSettingsToggle = visibility?.showEditSettingsToggle !== false;
   const showSelectionPanelTabs = visibility?.showSelectionPanelTabs !== false;
-  const renderTemplateNameInput = showTemplateNameInput;
   const renderSaveButton = showSaveButton;
   const renderTodoButton = showTodoButton;
   const renderInteractionModeControls = showInteractionModeControls;
@@ -267,9 +259,9 @@ export const TemplateEditCanvasToolbar = ({
   const renderHistoryControls = showHistoryControls;
   const renderZoomControls = showZoomControls;
   const renderFullscreenControl = showFullscreenControl;
-  const showHeaderActions = renderTemplateNameInput || renderSaveButton || renderTodoButton;
-  const showHeader = showCanvasTitle || showHeaderActions;
   const showToolbarBody =
+    renderSaveButton ||
+    renderTodoButton ||
     renderPreviewToggle ||
     renderInteractionModeControls ||
     renderHistoryControls ||
@@ -280,74 +272,49 @@ export const TemplateEditCanvasToolbar = ({
 
   return (
   <>
-    {showHeader ? (
-    <CardHeader className={`space-y-4 pb-3 ${canvasFullscreen ? 'shrink-0' : ''}`}>
-      <div className="flex items-center gap-3">
-        {showCanvasTitle ? (
-        <div className="min-w-0 shrink-0" {...canvasOwnerEnv('canvasToolbarVisibility.showCanvasTitle')}>
-          <CardTitle>상자 편집 캔버스</CardTitle>
-        </div>
-        ) : null}
-        {showHeaderActions ? (
-          <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
-            {renderTemplateNameInput ? (
-              <div className="relative min-w-0 max-w-[420px] flex-1" {...canvasOwnerEnv('canvasToolbarVisibility.showTemplateNameInput')}>
-                <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
-                  <span className="sm:hidden">이름:</span>
-                  <span className="hidden sm:inline">{nameFieldLabel}</span>
-                </span>
-                <DeferredValueInput
-                  value={templateName}
-                  onCommit={onTemplateNameChange}
-                  disabled={loading || templateNameReadOnly}
-                  readOnly={templateNameReadOnly}
-                  aria-label={nameFieldLabel}
-                  className="h-9 pl-12 sm:pl-[7.75rem]"
-                />
-              </div>
-            ) : null}
-            {renderSaveButton ? (
-              <Button
-                {...canvasOwnerEnv('canvasToolbarVisibility.showSaveButton')}
-                onClick={onSave}
-                disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentDraftSaveEnabled)}
-                aria-label={saving ? '저장 중...' : saveButtonLabel}
-                className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-4"
-              >
-                <Save className="h-4 w-4 shrink-0 sm:mr-1" />
-                <span className="hidden sm:inline">{saving ? '저장 중...' : saveButtonLabel}</span>
-                <span className="sr-only sm:hidden">{saving ? '저장 중...' : saveButtonLabel}</span>
-              </Button>
-            ) : null}
-            {renderTodoButton ? (
-              <Button
-                {...canvasOwnerEnv('canvasToolbarVisibility.showTodoButton')}
-                type="button"
-                variant="outline"
-                onClick={onToggleTodoPanel}
-                disabled={todoButtonDisabled || !onToggleTodoPanel}
-                aria-pressed={todoPanelOpen}
-                aria-label={todoButtonLabel}
-                className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-3"
-              >
-                <ListTodo className="h-4 w-4 shrink-0 sm:mr-1" />
-                <span className="hidden sm:inline">{todoButtonLabel}</span>
-                {todoCount > 0 ? (
-                  <span className="ml-1 hidden rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white sm:inline-flex">
-                    {todoCount}
-                  </span>
-                ) : null}
-                <span className="sr-only sm:hidden">{todoButtonLabel}</span>
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </CardHeader>
-    ) : null}
     {showToolbarBody ? (
-      <CardContent className={`border-b border-slate-200 bg-white px-6 pb-6 pt-0 ${canvasFullscreen ? 'shrink-0' : ''}`}>
-      <div className="v106-canvas-toolbar flex w-full min-w-0 flex-wrap items-stretch gap-2 md:gap-3">
+      <CardContent
+        className={`border-b border-slate-200 bg-white px-6 pb-6 pt-6 ${canvasFullscreen ? 'shrink-0' : ''}`}
+        data-canvas-owner-item="canvas-toolbar-body"
+        data-canvas-owner-name="캔버스 도구 모음"
+      >
+      <div
+        className="v106-canvas-toolbar flex w-full min-w-0 flex-wrap items-stretch gap-2 md:gap-3"
+        data-canvas-owner-item="canvas-toolbar-controls"
+        data-canvas-owner-name="캔버스 도구 버튼 묶음"
+      >
+        {renderSaveButton ? (
+          <Button
+            {...canvasOwnerEnv('canvasToolbarVisibility.showSaveButton')}
+            onClick={onSave}
+            disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentDraftSaveEnabled)}
+            aria-label={saving ? '저장 중...' : saveButtonLabel}
+            className={`${canvasToolbarButtonBaseClassName} rounded-md`}
+          >
+            <Save className="h-4 w-4 shrink-0" />
+            <span className="v106-canvas-toolbar-label">{saving ? '저장 중...' : saveButtonLabel}</span>
+          </Button>
+        ) : null}
+        {renderTodoButton ? (
+          <Button
+            {...canvasOwnerEnv('canvasToolbarVisibility.showTodoButton')}
+            type="button"
+            variant="outline"
+            onClick={onToggleTodoPanel}
+            disabled={todoButtonDisabled || !onToggleTodoPanel}
+            aria-pressed={todoPanelOpen}
+            aria-label={todoButtonLabel}
+            className={`${canvasToolbarButtonBaseClassName} rounded-md`}
+          >
+            <ListTodo className="h-4 w-4 shrink-0" />
+            <span className="v106-canvas-toolbar-label">{todoButtonLabel}</span>
+            {todoCount > 0 ? (
+              <span className="v106-canvas-toolbar-label ml-1 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                {todoCount}
+              </span>
+            ) : null}
+          </Button>
+        ) : null}
         {renderPreviewToggle ? (
         <div className={`${canvasToolbarGroupClassName} shrink-0`} {...canvasOwnerEnv('canvasToolbarVisibility.showPreviewToggle')}>
           <button
