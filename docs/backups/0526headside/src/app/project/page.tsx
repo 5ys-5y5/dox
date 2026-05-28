@@ -38,12 +38,6 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
-import {
-  AppShellFrame,
-  AppShellHeader,
-  AppShellSidebar,
-  createAppShellNavigationSections,
-} from '../../components/design-system/layout';
 import { MejaiScrollTable, type MejaiScrollTableColumn, type MejaiScrollTableRow } from '../../components/ui/MejaiScrollTable';
 import { MultiEntityPicker } from '../../components/ui/MultiEntityPicker';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
@@ -2104,7 +2098,6 @@ export default function ProjectPage() {
   const [dashboardSummaries, setDashboardSummaries] = React.useState<ProjectDashboardSiteSummary[]>([]);
   const [loadingDashboardSummaries, setLoadingDashboardSummaries] = React.useState(false);
   const [dashboardRefreshKey, setDashboardRefreshKey] = React.useState(0);
-  const [appShellMobileSidebarOpen, setAppShellMobileSidebarOpen] = React.useState(false);
   const [showCreateSiteForm, setShowCreateSiteForm] = React.useState(false);
   const [newSiteName, setNewSiteName] = React.useState('');
   const [newSiteOpenDate, setNewSiteOpenDate] = React.useState(getTodayInputValue());
@@ -2353,7 +2346,6 @@ export default function ProjectPage() {
     () => sites.find((site) => site.id === selectedSiteId) || null,
     [selectedSiteId, sites]
   );
-  const appShellNavigationSections = React.useMemo(() => createAppShellNavigationSections('project'), []);
 
   const siteOptions = React.useMemo(
     () =>
@@ -5803,40 +5795,13 @@ export default function ProjectPage() {
       </div>
     </div>
   );
+
   return (
-    <AppShellFrame
-      header={
-        <AppShellHeader
-          title="현장 관리"
-          profileLabel="프로필"
-          sidebarToggleLabel="사이드바 열기"
-          onSidebarToggle={() => setAppShellMobileSidebarOpen(true)}
-        />
-      }
-      sidebar={
-        <AppShellSidebar
-          brandLabel="Dox"
-          brandHref="/project"
-          sections={appShellNavigationSections}
-        />
-      }
-      mobileSidebar={
-        <AppShellSidebar
-          brandLabel="Dox"
-          brandHref="/project"
-          sections={appShellNavigationSections}
-          mobile
-          onMobileClose={() => setAppShellMobileSidebarOpen(false)}
-        />
-      }
-      mobileSidebarOpen={appShellMobileSidebarOpen}
-      onMobileSidebarClose={() => setAppShellMobileSidebarOpen(false)}
-    >
-      <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8" {...projectOwnerItem('project-owner-root', '현장 관리 페이지 루트')}>
+    <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8" {...projectOwnerItem('project-owner-root', '현장 관리 페이지 루트')}>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between" {...projectOwnerItem('project-page-header', '현장 관리 페이지 머리글')}>
         <div className="space-y-2" {...projectOwnerItem('project-page-heading-group', '현장 관리 페이지 제목 묶음')}>
           <Badge variant="slate" {...projectOwnerItem('project-page-feature-badge', '현장 관리 페이지 기능 배지')}>현장 통합 관리</Badge>
-          <h2 className="text-xl font-semibold text-slate-950" {...projectOwnerItem('project-page-title', '현장 관리 페이지 제목')}>현장 관리 개요</h2>
+          <h1 className="text-3xl font-semibold text-slate-950" {...projectOwnerItem('project-page-title', '현장 관리 페이지 제목')}>현장 관리</h1>
           <p className="max-w-4xl text-sm text-slate-600" {...projectOwnerItem('project-page-description', '현장 관리 페이지 설명')}>
             현장을 만들고 필요한 문서를 준비한 뒤, 기록 값과 첨부 파일, 사진 증빙, 구성원 소속과 scope를 한곳에서 관리합니다.
           </p>
@@ -6574,7 +6539,6 @@ export default function ProjectPage() {
         {renderProjectDocumentOutputTabs()}
       </div>
 
-      </div>
-    </AppShellFrame>
+    </div>
   );
 }

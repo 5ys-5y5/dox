@@ -175,21 +175,22 @@ docs/backups/0526headside/src/components/design-system/index.ts
 신규 파일은 백업이 아니라 체크리스트에 신규 생성으로 기록한다.
 
 ## 구현 체크리스트
-- [ ] `docs/backups/0526headside/`에 백업을 생성한다.
-- [ ] `src/components/design-system/layout/app-shell/appShellTypes.ts`를 만든다.
-- [ ] `src/components/design-system/layout/app-shell/appShellNavigation.ts`를 만든다.
-- [ ] `src/components/design-system/layout/app-shell/AppShellHeader.tsx`를 만든다.
-- [ ] `src/components/design-system/layout/app-shell/AppShellSidebar.tsx`를 만든다.
-- [ ] `src/components/design-system/layout/app-shell/AppShellFrame.tsx`를 만든다.
-- [ ] `src/components/design-system/layout/app-shell/index.ts`를 만든다.
-- [ ] `src/components/design-system/layout/index.ts`에서 app-shell export를 추가한다.
-- [ ] 필요 시 `src/components/design-system/index.ts`에서 app-shell export를 추가한다.
-- [ ] `/project` 페이지에 `AppShellFrame`, `AppShellHeader`, `AppShellSidebar`를 우선 적용한다.
-- [ ] 외부 예시의 `data-mejai-ui-*`가 코드에 남지 않았는지 `rg "data-mejai-ui|page-app-create-tab"`로 확인한다.
-- [ ] 모든 신규 shell 항목에 의미 기반 `data-app-shell-item`이 있는지 확인한다.
-- [ ] 기존 `/project` 고유 항목의 `data-project-owner-item`이 손실되지 않았는지 확인한다.
-- [ ] `npm run check:no-shadow-app`를 실행한다.
-- [ ] 브라우저에서 `http://localhost:3001/project`를 직접 열어 헤더 sticky, 사이드바 sticky, 본문 스크롤을 확인한다.
+- [x] `docs/backups/0526headside/`에 백업을 생성한다.
+- [x] `src/components/design-system/layout/app-shell/appShellTypes.ts`를 만든다.
+- [x] `src/components/design-system/layout/app-shell/appShellNavigation.ts`를 만든다.
+- [x] `src/components/design-system/layout/app-shell/AppShellHeader.tsx`를 만든다.
+- [x] `src/components/design-system/layout/app-shell/AppShellSidebar.tsx`를 만든다.
+- [x] `src/components/design-system/layout/app-shell/AppShellFrame.tsx`를 만든다.
+- [x] `src/components/design-system/layout/app-shell/index.ts`를 만든다.
+- [x] `src/components/design-system/layout/index.ts`에서 app-shell export를 추가한다.
+- [x] 필요 시 `src/components/design-system/index.ts`에서 app-shell export를 추가한다.
+- [x] `/project` 페이지에 `AppShellFrame`, `AppShellHeader`, `AppShellSidebar`를 우선 적용한다.
+- [x] `AppShellHeader`, `AppShellSidebar`가 기존 `AppHeaderClone`, `AppSidebarClone` UI를 재사용하도록 재구현한다.
+- [x] 외부 예시의 `data-mejai-ui-*`가 코드에 남지 않았는지 `rg "data-mejai-ui|page-app-create-tab"`로 확인한다. 수정 범위 기준 통과.
+- [x] 모든 신규 shell 항목에 의미 기반 `data-app-shell-item`이 있는지 확인한다.
+- [x] 기존 `/project` 고유 항목의 `data-project-owner-item`이 손실되지 않았는지 확인한다.
+- [x] `npm run check:no-shadow-app`를 실행한다.
+- [ ] 브라우저에서 `http://localhost:3001/project`를 직접 열어 헤더 sticky, 사이드바 sticky, 본문 스크롤을 확인한다. 현재 실행 환경에서 `listen EPERM`으로 dev 서버 시작 불가.
 
 ## 구현 제외
 - 실제 인증/팀 전환 팝오버 구현

@@ -43,24 +43,7 @@ export {
   TopHeaderShell,
   OverlayShell,
 } from "@/components/design-system/shells";
-export {
-  AppHeaderClone,
-  AppSidebarClone,
-  AppShellFrame,
-  AppShellHeader,
-  AppShellSidebar,
-  appShellNavigationSections,
-  createAppShellNavigationSections,
-  type AppHeaderCloneProps,
-  type AppSidebarCloneProps,
-  type AppShellFrameProps,
-  type AppShellHeaderProps,
-  type AppShellNavigationItem,
-  type AppShellNavigationSection,
-  type AppShellSidebarProps,
-  type SidebarGroup,
-  type SidebarItem,
-} from "@/components/design-system/layout";
+export { AppHeaderClone, AppSidebarClone } from "@/components/design-system/layout";
 export {
   ConversationGrid,
   ConversationQuickReplyButton,
