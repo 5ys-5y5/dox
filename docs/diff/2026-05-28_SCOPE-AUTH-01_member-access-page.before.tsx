@@ -20,6 +20,7 @@ type AccessibleDocumentGroup = {
   siteName: string;
   documents: AccessibleDocument[];
 };
+type DocumentRoleFilter = AccessibleDocument['accessRole'] | 'all';
 
 const MEMBER_ACCESS_INFO_COLUMNS: MejaiScrollTableColumn[] = [
   {
@@ -102,14 +103,67 @@ const formatDateTime = (value: string | null | undefined) => {
   return dateTimeFormatter.format(date);
 };
 
+const getSiteRoleLabel = (role: AccessibleSite['accessRole']) => {
+  switch (role) {
+    case 'owner':
+      return '현장 소유자';
+    case 'manager':
+      return '현장 관리자';
+    case 'participant':
+    case 'editor':
+      return '현장 참여자';
+    case 'viewer':
+    default:
+      return '현장 참여자';
+  }
+};
+
+const getSiteRoleVariant = (role: AccessibleSite['accessRole']) => {
+  switch (role) {
+    case 'owner':
+      return 'green' as const;
+    case 'manager':
+      return 'blue' as const;
+    case 'participant':
+    case 'editor':
+      return 'amber' as const;
+    case 'viewer':
+    default:
+      return 'outline' as const;
+  }
+};
+
+const getDocumentRoleLabel = (role: AccessibleDocument['accessRole']) => {
+  switch (role) {
+    case 'editor':
+      return '편집 가능';
+    case 'signer':
+      return '서명 가능';
+    case 'viewer':
+    default:
+      return '열람 가능';
+  }
+};
+
+const getDocumentRoleVariant = (role: AccessibleDocument['accessRole']) => {
+  switch (role) {
+    case 'editor':
+      return 'green' as const;
+    case 'signer':
+    case 'viewer':
+    default:
+      return 'outline' as const;
+  }
+};
+
 const getDocumentAccessSourceLabel = (source: AccessibleDocument['accessSource']) => {
   switch (source) {
     case 'site':
-      return '현장 소속';
+      return '현장 접근 권한';
     case 'document':
-      return '문서 소속';
+      return '문서 접근 권한';
     case 'site+document':
-      return '현장+문서 소속';
+      return '현장+문서 접근 권한';
     default:
       return source;
   }
@@ -213,6 +267,7 @@ export default function MemberAccessPage() {
   const [submitting, setSubmitting] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [selectedSiteFilter, setSelectedSiteFilter] = React.useState('all');
+  const [documentRoleFilter, setDocumentRoleFilter] = React.useState<DocumentRoleFilter>('all');
   const [documentSearch, setDocumentSearch] = React.useState('');
 
   const loadSession = React.useCallback(async () => {
@@ -278,6 +333,7 @@ export default function MemberAccessPage() {
       setPhoneNumber('');
       setAccessCode('');
       setSelectedSiteFilter('all');
+      setDocumentRoleFilter('all');
       setDocumentSearch('');
       setSession(result.data as MemberAccessSessionDto);
       setMessage('번호 인증이 완료되었습니다.');
@@ -292,6 +348,7 @@ export default function MemberAccessPage() {
     await fetch('/api/member-access/session', { method: 'DELETE' });
     setSession(null);
     setSelectedSiteFilter('all');
+    setDocumentRoleFilter('all');
     setDocumentSearch('');
     setMessage('접근 세션을 종료했습니다.');
   };
@@ -302,15 +359,16 @@ export default function MemberAccessPage() {
 
     return documents.filter((document) => {
       const matchesSite = selectedSiteFilter === 'all' || document.siteId === selectedSiteFilter;
+      const matchesRole = documentRoleFilter === 'all' || document.accessRole === documentRoleFilter;
       const matchesQuery =
         !query ||
         document.title.toLowerCase().includes(query) ||
         document.siteName.toLowerCase().includes(query) ||
         getDocumentAccessSourceLabel(document.accessSource).toLowerCase().includes(query);
 
-      return matchesSite && matchesQuery;
+      return matchesSite && matchesRole && matchesQuery;
     });
-  }, [documentSearch, selectedSiteFilter, session]);
+  }, [documentRoleFilter, documentSearch, selectedSiteFilter, session]);
 
   const accessibleDocumentGroups = React.useMemo(() => groupAccessibleDocumentsByProject(filteredDocuments), [filteredDocuments]);
   const directDocumentCount = React.useMemo(
@@ -326,7 +384,7 @@ export default function MemberAccessPage() {
     return session.accessibleSites.map((site) => ({
       key: site.siteId,
       selected: selectedSiteFilter === site.siteId,
-      title: `${site.siteName} / 현장 소속`,
+      title: `${site.siteName} / ${getSiteRoleLabel(site.accessRole)}`,
       ariaLabel: `${site.siteName} 현장 문서 필터`,
       onClick: () => setSelectedSiteFilter(site.siteId),
       cells: {
@@ -337,12 +395,12 @@ export default function MemberAccessPage() {
           </div>
         ),
         status: (
-          <Badge variant="blue" className="px-1.5 py-0 text-[10px] font-semibold leading-5">
-            현장 소속
+          <Badge variant={getSiteRoleVariant(site.accessRole)} className="px-1.5 py-0 text-[10px] font-semibold leading-5">
+            {getSiteRoleLabel(site.accessRole)}
           </Badge>
         ),
         summary: `연결 문서 ${site.documentCount.toLocaleString('ko-KR')}건`,
-        source: '현장 소속',
+        source: '현장 접근 권한',
       },
     }));
   }, [selectedSiteFilter, session]);
@@ -354,7 +412,7 @@ export default function MemberAccessPage() {
 
         return {
           key: document.documentId,
-          title: `${document.title} / 문서 열람`,
+          title: `${document.title} / ${getDocumentRoleLabel(document.accessRole)}`,
           ariaLabel: `${document.title} 문서 열기`,
           onClick: () => router.push(documentHref),
           cells: {
@@ -365,8 +423,8 @@ export default function MemberAccessPage() {
               </div>
             ),
             status: (
-              <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-semibold leading-5">
-                열람 가능
+              <Badge variant={getDocumentRoleVariant(document.accessRole)} className="px-1.5 py-0 text-[10px] font-semibold leading-5">
+                {getDocumentRoleLabel(document.accessRole)}
               </Badge>
             ),
             summary: `현재 버전 ${document.currentVersionNumber || 0} · 마지막 변경 ${formatDateTime(document.updatedAt)}`,
@@ -396,7 +454,7 @@ export default function MemberAccessPage() {
           <Badge variant="slate">MEMBER-DOCUMENT-01</Badge>
           <h1 className="text-3xl font-semibold text-slate-950">구성원 문서 접근</h1>
           <p className="max-w-4xl text-sm text-slate-600">
-            번호 인증을 통과한 구성원이 소속 현장과 소속 문서를 확인하는 화면입니다.
+            번호 인증을 통과한 구성원이 현장별 문서와 문서별 권한을 확인하는 화면입니다.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -428,7 +486,7 @@ export default function MemberAccessPage() {
           <Card className="min-w-0 border-slate-200">
             <CardHeader>
               <CardTitle>1. 접근 번호와 현장</CardTitle>
-              <CardDescription>인증된 번호와 이 번호에 연결된 현장 소속입니다.</CardDescription>
+              <CardDescription>인증된 번호와 이 번호에 연결된 현장 접근 권한입니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -463,7 +521,7 @@ export default function MemberAccessPage() {
                   icon={FolderKanban}
                   label="현장"
                   value={`${session.accessibleSites.length.toLocaleString('ko-KR')}건`}
-                  description="현장 단위 소속"
+                  description="현장 단위 접근 권한"
                 />
                 <MetricCard
                   icon={FileText}
@@ -473,9 +531,9 @@ export default function MemberAccessPage() {
                 />
                 <MetricCard
                   icon={ShieldCheck}
-                  label="직접 문서 소속"
+                  label="직접 문서 권한"
                   value={`${directDocumentCount.toLocaleString('ko-KR')}건`}
-                  description="문서 단위 소속"
+                  description="문서 단위로 부여된 권한"
                 />
                 <MetricCard
                   icon={KeyRound}
@@ -486,7 +544,7 @@ export default function MemberAccessPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-800">현장 소속</label>
+                <label className="text-sm font-medium text-slate-800">현장 접근 권한</label>
                 <MemberAccessInfoList
                   rows={siteRows}
                   emptyMessage="접근 가능한 현장이 없습니다."
@@ -499,10 +557,10 @@ export default function MemberAccessPage() {
           <Card className="min-w-0 border-slate-200">
             <CardHeader>
               <CardTitle>2. 접근 가능한 문서</CardTitle>
-              <CardDescription>현장별로 묶인 소속 문서입니다. 편집 가능 범위는 문서 안의 scope 배정으로 결정됩니다.</CardDescription>
+              <CardDescription>현장별로 묶인 문서와 문서별 권한입니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_176px]">
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_176px_164px]">
                 <div className="min-w-0 space-y-2">
                   <label htmlFor="member-access-document-search" className="text-xs font-medium text-slate-700">
                     문서 검색
@@ -537,6 +595,23 @@ export default function MemberAccessPage() {
                         {site.siteName}
                       </option>
                     ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="member-access-role-filter" className="text-xs font-medium text-slate-700">
+                    권한 필터
+                  </label>
+                  <select
+                    id="member-access-role-filter"
+                    name="memberAccessRoleFilter"
+                    value={documentRoleFilter}
+                    onChange={(event) => setDocumentRoleFilter(event.target.value as DocumentRoleFilter)}
+                    className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    aria-label="문서 권한 필터"
+                  >
+                    <option value="all">전체 권한</option>
+                    <option value="editor">편집 가능</option>
+                    <option value="viewer">열람 가능</option>
                   </select>
                 </div>
               </div>
@@ -580,7 +655,7 @@ export default function MemberAccessPage() {
           <Card className="min-w-0 border-slate-200">
             <CardHeader>
               <CardTitle>2. 접근 문서</CardTitle>
-              <CardDescription>인증 후 현장별 소속 문서가 이 영역에 표시됩니다.</CardDescription>
+              <CardDescription>인증 후 현장별 문서와 권한이 이 영역에 표시됩니다.</CardDescription>
             </CardHeader>
             <CardContent>
               <EmptyState title="인증된 번호가 없습니다." description="접근 가능한 문서 목록을 아직 불러오지 않았습니다." />

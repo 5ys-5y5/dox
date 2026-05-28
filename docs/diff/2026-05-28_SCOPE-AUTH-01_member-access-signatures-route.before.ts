@@ -12,8 +12,6 @@ type RouteContext = {
 
 const normalizePhoneNumberParam = (value: string | null) => String(value || '').replace(/[^0-9]/g, '').trim();
 
-const normalizeKey = (value: string | null | undefined) => String(value || '').trim();
-
 const readRequiredMemberSession = async () => {
   const cookieStore = await cookies();
   const session = readMemberAccessSessionToken(cookieStore.get(MEMBER_ACCESS_SESSION_COOKIE_NAME)?.value);
@@ -65,6 +63,10 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
+    if (access.accessRole !== 'signer' && access.accessRole !== 'editor') {
+      return NextResponse.json({ success: false, message: '이 문서는 서명 권한이 없습니다.' }, { status: 403 });
+    }
+
     const body = await request.json();
     const requestId = String(body?.requestId || '').trim();
     const signatureImagePath = String(body?.signatureImagePath || '').trim();
@@ -82,18 +84,6 @@ export async function POST(request: Request, context: RouteContext) {
 
     if (!signatureEvidence) {
       return NextResponse.json({ success: false, message: '이 구성원에게 배정된 서명 요청을 찾을 수 없습니다.' }, { status: 403 });
-    }
-
-    const editableValueKeySet = new Set(access.scopeAccess.editableValueKeys.map(normalizeKey).filter(Boolean));
-    const evidenceKeys = [
-      signatureEvidence.slotKey,
-      signatureEvidence.label,
-      signatureEvidence.signerRoleName,
-    ].map(normalizeKey).filter(Boolean);
-    const hasEditableSignatureScope = evidenceKeys.some((key) => editableValueKeySet.has(key));
-
-    if (!hasEditableSignatureScope) {
-      return NextResponse.json({ success: false, message: '이 서명 항목을 처리할 수 있는 scope이 없습니다.' }, { status: 403 });
     }
 
     if (signatureEvidence.status === 'completed') {
@@ -130,7 +120,7 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ success: true, data: signature });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
-    const status = message.includes('인증') ? 401 : message.includes('권한') || message.includes('소속') ? 403 : 500;
+    const status = message.includes('인증') ? 401 : message.includes('권한') ? 403 : 500;
 
     console.error('Member Access Document Signature API POST Error:', error);
 

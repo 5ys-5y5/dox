@@ -20,19 +20,31 @@ import {
 } from '../../components/template/TemplateExtractWorkspace';
 import { CanvasOwnedWorkspace, type CanvasOwnerSurface } from './ownerPolicy';
 import {
+  canvasAccessRoleLabels,
+  canvasAccessRoles,
+  createEmptyCanvasAccessRolePolicyStore,
+  normalizeCanvasAccessRole,
+  readCanvasAccessRolePolicyStoreFromStorage,
+  resolveCanvasAccessRolePolicies,
+  resolveEffectiveCanvasAccessMode,
+  saveCanvasAccessRolePolicyStoreToStorage,
+  updateCanvasAccessRolePolicyStoreOverride,
+  type CanvasAccessMode,
+  type CanvasAccessRole,
+  type CanvasAccessRolePolicy,
+  type CanvasAccessRolePolicyStore,
+} from './accessRolePolicy';
+import {
   applyCanvasOwnerSettingsToWorkspaceProps,
   buildCanvasToolbarVisibility,
   buildPersistenceVisibility,
   buildTemplateUsagePreviewLayoutDebugOptions,
-  canvasWorkspaceModes,
   defaultCanvasOwnerSettings,
   createEmptyCanvasOwnerSettingsStore,
   normalizeCanvasWorkspaceMode,
   readCanvasOwnerSettingsFromStorage,
-  resolveCanvasOwnerPagePolicy,
   resolveCanvasOwnerSettings,
   saveCanvasOwnerSettingsStoreToStorage,
-  updateCanvasOwnerPagePolicyOverride,
   updateCanvasOwnerSettingsStoreOverride,
   type CanvasOwnerSettings,
   type CanvasOwnerSettingKey,
@@ -74,6 +86,7 @@ type ManagedCanvasPageId =
   | 'canvas'
   | 'templates'
   | 'templates-edit'
+  | 'documents'
   | 'project'
   | 'request-links'
   | 'member-access'
@@ -229,7 +242,7 @@ const canvasOwnerItemAttribute = 'data-canvas-owner-item';
 const canvasOwnerNameAttribute = 'data-canvas-owner-name';
 const canvasOwnerAutoNamedAttribute = 'data-canvas-owner-auto-named';
 
-const defaultManagedCanvasPages: ManagedCanvasPage[] = [
+const managedCanvasPages: ManagedCanvasPage[] = [
   {
     id: 'canvas',
     label: '공용 캔버스 관리자',
@@ -256,6 +269,15 @@ const defaultManagedCanvasPages: ManagedCanvasPage[] = [
     description: '저장된 템플릿을 직접 편집하는 페이지입니다.',
     allowedModes: ['template'],
     defaultMode: 'template',
+  },
+  {
+    id: 'documents',
+    label: '문서 관리',
+    path: '/documents',
+    surface: 'documents',
+    description: '문서 요청, 출력본, 사진 증빙 흐름에서 문서를 읽기 전용으로 확인합니다.',
+    allowedModes: ['read'],
+    defaultMode: 'read',
   },
   {
     id: 'project',
@@ -296,13 +318,10 @@ const defaultManagedCanvasPages: ManagedCanvasPage[] = [
 ];
 
 const normalizeManagedCanvasPageId = (value: string | null | undefined): ManagedCanvasPageId =>
-  defaultManagedCanvasPages.some((page) => page.id === value) ? (value as ManagedCanvasPageId) : 'canvas';
+  managedCanvasPages.some((page) => page.id === value) ? (value as ManagedCanvasPageId) : 'canvas';
 
 const getManagedCanvasPage = (pageId: ManagedCanvasPageId) =>
-  defaultManagedCanvasPages.find((page) => page.id === pageId) || defaultManagedCanvasPages[0];
-
-const getManagedCanvasPageFromList = (pages: ManagedCanvasPage[], pageId: ManagedCanvasPageId) =>
-  pages.find((page) => page.id === pageId) || pages[0];
+  managedCanvasPages.find((page) => page.id === pageId) || managedCanvasPages[0];
 
 const resolveManagedCanvasWorkspaceMode = (page: ManagedCanvasPage, value: string | null | undefined): CanvasWorkspaceMode => {
   const normalizedMode = normalizeCanvasWorkspaceMode(value);
@@ -351,6 +370,9 @@ export default function CanvasOwnerPage() {
   const searchParams = useSearchParams();
   const canvasOwnerRootRef = React.useRef<HTMLElement | null>(null);
   const selectedManagedPageId = normalizeManagedCanvasPageId(searchParams.get('page'));
+  const selectedManagedPage = getManagedCanvasPage(selectedManagedPageId);
+  const workspaceMode = resolveManagedCanvasWorkspaceMode(selectedManagedPage, searchParams.get('mode'));
+  const selectedCanvasAccessRole = normalizeCanvasAccessRole(searchParams.get('role'));
   const templateIdFromQuery = searchParams.get('templateId')?.trim() || '';
   const documentIdFromQuery = searchParams.get('documentId')?.trim() || '';
 
@@ -373,43 +395,44 @@ export default function CanvasOwnerPage() {
   const [settingsStore, setSettingsStore] = React.useState<CanvasOwnerSettingsStore>(() =>
     createEmptyCanvasOwnerSettingsStore()
   );
-  const [canvasSettingsLoaded, setCanvasSettingsLoaded] = React.useState(false);
-  const [activeControlTab, setActiveControlTab] = React.useState<CanvasOwnerControlTab>('page');
-  const managedCanvasPages = React.useMemo<ManagedCanvasPage[]>(
-    () =>
-      defaultManagedCanvasPages.map((page) => {
-        const pagePolicy = resolveCanvasOwnerPagePolicy(settingsStore, {
-          pageId: page.id,
-          defaultAllowedModes: page.allowedModes,
-          defaultMode: page.defaultMode,
-        });
-
-        return {
-          ...page,
-          allowedModes: pagePolicy.allowedModes,
-          defaultMode: pagePolicy.defaultMode,
-        };
-      }),
-    [settingsStore]
+  const [savedAccessRolePolicyStore, setSavedAccessRolePolicyStore] = React.useState<CanvasAccessRolePolicyStore>(() =>
+    createEmptyCanvasAccessRolePolicyStore()
   );
-  const selectedManagedPage = getManagedCanvasPageFromList(managedCanvasPages, selectedManagedPageId);
-  const workspaceMode = resolveManagedCanvasWorkspaceMode(selectedManagedPage, searchParams.get('mode'));
+  const [accessRolePolicyStore, setAccessRolePolicyStore] = React.useState<CanvasAccessRolePolicyStore>(() =>
+    createEmptyCanvasAccessRolePolicyStore()
+  );
+  const [activeControlTab, setActiveControlTab] = React.useState<CanvasOwnerControlTab>('page');
 
   const selectedTemplateId = templateIdFromQuery || templates[0]?.id || '';
   const selectedDocumentId = documentIdFromQuery || documents[0]?.document.id || '';
   const settingsSignature = React.useMemo(() => JSON.stringify(settingsStore), [settingsStore]);
   const savedSettingsSignature = React.useMemo(() => JSON.stringify(savedSettingsStore), [savedSettingsStore]);
-  const hasUnsavedCanvasSettings = settingsSignature !== savedSettingsSignature;
+  const accessRolePolicySignature = React.useMemo(() => JSON.stringify(accessRolePolicyStore), [accessRolePolicyStore]);
+  const savedAccessRolePolicySignature = React.useMemo(
+    () => JSON.stringify(savedAccessRolePolicyStore),
+    [savedAccessRolePolicyStore]
+  );
+  const hasUnsavedCanvasSettings =
+    settingsSignature !== savedSettingsSignature || accessRolePolicySignature !== savedAccessRolePolicySignature;
   const activeSettingsScope = activeControlTab === 'mode' ? 'mode' : 'page';
-  const effectiveWorkspaceMode = workspaceMode;
-  const canEditCurrentWorkspace = effectiveWorkspaceMode !== 'read';
+  const selectedPageAccessRolePolicies = React.useMemo(
+    () => resolveCanvasAccessRolePolicies(accessRolePolicyStore, selectedManagedPage.id),
+    [accessRolePolicyStore, selectedManagedPage.id]
+  );
+  const selectedAccessRolePolicy = selectedPageAccessRolePolicies[selectedCanvasAccessRole];
+  const selectedAccessMode = resolveEffectiveCanvasAccessMode(selectedCanvasAccessRole, selectedAccessRolePolicy);
+  const requestedAccessWorkspaceMode = selectedAccessMode === 'view' ? 'read' : workspaceMode;
+  const canUseRequestedAccessWorkspaceMode = selectedManagedPage.allowedModes.includes(requestedAccessWorkspaceMode);
+  const effectiveWorkspaceMode = canUseRequestedAccessWorkspaceMode ? requestedAccessWorkspaceMode : workspaceMode;
+  const accessPreviewUnavailable = !canUseRequestedAccessWorkspaceMode;
   const resolvedSettings = React.useMemo(
     () =>
       resolveCanvasOwnerSettings(settingsStore, {
         pageId: activeSettingsScope === 'page' ? selectedManagedPage.id : undefined,
         workspaceMode: effectiveWorkspaceMode,
+        accessRole: selectedCanvasAccessRole,
       }),
-    [activeSettingsScope, effectiveWorkspaceMode, selectedManagedPage.id, settingsStore]
+    [activeSettingsScope, effectiveWorkspaceMode, selectedCanvasAccessRole, selectedManagedPage.id, settingsStore]
   );
   const settings = resolvedSettings.settings;
   const settingSources = resolvedSettings.sources;
@@ -418,8 +441,9 @@ export default function CanvasOwnerPage() {
       resolveCanvasOwnerSettings(settingsStore, {
         pageId: selectedManagedPage.id,
         workspaceMode: effectiveWorkspaceMode,
+        accessRole: selectedCanvasAccessRole,
       }),
-    [effectiveWorkspaceMode, selectedManagedPage.id, settingsStore]
+    [effectiveWorkspaceMode, selectedCanvasAccessRole, selectedManagedPage.id, settingsStore]
   );
   const previewSettings = previewResolvedSettings.settings;
   const previewSettingSources = previewResolvedSettings.sources;
@@ -446,30 +470,49 @@ export default function CanvasOwnerPage() {
     const { settingsStore: nextSettingsStore, hasStoredSettings } = readCanvasOwnerSettingsFromStorage({
       pageId: selectedManagedPage.id,
       workspaceMode: effectiveWorkspaceMode,
+      accessRole: selectedCanvasAccessRole,
     });
+    const {
+      policyStore: nextAccessRolePolicyStore,
+      hasStoredPolicies,
+    } = readCanvasAccessRolePolicyStoreFromStorage();
 
     if (hasStoredSettings) {
       setSavedSettingsStore(nextSettingsStore);
       setSettingsStore(nextSettingsStore);
     }
-    setCanvasSettingsLoaded(true);
-  }, [effectiveWorkspaceMode, selectedManagedPage.id]);
+    if (hasStoredPolicies) {
+      setSavedAccessRolePolicyStore(nextAccessRolePolicyStore);
+      setAccessRolePolicyStore(nextAccessRolePolicyStore);
+    }
+  }, []);
 
   const saveCanvasOwnerSettings = React.useCallback(() => {
     const nextSettingsStore = saveCanvasOwnerSettingsStoreToStorage(settingsStore);
+    const nextAccessRolePolicyStore = saveCanvasAccessRolePolicyStoreToStorage(accessRolePolicyStore);
     setSavedSettingsStore(nextSettingsStore);
     setSettingsStore(nextSettingsStore);
+    setSavedAccessRolePolicyStore(nextAccessRolePolicyStore);
+    setAccessRolePolicyStore(nextAccessRolePolicyStore);
     setOwnerEventMessage(
       activeSettingsScope === 'page'
-        ? `${selectedManagedPage.label} · ${modeLabels[effectiveWorkspaceMode]} 설정을 저장했습니다.`
-        : `${modeLabels[effectiveWorkspaceMode]} 설정을 저장했습니다.`
+        ? `${selectedManagedPage.label} · ${canvasAccessRoleLabels[selectedCanvasAccessRole]} · ${modeLabels[effectiveWorkspaceMode]} 설정을 저장했습니다.`
+        : `${canvasAccessRoleLabels[selectedCanvasAccessRole]} · ${modeLabels[effectiveWorkspaceMode]} 설정을 저장했습니다.`
     );
-  }, [activeSettingsScope, effectiveWorkspaceMode, selectedManagedPage.label, settingsStore]);
+  }, [
+    accessRolePolicyStore,
+    activeSettingsScope,
+    effectiveWorkspaceMode,
+    selectedCanvasAccessRole,
+    selectedManagedPage.label,
+    settingsStore,
+  ]);
 
   const resetCanvasOwnerSettings = React.useCallback(() => {
     setSettingsStore(savedSettingsStore);
+    setAccessRolePolicyStore(savedAccessRolePolicyStore);
     setOwnerEventMessage('저장된 상자 편집 캔버스 환경설정으로 되돌렸습니다.');
-  }, [savedSettingsStore]);
+  }, [savedAccessRolePolicyStore, savedSettingsStore]);
 
   const updateSetting = React.useCallback(
     <K extends keyof CanvasOwnerSettings>(key: K, value: CanvasOwnerSettings[K]) => {
@@ -478,16 +521,29 @@ export default function CanvasOwnerPage() {
           scope: activeSettingsScope,
           pageId: selectedManagedPage.id,
           workspaceMode: effectiveWorkspaceMode,
+          accessRole: selectedCanvasAccessRole,
           key,
           value,
         })
       );
     },
-    [activeSettingsScope, effectiveWorkspaceMode, selectedManagedPage.id]
+    [activeSettingsScope, effectiveWorkspaceMode, selectedCanvasAccessRole, selectedManagedPage.id]
+  );
+  const updateAccessRolePolicy = React.useCallback(
+    (role: CanvasAccessRole, patch: Partial<CanvasAccessRolePolicy>) => {
+      setAccessRolePolicyStore((previous) =>
+        updateCanvasAccessRolePolicyStoreOverride(previous, {
+          pageId: selectedManagedPage.id,
+          role,
+          patch,
+        })
+      );
+    },
+    [selectedManagedPage.id]
   );
 
   const updateQuery = React.useCallback(
-    (patch: Partial<Record<'page' | 'mode' | 'templateId' | 'documentId', string>>) => {
+    (patch: Partial<Record<'page' | 'mode' | 'role' | 'templateId' | 'documentId', string>>) => {
       const nextParams = new URLSearchParams(searchParams.toString());
 
       Object.entries(patch).forEach(([key, value]) => {
@@ -504,73 +560,6 @@ export default function CanvasOwnerPage() {
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
     },
     [pathname, router, searchParams]
-  );
-
-  const updateSelectedPageAllowedModes = React.useCallback(
-    (nextAllowedModes: CanvasWorkspaceMode[]) => {
-      const normalizedAllowedModes = canvasWorkspaceModes.filter((mode) => nextAllowedModes.includes(mode));
-      const resolvedAllowedModes = normalizedAllowedModes.length > 0 ? normalizedAllowedModes : [selectedManagedPage.defaultMode];
-      const nextDefaultMode = resolvedAllowedModes.includes(selectedManagedPage.defaultMode)
-        ? selectedManagedPage.defaultMode
-        : resolvedAllowedModes[0];
-
-      setSettingsStore((previous) => {
-        const nextStore = updateCanvasOwnerPagePolicyOverride(previous, {
-          pageId: selectedManagedPage.id,
-          key: 'allowedModes',
-          value: resolvedAllowedModes,
-        });
-
-        return updateCanvasOwnerPagePolicyOverride(nextStore, {
-          pageId: selectedManagedPage.id,
-          key: 'defaultMode',
-          value: nextDefaultMode,
-        });
-      });
-
-      if (!resolvedAllowedModes.includes(workspaceMode)) {
-        updateQuery({ mode: nextDefaultMode });
-      }
-    },
-    [selectedManagedPage.defaultMode, selectedManagedPage.id, updateQuery, workspaceMode]
-  );
-
-  const toggleSelectedPageAllowedMode = React.useCallback(
-    (mode: CanvasWorkspaceMode) => {
-      const currentAllowedModes = selectedManagedPage.allowedModes;
-
-      if (currentAllowedModes.includes(mode) && currentAllowedModes.length <= 1) {
-        return;
-      }
-
-      const nextAllowedModeSet = new Set(currentAllowedModes);
-
-      if (nextAllowedModeSet.has(mode)) {
-        nextAllowedModeSet.delete(mode);
-      } else {
-        nextAllowedModeSet.add(mode);
-      }
-
-      updateSelectedPageAllowedModes(canvasWorkspaceModes.filter((item) => nextAllowedModeSet.has(item)));
-    },
-    [selectedManagedPage.allowedModes, updateSelectedPageAllowedModes]
-  );
-
-  const updateSelectedPageDefaultMode = React.useCallback(
-    (mode: CanvasWorkspaceMode) => {
-      if (!selectedManagedPage.allowedModes.includes(mode)) {
-        return;
-      }
-
-      setSettingsStore((previous) =>
-        updateCanvasOwnerPagePolicyOverride(previous, {
-          pageId: selectedManagedPage.id,
-          key: 'defaultMode',
-          value: mode,
-        })
-      );
-    },
-    [selectedManagedPage.allowedModes, selectedManagedPage.id]
   );
 
   const handlePreviewCanvasSelectionChange = React.useCallback(
@@ -596,10 +585,6 @@ export default function CanvasOwnerPage() {
   );
 
   React.useEffect(() => {
-    if (!canvasSettingsLoaded) {
-      return;
-    }
-
     const rawPageId = searchParams.get('page');
     const rawMode = searchParams.get('mode');
 
@@ -611,7 +596,7 @@ export default function CanvasOwnerPage() {
     nextParams.set('page', selectedManagedPage.id);
     nextParams.set('mode', workspaceMode);
     router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
-  }, [canvasSettingsLoaded, pathname, router, searchParams, selectedManagedPage.id, workspaceMode]);
+  }, [pathname, router, searchParams, selectedManagedPage.id, workspaceMode]);
 
   React.useEffect(() => {
     setPreviewSelectedCanvasBoxes([]);
@@ -619,10 +604,10 @@ export default function CanvasOwnerPage() {
 
   const handleSelectManagedPage = React.useCallback(
     (pageId: ManagedCanvasPageId) => {
-      const nextPage = getManagedCanvasPageFromList(managedCanvasPages, pageId);
+      const nextPage = getManagedCanvasPage(pageId);
       updateQuery({ page: nextPage.id, mode: nextPage.defaultMode });
     },
-    [managedCanvasPages, updateQuery]
+    [updateQuery]
   );
 
   const handleSelectWorkspaceMode = React.useCallback(
@@ -656,6 +641,7 @@ export default function CanvasOwnerPage() {
           scope: activeSettingsScope,
           pageId: selectedManagedPage.id,
           workspaceMode: nextWorkspaceMode,
+          accessRole: selectedCanvasAccessRole,
           key: 'canvasViewMode',
           value: viewMode,
         });
@@ -668,6 +654,7 @@ export default function CanvasOwnerPage() {
           scope: activeSettingsScope,
           pageId: selectedManagedPage.id,
           workspaceMode: nextWorkspaceMode,
+          accessRole: selectedCanvasAccessRole,
           key: 'readModeInteractionMode',
           value: viewMode === 'preview' ? 'view-only' : 'box-selection',
         });
@@ -679,11 +666,19 @@ export default function CanvasOwnerPage() {
     },
     [
       activeSettingsScope,
+      selectedCanvasAccessRole,
       selectedManagedPage.allowedModes,
       selectedManagedPage.id,
       updateQuery,
       workspaceMode,
     ]
+  );
+
+  const handleSelectAccessRole = React.useCallback(
+    (role: CanvasAccessRole) => {
+      updateQuery({ role });
+    },
+    [updateQuery]
   );
 
   const loadLists = React.useCallback(async () => {
@@ -809,7 +804,7 @@ export default function CanvasOwnerPage() {
     }
 
     return {
-      draftKey: `${selectedManagedPage.id}:${effectiveWorkspaceMode}:${selectedDocumentDetail.document.id}:${selectedDocumentDetail.latestVersion?.id || 'no-version'}:${buildDocumentHtmlContentKey(draftHtml)}:${draftReloadNonce}`,
+      draftKey: `${selectedManagedPage.id}:${selectedCanvasAccessRole}:${effectiveWorkspaceMode}:${selectedDocumentDetail.document.id}:${selectedDocumentDetail.latestVersion?.id || 'no-version'}:${buildDocumentHtmlContentKey(draftHtml)}:${draftReloadNonce}`,
       templateName: selectedDocumentDetail.document.title,
       draftHtml,
       sourceDocumentName: '',
@@ -820,6 +815,7 @@ export default function CanvasOwnerPage() {
     attachmentFilesByValueKey,
     draftReloadNonce,
     effectiveWorkspaceMode,
+    selectedCanvasAccessRole,
     selectedDocumentDetail,
     selectedDocumentLabelValues,
     selectedManagedPage.id,
@@ -883,7 +879,7 @@ export default function CanvasOwnerPage() {
   const selectedPageAllowsEditableValueKeys =
     selectedManagedPage.surface === 'canvas' || selectedManagedPage.surface === 'request-links';
   const effectiveEditableValueKeys =
-    !canEditCurrentWorkspace ||
+    selectedAccessMode !== 'edit' ||
     effectiveWorkspaceMode !== 'document' ||
     !previewSettings.limitEditableValueKeys ||
     !selectedPageAllowsEditableValueKeys
@@ -891,7 +887,8 @@ export default function CanvasOwnerPage() {
       : editableValueKeyCandidates;
   const topNotice = previewSettings.showTopNotice ? (
     <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-      owner page sample `topNotice`가 켜진 상태입니다. 현재 페이지: {selectedManagedPage.label} · 모드: {effectiveWorkspaceMode}
+      owner page sample `topNotice`가 켜진 상태입니다. 현재 페이지: {selectedManagedPage.label} · 권한:{' '}
+      {canvasAccessRoleLabels[selectedCanvasAccessRole]} · 모드: {effectiveWorkspaceMode}
     </div>
   ) : null;
   const extractStatusNotice = extractStatus ? (
@@ -925,6 +922,7 @@ export default function CanvasOwnerPage() {
     </Card>
   ) : null;
   const canUseTemplateExtractPanel =
+    selectedAccessMode === 'edit' &&
     effectiveWorkspaceMode === 'template' &&
     ['canvas', 'templates'].includes(selectedManagedPage.id);
   const templateExtractPanel =
@@ -959,7 +957,7 @@ export default function CanvasOwnerPage() {
   );
   const effectiveDocumentAttachmentApiPath =
     effectiveWorkspaceMode === 'document' &&
-    canEditCurrentWorkspace &&
+    selectedAccessMode === 'edit' &&
     previewSettings.enableDocumentAttachmentApiPath &&
     selectedDocumentDetail
       ? `/api/documents/${encodeURIComponent(selectedDocumentDetail.document.id)}/attachments`
@@ -1090,7 +1088,7 @@ export default function CanvasOwnerPage() {
         nameFieldLabel: '템플릿 이름:',
         saveButtonLabel: '저장',
         templateNameReadOnly: false,
-        saveDisabled: !canEditCurrentWorkspace,
+        saveDisabled: selectedAccessMode !== 'edit',
       };
     }
 
@@ -1106,7 +1104,24 @@ export default function CanvasOwnerPage() {
         nameFieldLabel: '템플릿 이름:',
         saveButtonLabel: '저장',
         templateNameReadOnly: false,
-        saveDisabled: !canEditCurrentWorkspace,
+        saveDisabled: selectedAccessMode !== 'edit',
+      };
+    }
+
+    if (selectedManagedPage.id === 'documents') {
+      return {
+        hideHeader: true,
+        hidePersistencePanel: true,
+        editableValueKeys: null,
+        showWorkspaceMessages: true,
+        suppressInitialDraftLoadedMessage: true,
+        headerTitle: '템플릿 편집',
+        headerDescription: '저장된 템플릿을 불러와 상자 편집 캔버스에서 수정하고 다시 저장합니다.',
+        nameFieldLabel: '템플릿 이름:',
+        saveButtonLabel: '저장',
+        templateNameReadOnly: true,
+        saveDisabled: true,
+        documentAttachmentApiPath: '',
       };
     }
 
@@ -1122,9 +1137,9 @@ export default function CanvasOwnerPage() {
         nameFieldLabel: '문서 이름:',
         saveButtonLabel: '문서 저장',
         templateNameReadOnly: true,
-        saveDisabled: !canEditCurrentWorkspace || effectiveWorkspaceMode !== 'document',
+        saveDisabled: selectedAccessMode !== 'edit' || effectiveWorkspaceMode !== 'document',
         documentAttachmentApiPath:
-          previewDocumentId && canEditCurrentWorkspace && effectiveWorkspaceMode === 'document'
+          previewDocumentId && selectedAccessMode === 'edit' && effectiveWorkspaceMode === 'document'
             ? `/api/documents/${encodeURIComponent(previewDocumentId)}/attachments`
             : '',
       };
@@ -1142,7 +1157,7 @@ export default function CanvasOwnerPage() {
         nameFieldLabel: '템플릿 이름:',
         saveButtonLabel: '문서 저장',
         templateNameReadOnly: true,
-        saveDisabled: !canEditCurrentWorkspace || effectiveWorkspaceMode !== 'document' || loadingDocumentDetail,
+        saveDisabled: selectedAccessMode !== 'edit' || effectiveWorkspaceMode !== 'document' || loadingDocumentDetail,
         documentAttachmentApiPath: '',
       };
     }
@@ -1171,13 +1186,13 @@ export default function CanvasOwnerPage() {
       showWorkspaceMessages: true,
       suppressInitialDraftLoadedMessage: false,
       headerTitle: '구성원 문서 접근',
-      headerDescription: '멤버 소속과 scope 배정 범위 안에서 현장 문서를 열람하거나 수정합니다.',
+      headerDescription: '초대된 권한 범위 안에서 현장 문서를 열람하거나 수정합니다.',
       nameFieldLabel: '문서 이름:',
-      saveButtonLabel: effectiveWorkspaceMode === 'document' && canEditCurrentWorkspace ? '문서 저장' : '열람 전용',
+      saveButtonLabel: effectiveWorkspaceMode === 'document' && selectedAccessMode === 'edit' ? '문서 저장' : '열람 전용',
       templateNameReadOnly: true,
-      saveDisabled: !canEditCurrentWorkspace || effectiveWorkspaceMode !== 'document',
+      saveDisabled: selectedAccessMode !== 'edit' || effectiveWorkspaceMode !== 'document',
       documentAttachmentApiPath:
-        canEditCurrentWorkspace && effectiveWorkspaceMode === 'document' && previewDocumentId
+        selectedAccessMode === 'edit' && effectiveWorkspaceMode === 'document' && previewDocumentId
           ? `/api/member-access/documents/${encodeURIComponent(previewDocumentId)}/attachments`
           : '',
     };
@@ -1198,7 +1213,8 @@ export default function CanvasOwnerPage() {
     saveButtonLabel: defaultCanvasOwnerSettings.saveButtonLabel,
     templateNameReadOnly: false,
     saveDisabled:
-      !canEditCurrentWorkspace ||
+      selectedAccessMode !== 'edit' ||
+      effectiveWorkspaceMode === 'read' ||
       (effectiveWorkspaceMode === 'document' && loadingDocumentDetail),
     documentAttachmentApiPath: effectiveDocumentAttachmentApiPath,
   };
@@ -1304,13 +1320,17 @@ export default function CanvasOwnerPage() {
   const getSettingSourceLabel = (source: CanvasOwnerSettingSource) =>
     source === 'page'
       ? '페이지'
-      : source === 'mode'
-        ? '모드'
-        : '기본';
+      : source === 'page-role'
+        ? '페이지 권한'
+        : source === 'role-mode'
+          ? '권한 모드'
+          : source === 'mode'
+            ? '모드'
+            : '기본';
   const getModeManagedClassName = (settingKey: CanvasOwnerSettingKey | null) =>
     activeControlTab === 'page' &&
     settingKey &&
-    settingSources[settingKey] === 'mode'
+    (settingSources[settingKey] === 'mode' || settingSources[settingKey] === 'role-mode')
       ? 'border-slate-300 bg-slate-100'
       : 'bg-white';
   const getTextSettingClassName = (settingKey: CanvasOwnerSettingKey) =>
@@ -1650,7 +1670,7 @@ export default function CanvasOwnerPage() {
       checked: settings.limitEditableValueKeys,
       disabled:
         effectiveWorkspaceMode === 'template' ||
-        !canEditCurrentWorkspace ||
+        selectedAccessMode !== 'edit' ||
         !selectedPageAllowsEditableValueKeys ||
         editableValueKeyCandidates.length === 0,
       onCheckedChange: (checked: boolean) => updateSetting('limitEditableValueKeys', checked),
@@ -1662,7 +1682,7 @@ export default function CanvasOwnerPage() {
       definitionName: 'onTemplateSaved',
       description: '템플릿 저장 성공 시 owner 페이지의 저장 후처리 콜백을 실행합니다.',
       checked: settings.enableOnTemplateSaved,
-      disabled: effectiveWorkspaceMode !== 'template' || !canEditCurrentWorkspace,
+      disabled: effectiveWorkspaceMode !== 'template' || selectedAccessMode !== 'edit',
       onCheckedChange: (checked: boolean) => updateSetting('enableOnTemplateSaved', checked),
     },
   ];
@@ -1745,9 +1765,29 @@ export default function CanvasOwnerPage() {
     },
     {
       section: 'Owner policy',
+      name: 'selectedAccessRole',
+      value: canvasAccessRoleLabels[selectedCanvasAccessRole],
+      description: '권한자별 접근에서 선택한 현재 권한자입니다.',
+    },
+    {
+      section: 'Owner policy',
+      name: 'accessMode',
+      value: selectedAccessMode === 'edit' ? '편집' : '보기',
+      description: '선택한 권한자가 이 페이지에서 사용할 실제 접근 상태입니다.',
+    },
+    {
+      section: 'Owner policy',
       name: 'effectiveWorkspaceMode',
       value: effectiveWorkspaceMode,
-      description: '공용 캔버스에 전달하는 실제 모드입니다.',
+      description: '선택한 권한자의 접근 상태를 반영해 공용 캔버스에 전달하는 실제 모드입니다.',
+    },
+    {
+      section: 'Owner policy',
+      name: 'accessPreview',
+      value: accessPreviewUnavailable ? 'unavailable' : 'enabled',
+      description: accessPreviewUnavailable
+        ? '선택한 페이지 정책이 이 권한자의 보기 모드를 허용하지 않습니다.'
+        : '선택한 권한자의 상태로 캔버스를 확인합니다.',
     },
     {
       section: 'Owner policy',
@@ -1967,7 +2007,7 @@ export default function CanvasOwnerPage() {
       section: 'TemplateEditWorkspaceProps',
       name: 'onTemplateSaved',
       value:
-        canEditCurrentWorkspace &&
+        selectedAccessMode === 'edit' &&
         effectiveWorkspaceMode === 'template' &&
         (selectedManagedPage.id === 'templates' || (!routeEquivalentPreviewEnabled && settings.enableOnTemplateSaved))
           ? 'enabled'
@@ -1977,7 +2017,7 @@ export default function CanvasOwnerPage() {
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'onSaveDraftHtml',
-      value: canEditCurrentWorkspace && effectiveWorkspaceMode === 'document' ? 'enabled' : 'disabled',
+      value: selectedAccessMode === 'edit' && effectiveWorkspaceMode === 'document' ? 'enabled' : 'disabled',
       description: '문서 모드 저장 콜백 연결 여부입니다.',
     },
     ...(previewCanvasToolbarVisibility ? Object.entries(previewCanvasToolbarVisibility) : []).map(([name, value]) => ({
@@ -2264,65 +2304,7 @@ export default function CanvasOwnerPage() {
         label="이 페이지에서 사용할 모드"
         description="템플릿, 문서, 읽기 모드는 페이지별 상호작용 프리셋입니다."
       />
-      <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold text-slate-800">허용 모드</div>
-            <p className="text-[10px] leading-4 text-slate-500">
-              이 페이지에서 선택할 수 있는 workspaceMode를 정합니다. 최소 1개는 항상 유지됩니다.
-            </p>
-          </div>
-          <Badge variant="slate" className="w-fit px-2 py-0 text-[9px]">
-            페이지 설정
-          </Badge>
-        </div>
-        <div className="grid gap-1.5 sm:grid-cols-3">
-          {canvasWorkspaceModes.map((mode) => {
-            const enabled = selectedManagedPage.allowedModes.includes(mode);
-            const disabled = enabled && selectedManagedPage.allowedModes.length <= 1;
-
-            return (
-              <Button
-                key={mode}
-                type="button"
-                variant={enabled ? 'default' : 'outline'}
-                className="h-8 justify-start px-2 text-xs"
-                disabled={disabled}
-                aria-pressed={enabled}
-                onClick={() => toggleSelectedPageAllowedMode(mode)}
-                {...canvasOwnerItem(`canvas-page-policy-allowed-mode-${mode}`, `${modeLabels[mode]} 허용 모드`)}
-              >
-                {modeLabels[mode]}
-              </Button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
-        <div className="text-[11px] font-semibold text-slate-800">기본 모드</div>
-        <div className="grid gap-1.5 sm:grid-cols-3">
-          {canvasWorkspaceModes.map((mode) => {
-            const allowed = selectedManagedPage.allowedModes.includes(mode);
-            const active = selectedManagedPage.defaultMode === mode;
-
-            return (
-              <Button
-                key={mode}
-                type="button"
-                variant={active ? 'default' : 'outline'}
-                className={`h-8 justify-start px-2 text-xs ${allowed ? '' : 'cursor-not-allowed opacity-50'}`}
-                disabled={!allowed}
-                onClick={() => updateSelectedPageDefaultMode(mode)}
-                {...canvasOwnerItem(`canvas-page-policy-default-mode-${mode}`, `${modeLabels[mode]} 기본 모드`)}
-              >
-                {modeLabels[mode]}
-              </Button>
-            );
-          })}
-        </div>
-      </div>
       <div className="space-y-1.5">
-        <div className="text-[11px] font-semibold text-slate-800">현재 미리보기 모드</div>
         {renderWorkspaceModeButtons()}
         <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
       </div>
@@ -2332,6 +2314,133 @@ export default function CanvasOwnerPage() {
           {renderSettingSourceBadge('canvasViewMode')}
         </div>
         {renderCanvasViewModeButtons()}
+      </div>
+    </div>
+  );
+  const renderAccessRolePolicySettings = () => (
+    <div className="space-y-1.5">
+      <OwnerSettingsSectionHeader
+        label="권한자별 접근"
+        description="선택한 페이지에서 문서 권한자가 사용할 수 있는 조작과 표시 색상을 정합니다."
+        badge={
+          <Badge variant="slate" className="shrink-0 px-2 py-0 text-[9px]">
+            {selectedManagedPage.label}
+          </Badge>
+        }
+      />
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
+        <span className="font-semibold text-slate-900">{canvasAccessRoleLabels[selectedCanvasAccessRole]}</span>
+        <span>{selectedAccessMode === 'edit' ? '편집 가능' : '보기 전용'}</span>
+        <span className="text-slate-400">/</span>
+        <span>적용 모드: {modeLabels[effectiveWorkspaceMode]}</span>
+        {accessPreviewUnavailable ? (
+          <span className="font-medium text-amber-700">문서 기반 화면에서 선택한 권한자의 캔버스 상태를 확인합니다.</span>
+        ) : null}
+      </div>
+      <div className="grid gap-2 lg:grid-cols-3">
+        {canvasAccessRoles.map((role) => {
+          const policy = selectedPageAccessRolePolicies[role];
+          const effectiveAccessMode = resolveEffectiveCanvasAccessMode(role, policy);
+          const active = role === selectedCanvasAccessRole;
+          const accessModeOptions: Array<{ value: CanvasAccessMode; label: string; disabled?: boolean }> = [
+            { value: 'edit', label: '편집', disabled: role !== 'editor' },
+            { value: 'view', label: '보기' },
+          ];
+
+          return (
+            <div
+              key={role}
+              role="button"
+              tabIndex={0}
+              className={`space-y-2 rounded-lg border bg-white p-3 text-left outline-none ${
+                active ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
+              }`}
+              onClick={() => handleSelectAccessRole(role)}
+              onKeyDown={(event) => {
+                if (event.currentTarget !== event.target) {
+                  return;
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleSelectAccessRole(role);
+                }
+              }}
+            >
+              <div className="flex min-w-0 items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <div className="truncate text-xs font-semibold text-slate-900">{canvasAccessRoleLabels[role]}</div>
+                    {active ? (
+                      <Badge variant="blue" className="shrink-0 px-1.5 py-0 text-[9px]">
+                        선택됨
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="mt-0.5 text-[10px] leading-4 text-slate-500">
+                    {effectiveAccessMode === 'edit'
+                      ? '텍스트, 첨부파일, 서명, 저장을 사용할 수 있습니다.'
+                      : '전체 화면과 확대/축소만 사용할 수 있습니다.'}
+                  </div>
+                </div>
+                <span
+                  className="inline-flex h-6 shrink-0 items-center rounded-full border px-2 text-[10px] font-semibold"
+                  style={{
+                    borderColor: policy.accentColor,
+                    backgroundColor: policy.backgroundColor,
+                    color: policy.textColor,
+                  }}
+                >
+                  {policy.badgeLabel}
+                </span>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-slate-700">접근 권한</label>
+                <OptionButtonGroup
+                  value={policy.accessMode}
+                  options={accessModeOptions}
+                  onChange={(value) => updateAccessRolePolicy(role, { accessMode: value })}
+                />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">권한 이름</label>
+                  <Input
+                    className={compactInputClassName}
+                    value={policy.label}
+                    onChange={(event) => updateAccessRolePolicy(role, { label: event.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">배지 문구</label>
+                  <Input
+                    className={compactInputClassName}
+                    value={policy.badgeLabel}
+                    onChange={(event) => updateAccessRolePolicy(role, { badgeLabel: event.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  ['accentColor', '테두리'],
+                  ['backgroundColor', '배경'],
+                  ['textColor', '글자'],
+                ] as Array<[keyof Pick<CanvasAccessRolePolicy, 'accentColor' | 'backgroundColor' | 'textColor'>, string]>).map(
+                  ([key, label]) => (
+                    <label key={key} className="space-y-1 text-[11px] font-medium text-slate-700">
+                      <span>{label}</span>
+                      <input
+                        type="color"
+                        value={policy[key]}
+                        className="h-8 w-full cursor-pointer rounded-md border border-slate-300 bg-white p-1"
+                        onChange={(event) => updateAccessRolePolicy(role, { [key]: event.target.value })}
+                      />
+                    </label>
+                  )
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -2735,8 +2844,8 @@ export default function CanvasOwnerPage() {
 	                    <CardTitle className="text-sm">상자 편집 캔버스 환경설정</CardTitle>
 	                    <CardDescription className="text-xs leading-5">
 	                      {activeSettingsScope === 'page'
-	                        ? `${selectedManagedPage.label} · ${modeLabels[effectiveWorkspaceMode]} 설정을 편집합니다. 회색 항목은 모드 설정에서 관리 중이며, 변경하면 페이지 설정이 우선됩니다.`
-	                        : `${modeLabels[effectiveWorkspaceMode]} 설정을 편집합니다. 페이지 설정이 있는 항목은 실제 출력에서 페이지 설정이 우선됩니다.`}
+	                        ? `${selectedManagedPage.label} · ${canvasAccessRoleLabels[selectedCanvasAccessRole]} · ${modeLabels[effectiveWorkspaceMode]} 설정을 편집합니다. 회색 항목은 모드 설정에서 관리 중이며, 변경하면 페이지 권한 설정이 우선됩니다.`
+	                        : `${canvasAccessRoleLabels[selectedCanvasAccessRole]} · ${modeLabels[effectiveWorkspaceMode]} 설정을 편집합니다. 페이지 권한 설정이 있는 항목은 실제 출력에서 페이지 설정이 우선됩니다.`}
 	                    </CardDescription>
                   </div>
                   <OwnerSettingsActionBar
@@ -2748,6 +2857,7 @@ export default function CanvasOwnerPage() {
 		            </CardHeader>
 		            <CardContent className="space-y-3 p-4 pt-0">
 			              {activeControlTab === 'page' ? renderPageWorkspaceModeSettings() : null}
+			              {renderAccessRolePolicySettings()}
 			              {renderCanvasSizeSettings()}
 		              {renderCanvasSelectionOverlaySettings()}
 		              {renderCanvasTextSettings()}
@@ -2758,15 +2868,35 @@ export default function CanvasOwnerPage() {
 
 	          <div className="space-y-3 xl:col-span-2">
 	            <Divider
-                label={`공용 캔버스 · ${selectedManagedPage.label} · ${modeLabels[effectiveWorkspaceMode]}`}
+                label={`공용 캔버스 · ${selectedManagedPage.label} · ${canvasAccessRoleLabels[selectedCanvasAccessRole]}`}
                 className="py-0"
               />
-              {effectiveWorkspaceMode === 'template' ? (
+              <div
+                className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                style={{
+                  borderColor: selectedAccessRolePolicy.accentColor,
+                  backgroundColor: selectedAccessRolePolicy.backgroundColor,
+                  color: selectedAccessRolePolicy.textColor,
+                }}
+              >
+                <span className="font-semibold">{selectedAccessRolePolicy.badgeLabel}</span>
+                <span>{selectedAccessMode === 'edit' ? '편집 가능' : '보기 전용'}</span>
+                <span className="opacity-60">/</span>
+                <span>
+                  {selectedAccessMode === 'edit'
+                    ? '텍스트, 첨부파일, 서명, 저장을 사용할 수 있습니다.'
+                    : '전체 화면과 확대/축소만 사용할 수 있습니다.'}
+                </span>
+              </div>
+              {accessPreviewUnavailable ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-6 py-8 text-sm text-amber-800">
+                  선택한 권한자의 캔버스 상태는 문서를 선택할 수 있는 화면에서 확인합니다.
+                </div>
+              ) : effectiveWorkspaceMode === 'template' ? (
                 <CanvasOwnedWorkspace
-                  key={`canvas-owner:${selectedManagedPage.id}:${effectiveWorkspaceMode}:${selectedTemplateId || 'no-template'}`}
+                  key={`canvas-owner:${selectedManagedPage.id}:${selectedCanvasAccessRole}:${effectiveWorkspaceMode}:${selectedTemplateId || 'no-template'}`}
                   surface={selectedManagedPage.surface}
-                  workspaceMode={effectiveWorkspaceMode}
-                  allowedWorkspaceModes={selectedManagedPage.allowedModes}
+                  canvasAccessRole={selectedCanvasAccessRole}
                   applyStoredCanvasOwnerSettings={false}
                   canvasOwnerSettings={previewSettings}
                   canvasOwnerSettingSources={previewSettingSources}
@@ -2794,7 +2924,7 @@ export default function CanvasOwnerPage() {
                   selectedCanvasBoxes={previewSelectedCanvasBoxes}
                   onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
                   onTemplateSaved={
-                    !canEditCurrentWorkspace
+                    selectedAccessMode !== 'edit'
                       ? undefined
                       : selectedManagedPage.id === 'templates'
                         ? () => setOwnerEventMessage('템플릿 생성 페이지의 onTemplateSaved 콜백이 실행되었습니다.')
@@ -2805,9 +2935,9 @@ export default function CanvasOwnerPage() {
                 />
               ) : selectedDocumentInitialDraft ? (
                 <CanvasOwnedWorkspace
-                  key={`canvas-owner:${selectedManagedPage.id}:${selectedDocumentInitialDraft.draftKey}`}
+                  key={`canvas-owner:${selectedManagedPage.id}:${selectedCanvasAccessRole}:${selectedDocumentInitialDraft.draftKey}`}
                   surface={selectedManagedPage.surface}
-                  allowedWorkspaceModes={selectedManagedPage.allowedModes}
+                  canvasAccessRole={selectedCanvasAccessRole}
                   applyStoredCanvasOwnerSettings={false}
                   canvasOwnerSettings={previewSettings}
                   canvasOwnerSettingSources={previewSettingSources}
@@ -2842,7 +2972,7 @@ export default function CanvasOwnerPage() {
                   todoButtonLabel="할 일"
                   todoCount={documentRequestTasks.length}
                   onSaveDraftHtml={
-                    canEditCurrentWorkspace && effectiveWorkspaceMode === 'document'
+                    selectedAccessMode === 'edit' && effectiveWorkspaceMode === 'document'
                       ? handleSaveDocumentDraft
                       : undefined
                   }

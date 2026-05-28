@@ -6,27 +6,24 @@ import type {
   MemberAccessibleSiteDto,
   MemberDocumentAccessDto,
   MemberDocumentAccessSource,
+  MemberDocumentEffectiveAccessRole,
+  DocumentMemberAccessRole,
   DocumentMemberInviteInput,
   DocumentMemberInviteResult,
   DocumentMemberRecordDto,
   MemberDispatchResultDto,
-  MemberDocumentScopeAccessDto,
   MemberInviteStatus,
   MemberRecordDto,
   MemberVerificationInput,
   MemberVerificationResult,
   MemberVerificationStatus,
+  SiteMemberAccessRole,
   SiteMemberInviteInput,
   SiteMemberInviteResult,
   SiteMemberRecordDto,
 } from '../lib/memberAccessDtos';
-import {
-  buildScopeKeysByKeyFrameGroupId,
-  buildValueKeyByKeyFrameGroupId,
-} from './canvasScopeDraftService';
 import { DocumentService } from './documentService';
 import { SolapiSmsService } from './solapiSmsService';
-import { TemplateScopeRegistryService } from './templateScopeRegistryService';
 
 type MemberRegistryRow = {
   id: string;
@@ -55,6 +52,7 @@ type SiteMembershipRow = {
   id: string;
   member_id: string;
   site_id: string;
+  access_role: SiteMemberAccessRole;
   created_by_member_id: string | null;
   created_at: string;
   updated_at: string;
@@ -64,6 +62,7 @@ type DocumentMembershipRow = {
   id: string;
   member_id: string;
   document_id: string;
+  access_role: DocumentMemberAccessRole;
   created_by_member_id: string | null;
   created_at: string;
   updated_at: string;
@@ -138,16 +137,33 @@ const SITES_DB_SCHEMA = 'sites';
 const DOCUMENTS_DB_SCHEMA = 'documents';
 
 // MEMBER_ACCESS_SCHEMA_BOUNDARY
-// 번호 기반 멤버/초대/소속은 DB의 member_access 스키마만 정본으로 사용합니다.
+// 번호 기반 멤버/초대/권한은 DB의 member_access 스키마만 정본으로 사용합니다.
 // 앱에서는 public SECURITY DEFINER RPC를 호출해 member_access 스키마를 Data API에 직접 노출하지 않습니다.
-// 현장/문서 소속은 보기 접근만 결정하고, 편집 가능 범위는 scopes.scope_registry 와
-// scopes.site_scope_assignments 의 scope 배정으로만 결정합니다.
+// 현장/문서 권한은 sites.site_registry, documents.document_registry 를 참조하지만
+// 멤버 정보 자체는 member_access.member_registry 와 memberships 가 기준입니다.
 const sitesSchema = (client = getSupabase()) => client.schema(SITES_DB_SCHEMA);
 const documentsSchema = (client = getSupabase()) => client.schema(DOCUMENTS_DB_SCHEMA);
 
 const normalizePhoneNumber = (value: string) => value.replace(/[^0-9]/g, '').trim();
 
 const normalizeAccessCode = (value: string) => value.replace(/[^0-9]/g, '').trim();
+
+const normalizeSiteMemberAccessRole = (role: SiteMemberAccessRole): SiteMemberAccessRole => {
+  if (role === 'owner' || role === 'manager') {
+    return 'manager';
+  }
+
+  return 'participant';
+};
+
+const normalizeDocumentMemberAccessRole = (role: DocumentMemberAccessRole): DocumentMemberAccessRole =>
+  role === 'editor' || role === 'signer' ? role : 'viewer';
+
+const isLegacySiteRoleConstraintError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || '');
+
+  return message.includes('권한 값이 올바르지 않습니다') || message.includes('site_memberships_access_role_check');
+};
 
 const hashAccessCode = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -163,7 +179,7 @@ const buildExistingAccessDispatch = (mode: MemberAccessDispatchMode): MemberDisp
   if (mode === 'reuse_existing_verified') {
     return {
       status: 'not_required',
-      message: '이미 인증된 번호입니다. 새 인증 없이 소속만 추가했습니다.',
+      message: '이미 인증된 번호입니다. 새 인증 없이 권한만 추가했습니다.',
       providerConfigured: true,
       sentAt: null,
       accessCodePreview: null,
@@ -206,6 +222,7 @@ const toSiteMemberRecordDto = (params: {
 }): SiteMemberRecordDto => ({
   membershipId: params.membership.id,
   siteId: params.membership.site_id,
+  accessRole: normalizeSiteMemberAccessRole(params.membership.access_role),
   member: toMemberRecordDto({ member: params.member, invite: params.invite }),
   createdAt: params.membership.created_at,
   updatedAt: params.membership.updated_at,
@@ -218,10 +235,32 @@ const toDocumentMemberRecordDto = (params: {
 }): DocumentMemberRecordDto => ({
   membershipId: params.membership.id,
   documentId: params.membership.document_id,
+  accessRole: normalizeDocumentMemberAccessRole(params.membership.access_role),
   member: toMemberRecordDto({ member: params.member, invite: params.invite }),
   createdAt: params.membership.created_at,
   updatedAt: params.membership.updated_at,
 });
+
+const getDocumentRoleRank = (role: MemberDocumentEffectiveAccessRole) => {
+  switch (role) {
+    case 'editor':
+      return 3;
+    case 'signer':
+      return 2;
+    case 'viewer':
+    default:
+      return 1;
+  }
+};
+
+const toEffectiveDocumentRoleFromSiteRole = (role: SiteMemberAccessRole): MemberDocumentEffectiveAccessRole =>
+  normalizeSiteMemberAccessRole(role) === 'manager' || role === 'editor' ? 'editor' : 'viewer';
+
+const mergeDocumentAccessRole = (
+  currentRole: MemberDocumentEffectiveAccessRole,
+  nextRole: MemberDocumentEffectiveAccessRole
+): MemberDocumentEffectiveAccessRole =>
+  getDocumentRoleRank(nextRole) > getDocumentRoleRank(currentRole) ? nextRole : currentRole;
 
 const mergeDocumentAccessSource = (
   currentSource: MemberDocumentAccessSource,
@@ -416,7 +455,7 @@ const loadDocumentAccessRowsByIds = async (client: ReturnType<typeof getSupabase
     .order('updated_at', { ascending: false });
 
   if (error) {
-    throw new Error(`구성원 접근 조회 실패: 직접 소속 문서 조회 중 오류가 발생했습니다. (${error.message})`);
+    throw new Error(`구성원 접근 조회 실패: 직접 권한 문서 조회 중 오류가 발생했습니다. (${error.message})`);
   }
 
   return (data || []) as DocumentAccessRegistryRow[];
@@ -430,11 +469,15 @@ const buildMemberAccessibleDocuments = (params: {
   directDocuments: DocumentAccessRegistryRow[];
 }) => {
   const siteNameById = new Map(params.siteRows.map((site) => [site.id, site.site_name] as const));
-  const siteMembershipSiteIds = new Set(params.siteMemberships.map((membership) => membership.site_id));
-  const directDocumentIds = new Set(params.documentMemberships.map((membership) => membership.document_id));
+  const siteRoleBySiteId = new Map(params.siteMemberships.map((membership) => [membership.site_id, membership.access_role] as const));
+  const documentRoleByDocumentId = new Map(
+    params.documentMemberships.map(
+      (membership) => [membership.document_id, normalizeDocumentMemberAccessRole(membership.access_role)] as const
+    )
+  );
   const documentMap = new Map<string, MemberAccessibleDocumentDto>();
 
-  const upsertDocument = (document: DocumentAccessRegistryRow, accessSource: MemberDocumentAccessSource) => {
+  const upsertDocument = (document: DocumentAccessRegistryRow, accessRole: MemberDocumentEffectiveAccessRole, accessSource: MemberDocumentAccessSource) => {
     const existing = documentMap.get(document.id);
     const siteName = siteNameById.get(document.site_id) || '현장';
 
@@ -447,6 +490,7 @@ const buildMemberAccessibleDocuments = (params: {
         status: document.status,
         currentVersionNumber: document.current_version_number,
         updatedAt: document.updated_at,
+        accessRole,
         accessSource,
       });
       return;
@@ -454,24 +498,30 @@ const buildMemberAccessibleDocuments = (params: {
 
     documentMap.set(document.id, {
       ...existing,
+      accessRole: mergeDocumentAccessRole(existing.accessRole, accessRole),
       accessSource: mergeDocumentAccessSource(existing.accessSource, accessSource),
     });
   };
 
   for (const document of params.siteDocuments) {
-    if (!siteMembershipSiteIds.has(document.site_id)) {
+    const siteRole = siteRoleBySiteId.get(document.site_id);
+    const managedSiteRole = siteRole ? normalizeSiteMemberAccessRole(siteRole) : null;
+
+    if (!managedSiteRole || managedSiteRole === 'participant') {
       continue;
     }
 
-    upsertDocument(document, 'site');
+    upsertDocument(document, toEffectiveDocumentRoleFromSiteRole(managedSiteRole), 'site');
   }
 
   for (const document of params.directDocuments) {
-    if (!directDocumentIds.has(document.id)) {
+    const documentRole = documentRoleByDocumentId.get(document.id);
+
+    if (!documentRole) {
       continue;
     }
 
-    upsertDocument(document, 'document');
+    upsertDocument(document, documentRole, 'document');
   }
 
   return Array.from(documentMap.values()).sort((left, right) =>
@@ -494,55 +544,10 @@ const buildMemberAccessibleSites = (params: {
     .map<MemberAccessibleSiteDto>((membership) => ({
       siteId: membership.site_id,
       siteName: siteNameById.get(membership.site_id) || '현장',
+      accessRole: normalizeSiteMemberAccessRole(membership.access_role),
       documentCount: documentCountBySiteId[membership.site_id] || 0,
     }))
     .sort((left, right) => left.siteName.localeCompare(right.siteName, 'ko'));
-};
-
-const uniqueStrings = (values: Array<string | null | undefined>) =>
-  Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
-
-const buildEmptyScopeAccess = (canView: boolean): MemberDocumentScopeAccessDto => ({
-  canView,
-  editableScopeKeys: [],
-  editableValueKeys: [],
-  editableKeyFrameGroupIds: [],
-  scopeKeysByKeyFrameGroupId: {},
-  valueKeyByKeyFrameGroupId: {},
-  memberIdsByScopeKey: {},
-});
-
-const buildMemberDocumentScopeAccess = async (params: {
-  memberId: string;
-  documentDetail: Awaited<ReturnType<typeof DocumentService.getDocumentDetail>>;
-}): Promise<MemberDocumentScopeAccessDto> => {
-  const memberId = String(params.memberId || '').trim();
-  const templateId = String(params.documentDetail.document.templateId || '').trim();
-  const siteId = String(params.documentDetail.document.siteId || '').trim();
-
-  if (!memberId || !templateId || !siteId) {
-    return buildEmptyScopeAccess(true);
-  }
-
-  const scopeContext = await TemplateScopeRegistryService.loadTemplateScopeContext({
-    templateId,
-    siteId,
-  });
-  const scopeKeysByKeyFrameGroupId = buildScopeKeysByKeyFrameGroupId(scopeContext.logicalScopes);
-  const valueKeyByKeyFrameGroupId = buildValueKeyByKeyFrameGroupId(scopeContext.registryEntries);
-  const editableScopes = scopeContext.logicalScopes.filter((scope) =>
-    (scopeContext.assignmentsByScopeKey[scope.scopeKey] || []).includes(memberId)
-  );
-
-  return {
-    canView: true,
-    editableScopeKeys: uniqueStrings(editableScopes.map((scope) => scope.scopeKey)),
-    editableValueKeys: uniqueStrings(editableScopes.flatMap((scope) => scope.valueKeys)),
-    editableKeyFrameGroupIds: uniqueStrings(editableScopes.flatMap((scope) => scope.keyFrameGroupIds)),
-    scopeKeysByKeyFrameGroupId,
-    valueKeyByKeyFrameGroupId,
-    memberIdsByScopeKey: scopeContext.assignmentsByScopeKey,
-  };
 };
 
 const getMemberAccessSessionRemotely = async (
@@ -615,22 +620,32 @@ export const MemberAccessService = {
   async inviteSiteMember(input: SiteMemberInviteInput): Promise<SiteMemberInviteResult> {
     const normalizedSiteId = input.siteId.trim();
     const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+    const normalizedAccessRole = normalizeSiteMemberAccessRole(input.accessRole);
     validatePhoneNumber(normalizedPhoneNumber);
     const client = getSupabase();
     const site = await ensureSiteExists(client, normalizedSiteId);
     const accessCode = generateAccessCode();
-    const inviteContext = await callMemberAccessRpc<MemberAccessInviteRpcResult<SiteMembershipRow>>(
-      client,
-      'member_access_invite_site_member',
-      {
-        p_site_id: normalizedSiteId,
-        p_phone_number: normalizedPhoneNumber,
-        p_display_name: input.displayName?.trim() || null,
-        p_access_code_hash: hashAccessCode(accessCode),
-        p_invited_by_member_id: input.invitedByMemberId?.trim() || null,
-      },
-      '구성원 초대 실패'
-    );
+    const inviteWithRole = (accessRole: SiteMemberAccessRole) =>
+      callMemberAccessRpc<MemberAccessInviteRpcResult<SiteMembershipRow>>(
+        client,
+        'member_access_invite_site_member',
+        {
+          p_site_id: normalizedSiteId,
+          p_phone_number: normalizedPhoneNumber,
+          p_display_name: input.displayName?.trim() || null,
+          p_access_role: accessRole,
+          p_access_code_hash: hashAccessCode(accessCode),
+          p_invited_by_member_id: input.invitedByMemberId?.trim() || null,
+        },
+        '구성원 초대 실패'
+      );
+    const inviteContext = await inviteWithRole(normalizedAccessRole).catch((error) => {
+      if (normalizedAccessRole === 'participant' && isLegacySiteRoleConstraintError(error)) {
+        return inviteWithRole('editor');
+      }
+
+      throw error;
+    });
 
     const dispatch =
       inviteContext.dispatchMode === 'send_code'
@@ -670,7 +685,7 @@ export const MemberAccessService = {
     const normalizedMembershipId = membershipId.trim();
 
     if (!normalizedMembershipId) {
-      throw new Error('현장 소속 삭제 실패: membershipId가 필요합니다.');
+      throw new Error('현장 권한 삭제 실패: membershipId가 필요합니다.');
     }
 
     const client = getSupabase();
@@ -678,7 +693,7 @@ export const MemberAccessService = {
       client,
       'member_access_remove_site_membership',
       { p_membership_id: normalizedMembershipId },
-      '현장 소속 삭제 실패'
+      '현장 권한 삭제 실패'
     );
 
     return toSiteMemberRecordDto({
@@ -692,7 +707,7 @@ export const MemberAccessService = {
     const normalizedDocumentId = documentId.trim();
 
     if (!normalizedDocumentId) {
-      throw new Error('문서 소속 목록 조회 실패: documentId가 필요합니다.');
+      throw new Error('문서 권한 목록 조회 실패: documentId가 필요합니다.');
     }
 
     const client = getSupabase();
@@ -700,7 +715,7 @@ export const MemberAccessService = {
       client,
       'member_access_list_document_members',
       { p_document_id: normalizedDocumentId },
-      '문서 소속 목록 조회 실패'
+      '문서 권한 목록 조회 실패'
     );
 
     return (Array.isArray(records) ? records : []).map((record) =>
@@ -715,6 +730,7 @@ export const MemberAccessService = {
   async inviteDocumentMember(input: DocumentMemberInviteInput): Promise<DocumentMemberInviteResult> {
     const normalizedDocumentId = input.documentId.trim();
     const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+    const normalizedAccessRole = normalizeDocumentMemberAccessRole(input.accessRole);
     validatePhoneNumber(normalizedPhoneNumber);
     const client = getSupabase();
     const document = await ensureDocumentExists(client, normalizedDocumentId);
@@ -726,6 +742,7 @@ export const MemberAccessService = {
         p_document_id: normalizedDocumentId,
         p_phone_number: normalizedPhoneNumber,
         p_display_name: input.displayName?.trim() || null,
+        p_access_role: normalizedAccessRole,
         p_access_code_hash: hashAccessCode(accessCode),
         p_invited_by_member_id: input.invitedByMemberId?.trim() || null,
       },
@@ -770,7 +787,7 @@ export const MemberAccessService = {
     const normalizedMembershipId = membershipId.trim();
 
     if (!normalizedMembershipId) {
-      throw new Error('문서 소속 삭제 실패: membershipId가 필요합니다.');
+      throw new Error('문서 권한 삭제 실패: membershipId가 필요합니다.');
     }
 
     const client = getSupabase();
@@ -778,7 +795,7 @@ export const MemberAccessService = {
       client,
       'member_access_remove_document_membership',
       { p_membership_id: normalizedMembershipId },
-      '문서 소속 삭제 실패'
+      '문서 권한 삭제 실패'
     );
 
     return toDocumentMemberRecordDto({
@@ -814,20 +831,16 @@ export const MemberAccessService = {
     const accessibleDocument = session.accessibleDocuments.find((item) => item.documentId === normalizedDocumentId) || null;
 
     if (!accessibleDocument) {
-      throw new Error('문서 접근 소속이 없습니다.');
+      throw new Error('문서 접근 권한이 없습니다.');
     }
 
     const detail = await DocumentService.getDocumentDetail(normalizedDocumentId);
-    const scopeAccess = await buildMemberDocumentScopeAccess({
-      memberId: session.member.id,
-      documentDetail: detail,
-    });
 
     return {
       member: session.member,
       authenticatedAt: session.authenticatedAt,
+      accessRole: accessibleDocument.accessRole,
       accessSource: accessibleDocument.accessSource,
-      scopeAccess,
       detail,
     };
   },

@@ -442,9 +442,6 @@ const findExistingSignatureRequestId = (
   return existingEvidence?.requestId || '';
 };
 
-const isSiteWideDocumentAccessRole = (role: string) =>
-  role === 'owner' || role === 'manager' || role === 'editor' || role === 'viewer';
-
 const createMemberOption = (
   memberRecord: DocumentMemberRecordDto | SiteMemberRecordDto,
   source: DocumentOwnerMemberOption['accessSource']
@@ -458,7 +455,6 @@ const createMemberOption = (
     memberId: member.id,
     phoneNumber: member.phoneNumber,
     displayName,
-    accessRole: memberRecord.accessRole,
     accessSource: source,
     label: displayName,
     meta: formattedPhone,
@@ -472,12 +468,10 @@ const mergeMemberOptions = (
 ): DocumentOwnerMemberOption[] => {
   const optionsByMemberId = new Map<string, DocumentOwnerMemberOption>();
 
-  siteMembers
-    .filter((membership) => isSiteWideDocumentAccessRole(membership.accessRole))
-    .forEach((membership) => {
-      const option = createMemberOption(membership, 'site');
-      optionsByMemberId.set(option.memberId, option);
-    });
+  siteMembers.forEach((membership) => {
+    const option = createMemberOption(membership, 'site');
+    optionsByMemberId.set(option.memberId, option);
+  });
 
         documentMembers.forEach((membership) => {
           const option = createMemberOption(membership, 'document');
@@ -1508,7 +1502,6 @@ export function DocumentsOwnerWorkspace({
         documentId,
         phoneNumber,
         displayName: displayName || null,
-        accessRole: selectedFields.every((field) => field.requestKind === 'signature') ? 'signer' : 'editor',
       });
       await loadDocumentContext(documentId);
       assignSelectedFieldsMember(result.membership.member.id);

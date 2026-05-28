@@ -72,14 +72,12 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const formData = await request.formData();
-    const valueKey = String(formData.get('valueKey') || '');
-    const editableValueKeySet = new Set(access.scopeAccess.editableValueKeys);
-
-    if (!valueKey || !editableValueKeySet.has(valueKey)) {
-      return NextResponse.json({ success: false, message: '이 파일 항목을 수정할 수 있는 scope이 없습니다.' }, { status: 403 });
+    if (access.accessRole !== 'editor') {
+      return NextResponse.json({ success: false, message: '이 문서는 편집 권한이 없습니다.' }, { status: 403 });
     }
 
+    const formData = await request.formData();
+    const valueKey = String(formData.get('valueKey') || '');
     const files = formData
       .getAll('files')
       .filter((entry): entry is File => entry instanceof File);
@@ -105,7 +103,7 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ success: true, data: { uploads } });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
-    const status = message.includes('인증') ? 401 : message.includes('권한') || message.includes('소속') ? 403 : 500;
+    const status = message.includes('인증') ? 401 : message.includes('권한') ? 403 : 500;
 
     console.error('Member Access Document Attachments API POST Error:', error);
 

@@ -45,7 +45,6 @@ export type DocumentOwnerMemberOption = EntityPickerOption & {
   memberId: string;
   phoneNumber: string;
   displayName: string;
-  accessRole: string;
   accessSource: 'document' | 'site';
 };
 

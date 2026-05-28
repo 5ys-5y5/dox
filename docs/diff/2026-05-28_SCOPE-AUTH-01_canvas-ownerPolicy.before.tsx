@@ -6,11 +6,10 @@ import type { TemplateEditWorkspaceProps } from '../../components/template/works
 import {
   applyCanvasOwnerSettingsToWorkspaceProps,
   normalizeCanvasWorkspaceMode,
-  resolveCanvasOwnerPagePolicy,
+  type CanvasOwnerAccessRole,
   type CanvasOwnerSettings,
   type CanvasOwnerSettingKey,
   type CanvasOwnerSettingSource,
-  type CanvasOwnerSettingsStore,
   useStoredCanvasOwnerSettings,
 } from './ownerSettings';
 
@@ -18,6 +17,7 @@ type CanvasWorkspaceMode = NonNullable<TemplateEditWorkspaceProps['workspaceMode
 
 export type CanvasOwnerSurface =
   | 'canvas'
+  | 'documents'
   | 'member-access'
   | 'project'
   | 'request-links'
@@ -28,10 +28,9 @@ export type CanvasOwnerSurface =
 type CanvasOwnedWorkspaceProps = TemplateEditWorkspaceProps & {
   surface: CanvasOwnerSurface;
   applyStoredCanvasOwnerSettings?: boolean;
+  canvasAccessRole?: CanvasOwnerAccessRole;
   canvasOwnerSettings?: CanvasOwnerSettings | null;
   canvasOwnerSettingSources?: Record<CanvasOwnerSettingKey, CanvasOwnerSettingSource>;
-  canvasOwnerSettingsStore?: CanvasOwnerSettingsStore;
-  allowedWorkspaceModes?: CanvasWorkspaceMode[];
 };
 
 type CanvasSurfacePolicy = {
@@ -44,6 +43,9 @@ const CANVAS_SURFACE_POLICIES: Record<CanvasOwnerSurface, CanvasSurfacePolicy> =
   canvas: {
     allowedModes: ['template', 'document', 'read'],
     allowEditableValueKeys: true,
+  },
+  documents: {
+    allowedModes: ['read'],
   },
   'member-access': {
     allowedModes: ['document', 'read'],
@@ -71,39 +73,19 @@ const CANVAS_SURFACE_POLICIES: Record<CanvasOwnerSurface, CanvasSurfacePolicy> =
 const resolveCanvasWorkspaceMode = (value: TemplateEditWorkspaceProps['workspaceMode']): CanvasWorkspaceMode =>
   normalizeCanvasWorkspaceMode(value);
 
+const resolveCanvasAccessRoleForSettings = (canvasAccessRole: CanvasOwnerAccessRole | undefined): CanvasOwnerAccessRole => {
+  if (canvasAccessRole) {
+    return canvasAccessRole;
+  }
+
+  return 'editor';
+};
+
 const hasEditableValueKeys = (value: string[] | null | undefined) =>
   Array.isArray(value) && value.some((item) => String(item || '').trim().length > 0);
 
-const resolveCanvasOwnedSurfacePolicy = (
-  surface: CanvasOwnerSurface,
-  settingsStore?: CanvasOwnerSettingsStore,
-  allowedWorkspaceModes?: CanvasWorkspaceMode[]
-): CanvasSurfacePolicy => {
+const validateCanvasOwnedWorkspace = (surface: CanvasOwnerSurface, props: TemplateEditWorkspaceProps) => {
   const policy = CANVAS_SURFACE_POLICIES[surface];
-  const resolvedPolicy = resolveCanvasOwnerPagePolicy(settingsStore || {
-    version: 5,
-    modeSettings: {},
-    pageSettings: {},
-    pagePolicies: {},
-  }, {
-    pageId: surface,
-    defaultAllowedModes: allowedWorkspaceModes || policy.allowedModes,
-    defaultMode: (allowedWorkspaceModes && allowedWorkspaceModes[0]) || policy.allowedModes[0],
-  });
-
-  return {
-    ...policy,
-    allowedModes: resolvedPolicy.allowedModes,
-  };
-};
-
-const validateCanvasOwnedWorkspace = (
-  surface: CanvasOwnerSurface,
-  props: TemplateEditWorkspaceProps,
-  settingsStore?: CanvasOwnerSettingsStore,
-  allowedWorkspaceModes?: CanvasWorkspaceMode[]
-) => {
-  const policy = resolveCanvasOwnedSurfacePolicy(surface, settingsStore, allowedWorkspaceModes);
   const workspaceMode = resolveCanvasWorkspaceMode(props.workspaceMode);
 
   if (!policy.allowedModes.includes(workspaceMode)) {
@@ -155,10 +137,8 @@ const resolveCanvasOwnedWorkspaceProps = ({
   workspaceMode,
   canvasOwnerSettings,
   canvasOwnerSettingSources,
-  canvasOwnerSettingsStore,
-  allowedWorkspaceModes,
   ...props
-}: CanvasOwnedWorkspaceProps): TemplateEditWorkspaceProps => {
+}: Omit<CanvasOwnedWorkspaceProps, 'canvasAccessRole'>): TemplateEditWorkspaceProps => {
   const normalizedWorkspaceMode = resolveCanvasWorkspaceMode(workspaceMode);
   const normalizedProps: TemplateEditWorkspaceProps = {
     ...props,
@@ -178,7 +158,7 @@ const resolveCanvasOwnedWorkspaceProps = ({
       })
     : normalizedProps;
 
-  if (!validateCanvasOwnedWorkspace(surface, configuredProps, canvasOwnerSettingsStore, allowedWorkspaceModes)) {
+  if (!validateCanvasOwnedWorkspace(surface, configuredProps)) {
     notFound();
   }
 
@@ -191,11 +171,13 @@ export function CanvasOwnedWorkspace({
   canvasOwnerSettingSources: explicitCanvasOwnerSettingSources,
   ...workspaceProps
 }: CanvasOwnedWorkspaceProps) {
-  const ownedWorkspaceProps = workspaceProps;
+  const { canvasAccessRole, ...ownedWorkspaceProps } = workspaceProps;
   const normalizedWorkspaceMode = normalizeCanvasWorkspaceMode(ownedWorkspaceProps.workspaceMode);
+  const effectiveCanvasAccessRole = resolveCanvasAccessRoleForSettings(canvasAccessRole);
   const storedCanvasOwnerSettings = useStoredCanvasOwnerSettings({
     pageId: ownedWorkspaceProps.surface,
     workspaceMode: normalizedWorkspaceMode,
+    accessRole: effectiveCanvasAccessRole,
   });
   const canvasOwnerSettings =
     explicitCanvasOwnerSettings ??
@@ -203,12 +185,10 @@ export function CanvasOwnedWorkspace({
   const canvasOwnerSettingSources =
     explicitCanvasOwnerSettingSources ??
     (applyStoredCanvasOwnerSettings ? storedCanvasOwnerSettings.sources : undefined);
-  const canvasOwnerSettingsStore = applyStoredCanvasOwnerSettings ? storedCanvasOwnerSettings.settingsStore : undefined;
   const resolvedWorkspaceProps = resolveCanvasOwnedWorkspaceProps({
     ...ownedWorkspaceProps,
     canvasOwnerSettings,
     canvasOwnerSettingSources,
-    canvasOwnerSettingsStore,
   });
   const canvasOwnerSettingsSource = canvasOwnerSettingSources
     ? [
@@ -226,6 +206,7 @@ export function CanvasOwnedWorkspace({
       data-canvas-owner-item="canvas-container"
       data-canvas-owner-surface={ownedWorkspaceProps.surface}
       data-canvas-owner-mode={resolvedWorkspaceProps.workspaceMode || 'template'}
+      data-canvas-owner-access-role={effectiveCanvasAccessRole}
       data-canvas-owner-view-mode={resolvedWorkspaceProps.canvasViewMode || 'position'}
       data-canvas-owner-selection-mode={resolvedWorkspaceProps.canvasSelectionMode || 'none'}
       data-canvas-owner-text-interaction-mode={resolvedWorkspaceProps.canvasTextInteractionMode || 'default'}

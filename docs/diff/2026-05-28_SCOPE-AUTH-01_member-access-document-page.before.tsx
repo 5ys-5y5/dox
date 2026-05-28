@@ -11,6 +11,11 @@ import {
 import { buildDocumentAttachmentValueFilesForSave } from '../../../../components/template/workspace/persistence/documentAttachmentClient';
 import type { TemplateEditWorkspaceSaveDraftParams } from '../../../../components/template/workspace/types';
 import { CanvasOwnedWorkspace } from '../../../canvas/ownerPolicy';
+import {
+  mapMemberDocumentAccessRoleToCanvasAccessRole,
+  resolveEffectiveCanvasAccessMode,
+  useStoredCanvasAccessRolePolicies,
+} from '../../../canvas/accessRolePolicy';
 import { Button } from '../../../../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/Card';
 import { MemberAccessVerificationCard } from '../../MemberAccessVerificationCard';
@@ -42,6 +47,18 @@ const formatDateTime = (value: string | null | undefined) => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(parsed);
+};
+
+const getRoleLabel = (role: MemberDocumentAccessDto['accessRole']) => {
+  switch (role) {
+    case 'editor':
+      return '편집 가능';
+    case 'signer':
+      return '서명 가능';
+    case 'viewer':
+    default:
+      return '열람 가능';
+  }
 };
 
 const normalizePhoneNumber = (value: string | null | undefined) => String(value || '').replace(/[^0-9]/g, '').trim();
@@ -125,6 +142,7 @@ export default function MemberAccessDocumentPage() {
   const [accessCode, setAccessCode] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
+  const accessRolePolicyState = useStoredCanvasAccessRolePolicies('member-access');
   const buildMemberDocumentApiPath = React.useCallback(
     (path: string) => buildUrlWithPhoneNumber(path, urlPhoneNumber),
     [urlPhoneNumber]
@@ -243,26 +261,21 @@ export default function MemberAccessDocumentPage() {
     () => (access ? groupDocumentValueFilesByValueKey(access.detail.valueFiles) : {}),
     [access]
   );
-  const editableValueKeys = React.useMemo(
-    () => (access ? access.scopeAccess.editableValueKeys.map(normalizeSignatureKey).filter(Boolean) : []),
-    [access]
-  );
-  const editableValueKeySet = React.useMemo(() => new Set(editableValueKeys), [editableValueKeys]);
-  const canEditDocument = Boolean(access && editableValueKeys.length > 0);
+  const canvasAccessRole = access ? mapMemberDocumentAccessRoleToCanvasAccessRole(access.accessRole) : 'viewer';
+  const canvasAccessRolePolicy = accessRolePolicyState.policies[canvasAccessRole];
+  const canEditDocument =
+    Boolean(access) &&
+    access.accessRole === 'editor' &&
+    resolveEffectiveCanvasAccessMode(canvasAccessRole, canvasAccessRolePolicy) === 'edit';
   const currentMemberPhoneNumber = normalizePhoneNumber(access?.member.phoneNumber);
   const currentMemberName = normalizeSignatureKey(access?.member.displayName);
   const signableSignatureRequests = React.useMemo(() => {
-    if (!access || editableValueKeySet.size <= 0) {
+    if (!access || (access.accessRole !== 'signer' && access.accessRole !== 'editor')) {
       return [];
     }
 
     return access.detail.signatureEvidence.filter((item) => {
       if (!item.requestId || item.status === 'completed' || item.status === 'expired' || item.status === 'failed') {
-        return false;
-      }
-
-      const evidenceKeys = [item.slotKey, item.label, item.signerRoleName].map(normalizeSignatureKey).filter(Boolean);
-      if (!evidenceKeys.some((key) => editableValueKeySet.has(key))) {
         return false;
       }
 
@@ -275,7 +288,7 @@ export default function MemberAccessDocumentPage() {
 
       return !signerName || !currentMemberName || signerName === currentMemberName;
     });
-  }, [access, currentMemberName, currentMemberPhoneNumber, editableValueKeySet]);
+  }, [access, currentMemberName, currentMemberPhoneNumber]);
   const signerEditableValueKeys = React.useMemo(
     () =>
       Array.from(
@@ -288,7 +301,7 @@ export default function MemberAccessDocumentPage() {
       ),
     [signableSignatureRequests]
   );
-  const canSignDocument = Boolean(access && signerEditableValueKeys.length > 0);
+  const canSignDocument = Boolean(access && access.accessRole === 'signer' && signerEditableValueKeys.length > 0);
   const canUseDocumentWorkspace = canEditDocument || canSignDocument;
 
   const initialDraft = React.useMemo<TemplateEditWorkspaceInitialDraft | null>(() => {
@@ -320,7 +333,7 @@ export default function MemberAccessDocumentPage() {
   const handleSaveDraft = React.useCallback(
     async ({ currentHtml, attachmentDrafts }: TemplateEditWorkspaceSaveDraftParams) => {
       if (!access || !canUseDocumentWorkspace) {
-        throw new Error('이 문서는 수정 가능한 scope이 없습니다.');
+        throw new Error('이 문서는 편집 권한이 없습니다.');
       }
 
       const signedDrafts = collectSignedSignatureDrafts(currentHtml);
@@ -454,10 +467,15 @@ export default function MemberAccessDocumentPage() {
         {access ? (
           <>
             <span
-              className="inline-flex h-6 items-center rounded-full border border-sky-200 bg-sky-50 px-2 text-xs font-semibold text-sky-800"
+              className="inline-flex h-6 items-center rounded-full border px-2 text-xs font-semibold"
+              style={{
+                borderColor: canvasAccessRolePolicy.accentColor,
+                backgroundColor: canvasAccessRolePolicy.backgroundColor,
+                color: canvasAccessRolePolicy.textColor,
+              }}
             >
               <ShieldCheck className="mr-1 h-3 w-3" />
-              {editableValueKeys.length > 0 ? `scope ${access.scopeAccess.editableScopeKeys.length}개` : '열람 가능'}
+              {canvasAccessRolePolicy.badgeLabel || getRoleLabel(access.accessRole)}
             </span>
             <div className="text-sm text-slate-600">
               {access.detail.document.title} · 마지막 저장 {formatDateTime(access.detail.latestVersion?.createdAt)}
@@ -490,17 +508,18 @@ export default function MemberAccessDocumentPage() {
       ) : access && initialDraft ? (
         <CanvasOwnedWorkspace
           surface="member-access"
+          canvasAccessRole={canvasAccessRole}
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
           workspaceMode={canUseDocumentWorkspace ? 'document' : 'read'}
           hidePersistencePanel
           headerTitle="구성원 문서 접근"
-          headerDescription="멤버 소속과 scope 배정 범위 안에서 현장 문서를 열람하거나 수정합니다."
+          headerDescription="초대된 권한 범위 안에서 현장 문서를 열람하거나 수정합니다."
           nameFieldLabel="문서 이름:"
           saveButtonLabel={canEditDocument ? '문서 저장' : canSignDocument ? '서명 완료' : '열람 전용'}
           templateNameReadOnly
           saveDisabled={!canUseDocumentWorkspace}
-          editableValueKeys={canUseDocumentWorkspace ? editableValueKeys : undefined}
+          editableValueKeys={canSignDocument && !canEditDocument ? signerEditableValueKeys : undefined}
           documentAttachmentApiPath={
             canEditDocument
               ? buildMemberDocumentApiPath(
@@ -516,7 +535,7 @@ export default function MemberAccessDocumentPage() {
             <CardTitle>문서를 열 수 없습니다.</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-600">
-            접근 소속 또는 문서 본문 상태를 먼저 확인해 주세요.
+            접근 권한 또는 문서 본문 상태를 먼저 확인해 주세요.
           </CardContent>
         </Card>
       )}

@@ -34221,6 +34221,8 @@ export default function TemplateEditWorkspace({
     return {
       'data-canvas-owner-item': `canvas-role-settings-${normalizedItem}`,
       'data-canvas-owner-name': `역할 탭 ${normalizedName}`,
+      'data-documents-owner-item': normalizedItem,
+      'data-documents-owner-name': `역할 탭 documents 선택 패널 호환 ${normalizedName}`,
     };
   }, []);
   const roleAssignmentTargetItems = React.useMemo(() => {

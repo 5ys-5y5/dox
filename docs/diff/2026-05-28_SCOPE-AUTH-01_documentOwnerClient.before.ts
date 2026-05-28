@@ -78,7 +78,6 @@ export const DocumentsOwnerClient = {
     documentId: string;
     phoneNumber: string;
     displayName?: string | null;
-    accessRole: 'editor' | 'viewer' | 'signer';
   }) {
     return readSuccessData<DocumentMemberInviteResult>(
       await fetch('/api/member-access/document-members', {

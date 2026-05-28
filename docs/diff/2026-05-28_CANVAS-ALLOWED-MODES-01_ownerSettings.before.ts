@@ -68,15 +68,10 @@ export type CanvasOwnerSettings = {
 export type CanvasOwnerSettingKey = keyof CanvasOwnerSettings;
 export type CanvasOwnerSettingSource = 'default' | 'mode' | 'page';
 export type CanvasOwnerSettingsOverrides = Partial<CanvasOwnerSettings>;
-export type CanvasOwnerPagePolicyOverrides = {
-  allowedModes?: CanvasWorkspaceMode[];
-  defaultMode?: CanvasWorkspaceMode;
-};
 export type CanvasOwnerSettingsStore = {
-  version: 5;
+  version: 4;
   modeSettings: Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>;
   pageSettings: Record<string, Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>>;
-  pagePolicies: Record<string, CanvasOwnerPagePolicyOverrides>;
 };
 export type CanvasOwnerSettingsContext = {
   pageId?: string;
@@ -138,10 +133,8 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
 export const CANVAS_OWNER_SETTINGS_STORAGE_KEY = 'mejai.canvas.ownerSettings.v1';
 const CANVAS_OWNER_SETTINGS_EVENT_NAME = 'mejai:canvas-owner-settings-changed';
 export const canvasOwnerSettingKeys = Object.keys(defaultCanvasOwnerSettings) as CanvasOwnerSettingKey[];
-export const canvasWorkspaceModes: CanvasWorkspaceMode[] = ['template', 'document', 'read'];
+const canvasWorkspaceModes: CanvasWorkspaceMode[] = ['template', 'document', 'read'];
 const hasOwn = (value: object, key: PropertyKey) => Object.prototype.hasOwnProperty.call(value, key);
-const isCanvasWorkspaceMode = (value: unknown): value is CanvasWorkspaceMode =>
-  canvasWorkspaceModes.includes(value as CanvasWorkspaceMode);
 const normalizeCanvasCssSizeSetting = (value: unknown, fallback = '') =>
   typeof value === 'string' ? value.trim().slice(0, 80) : fallback;
 const normalizeCanvasOpacitySetting = (value: unknown, fallback = 0.5) => {
@@ -171,23 +164,6 @@ export const normalizeCanvasWorkspaceMode = (value: string | null | undefined): 
   }
 
   return 'template';
-};
-
-export const normalizeCanvasAllowedWorkspaceModes = (
-  value: unknown,
-  fallback: CanvasWorkspaceMode[] = canvasWorkspaceModes
-): CanvasWorkspaceMode[] => {
-  const fallbackModes = fallback.filter(isCanvasWorkspaceMode);
-  const source = Array.isArray(value) ? value : fallbackModes;
-  const normalizedModes = source.reduce<CanvasWorkspaceMode[]>((accumulator, item) => {
-    if (isCanvasWorkspaceMode(item) && !accumulator.includes(item)) {
-      accumulator.push(item);
-    }
-
-    return accumulator;
-  }, []);
-
-  return normalizedModes.length > 0 ? normalizedModes : fallbackModes.length > 0 ? fallbackModes : ['template'];
 };
 
 export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSettings => {
@@ -262,49 +238,10 @@ const resolveDefaultCanvasReadModeInteractionMode = (
 };
 
 export const createEmptyCanvasOwnerSettingsStore = (): CanvasOwnerSettingsStore => ({
-  version: 5,
+  version: 4,
   modeSettings: {},
   pageSettings: {},
-  pagePolicies: {},
 });
-
-export const normalizeCanvasOwnerPagePolicyOverrides = (value: unknown): CanvasOwnerPagePolicyOverrides => {
-  const candidate =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Partial<CanvasOwnerPagePolicyOverrides>)
-      : {};
-  const normalizedPolicy: CanvasOwnerPagePolicyOverrides = {};
-
-  if (hasOwn(candidate, 'allowedModes')) {
-    const candidateAllowedModes = Array.isArray(candidate.allowedModes)
-      ? candidate.allowedModes.reduce<CanvasWorkspaceMode[]>((accumulator, item) => {
-          if (isCanvasWorkspaceMode(item) && !accumulator.includes(item)) {
-            accumulator.push(item);
-          }
-
-          return accumulator;
-        }, [])
-      : [];
-
-    if (candidateAllowedModes.length > 0) {
-      normalizedPolicy.allowedModes = candidateAllowedModes;
-    }
-  }
-
-  if (hasOwn(candidate, 'defaultMode')) {
-    normalizedPolicy.defaultMode = normalizeCanvasWorkspaceMode(candidate.defaultMode);
-  }
-
-  if (
-    normalizedPolicy.allowedModes &&
-    normalizedPolicy.defaultMode &&
-    !normalizedPolicy.allowedModes.includes(normalizedPolicy.defaultMode)
-  ) {
-    normalizedPolicy.defaultMode = normalizedPolicy.allowedModes[0];
-  }
-
-  return normalizedPolicy;
-};
 
 export const normalizeCanvasOwnerSettingsOverrides = (value: unknown): CanvasOwnerSettingsOverrides => {
   const candidate =
@@ -344,11 +281,10 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
       ? (value as {
           modeSettings?: unknown;
           pageSettings?: unknown;
-          pagePolicies?: unknown;
         })
       : null;
 
-  if (!candidate || (!candidate.modeSettings && !candidate.pageSettings && !candidate.pagePolicies)) {
+  if (!candidate || (!candidate.modeSettings && !candidate.pageSettings)) {
     const legacyOverrides = normalizeCanvasOwnerSettingsOverrides(value);
 
     if (Object.keys(legacyOverrides).length === 0) {
@@ -356,14 +292,13 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     }
 
     return {
-      version: 5,
+      version: 4,
       modeSettings: {
         template: { ...legacyOverrides },
         document: { ...legacyOverrides },
         read: { ...legacyOverrides },
       },
       pageSettings: {},
-      pagePolicies: {},
     };
   }
 
@@ -375,13 +310,8 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     candidate.pageSettings && typeof candidate.pageSettings === 'object' && !Array.isArray(candidate.pageSettings)
       ? (candidate.pageSettings as Record<string, unknown>)
       : {};
-  const pagePoliciesCandidate =
-    candidate.pagePolicies && typeof candidate.pagePolicies === 'object' && !Array.isArray(candidate.pagePolicies)
-      ? (candidate.pagePolicies as Record<string, unknown>)
-      : {};
   const modeSettings: CanvasOwnerSettingsStore['modeSettings'] = {};
   const pageSettings: CanvasOwnerSettingsStore['pageSettings'] = {};
-  const pagePolicies: CanvasOwnerSettingsStore['pagePolicies'] = {};
 
   canvasWorkspaceModes.forEach((mode) => {
     const overrides = normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate[mode]);
@@ -412,25 +342,10 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     }
   });
 
-  Object.entries(pagePoliciesCandidate).forEach(([pageId, rawPagePolicy]) => {
-    const normalizedPageId = String(pageId || '').trim();
-
-    if (!normalizedPageId) {
-      return;
-    }
-
-    const policyOverrides = normalizeCanvasOwnerPagePolicyOverrides(rawPagePolicy);
-
-    if (Object.keys(policyOverrides).length > 0) {
-      pagePolicies[normalizedPageId] = policyOverrides;
-    }
-  });
-
   return {
-    version: 5,
+    version: 4,
     modeSettings,
     pageSettings,
-    pagePolicies,
   };
 };
 
@@ -479,83 +394,6 @@ export const resolveCanvasOwnerSettings = (
     modeOverrides,
     pageOverrides,
     workspaceMode,
-  };
-};
-
-export const resolveCanvasOwnerPagePolicy = (
-  store: CanvasOwnerSettingsStore,
-  {
-    pageId,
-    defaultAllowedModes,
-    defaultMode,
-  }: {
-    pageId?: string;
-    defaultAllowedModes: CanvasWorkspaceMode[];
-    defaultMode: CanvasWorkspaceMode;
-  }
-) => {
-  const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
-  const fallbackAllowedModes = normalizeCanvasAllowedWorkspaceModes(defaultAllowedModes, canvasWorkspaceModes);
-  const fallbackDefaultMode = fallbackAllowedModes.includes(defaultMode) ? defaultMode : fallbackAllowedModes[0];
-  const normalizedPageId = String(pageId || '').trim();
-  const pagePolicyOverrides = normalizedPageId ? normalizedStore.pagePolicies[normalizedPageId] || {} : {};
-  const allowedModes = pagePolicyOverrides.allowedModes
-    ? normalizeCanvasAllowedWorkspaceModes(pagePolicyOverrides.allowedModes, fallbackAllowedModes)
-    : fallbackAllowedModes;
-  const defaultModeOverride = pagePolicyOverrides.defaultMode;
-  const resolvedDefaultMode =
-    defaultModeOverride && allowedModes.includes(defaultModeOverride)
-      ? defaultModeOverride
-      : allowedModes.includes(fallbackDefaultMode)
-        ? fallbackDefaultMode
-        : allowedModes[0];
-
-  return {
-    allowedModes,
-    defaultMode: resolvedDefaultMode,
-    policyOverrides: pagePolicyOverrides,
-  };
-};
-
-export const updateCanvasOwnerPagePolicyOverride = <K extends keyof CanvasOwnerPagePolicyOverrides>(
-  store: CanvasOwnerSettingsStore,
-  {
-    pageId,
-    key,
-    value,
-  }: {
-    pageId: string;
-    key: K;
-    value: NonNullable<CanvasOwnerPagePolicyOverrides[K]>;
-  }
-): CanvasOwnerSettingsStore => {
-  const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
-  const normalizedPageId = String(pageId || '').trim();
-
-  if (!normalizedPageId) {
-    return normalizedStore;
-  }
-
-  const currentPolicy = normalizedStore.pagePolicies[normalizedPageId] || {};
-  const nextPolicy = normalizeCanvasOwnerPagePolicyOverrides({
-    ...currentPolicy,
-    [key]: value,
-  });
-
-  if (
-    nextPolicy.allowedModes &&
-    nextPolicy.defaultMode &&
-    !nextPolicy.allowedModes.includes(nextPolicy.defaultMode)
-  ) {
-    nextPolicy.defaultMode = nextPolicy.allowedModes[0];
-  }
-
-  return {
-    ...normalizedStore,
-    pagePolicies: {
-      ...normalizedStore.pagePolicies,
-      [normalizedPageId]: nextPolicy,
-    },
   };
 };
 
@@ -663,14 +501,13 @@ export const saveCanvasOwnerSettingsStoreToStorage = (settingsStore: CanvasOwner
 export const saveCanvasOwnerSettingsToStorage = (settings: CanvasOwnerSettings) => {
   const overrides = normalizeCanvasOwnerSettingsOverrides(settings);
   const nextSettingsStore: CanvasOwnerSettingsStore = {
-    version: 5,
+    version: 4,
     modeSettings: {
       template: { ...overrides },
       document: { ...overrides },
       read: { ...overrides },
     },
     pageSettings: {},
-    pagePolicies: {},
   };
 
   return saveCanvasOwnerSettingsStoreToStorage(nextSettingsStore);

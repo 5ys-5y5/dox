@@ -21,6 +21,7 @@ import {
   materializeTemplateCanvasHtmlForPersistence,
   type TemplateEditWorkspaceInitialDraft,
 } from '../../components/template/TemplateEditWorkspace';
+import { DocumentsOwnerWorkspace } from '../documents/_owner';
 import { CanvasOwnedWorkspace } from '../canvas/ownerPolicy';
 import { buildDocumentAttachmentValueFilesForSave } from '../../components/template/workspace/persistence/documentAttachmentClient';
 import {
@@ -40,6 +41,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Input } from '../../components/ui/Input';
 import { MejaiScrollTable, type MejaiScrollTableColumn, type MejaiScrollTableRow } from '../../components/ui/MejaiScrollTable';
 import { MultiEntityPicker } from '../../components/ui/MultiEntityPicker';
+import { OwnerSettingsTabList } from '../../components/ui/OwnerSettingsLayout';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import {
   collapseDocumentCanvasWhitespace as collapseWhitespace,
@@ -63,6 +65,7 @@ import type {
   MemberAccessSessionDto,
   MemberDispatchResultDto,
   MemberVerificationStatus,
+  SiteMemberAccessRole,
   SiteMemberInviteResult,
   SiteMemberRecordDto,
 } from '../../lib/memberAccessDtos';
@@ -86,6 +89,7 @@ type DocumentDetailDiagnosticItem = {
   source: string;
 };
 type ProjectListStatusVariant = 'default' | 'green' | 'amber' | 'slate' | 'red' | 'outline';
+type ProjectDocumentOutputTab = 'edit' | 'todo';
 type ProjectListAction = {
   title: string;
   ariaLabel: string;
@@ -192,6 +196,7 @@ type PendingChecklistRegistration =
       tagName: string;
       linkedPosition?: ProjectChecklistLinkedPosition | null;
     };
+type ManagedSiteMemberAccessRole = 'manager' | 'participant';
 type ProjectDocumentPickerOption = {
   id: string;
   label: string;
@@ -307,6 +312,14 @@ const PHOTO_REQUIREMENT_STATUS_LABELS: Record<DocumentDetailResult['photoRequire
   missing: '누락',
 };
 
+const SITE_MEMBER_ROLE_LABELS: Record<SiteMemberAccessRole, string> = {
+  owner: '관리자',
+  manager: '관리자',
+  participant: '참여자',
+  editor: '참여자',
+  viewer: '참여자',
+};
+
 const DOCUMENT_CONNECTED_INFO_LABELS = {
   photo_evidence_status: '사진 증빙 상태',
   photo_requirement_count: '사진 요구 수',
@@ -316,6 +329,24 @@ const DOCUMENT_CONNECTED_INFO_LABELS = {
   attachment_file_count: '첨부 파일 수',
   attachment_file_names: '첨부 파일 이름',
 } as const;
+
+const SITE_MEMBER_ROLE_OPTIONS: Array<{ value: ManagedSiteMemberAccessRole; label: string }> = [
+  { value: 'manager', label: '관리자' },
+  { value: 'participant', label: '참여자' },
+];
+
+const getManagedSiteMemberRole = (role: SiteMemberAccessRole): ManagedSiteMemberAccessRole => {
+  if (role === 'owner' || role === 'manager') {
+    return 'manager';
+  }
+
+  return 'participant';
+};
+
+const hasFullDocumentAccessBySiteRole = (role: SiteMemberAccessRole | ManagedSiteMemberAccessRole) => {
+  const managedRole = getManagedSiteMemberRole(role);
+  return managedRole === 'manager';
+};
 
 const buildTemplateScopeSaveScopesFromContext = (
   context: TemplateScopeContextDto,
@@ -2141,6 +2172,8 @@ export default function ProjectPage() {
     variant: 'info' | 'error' | 'success';
     message: string;
   } | null>(null);
+  const [activeProjectDocumentOutputTab, setActiveProjectDocumentOutputTab] =
+    React.useState<ProjectDocumentOutputTab>('edit');
   const [photoRequirementLinksByKey, setPhotoRequirementLinksByKey] = React.useState<
     Record<string, ProjectChecklistLinkedPosition>
   >({});
@@ -2160,11 +2193,13 @@ export default function ProjectPage() {
   const [showAddSiteMemberForm, setShowAddSiteMemberForm] = React.useState(false);
   const [siteMemberPhoneNumber, setSiteMemberPhoneNumber] = React.useState('');
   const [siteMemberDisplayName, setSiteMemberDisplayName] = React.useState('');
+  const [siteMemberRole, setSiteMemberRole] = React.useState<ManagedSiteMemberAccessRole>('participant');
   const [siteMemberDocumentIds, setSiteMemberDocumentIds] = React.useState<string[]>([]);
   const [siteMemberDocumentScopeKeys, setSiteMemberDocumentScopeKeys] = React.useState<string[]>([]);
   const [expandedSiteMemberId, setExpandedSiteMemberId] = React.useState('');
   const [invitingSiteMember, setInvitingSiteMember] = React.useState(false);
   const [deletingSiteMemberId, setDeletingSiteMemberId] = React.useState('');
+  const [updatingSiteMemberId, setUpdatingSiteMemberId] = React.useState('');
   const [savingMemberDocumentAccessKey, setSavingMemberDocumentAccessKey] = React.useState('');
 
   React.useEffect(
@@ -2883,7 +2918,11 @@ export default function ProjectPage() {
     () =>
       Boolean(
         selectedSignatureRequestSiteId &&
-          memberAccessSession?.accessibleSites.some((site) => site.siteId === selectedSignatureRequestSiteId)
+          memberAccessSession?.accessibleSites.some(
+            (site) =>
+              site.siteId === selectedSignatureRequestSiteId &&
+              getManagedSiteMemberRole(site.accessRole) === 'manager'
+          )
       ),
     [memberAccessSession?.accessibleSites, selectedSignatureRequestSiteId]
   );
@@ -3740,7 +3779,7 @@ export default function ProjectPage() {
     const normalizedPhoneDigits = phoneNumber.replace(/[^0-9]/g, '');
 
     setCreatingSignatureRequest(true);
-    setSignatureRequestFeedback({ variant: 'info', message: '서명 대상 구성원 소속을 등록하고 요청을 만드는 중입니다.' });
+    setSignatureRequestFeedback({ variant: 'info', message: '서명 권한을 등록하고 요청을 만드는 중입니다.' });
 
     try {
       const memberResponse = await fetch('/api/member-access/document-members', {
@@ -3750,12 +3789,13 @@ export default function ProjectPage() {
           documentId: targetDocumentId,
           phoneNumber,
           displayName: signerName,
+          accessRole: 'signer',
         }),
       });
       const memberResult = await memberResponse.json();
 
       if (!memberResponse.ok || !memberResult?.success) {
-        throw new Error(memberResult?.message || '서명 대상 구성원 소속 등록에 실패했습니다.');
+        throw new Error(memberResult?.message || '서명 권한 등록에 실패했습니다.');
       }
 
       const signResponse = await fetch('/api/sign', {
@@ -4238,6 +4278,7 @@ export default function ProjectPage() {
     setShowAddSiteMemberForm(false);
     setSiteMemberPhoneNumber('');
     setSiteMemberDisplayName('');
+    setSiteMemberRole('participant');
     setSiteMemberDocumentIds([]);
     setSiteMemberDocumentScopeKeys([]);
     setExpandedSiteMemberId('');
@@ -4644,7 +4685,7 @@ export default function ProjectPage() {
     const normalizedSiteId = selectedSiteId.trim();
     const phoneNumber = siteMemberPhoneNumber.trim();
     const displayName = siteMemberDisplayName.trim() || null;
-    const documentScopeKeysToInvite = siteMemberDocumentScopeKeys;
+    const documentScopeKeysToInvite = siteMemberRole === 'participant' ? siteMemberDocumentScopeKeys : [];
 
     if (!normalizedSiteId) {
       setMessage('구성원을 초대할 현장을 먼저 선택해 주세요.');
@@ -4667,6 +4708,7 @@ export default function ProjectPage() {
           siteId: normalizedSiteId,
           phoneNumber,
           displayName,
+          accessRole: siteMemberRole,
         }),
       });
       const result = await response.json();
@@ -4735,13 +4777,14 @@ export default function ProjectPage() {
       setShowAddSiteMemberForm(false);
       setSiteMemberPhoneNumber('');
       setSiteMemberDisplayName('');
+      setSiteMemberRole('participant');
       setSiteMemberDocumentIds([]);
       setSiteMemberDocumentScopeKeys([]);
 
       const documentCountMessage =
         documentScopeKeysToInvite.length > 0 ? ` 문서 scope ${documentScopeKeysToInvite.length}건도 함께 등록했습니다.` : '';
       setMessage(
-        `${formatPhoneNumber(invitedMember.membership.member.phoneNumber)} 연락처에 현장 소속을 등록했습니다.${documentCountMessage} ${formatMemberDispatchMessage(invitedMember.dispatch)}`
+        `${formatPhoneNumber(invitedMember.membership.member.phoneNumber)} 연락처에 현장 접근 권한을 등록했습니다.${documentCountMessage} ${formatMemberDispatchMessage(invitedMember.dispatch)}`
       );
     } catch (error) {
       setMessage(getMemberAccessErrorMessage(error, '현장 구성원 초대에 실패했습니다.'));
@@ -4754,10 +4797,51 @@ export default function ProjectPage() {
     siteMemberDisplayName,
     siteMemberDocumentScopeKeys,
     siteMemberPhoneNumber,
+    siteMemberRole,
     documents,
     loadSiteDocumentMembers,
     templateScopeContextsByTemplateId,
   ]);
+
+  const handleUpdateSiteMemberRole = React.useCallback(
+    async (membership: SiteMemberRecordDto, nextRole: ManagedSiteMemberAccessRole) => {
+      const normalizedSiteId = selectedSiteId.trim();
+      const currentRole = getManagedSiteMemberRole(membership.accessRole);
+
+      if (!normalizedSiteId || nextRole === currentRole || updatingSiteMemberId) {
+        return;
+      }
+
+      setUpdatingSiteMemberId(membership.membershipId);
+      setMessage(null);
+
+      try {
+        const response = await fetch('/api/member-access/site-members', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            siteId: normalizedSiteId,
+            phoneNumber: membership.member.phoneNumber,
+            displayName: membership.member.displayName,
+            accessRole: nextRole,
+          }),
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.message || '현장 권한 변경에 실패했습니다.');
+        }
+
+        await loadSiteMembers(normalizedSiteId);
+        setMessage(`"${membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber)}"의 현장 권한을 변경했습니다.`);
+      } catch (error) {
+        setMessage(getMemberAccessErrorMessage(error, '현장 권한 변경에 실패했습니다.'));
+      } finally {
+        setUpdatingSiteMemberId('');
+      }
+    },
+    [loadSiteMembers, selectedSiteId, updatingSiteMemberId]
+  );
 
   const handleSaveMemberDocumentScopeAccess = React.useCallback(
     async (
@@ -4767,6 +4851,11 @@ export default function ProjectPage() {
       scopeKey: string,
       operationKey: string
     ) => {
+      if (hasFullDocumentAccessBySiteRole(membership.accessRole)) {
+        setMessage('관리자는 모든 scope 권한을 가지고 있습니다.');
+        return;
+      }
+
       const normalizedSiteId = selectedSiteId.trim();
       const normalizedTemplateId = templateId.trim();
       const normalizedScopeKey = scopeKey.trim();
@@ -4883,7 +4972,7 @@ export default function ProjectPage() {
         return;
       }
 
-      const confirmed = window.confirm(`"${memberLabel}"의 현장 소속을 삭제하시겠습니까?`);
+      const confirmed = window.confirm(`"${memberLabel}"의 현장 접근 권한을 삭제하시겠습니까?`);
 
       if (!confirmed) {
         return;
@@ -4904,7 +4993,7 @@ export default function ProjectPage() {
             const result = await response.json();
 
             if (!response.ok || !result?.success) {
-              throw new Error(result?.message || '구성원의 문서 소속 삭제에 실패했습니다.');
+              throw new Error(result?.message || '구성원의 문서 권한 삭제에 실패했습니다.');
             }
           })
         );
@@ -4916,16 +5005,16 @@ export default function ProjectPage() {
         const result = await response.json();
 
         if (!response.ok || !result?.success) {
-          throw new Error(result?.message || '현장 구성원 소속 삭제에 실패했습니다.');
+          throw new Error(result?.message || '현장 구성원 권한 삭제에 실패했습니다.');
         }
 
         if (selectedSiteId) {
           await reloadSelectedSiteMembers();
         }
 
-        setMessage(`"${memberLabel}"의 현장 소속을 삭제했습니다.`);
+        setMessage(`"${memberLabel}"의 현장 접근 권한을 삭제했습니다.`);
       } catch (error) {
-        setMessage(getMemberAccessErrorMessage(error, '현장 구성원 소속 삭제에 실패했습니다.'));
+        setMessage(getMemberAccessErrorMessage(error, '현장 구성원 권한 삭제에 실패했습니다.'));
       } finally {
         setDeletingSiteMemberId('');
       }
@@ -4943,6 +5032,7 @@ export default function ProjectPage() {
           (membership) => membership.documentId === item.document.id
         );
         const documentLinkPhoneNumber =
+          directDocumentMembers.find((membership) => membership.accessRole === 'signer')?.member.phoneNumber ||
           directDocumentMembers[0]?.member.phoneNumber ||
           null;
         const isStatusExpanded = expandedDocumentStatusDocumentId === item.document.id;
@@ -5175,8 +5265,12 @@ export default function ProjectPage() {
         const memberLabel = membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber);
         const memberScopeDocumentCount = memberScopeDocumentCountByMemberId[membership.member.id] || 0;
         const isDeletingMember = deletingSiteMemberId === membership.membershipId;
+        const isUpdatingMember = updatingSiteMemberId === membership.membershipId;
+        const hasFullDocumentAccess = hasFullDocumentAccessBySiteRole(membership.accessRole);
         const expanded = expandedSiteMemberId === membership.membershipId;
-        const scopeLabel = memberScopeDocumentCount > 0
+        const scopeLabel = hasFullDocumentAccess
+          ? '현장 전체 접근'
+          : memberScopeDocumentCount > 0
             ? `scope 접근 · ${memberScopeDocumentCount}개 문서`
             : 'scope 접근 · 지정 없음';
 
@@ -5187,31 +5281,33 @@ export default function ProjectPage() {
 	          statusVariant: getMemberVerificationStatusVariant(membership.member.verificationStatus),
 	          summary: scopeLabel,
 	          contact: formatPhoneNumber(membership.member.phoneNumber),
-	          roleLabel: '현장 소속',
+	          roleLabel: SITE_MEMBER_ROLE_LABELS[membership.accessRole],
 	          scopeLabel,
           scopeContent: (
             <div className="flex min-w-0 items-center gap-2">
               <Badge
-                variant={memberScopeDocumentCount > 0 ? 'blue' : 'slate'}
+                variant={hasFullDocumentAccess ? 'green' : 'slate'}
                 className="shrink-0 px-2 py-0 text-[10px] leading-5"
               >
-                scope
+                {hasFullDocumentAccess ? '현장 전체' : '문서별'}
               </Badge>
               <span className="min-w-0 truncate text-[10px] text-slate-500">
-                {memberScopeDocumentCount > 0
+                {hasFullDocumentAccess
+                  ? '모든 문서 접근 가능'
+                  : memberScopeDocumentCount > 0
                     ? `${memberScopeDocumentCount}개 문서 scope`
                     : '지정 scope 없음'}
               </span>
             </div>
           ),
 	          lastVerifiedAt: membership.member.lastVerifiedAt ? formatDateTime(membership.member.lastVerifiedAt) : '인증 이력 없음',
-	          source: '현장 소속',
+	          source: '현장 접근 권한',
 	          selected: expanded,
           detailAction: {
             title: expanded ? '구성원 접근 상세 숨기기' : '구성원 접근 상세 보기',
             ariaLabel: `${memberLabel} 구성원 접근 상세 ${expanded ? '숨기기' : '보기'}`,
             icon: expanded ? <Minimize2 className="h-4 w-4" /> : <Info className="h-4 w-4" />,
-            disabled: isDeletingMember,
+            disabled: isDeletingMember || isUpdatingMember,
             onClick: () => {
               setExpandedSiteMemberId((current) =>
                 current === membership.membershipId ? '' : membership.membershipId
@@ -5219,8 +5315,8 @@ export default function ProjectPage() {
             },
           },
 	          action: {
-	            title: '현장 소속 삭제',
-	            ariaLabel: `${memberLabel} 현장 소속 삭제`,
+	            title: '현장 접근 권한 삭제',
+	            ariaLabel: `${memberLabel} 현장 접근 권한 삭제`,
 	            icon: <Trash2 className="h-4 w-4" />,
 	            disabled: isDeletingMember,
 	            onClick: () => {
@@ -5235,6 +5331,7 @@ export default function ProjectPage() {
 	      handleDeleteSiteMember,
 	      memberScopeDocumentCountByMemberId,
 	      siteMembers,
+	      updatingSiteMemberId,
 	    ]
 	  );
 
@@ -5245,6 +5342,16 @@ export default function ProjectPage() {
   const expandedSiteMemberLabel = expandedSiteMember
     ? expandedSiteMember.member.displayName?.trim() || formatPhoneNumber(expandedSiteMember.member.phoneNumber)
     : '';
+  const expandedSiteMemberManagedRole = expandedSiteMember
+    ? getManagedSiteMemberRole(expandedSiteMember.accessRole)
+    : 'participant';
+  const expandedSiteMemberHasFullDocumentAccess = expandedSiteMember
+    ? hasFullDocumentAccessBySiteRole(expandedSiteMember.accessRole)
+    : false;
+  const expandedSiteMemberCanManageDocuments = expandedSiteMember ? !expandedSiteMemberHasFullDocumentAccess : false;
+  const expandedSiteMemberIsUpdating = expandedSiteMember
+    ? updatingSiteMemberId === expandedSiteMember.membershipId
+    : false;
   const expandedSiteMemberIsDeleting = expandedSiteMember
     ? deletingSiteMemberId === expandedSiteMember.membershipId
     : false;
@@ -5694,6 +5801,13 @@ export default function ProjectPage() {
 
   const selectedOwnerDocumentId =
     selectedDocumentListItem?.document.id || selectedDocumentDetail?.document.id || selectedDocumentId.trim();
+  const selectedOwnerSiteId =
+    selectedDocumentListItem?.document.siteId || selectedDocumentDetail?.document.siteId || selectedSiteId;
+  const projectDocumentOutputTabs: Array<{ value: ProjectDocumentOutputTab; label: string }> = [
+    { value: 'edit', label: '편집' },
+    { value: 'todo', label: '할 일' },
+  ];
+
   const renderProjectDocumentCreateSiteNotice = () => (
     <Card className="border-slate-200" {...projectOwnerItem('document-output-create-site-notice-panel', '문서 출력 새 현장 입력 중 안내 패널')}>
       <CardContent className="p-6" {...projectOwnerItem('document-output-create-site-notice-content', '문서 출력 새 현장 입력 중 안내 내용')}>
@@ -5711,7 +5825,7 @@ export default function ProjectPage() {
       <CardContent className="p-6" {...projectOwnerItem('document-output-no-selection-notice-content', '문서 출력 문서 미선택 안내 내용')}>
         <EmptyState
           title="작업할 현장 문서를 먼저 고르세요."
-          description="위의 현장 문서에서 문서를 선택하면 이 페이지 하단에서 바로 편집할 수 있습니다."
+          description="위의 현장 문서에서 문서를 선택하면 이 페이지 하단에서 바로 편집하거나 할 일을 부여할 수 있습니다."
           ownerItemKey="document-output-no-selection-notice-empty-state"
         />
       </CardContent>
@@ -5775,10 +5889,57 @@ export default function ProjectPage() {
     return renderProjectDocumentNoSelectionNotice();
   };
 
+  const renderProjectDocumentTodoPanel = () => {
+    if (showCreateSiteForm) {
+      return renderProjectDocumentCreateSiteNotice();
+    }
+
+    if (selectedOwnerDocumentId) {
+      return (
+        <div {...projectOwnerItem('document-todo-documents-owner-workspace', '문서 할 일 문서 기능 워크스페이스')}>
+          <DocumentsOwnerWorkspace
+            key={`project-current-work:${selectedOwnerDocumentId}`}
+            initialSiteId={selectedOwnerSiteId}
+            lockedDocumentId={selectedOwnerDocumentId}
+            hideDocumentPicker
+            hidePageHeader
+            embedded
+            surface="project"
+            renderMode="current-work-panel"
+          />
+        </div>
+      );
+    }
+
+    return renderProjectDocumentNoSelectionNotice();
+  };
+
   const renderProjectDocumentOutputTabs = () => (
     <div className="space-y-4" {...projectOwnerItem('document-output-tabs', '현장 문서 출력 탭 영역')}>
-      <div {...projectOwnerItem('document-edit-output-panel', '현장 문서 편집 출력 패널')}>
-        {renderProjectDocumentEditPanel()}
+      <div {...projectOwnerItem('document-output-tab-list', '현장 문서 작업 탭 리스트')}>
+        <OwnerSettingsTabList
+          value={activeProjectDocumentOutputTab}
+          ariaLabel="현장 문서 작업 탭"
+          options={projectDocumentOutputTabs}
+          onChange={(value) => setActiveProjectDocumentOutputTab(value as ProjectDocumentOutputTab)}
+          className="max-w-xs"
+        />
+      </div>
+
+      <div
+        role="tabpanel"
+        {...projectOwnerItem(
+          activeProjectDocumentOutputTab === 'edit'
+            ? 'document-edit-output-panel'
+            : 'document-todo-output-panel',
+          activeProjectDocumentOutputTab === 'edit'
+            ? '현장 문서 편집 출력 패널'
+            : '현장 문서 할 일 출력 패널'
+        )}
+      >
+        {activeProjectDocumentOutputTab === 'edit'
+          ? renderProjectDocumentEditPanel()
+          : renderProjectDocumentTodoPanel()}
       </div>
     </div>
   );
@@ -5790,7 +5951,7 @@ export default function ProjectPage() {
           <Badge variant="slate" {...projectOwnerItem('project-page-feature-badge', '현장 관리 페이지 기능 배지')}>현장 통합 관리</Badge>
           <h1 className="text-3xl font-semibold text-slate-950" {...projectOwnerItem('project-page-title', '현장 관리 페이지 제목')}>현장 관리</h1>
           <p className="max-w-4xl text-sm text-slate-600" {...projectOwnerItem('project-page-description', '현장 관리 페이지 설명')}>
-            현장을 만들고 필요한 문서를 준비한 뒤, 기록 값과 첨부 파일, 사진 증빙, 구성원 소속과 scope를 한곳에서 관리합니다.
+            현장을 만들고 필요한 문서를 준비한 뒤, 기록 값과 첨부 파일, 사진 증빙, 구성원 접근 권한을 한곳에서 관리합니다.
           </p>
         </div>
         <div className="flex flex-wrap gap-2" {...projectOwnerItem('project-page-actions', '현장 관리 페이지 실행 버튼 영역')}>
@@ -6278,14 +6439,14 @@ export default function ProjectPage() {
 	                  <div className="space-y-3 border-t border-slate-200 pt-6" {...projectOwnerItem('site-member-section', '구성원 섹션')}>
 	                    <div className="space-y-1" {...projectOwnerItem('site-member-section-heading-group', '구성원 섹션 제목 묶음')}>
 	                      <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-member-section-title', '구성원 섹션 제목')}>구성원</div>
-	                      <p className="text-xs text-slate-500" {...projectOwnerItem('site-member-section-description', '구성원 섹션 설명')}>현장 소속과 문서별 scope를 구성원별로 관리합니다.</p>
+	                      <p className="text-xs text-slate-500" {...projectOwnerItem('site-member-section-description', '구성원 섹션 설명')}>현장 접근 권한과 문서별 scope를 구성원별로 관리합니다.</p>
 	                    </div>
 	                    {selectedSite ? (
 	                      <div className="space-y-5" {...projectOwnerItem('site-member-content', '구성원 내용')}>
-	                        <div className="space-y-2" {...projectOwnerItem('site-member-access-section', '현장 소속 섹션')}>
-	                          <div className="flex items-center justify-between gap-3" {...projectOwnerItem('site-member-access-header', '현장 소속 머리글')}>
-	                            <div className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-member-access-title', '현장 소속 제목')}>현장 소속</div>
-	                            <div className="flex items-center gap-2" {...projectOwnerItem('site-member-access-actions', '현장 소속 실행 영역')}>
+	                        <div className="space-y-2" {...projectOwnerItem('site-member-access-section', '현장 접근 권한 섹션')}>
+	                          <div className="flex items-center justify-between gap-3" {...projectOwnerItem('site-member-access-header', '현장 접근 권한 머리글')}>
+	                            <div className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-member-access-title', '현장 접근 권한 제목')}>현장 접근 권한</div>
+	                            <div className="flex items-center gap-2" {...projectOwnerItem('site-member-access-actions', '현장 접근 권한 실행 영역')}>
 	                              <span className="text-xs text-slate-500" {...projectOwnerItem('site-member-count', '현장 구성원 수')}>
 	                                {loadingSiteMembers || loadingSiteDocumentMembers
 	                                  ? '불러오는 중...'
@@ -6327,7 +6488,31 @@ export default function ProjectPage() {
                                     {...projectOwnerItem('site-member-add-phone-input', '현장 구성원 휴대폰 입력')}
                                   />
                                 </div>
+	                                <div className="space-y-2" {...projectOwnerItem('site-member-add-role-field', '현장 구성원 현장 권한 선택 항목')}>
+	                                  <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-role-label', '현장 구성원 현장 권한 라벨')}>현장 권한</label>
+		                                  <select
+		                                    value={siteMemberRole}
+		                                    onChange={(event) => {
+		                                      const nextRole = event.target.value as ManagedSiteMemberAccessRole;
+		                                      setSiteMemberRole(nextRole);
+
+		                                      if (nextRole !== 'participant') {
+		                                        setSiteMemberDocumentIds([]);
+		                                        setSiteMemberDocumentScopeKeys([]);
+		                                      }
+		                                    }}
+		                                    className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+		                                    {...projectOwnerItem('site-member-add-role-select', '현장 구성원 현장 권한 선택')}
+		                                  >
+	                                    {SITE_MEMBER_ROLE_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+	                                  </select>
+	                                </div>
 	                              </div>
+		                              {siteMemberRole === 'participant' ? (
 		                                <div className="space-y-3 border-t border-slate-200 pt-3" {...projectOwnerItem('site-member-add-document-access-section', '현장 구성원 문서 scope 추가 섹션')}>
 		                                  <div className="space-y-2" {...projectOwnerItem('site-member-add-document-picker-field', '현장 구성원 문서 선택 항목')}>
 		                                    <label className="text-xs font-medium text-slate-700" {...projectOwnerItem('site-member-add-document-picker-label', '현장 구성원 문서 선택 라벨')}>문서</label>
@@ -6360,6 +6545,7 @@ export default function ProjectPage() {
 			                                    />
 		                                  </div>
 		                                </div>
+		                              ) : null}
 	                              <div className="grid grid-cols-2 gap-2" {...projectOwnerItem('site-member-add-form-actions', '현장 구성원 추가 실행 버튼 영역')}>
 	                                <Button
 	                                  type="button"
@@ -6378,6 +6564,7 @@ export default function ProjectPage() {
 	                                    setShowAddSiteMemberForm(false);
 	                                    setSiteMemberPhoneNumber('');
 	                                    setSiteMemberDisplayName('');
+	                                    setSiteMemberRole('participant');
 	                                    setSiteMemberDocumentIds([]);
 	                                    setSiteMemberDocumentScopeKeys([]);
 	                                  }}
@@ -6392,10 +6579,10 @@ export default function ProjectPage() {
 	                          <ProjectInfoList
 	                            items={siteMemberRows}
 	                            variant="member"
-	                            emptyMessage="아직 현장 소속 구성원이 없습니다."
+	                            emptyMessage="아직 현장 접근 권한을 받은 구성원이 없습니다."
 	                            maxBodyHeightClassName="max-h-[260px]"
 	                            ownerItemKey="site-member-list"
-	                            ownerItemName="현장 소속 구성원 목록"
+	                            ownerItemName="현장 접근 권한 구성원 목록"
 	                          />
 	                          {expandedSiteMember ? (
 	                            <div
@@ -6428,7 +6615,9 @@ export default function ProjectPage() {
                                       `${expandedSiteMemberLabel} 구성원 접근 범위 요약`
                                     )}
                                   >
-		                                  {expandedMemberScopeDocumentCount > 0
+		                                  {expandedSiteMemberHasFullDocumentAccess
+		                                    ? '현장 전체 문서 scope 접근 가능'
+		                                    : expandedMemberScopeDocumentCount > 0
 		                                      ? `${expandedMemberScopeDocumentCount}개 문서 scope`
 		                                      : '지정 scope 없음'}
 	                                </div>
@@ -6467,10 +6656,12 @@ export default function ProjectPage() {
                                   <div className="rounded-lg border border-slate-200 bg-white p-3" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}`, `${expandedSiteMemberLabel} 구성원 접근 범위 카드`)}>
                                     <div className="text-[10px] font-medium text-slate-500" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-label`, `${expandedSiteMemberLabel} 구성원 접근 범위 라벨`)}>범위</div>
 	                                    <div className="mt-1 text-xs font-semibold text-slate-900" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-value`, `${expandedSiteMemberLabel} 구성원 접근 범위 값`)}>
-	                                      scope별
+	                                      {expandedSiteMemberHasFullDocumentAccess ? '현장 전체' : 'scope별'}
 	                                    </div>
                                     <div className="mt-1 truncate text-[10px] text-slate-500" {...projectOwnerItem(`site-member-access-expanded-scope-card-${expandedSiteMember.membershipId}-description`, `${expandedSiteMemberLabel} 구성원 접근 범위 설명`)}>
-	                                      {expandedMemberScopeDocumentCount > 0
+	                                      {expandedSiteMemberHasFullDocumentAccess
+	                                        ? '현장 아래 모든 문서 scope 접근 가능'
+	                                        : expandedMemberScopeDocumentCount > 0
 	                                          ? `${expandedMemberScopeDocumentCount}개 문서 scope`
 	                                          : '지정된 scope 없음'}
                                     </div>
@@ -6479,31 +6670,102 @@ export default function ProjectPage() {
                                 <div
                                   className="space-y-2"
                                   {...projectOwnerItem(
-                                    `site-member-access-expanded-document-picker-field-${expandedSiteMember.membershipId}`,
-                                    `${expandedSiteMemberLabel} 구성원 문서 scope 선택 항목`
+                                    `site-member-access-expanded-role-field-${expandedSiteMember.membershipId}`,
+                                    `${expandedSiteMemberLabel} 구성원 현장 권한 선택 항목`
                                   )}
                                 >
                                   <label
                                     className="text-xs font-medium text-slate-700"
                                     {...projectOwnerItem(
-                                      `site-member-access-expanded-document-picker-label-${expandedSiteMember.membershipId}`,
-                                      `${expandedSiteMemberLabel} 구성원 문서 scope 라벨`
+                                      `site-member-access-expanded-role-label-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 현장 권한 라벨`
                                     )}
                                   >
-                                    문서 scope
+                                    현장 권한
                                   </label>
-                                  <MemberDocumentAccessPicker
-                                    membership={expandedSiteMember}
-                                    memberLabel={expandedSiteMemberLabel}
-                                    options={siteDocumentPickerOptions}
-                                    scopeContextsByTemplateId={templateScopeContextsByTemplateId}
-                                    savingMemberDocumentAccessKey={savingMemberDocumentAccessKey}
-                                    onToggleScopeAccess={handleSaveMemberDocumentScopeAccess}
-                                    onClearDocumentScopeAccess={handleClearMemberDocumentScopeAccess}
-                                    ownerItemKey={`site-member-access-expanded-document-picker-${expandedSiteMember.membershipId}`}
-                                    ownerItemName={`${expandedSiteMemberLabel} 구성원 문서 scope 선택기`}
-                                  />
+                                  <div
+                                    className="grid grid-cols-2 gap-2"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-role-button-group-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 현장 권한 버튼 그룹`
+                                    )}
+                                  >
+                                    {SITE_MEMBER_ROLE_OPTIONS.map((option) => {
+                                      const selected = option.value === expandedSiteMemberManagedRole;
+
+                                      return (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          disabled={
+                                            expandedSiteMemberIsDeleting ||
+                                            expandedSiteMemberIsUpdating ||
+                                            selected
+                                          }
+                                          aria-pressed={selected}
+                                          onClick={() =>
+                                            void handleUpdateSiteMemberRole(
+                                              expandedSiteMember,
+                                              option.value
+                                            )
+                                          }
+                                          className={cn(
+                                            'inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-70',
+                                            selected
+                                              ? 'border-slate-900 bg-slate-900 text-white'
+                                              : 'border-slate-300 bg-white text-slate-700'
+                                          )}
+                                          {...projectOwnerItem(
+                                            `site-member-access-expanded-role-${option.value}-button-${expandedSiteMember.membershipId}`,
+                                            `${expandedSiteMemberLabel} 구성원 ${option.label} 권한 버튼`
+                                          )}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
+                                {expandedSiteMemberCanManageDocuments ? (
+                                  <div
+                                    className="space-y-2"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-document-picker-field-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 문서 scope 선택 항목`
+                                    )}
+                                  >
+                                    <label
+                                      className="text-xs font-medium text-slate-700"
+                                      {...projectOwnerItem(
+                                        `site-member-access-expanded-document-picker-label-${expandedSiteMember.membershipId}`,
+                                        `${expandedSiteMemberLabel} 구성원 문서 scope 라벨`
+                                      )}
+                                    >
+                                      문서 scope
+                                    </label>
+                                    <MemberDocumentAccessPicker
+                                      membership={expandedSiteMember}
+                                      memberLabel={expandedSiteMemberLabel}
+                                      options={siteDocumentPickerOptions}
+                                      scopeContextsByTemplateId={templateScopeContextsByTemplateId}
+                                      savingMemberDocumentAccessKey={savingMemberDocumentAccessKey}
+                                      onToggleScopeAccess={handleSaveMemberDocumentScopeAccess}
+                                      onClearDocumentScopeAccess={handleClearMemberDocumentScopeAccess}
+                                      ownerItemKey={`site-member-access-expanded-document-picker-${expandedSiteMember.membershipId}`}
+                                      ownerItemName={`${expandedSiteMemberLabel} 구성원 문서 scope 선택기`}
+                                    />
+                                  </div>
+                                ) : (
+                                  <div
+                                    className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700"
+                                    {...projectOwnerItem(
+                                      `site-member-access-expanded-full-access-notice-${expandedSiteMember.membershipId}`,
+                                      `${expandedSiteMemberLabel} 구성원 현장 전체 접근 안내`
+                                    )}
+                                  >
+                                    현장 접근 권한으로 현장 아래 모든 문서에 접근할 수 있습니다.
+                                  </div>
+                                )}
                             </div>
                           ) : null}
 	                        </div>
@@ -6511,7 +6773,7 @@ export default function ProjectPage() {
 	                    ) : (
                       <EmptyState
                         title="선택된 현장이 없습니다."
-                        description="현장을 선택하면 구성원 소속과 scope를 확인할 수 있습니다."
+                        description="현장을 선택하면 구성원 권한을 확인할 수 있습니다."
                         ownerItemKey="site-member-empty-state"
                       />
                     )}

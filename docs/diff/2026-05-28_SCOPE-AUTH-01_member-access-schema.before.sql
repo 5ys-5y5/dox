@@ -2,21 +2,12 @@
 -- 실행 위치:
 --   Supabase Dashboard > SQL Editor
 --
--- 설계 기준:
---   member_access 는 번호 인증, 초대, 현장/문서 "소속"만 소유합니다.
---   보기 접근은 현장/문서 소속으로 결정합니다.
---   편집 가능 범위는 scopes.scope_registry 와 scopes.site_scope_assignments 의 scope 배정으로만 결정합니다.
---   편집/보기/서명 역할 컬럼과 RPC 인자는 만들지 않습니다.
---
 -- 주의:
 --   앱 서버는 SUPABASE_SERVICE_ROLE_KEY 로 접근하므로 service_role 권한이 필요합니다.
 --   앱은 public SECURITY DEFINER RPC 함수만 호출하고, member_access 스키마를 Data API에 직접 노출하지 않습니다.
 --   anon/authenticated 에게는 member_access 스키마/테이블 권한과 RPC 실행 권한을 부여하지 않습니다.
 
 CREATE SCHEMA IF NOT EXISTS member_access;
-
-DROP FUNCTION IF EXISTS public.member_access_invite_site_member(uuid, text, text, text, text, uuid);
-DROP FUNCTION IF EXISTS public.member_access_invite_document_member(uuid, text, text, text, text, uuid);
 
 CREATE OR REPLACE FUNCTION member_access.update_updated_at_column()
 RETURNS trigger
@@ -75,35 +66,45 @@ CREATE TABLE IF NOT EXISTS member_access.site_memberships (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   member_id uuid NOT NULL REFERENCES member_access.member_registry(id) ON DELETE CASCADE,
   site_id uuid NOT NULL,
+  access_role text NOT NULL,
   created_by_member_id uuid REFERENCES member_access.member_registry(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT site_memberships_member_site_key UNIQUE (member_id, site_id)
+  CONSTRAINT site_memberships_member_site_key UNIQUE (member_id, site_id),
+  CONSTRAINT site_memberships_access_role_check CHECK (access_role IN ('manager', 'participant'))
 );
 
 CREATE TABLE IF NOT EXISTS member_access.document_memberships (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   member_id uuid NOT NULL REFERENCES member_access.member_registry(id) ON DELETE CASCADE,
   document_id uuid NOT NULL,
+  access_role text NOT NULL,
   created_by_member_id uuid REFERENCES member_access.member_registry(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT document_memberships_member_document_key UNIQUE (member_id, document_id)
+  CONSTRAINT document_memberships_member_document_key UNIQUE (member_id, document_id),
+  CONSTRAINT document_memberships_access_role_check CHECK (access_role IN ('editor', 'viewer', 'signer'))
 );
 
 DO $$
 BEGIN
+  UPDATE member_access.site_memberships
+     SET access_role = 'manager'
+   WHERE access_role = 'owner';
+
   ALTER TABLE member_access.site_memberships
     DROP CONSTRAINT IF EXISTS site_memberships_access_role_check;
+
+  ALTER TABLE member_access.site_memberships
+    ADD CONSTRAINT site_memberships_access_role_check
+    CHECK (access_role IN ('manager', 'participant'));
 
   ALTER TABLE member_access.document_memberships
     DROP CONSTRAINT IF EXISTS document_memberships_access_role_check;
 
-  ALTER TABLE member_access.site_memberships
-    DROP COLUMN IF EXISTS access_role;
-
   ALTER TABLE member_access.document_memberships
-    DROP COLUMN IF EXISTS access_role;
+    ADD CONSTRAINT document_memberships_access_role_check
+    CHECK (access_role IN ('editor', 'viewer', 'signer'));
 END $$;
 
 CREATE INDEX IF NOT EXISTS member_registry_phone_number_idx
@@ -208,6 +209,7 @@ CREATE OR REPLACE FUNCTION public.member_access_invite_site_member(
   p_site_id uuid,
   p_phone_number text,
   p_display_name text,
+  p_access_role text,
   p_access_code_hash text,
   p_invited_by_member_id uuid DEFAULT NULL
 )
@@ -222,9 +224,14 @@ DECLARE
   v_invite member_access.member_invites%ROWTYPE;
   v_membership member_access.site_memberships%ROWTYPE;
   v_display_name text := NULLIF(BTRIM(COALESCE(p_display_name, '')), '');
+  v_can_reuse_existing_access boolean := false;
   v_should_generate_access_code boolean := true;
   v_dispatch_mode text := 'send_code';
 BEGIN
+  IF p_access_role NOT IN ('manager', 'participant') THEN
+    RAISE EXCEPTION '구성원 초대 실패: 현장 권한 값이 올바르지 않습니다. (%)', p_access_role;
+  END IF;
+
   SELECT *
     INTO v_member
     FROM member_access.member_registry
@@ -236,6 +243,10 @@ BEGIN
       FROM member_access.member_invites
      WHERE member_id = v_member.id;
 
+    v_can_reuse_existing_access :=
+      v_existing_invite.id IS NOT NULL
+      AND v_existing_invite.invite_status = 'active'
+      AND v_member.verification_status = 'verified';
     v_should_generate_access_code := v_member.verification_status <> 'verified';
 
     UPDATE member_access.member_registry
@@ -298,15 +309,18 @@ BEGIN
   INSERT INTO member_access.site_memberships (
     member_id,
     site_id,
+    access_role,
     created_by_member_id
   )
   VALUES (
     v_member.id,
     p_site_id,
+    p_access_role,
     p_invited_by_member_id
   )
   ON CONFLICT (member_id, site_id) DO UPDATE
-     SET created_by_member_id = EXCLUDED.created_by_member_id
+     SET access_role = EXCLUDED.access_role,
+         created_by_member_id = EXCLUDED.created_by_member_id
   RETURNING * INTO v_membership;
 
   v_dispatch_mode := CASE
@@ -328,6 +342,7 @@ CREATE OR REPLACE FUNCTION public.member_access_invite_document_member(
   p_document_id uuid,
   p_phone_number text,
   p_display_name text,
+  p_access_role text,
   p_access_code_hash text,
   p_invited_by_member_id uuid DEFAULT NULL
 )
@@ -342,9 +357,14 @@ DECLARE
   v_invite member_access.member_invites%ROWTYPE;
   v_membership member_access.document_memberships%ROWTYPE;
   v_display_name text := NULLIF(BTRIM(COALESCE(p_display_name, '')), '');
+  v_can_reuse_existing_access boolean := false;
   v_should_generate_access_code boolean := true;
   v_dispatch_mode text := 'send_code';
 BEGIN
+  IF p_access_role NOT IN ('editor', 'viewer', 'signer') THEN
+    RAISE EXCEPTION '구성원 초대 실패: 문서 권한 값이 올바르지 않습니다. (%)', p_access_role;
+  END IF;
+
   SELECT *
     INTO v_member
     FROM member_access.member_registry
@@ -356,6 +376,10 @@ BEGIN
       FROM member_access.member_invites
      WHERE member_id = v_member.id;
 
+    v_can_reuse_existing_access :=
+      v_existing_invite.id IS NOT NULL
+      AND v_existing_invite.invite_status = 'active'
+      AND v_member.verification_status = 'verified';
     v_should_generate_access_code := v_member.verification_status <> 'verified';
 
     UPDATE member_access.member_registry
@@ -418,15 +442,18 @@ BEGIN
   INSERT INTO member_access.document_memberships (
     member_id,
     document_id,
+    access_role,
     created_by_member_id
   )
   VALUES (
     v_member.id,
     p_document_id,
+    p_access_role,
     p_invited_by_member_id
   )
   ON CONFLICT (member_id, document_id) DO UPDATE
-     SET created_by_member_id = EXCLUDED.created_by_member_id
+     SET access_role = EXCLUDED.access_role,
+         created_by_member_id = EXCLUDED.created_by_member_id
   RETURNING * INTO v_membership;
 
   v_dispatch_mode := CASE
@@ -461,7 +488,7 @@ BEGIN
    WHERE id = p_membership_id;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION '현장 소속 삭제 실패: 구성원을 찾을 수 없습니다.';
+    RAISE EXCEPTION '현장 권한 삭제 실패: 구성원을 찾을 수 없습니다.';
   END IF;
 
   SELECT * INTO v_member FROM member_access.member_registry WHERE id = v_membership.member_id;
@@ -494,7 +521,7 @@ BEGIN
    WHERE id = p_membership_id;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION '문서 소속 삭제 실패: 구성원을 찾을 수 없습니다.';
+    RAISE EXCEPTION '문서 권한 삭제 실패: 구성원을 찾을 수 없습니다.';
   END IF;
 
   SELECT * INTO v_member FROM member_access.member_registry WHERE id = v_membership.member_id;
@@ -717,8 +744,8 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA member_access TO service_role;
 
 REVOKE ALL ON FUNCTION public.member_access_list_site_members(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.member_access_list_document_members(uuid) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.member_access_invite_site_member(uuid, text, text, text, uuid) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.member_access_invite_document_member(uuid, text, text, text, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.member_access_invite_site_member(uuid, text, text, text, text, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.member_access_invite_document_member(uuid, text, text, text, text, uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.member_access_remove_site_membership(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.member_access_remove_document_membership(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.member_access_get_session(uuid) FROM PUBLIC, anon, authenticated;
@@ -727,8 +754,8 @@ REVOKE ALL ON FUNCTION public.member_access_verify(text, text) FROM PUBLIC, anon
 
 GRANT EXECUTE ON FUNCTION public.member_access_list_site_members(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.member_access_list_document_members(uuid) TO service_role;
-GRANT EXECUTE ON FUNCTION public.member_access_invite_site_member(uuid, text, text, text, uuid) TO service_role;
-GRANT EXECUTE ON FUNCTION public.member_access_invite_document_member(uuid, text, text, text, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.member_access_invite_site_member(uuid, text, text, text, text, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.member_access_invite_document_member(uuid, text, text, text, text, uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.member_access_remove_site_membership(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.member_access_remove_document_membership(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.member_access_get_session(uuid) TO service_role;
@@ -746,12 +773,6 @@ $$;
 SELECT table_schema, table_name
 FROM information_schema.tables
 WHERE table_schema = 'member_access'
-ORDER BY table_name;
-
-SELECT table_schema, table_name, column_name
-FROM information_schema.columns
-WHERE table_schema = 'member_access'
-  AND column_name = 'access_role'
 ORDER BY table_name;
 
 SELECT routine_schema, routine_name

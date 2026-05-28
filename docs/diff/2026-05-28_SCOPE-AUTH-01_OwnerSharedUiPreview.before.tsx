@@ -94,10 +94,10 @@ export function OwnerSharedUiPreview({
         itemAttributes={itemAttributes}
       >
         <EntityPicker
-          value="canvas"
+          value="documents"
           options={[
+            { id: 'documents', label: '문서 관리', meta: '/documents', keywords: ['document', 'docfunc'] },
             { id: 'canvas', label: '공용 캔버스', meta: '/canvas', keywords: ['canvas', 'owner'] },
-            { id: 'project', label: '현장 관리', meta: '/project', keywords: ['project', 'site'] },
           ]}
           onChange={noopString}
           placeholder="항목 검색"
@@ -161,14 +161,25 @@ export function OwnerSharedUiPreview({
             itemAttributes={itemAttributes}
           >
             <OwnerSettingsManagedTargetControls
-              value="canvas"
+              value="documents"
               targets={[
+                {
+                  value: 'documents',
+                  label: '문서 관리',
+                  path: '/documents',
+                  description: '문서 기능 owner 설정을 관리합니다.',
+                  badge: <Badge variant="blue" className="px-2 py-0 text-[10px]">선택</Badge>,
+                  detailRows: [
+                    { label: 'surface', value: 'documents' },
+                    { label: 'mode', value: 'read' },
+                  ],
+                },
                 {
                   value: 'canvas',
                   label: '공용 캔버스',
                   path: '/canvas',
                   description: '상자 편집 캔버스 owner 설정을 관리합니다.',
-                  badge: <Badge variant="blue" className="px-2 py-0 text-[10px]">선택</Badge>,
+                  badge: <Badge variant="slate" className="px-2 py-0 text-[10px]">대상</Badge>,
                   detailRows: [
                     { label: 'surface', value: 'canvas' },
                     { label: 'mode', value: 'template' },

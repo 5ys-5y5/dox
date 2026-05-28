@@ -2,17 +2,7 @@ import Link from 'next/link';
 import { Badge } from '../components/ui/Badge';
 import { cn } from '../lib/utils';
 
-const pageGroups: Array<{
-  title: string;
-  description: string;
-  pages: Array<{
-    href: string;
-    title: string;
-    summary: string;
-    status: string;
-    statusVariant?: 'blue' | 'green' | 'amber' | 'slate' | 'red';
-  }>;
-}> = [
+const pageGroups = [
   {
     title: '현장 관리',
     description: '현장별 템플릿 문서, 원본 파일, 사진, 서명, 구성원 운영을 통합해서 확인하는 화면입니다.',
@@ -47,6 +37,12 @@ const pageGroups: Array<{
         summary: '템플릿 모드, 문서 모드, 읽기 모드를 한 화면에서 직접 확인하는 공용 캔버스 owner 페이지입니다.',
         status: '완료',
         statusVariant: 'blue',
+      },
+      {
+        href: '/documents',
+        title: '서류 클라우드 관리',
+        summary: '문서 생성, 상세 조회, 버전 추가를 다룹니다.',
+        status: '구현중',
       },
       {
         href: '/sites',

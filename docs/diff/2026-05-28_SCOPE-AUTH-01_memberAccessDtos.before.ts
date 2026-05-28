@@ -4,6 +4,9 @@ export type MemberVerificationStatus = 'invited' | 'verified' | 'revoked';
 export type MemberInviteStatus = 'active' | 'revoked';
 export type MemberDispatchStatus = 'sent' | 'provider_not_configured' | 'failed' | 'not_required';
 
+export type SiteMemberAccessRole = 'owner' | 'manager' | 'participant' | 'editor' | 'viewer';
+export type DocumentMemberAccessRole = 'editor' | 'viewer' | 'signer';
+
 export type MemberRecordDto = {
   id: string;
   phoneNumber: string;
@@ -29,6 +32,7 @@ export type MemberDispatchResultDto = {
 export type SiteMemberRecordDto = {
   membershipId: string;
   siteId: string;
+  accessRole: SiteMemberAccessRole;
   member: MemberRecordDto;
   createdAt: string;
   updatedAt: string;
@@ -37,6 +41,7 @@ export type SiteMemberRecordDto = {
 export type DocumentMemberRecordDto = {
   membershipId: string;
   documentId: string;
+  accessRole: DocumentMemberAccessRole;
   member: MemberRecordDto;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +51,7 @@ export type SiteMemberInviteInput = {
   siteId: string;
   phoneNumber: string;
   displayName?: string | null;
+  accessRole: SiteMemberAccessRole;
   invitedByMemberId?: string | null;
 };
 
@@ -53,6 +59,7 @@ export type DocumentMemberInviteInput = {
   documentId: string;
   phoneNumber: string;
   displayName?: string | null;
+  accessRole: DocumentMemberAccessRole;
   invitedByMemberId?: string | null;
 };
 
@@ -76,11 +83,14 @@ export type MemberVerificationResult = {
   authenticatedAt: string;
 };
 
+export type MemberDocumentEffectiveAccessRole = 'editor' | 'signer' | 'viewer';
+
 export type MemberDocumentAccessSource = 'site' | 'document' | 'site+document';
 
 export type MemberAccessibleSiteDto = {
   siteId: string;
   siteName: string;
+  accessRole: SiteMemberAccessRole;
   documentCount: number;
 };
 
@@ -92,6 +102,7 @@ export type MemberAccessibleDocumentDto = {
   status: DocumentLifecycleStatus;
   currentVersionNumber: number | null;
   updatedAt: string;
+  accessRole: MemberDocumentEffectiveAccessRole;
   accessSource: MemberDocumentAccessSource;
 };
 
@@ -102,20 +113,10 @@ export type MemberAccessSessionDto = {
   accessibleDocuments: MemberAccessibleDocumentDto[];
 };
 
-export type MemberDocumentScopeAccessDto = {
-  canView: boolean;
-  editableScopeKeys: string[];
-  editableValueKeys: string[];
-  editableKeyFrameGroupIds: string[];
-  scopeKeysByKeyFrameGroupId: Record<string, string[]>;
-  valueKeyByKeyFrameGroupId: Record<string, string | null>;
-  memberIdsByScopeKey: Record<string, string[]>;
-};
-
 export type MemberDocumentAccessDto = {
   member: MemberRecordDto;
   authenticatedAt: string;
+  accessRole: MemberDocumentEffectiveAccessRole;
   accessSource: MemberDocumentAccessSource;
-  scopeAccess: MemberDocumentScopeAccessDto;
   detail: DocumentDetailResult;
 };

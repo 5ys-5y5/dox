@@ -24,15 +24,12 @@ import {
   buildCanvasToolbarVisibility,
   buildPersistenceVisibility,
   buildTemplateUsagePreviewLayoutDebugOptions,
-  canvasWorkspaceModes,
   defaultCanvasOwnerSettings,
   createEmptyCanvasOwnerSettingsStore,
   normalizeCanvasWorkspaceMode,
   readCanvasOwnerSettingsFromStorage,
-  resolveCanvasOwnerPagePolicy,
   resolveCanvasOwnerSettings,
   saveCanvasOwnerSettingsStoreToStorage,
-  updateCanvasOwnerPagePolicyOverride,
   updateCanvasOwnerSettingsStoreOverride,
   type CanvasOwnerSettings,
   type CanvasOwnerSettingKey,
@@ -229,7 +226,7 @@ const canvasOwnerItemAttribute = 'data-canvas-owner-item';
 const canvasOwnerNameAttribute = 'data-canvas-owner-name';
 const canvasOwnerAutoNamedAttribute = 'data-canvas-owner-auto-named';
 
-const defaultManagedCanvasPages: ManagedCanvasPage[] = [
+const managedCanvasPages: ManagedCanvasPage[] = [
   {
     id: 'canvas',
     label: '공용 캔버스 관리자',
@@ -296,13 +293,10 @@ const defaultManagedCanvasPages: ManagedCanvasPage[] = [
 ];
 
 const normalizeManagedCanvasPageId = (value: string | null | undefined): ManagedCanvasPageId =>
-  defaultManagedCanvasPages.some((page) => page.id === value) ? (value as ManagedCanvasPageId) : 'canvas';
+  managedCanvasPages.some((page) => page.id === value) ? (value as ManagedCanvasPageId) : 'canvas';
 
 const getManagedCanvasPage = (pageId: ManagedCanvasPageId) =>
-  defaultManagedCanvasPages.find((page) => page.id === pageId) || defaultManagedCanvasPages[0];
-
-const getManagedCanvasPageFromList = (pages: ManagedCanvasPage[], pageId: ManagedCanvasPageId) =>
-  pages.find((page) => page.id === pageId) || pages[0];
+  managedCanvasPages.find((page) => page.id === pageId) || managedCanvasPages[0];
 
 const resolveManagedCanvasWorkspaceMode = (page: ManagedCanvasPage, value: string | null | undefined): CanvasWorkspaceMode => {
   const normalizedMode = normalizeCanvasWorkspaceMode(value);
@@ -351,6 +345,8 @@ export default function CanvasOwnerPage() {
   const searchParams = useSearchParams();
   const canvasOwnerRootRef = React.useRef<HTMLElement | null>(null);
   const selectedManagedPageId = normalizeManagedCanvasPageId(searchParams.get('page'));
+  const selectedManagedPage = getManagedCanvasPage(selectedManagedPageId);
+  const workspaceMode = resolveManagedCanvasWorkspaceMode(selectedManagedPage, searchParams.get('mode'));
   const templateIdFromQuery = searchParams.get('templateId')?.trim() || '';
   const documentIdFromQuery = searchParams.get('documentId')?.trim() || '';
 
@@ -373,27 +369,7 @@ export default function CanvasOwnerPage() {
   const [settingsStore, setSettingsStore] = React.useState<CanvasOwnerSettingsStore>(() =>
     createEmptyCanvasOwnerSettingsStore()
   );
-  const [canvasSettingsLoaded, setCanvasSettingsLoaded] = React.useState(false);
   const [activeControlTab, setActiveControlTab] = React.useState<CanvasOwnerControlTab>('page');
-  const managedCanvasPages = React.useMemo<ManagedCanvasPage[]>(
-    () =>
-      defaultManagedCanvasPages.map((page) => {
-        const pagePolicy = resolveCanvasOwnerPagePolicy(settingsStore, {
-          pageId: page.id,
-          defaultAllowedModes: page.allowedModes,
-          defaultMode: page.defaultMode,
-        });
-
-        return {
-          ...page,
-          allowedModes: pagePolicy.allowedModes,
-          defaultMode: pagePolicy.defaultMode,
-        };
-      }),
-    [settingsStore]
-  );
-  const selectedManagedPage = getManagedCanvasPageFromList(managedCanvasPages, selectedManagedPageId);
-  const workspaceMode = resolveManagedCanvasWorkspaceMode(selectedManagedPage, searchParams.get('mode'));
 
   const selectedTemplateId = templateIdFromQuery || templates[0]?.id || '';
   const selectedDocumentId = documentIdFromQuery || documents[0]?.document.id || '';
@@ -452,7 +428,6 @@ export default function CanvasOwnerPage() {
       setSavedSettingsStore(nextSettingsStore);
       setSettingsStore(nextSettingsStore);
     }
-    setCanvasSettingsLoaded(true);
   }, [effectiveWorkspaceMode, selectedManagedPage.id]);
 
   const saveCanvasOwnerSettings = React.useCallback(() => {
@@ -506,73 +481,6 @@ export default function CanvasOwnerPage() {
     [pathname, router, searchParams]
   );
 
-  const updateSelectedPageAllowedModes = React.useCallback(
-    (nextAllowedModes: CanvasWorkspaceMode[]) => {
-      const normalizedAllowedModes = canvasWorkspaceModes.filter((mode) => nextAllowedModes.includes(mode));
-      const resolvedAllowedModes = normalizedAllowedModes.length > 0 ? normalizedAllowedModes : [selectedManagedPage.defaultMode];
-      const nextDefaultMode = resolvedAllowedModes.includes(selectedManagedPage.defaultMode)
-        ? selectedManagedPage.defaultMode
-        : resolvedAllowedModes[0];
-
-      setSettingsStore((previous) => {
-        const nextStore = updateCanvasOwnerPagePolicyOverride(previous, {
-          pageId: selectedManagedPage.id,
-          key: 'allowedModes',
-          value: resolvedAllowedModes,
-        });
-
-        return updateCanvasOwnerPagePolicyOverride(nextStore, {
-          pageId: selectedManagedPage.id,
-          key: 'defaultMode',
-          value: nextDefaultMode,
-        });
-      });
-
-      if (!resolvedAllowedModes.includes(workspaceMode)) {
-        updateQuery({ mode: nextDefaultMode });
-      }
-    },
-    [selectedManagedPage.defaultMode, selectedManagedPage.id, updateQuery, workspaceMode]
-  );
-
-  const toggleSelectedPageAllowedMode = React.useCallback(
-    (mode: CanvasWorkspaceMode) => {
-      const currentAllowedModes = selectedManagedPage.allowedModes;
-
-      if (currentAllowedModes.includes(mode) && currentAllowedModes.length <= 1) {
-        return;
-      }
-
-      const nextAllowedModeSet = new Set(currentAllowedModes);
-
-      if (nextAllowedModeSet.has(mode)) {
-        nextAllowedModeSet.delete(mode);
-      } else {
-        nextAllowedModeSet.add(mode);
-      }
-
-      updateSelectedPageAllowedModes(canvasWorkspaceModes.filter((item) => nextAllowedModeSet.has(item)));
-    },
-    [selectedManagedPage.allowedModes, updateSelectedPageAllowedModes]
-  );
-
-  const updateSelectedPageDefaultMode = React.useCallback(
-    (mode: CanvasWorkspaceMode) => {
-      if (!selectedManagedPage.allowedModes.includes(mode)) {
-        return;
-      }
-
-      setSettingsStore((previous) =>
-        updateCanvasOwnerPagePolicyOverride(previous, {
-          pageId: selectedManagedPage.id,
-          key: 'defaultMode',
-          value: mode,
-        })
-      );
-    },
-    [selectedManagedPage.allowedModes, selectedManagedPage.id]
-  );
-
   const handlePreviewCanvasSelectionChange = React.useCallback(
     (boxes: TemplateCanvasSelectedBox[], options?: TemplateCanvasSelectionChangeOptions) => {
       setPreviewSelectedCanvasBoxes((current) => {
@@ -596,10 +504,6 @@ export default function CanvasOwnerPage() {
   );
 
   React.useEffect(() => {
-    if (!canvasSettingsLoaded) {
-      return;
-    }
-
     const rawPageId = searchParams.get('page');
     const rawMode = searchParams.get('mode');
 
@@ -611,7 +515,7 @@ export default function CanvasOwnerPage() {
     nextParams.set('page', selectedManagedPage.id);
     nextParams.set('mode', workspaceMode);
     router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
-  }, [canvasSettingsLoaded, pathname, router, searchParams, selectedManagedPage.id, workspaceMode]);
+  }, [pathname, router, searchParams, selectedManagedPage.id, workspaceMode]);
 
   React.useEffect(() => {
     setPreviewSelectedCanvasBoxes([]);
@@ -619,10 +523,10 @@ export default function CanvasOwnerPage() {
 
   const handleSelectManagedPage = React.useCallback(
     (pageId: ManagedCanvasPageId) => {
-      const nextPage = getManagedCanvasPageFromList(managedCanvasPages, pageId);
+      const nextPage = getManagedCanvasPage(pageId);
       updateQuery({ page: nextPage.id, mode: nextPage.defaultMode });
     },
-    [managedCanvasPages, updateQuery]
+    [updateQuery]
   );
 
   const handleSelectWorkspaceMode = React.useCallback(
@@ -2264,65 +2168,7 @@ export default function CanvasOwnerPage() {
         label="이 페이지에서 사용할 모드"
         description="템플릿, 문서, 읽기 모드는 페이지별 상호작용 프리셋입니다."
       />
-      <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold text-slate-800">허용 모드</div>
-            <p className="text-[10px] leading-4 text-slate-500">
-              이 페이지에서 선택할 수 있는 workspaceMode를 정합니다. 최소 1개는 항상 유지됩니다.
-            </p>
-          </div>
-          <Badge variant="slate" className="w-fit px-2 py-0 text-[9px]">
-            페이지 설정
-          </Badge>
-        </div>
-        <div className="grid gap-1.5 sm:grid-cols-3">
-          {canvasWorkspaceModes.map((mode) => {
-            const enabled = selectedManagedPage.allowedModes.includes(mode);
-            const disabled = enabled && selectedManagedPage.allowedModes.length <= 1;
-
-            return (
-              <Button
-                key={mode}
-                type="button"
-                variant={enabled ? 'default' : 'outline'}
-                className="h-8 justify-start px-2 text-xs"
-                disabled={disabled}
-                aria-pressed={enabled}
-                onClick={() => toggleSelectedPageAllowedMode(mode)}
-                {...canvasOwnerItem(`canvas-page-policy-allowed-mode-${mode}`, `${modeLabels[mode]} 허용 모드`)}
-              >
-                {modeLabels[mode]}
-              </Button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
-        <div className="text-[11px] font-semibold text-slate-800">기본 모드</div>
-        <div className="grid gap-1.5 sm:grid-cols-3">
-          {canvasWorkspaceModes.map((mode) => {
-            const allowed = selectedManagedPage.allowedModes.includes(mode);
-            const active = selectedManagedPage.defaultMode === mode;
-
-            return (
-              <Button
-                key={mode}
-                type="button"
-                variant={active ? 'default' : 'outline'}
-                className={`h-8 justify-start px-2 text-xs ${allowed ? '' : 'cursor-not-allowed opacity-50'}`}
-                disabled={!allowed}
-                onClick={() => updateSelectedPageDefaultMode(mode)}
-                {...canvasOwnerItem(`canvas-page-policy-default-mode-${mode}`, `${modeLabels[mode]} 기본 모드`)}
-              >
-                {modeLabels[mode]}
-              </Button>
-            );
-          })}
-        </div>
-      </div>
       <div className="space-y-1.5">
-        <div className="text-[11px] font-semibold text-slate-800">현재 미리보기 모드</div>
         {renderWorkspaceModeButtons()}
         <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
       </div>
@@ -2765,8 +2611,6 @@ export default function CanvasOwnerPage() {
                 <CanvasOwnedWorkspace
                   key={`canvas-owner:${selectedManagedPage.id}:${effectiveWorkspaceMode}:${selectedTemplateId || 'no-template'}`}
                   surface={selectedManagedPage.surface}
-                  workspaceMode={effectiveWorkspaceMode}
-                  allowedWorkspaceModes={selectedManagedPage.allowedModes}
                   applyStoredCanvasOwnerSettings={false}
                   canvasOwnerSettings={previewSettings}
                   canvasOwnerSettingSources={previewSettingSources}
@@ -2807,7 +2651,6 @@ export default function CanvasOwnerPage() {
                 <CanvasOwnedWorkspace
                   key={`canvas-owner:${selectedManagedPage.id}:${selectedDocumentInitialDraft.draftKey}`}
                   surface={selectedManagedPage.surface}
-                  allowedWorkspaceModes={selectedManagedPage.allowedModes}
                   applyStoredCanvasOwnerSettings={false}
                   canvasOwnerSettings={previewSettings}
                   canvasOwnerSettingSources={previewSettingSources}

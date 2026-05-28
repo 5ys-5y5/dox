@@ -435,7 +435,7 @@ export const SignService = {
     const documentId = String(requestData.document_id || '').trim();
 
     if (!actingMemberId) {
-      throw new Error('서명 요청 삭제 권한이 없습니다. 관리자만 삭제할 수 있습니다.');
+      throw new Error('서명 요청 삭제 소속이 없습니다.');
     }
 
     if (!documentId) {
@@ -459,8 +459,8 @@ export const SignService = {
     );
     const siteAccess = accessSession.accessibleSites.find((site) => site.siteId === documentRecord.site_id) || null;
 
-    if (!siteAccess || siteAccess.accessRole !== 'manager') {
-      throw new Error('서명 요청 삭제 권한이 없습니다. 관리자만 삭제할 수 있습니다.');
+    if (!siteAccess) {
+      throw new Error('서명 요청 삭제 소속이 없습니다.');
     }
 
     const requestStatus = String(requestData.status || '').trim().toLowerCase();

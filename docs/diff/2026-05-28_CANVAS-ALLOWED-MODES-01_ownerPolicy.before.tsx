@@ -6,11 +6,9 @@ import type { TemplateEditWorkspaceProps } from '../../components/template/works
 import {
   applyCanvasOwnerSettingsToWorkspaceProps,
   normalizeCanvasWorkspaceMode,
-  resolveCanvasOwnerPagePolicy,
   type CanvasOwnerSettings,
   type CanvasOwnerSettingKey,
   type CanvasOwnerSettingSource,
-  type CanvasOwnerSettingsStore,
   useStoredCanvasOwnerSettings,
 } from './ownerSettings';
 
@@ -30,8 +28,6 @@ type CanvasOwnedWorkspaceProps = TemplateEditWorkspaceProps & {
   applyStoredCanvasOwnerSettings?: boolean;
   canvasOwnerSettings?: CanvasOwnerSettings | null;
   canvasOwnerSettingSources?: Record<CanvasOwnerSettingKey, CanvasOwnerSettingSource>;
-  canvasOwnerSettingsStore?: CanvasOwnerSettingsStore;
-  allowedWorkspaceModes?: CanvasWorkspaceMode[];
 };
 
 type CanvasSurfacePolicy = {
@@ -74,36 +70,8 @@ const resolveCanvasWorkspaceMode = (value: TemplateEditWorkspaceProps['workspace
 const hasEditableValueKeys = (value: string[] | null | undefined) =>
   Array.isArray(value) && value.some((item) => String(item || '').trim().length > 0);
 
-const resolveCanvasOwnedSurfacePolicy = (
-  surface: CanvasOwnerSurface,
-  settingsStore?: CanvasOwnerSettingsStore,
-  allowedWorkspaceModes?: CanvasWorkspaceMode[]
-): CanvasSurfacePolicy => {
+const validateCanvasOwnedWorkspace = (surface: CanvasOwnerSurface, props: TemplateEditWorkspaceProps) => {
   const policy = CANVAS_SURFACE_POLICIES[surface];
-  const resolvedPolicy = resolveCanvasOwnerPagePolicy(settingsStore || {
-    version: 5,
-    modeSettings: {},
-    pageSettings: {},
-    pagePolicies: {},
-  }, {
-    pageId: surface,
-    defaultAllowedModes: allowedWorkspaceModes || policy.allowedModes,
-    defaultMode: (allowedWorkspaceModes && allowedWorkspaceModes[0]) || policy.allowedModes[0],
-  });
-
-  return {
-    ...policy,
-    allowedModes: resolvedPolicy.allowedModes,
-  };
-};
-
-const validateCanvasOwnedWorkspace = (
-  surface: CanvasOwnerSurface,
-  props: TemplateEditWorkspaceProps,
-  settingsStore?: CanvasOwnerSettingsStore,
-  allowedWorkspaceModes?: CanvasWorkspaceMode[]
-) => {
-  const policy = resolveCanvasOwnedSurfacePolicy(surface, settingsStore, allowedWorkspaceModes);
   const workspaceMode = resolveCanvasWorkspaceMode(props.workspaceMode);
 
   if (!policy.allowedModes.includes(workspaceMode)) {
@@ -155,8 +123,6 @@ const resolveCanvasOwnedWorkspaceProps = ({
   workspaceMode,
   canvasOwnerSettings,
   canvasOwnerSettingSources,
-  canvasOwnerSettingsStore,
-  allowedWorkspaceModes,
   ...props
 }: CanvasOwnedWorkspaceProps): TemplateEditWorkspaceProps => {
   const normalizedWorkspaceMode = resolveCanvasWorkspaceMode(workspaceMode);
@@ -178,7 +144,7 @@ const resolveCanvasOwnedWorkspaceProps = ({
       })
     : normalizedProps;
 
-  if (!validateCanvasOwnedWorkspace(surface, configuredProps, canvasOwnerSettingsStore, allowedWorkspaceModes)) {
+  if (!validateCanvasOwnedWorkspace(surface, configuredProps)) {
     notFound();
   }
 
@@ -203,12 +169,10 @@ export function CanvasOwnedWorkspace({
   const canvasOwnerSettingSources =
     explicitCanvasOwnerSettingSources ??
     (applyStoredCanvasOwnerSettings ? storedCanvasOwnerSettings.sources : undefined);
-  const canvasOwnerSettingsStore = applyStoredCanvasOwnerSettings ? storedCanvasOwnerSettings.settingsStore : undefined;
   const resolvedWorkspaceProps = resolveCanvasOwnedWorkspaceProps({
     ...ownedWorkspaceProps,
     canvasOwnerSettings,
     canvasOwnerSettingSources,
-    canvasOwnerSettingsStore,
   });
   const canvasOwnerSettingsSource = canvasOwnerSettingSources
     ? [
