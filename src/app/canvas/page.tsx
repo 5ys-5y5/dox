@@ -877,7 +877,6 @@ export default function CanvasOwnerPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-950">할 일</p>
-            <p className="mt-0.5 text-xs text-slate-500">문서 담당자가 채워야 하는 값, 서명, 사진, 파일 요청입니다.</p>
           </div>
           <Badge variant="slate">{sortedTasks.length}개</Badge>
         </div>
@@ -886,7 +885,7 @@ export default function CanvasOwnerPage() {
             등록된 할 일이 없습니다.
           </div>
         ) : (
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="grid gap-2">
             {sortedTasks.map((task) => {
               const tagNames = readCanvasTaskTagNames(task);
               const assigneeLabel = documentTaskMemberLabelById[task.assigneeMemberId] || task.assigneeMemberId;
@@ -1117,7 +1116,7 @@ export default function CanvasOwnerPage() {
     : 'canvas-owner-settings';
   const previewAdditionalControlPanelsEnabled = Boolean(previewAdditionalControlPanels);
   const previewTopNoticeEnabled = Boolean(previewTopNotice);
-  const previewTodoPanelEnabled = documentSaveEnabled && Boolean(selectedDocumentInitialDraft);
+  const previewTodoPanelEnabled = usesTemplateList || Boolean(selectedDocumentInitialDraft);
   const previewTodoCount = previewTodoPanelEnabled ? documentRequestTasks.length : 0;
   const settingKeyByDefinitionName: Record<string, CanvasOwnerSettingKey> = {
     hideHeader: 'hideHeader',
@@ -1284,7 +1283,7 @@ export default function CanvasOwnerPage() {
       sectionLabel: '상자 캔버스 편집',
       label: '할 일 버튼 표시',
       definitionName: 'canvasToolbarVisibility.showTodoButton',
-      description: '문서 출력 페이지에서 저장 버튼 오른쪽의 할 일 버튼을 표시합니다. 템플릿 작성/읽기 전용 페이지에서는 숨겨질 수 있습니다.',
+      description: '템플릿/문서 화면에서 저장 버튼 오른쪽의 할 일 버튼을 표시합니다. 읽기 전용 페이지에서는 숨겨질 수 있습니다.',
       checked: settings.showCanvasTodoButton,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showCanvasTodoButton', checked),
@@ -2499,6 +2498,9 @@ export default function CanvasOwnerPage() {
                   canvasSpecifiedWidth={previewBaseWorkspaceProps.canvasSpecifiedWidth}
                   selectedCanvasBoxes={previewSelectedCanvasBoxes}
                   onCanvasSelectionChange={handlePreviewCanvasSelectionChange}
+                  todoPanel={canvasTodoPanel}
+                  todoButtonLabel="할 일"
+                  todoCount={documentRequestTasks.length}
                   onTemplateSaved={
                     !canEditCurrentWorkspace
                       ? undefined

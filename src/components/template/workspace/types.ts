@@ -817,6 +817,9 @@ export type TemplateEditPreviewSurfaceProps = {
   selectionPanelTab: SelectionPanelTab;
   editSettingsPanelVisible: boolean;
   showMetadataIcons: boolean;
+  todoOverlay?: TemplateFloatingOverlayContent;
+  todoOverlayLabel?: string;
+  onCloseTodoOverlay?: () => void;
   actionOverlay?: TemplateFloatingOverlayContent;
   actionOverlayLabel?: string;
   actionOverlayExpandedWidthClassName?: string;
@@ -855,6 +858,7 @@ export type TemplateEditPreviewSurfaceProps = {
 export type SummaryOverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 export type TemplateFloatingOverlayId =
+  | 'todo'
   | 'summary'
   | 'style'
   | 'sizeType'

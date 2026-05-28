@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import * as React from 'react';
 import { CardContent } from '../../../ui/Card';
 import {
@@ -75,6 +75,9 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   selectionPanelTab,
   editSettingsPanelVisible,
   showMetadataIcons,
+  todoOverlay,
+  todoOverlayLabel = '할 일',
+  onCloseTodoOverlay,
   actionOverlay,
   actionOverlayLabel = '기능 버튼',
   actionOverlayExpandedWidthClassName,
@@ -118,6 +121,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const showEditorRoomFallbackForUsagePreview =
     templateUsagePreviewMode && showEditorRoomAsUsagePreviewFallback && !hasPreparedTemplateUsagePreviewHtml;
   const floatingOverlayNodeRefs = React.useRef<Record<TemplateFloatingOverlayId, HTMLElement | null>>({
+    todo: null,
     summary: null,
     style: null,
     sizeType: null,
@@ -133,6 +137,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const [floatingOverlayQuadrantGuide, setFloatingOverlayQuadrantGuide] =
     React.useState<FloatingOverlayQuadrantGuideState | null>(null);
   const [floatingOverlayCorners, setFloatingOverlayCorners] = React.useState<Record<TemplateFloatingOverlayId, SummaryOverlayCorner>>({
+    todo: 'top-left',
     summary: 'top-left',
     style: 'top-right',
     sizeType: 'top-right',
@@ -1110,6 +1115,60 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     : undefined;
   const preparedViewSelectionPanelTab = resolveTemplateCanvasSelectionPanelTab(preparedViewMode);
   const preparedViewMatchesActivePanel = preparedViewSelectionPanelTab === selectionPanelTab;
+  const todoOverlayActive = Boolean(todoOverlay);
+  const renderTodoOverlaySection = (): OverlayRailSection | null => {
+    if (!todoOverlay) {
+      return null;
+    }
+
+    const contentRenderer = typeof todoOverlay === 'function' ? todoOverlay : null;
+
+    return {
+      node: (
+        <div
+          key="todo"
+          ref={(node) => {
+            floatingOverlayNodeRefs.current.todo = node;
+          }}
+          className="w-full border-b border-slate-200 last:border-b-0"
+          data-template-floating-overlay-expanded="true"
+          data-template-floating-overlay-id="todo"
+          data-canvas-owner-item="canvas-container-상자-편집-패널-할-일"
+          data-canvas-owner-name="상자 편집 패널 할 일 섹션"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div
+            data-template-overlay-rail-content="true"
+            data-canvas-owner-item="canvas-container-상자-편집-패널-할-일-내용"
+            data-canvas-owner-name="상자 편집 패널 할 일 내용"
+            className="bg-slate-100 px-3 py-2.5"
+            aria-label={todoOverlayLabel}
+          >
+            {onCloseTodoOverlay ? (
+              <button
+                type="button"
+                className="mb-2.5 flex h-8 w-full items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onCloseTodoOverlay();
+                }}
+                aria-label="할 일 닫기"
+                title="할 일 닫기"
+              >
+                <span className="min-w-0 truncate">편집 설정으로 돌아가기</span>
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+            {contentRenderer ? contentRenderer() : todoOverlay}
+          </div>
+        </div>
+      ),
+    };
+  };
+  const renderActiveTodoOverlaySection = (tab: SelectionPanelTab) =>
+    tab === selectionPanelTab ? renderTodoOverlaySection() : null;
 
   if (templateUsagePreviewPending && !showEditorRoomFallbackForUsagePreview) {
     return (
@@ -1172,81 +1231,91 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     );
   }
 
-  const positionOverlayRailSections = compactOverlayRailSections([
-    renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
-    renderFloatingOverlaySection(
-      'style',
-      styleOverlayLabel,
-      styleOverlayCollapsed,
-      setStyleOverlayCollapsed,
-      finishStyleOverlayDrag,
-      styleOverlay,
-      { expandedWidthClassName: 'w-[250px] max-w-[250px]', keepMountedWhenCollapsed: true }
-    ),
-    renderFloatingOverlaySection(
-      'sizeType',
-      '상자 크기 타입',
-      sizeTypeOverlayCollapsed,
-      setSizeTypeOverlayCollapsed,
-      finishSizeTypeOverlayDrag,
-      sizeTypeOverlay,
-      { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
-    ),
-    renderFloatingOverlaySection(
-      'textStyle',
-      '텍스트 스타일',
-      textStyleOverlayCollapsed,
-      setTextStyleOverlayCollapsed,
-      finishTextStyleOverlayDrag,
-      textStyleOverlay,
-      {
-        expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]',
-        keepMountedWhenCollapsed: true,
-      }
-    ),
-    renderFloatingOverlaySection(
-      'action',
-      actionOverlayLabel,
-      actionOverlayCollapsed,
-      setActionOverlayCollapsed,
-      finishActionOverlayDrag,
-      actionOverlay,
-      {
-        expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
-        keepMountedWhenCollapsed: true,
-      }
-    ),
-  ]);
-  const metadataOverlayRailSections = compactOverlayRailSections([
-    renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
-    renderFloatingOverlaySection(
-      'metadataRolePrimary',
-      '상자 역할 - 1',
-      metadataRolePrimaryOverlayCollapsed,
-      setMetadataRolePrimaryOverlayCollapsed,
-      finishMetadataRolePrimaryOverlayDrag,
-      metadataRolePrimaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-    renderFloatingOverlaySection(
-      'metadataRoleSecondary',
-      '상자 역할 - 2',
-      metadataRoleSecondaryOverlayCollapsed,
-      setMetadataRoleSecondaryOverlayCollapsed,
-      finishMetadataRoleSecondaryOverlayDrag,
-      metadataRoleSecondaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-    renderFloatingOverlaySection(
-      'metadataRoleTertiary',
-      '상자 연결',
-      metadataRoleTertiaryOverlayCollapsed,
-      setMetadataRoleTertiaryOverlayCollapsed,
-      finishMetadataRoleTertiaryOverlayDrag,
-      metadataRoleTertiaryOverlay,
-      { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
-    ),
-  ]);
+  const positionEditOverlayRailSections = editSettingsPanelVisible
+    ? [
+        renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
+        renderFloatingOverlaySection(
+          'style',
+          styleOverlayLabel,
+          styleOverlayCollapsed,
+          setStyleOverlayCollapsed,
+          finishStyleOverlayDrag,
+          styleOverlay,
+          { expandedWidthClassName: 'w-[250px] max-w-[250px]', keepMountedWhenCollapsed: true }
+        ),
+        renderFloatingOverlaySection(
+          'sizeType',
+          '상자 크기 타입',
+          sizeTypeOverlayCollapsed,
+          setSizeTypeOverlayCollapsed,
+          finishSizeTypeOverlayDrag,
+          sizeTypeOverlay,
+          { expandedWidthClassName: 'w-fit max-w-[250px]', keepMountedWhenCollapsed: true }
+        ),
+        renderFloatingOverlaySection(
+          'textStyle',
+          '텍스트 스타일',
+          textStyleOverlayCollapsed,
+          setTextStyleOverlayCollapsed,
+          finishTextStyleOverlayDrag,
+          textStyleOverlay,
+          {
+            expandedWidthClassName: textStyleOverlayExpandedWidthClassName || 'w-fit max-w-[250px]',
+            keepMountedWhenCollapsed: true,
+          }
+        ),
+        renderFloatingOverlaySection(
+          'action',
+          actionOverlayLabel,
+          actionOverlayCollapsed,
+          setActionOverlayCollapsed,
+          finishActionOverlayDrag,
+          actionOverlay,
+          {
+            expandedWidthClassName: actionOverlayExpandedWidthClassName || 'w-44 max-w-[calc(100%_-_1.5rem)]',
+            keepMountedWhenCollapsed: true,
+          }
+        ),
+      ]
+    : [];
+  const positionOverlayRailSections = compactOverlayRailSections(
+    todoOverlayActive ? [renderActiveTodoOverlaySection('position')] : positionEditOverlayRailSections
+  );
+  const metadataEditOverlayRailSections = editSettingsPanelVisible
+    ? [
+        renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
+        renderFloatingOverlaySection(
+          'metadataRolePrimary',
+          '상자 역할 - 1',
+          metadataRolePrimaryOverlayCollapsed,
+          setMetadataRolePrimaryOverlayCollapsed,
+          finishMetadataRolePrimaryOverlayDrag,
+          metadataRolePrimaryOverlay,
+          { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+        ),
+        renderFloatingOverlaySection(
+          'metadataRoleSecondary',
+          '상자 역할 - 2',
+          metadataRoleSecondaryOverlayCollapsed,
+          setMetadataRoleSecondaryOverlayCollapsed,
+          finishMetadataRoleSecondaryOverlayDrag,
+          metadataRoleSecondaryOverlay,
+          { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+        ),
+        renderFloatingOverlaySection(
+          'metadataRoleTertiary',
+          '상자 연결',
+          metadataRoleTertiaryOverlayCollapsed,
+          setMetadataRoleTertiaryOverlayCollapsed,
+          finishMetadataRoleTertiaryOverlayDrag,
+          metadataRoleTertiaryOverlay,
+          { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
+        ),
+      ]
+    : [];
+  const metadataOverlayRailSections = compactOverlayRailSections(
+    todoOverlayActive ? [renderActiveTodoOverlaySection('metadata')] : metadataEditOverlayRailSections
+  );
   const hasMetadata2ScopeRailOverlay = Boolean(
     metadata2RoleScopeOverlay ||
       metadata2RolePhotoOverlay ||
@@ -1254,8 +1323,8 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       metadata2RoleExpirationOverlay ||
       metadata2RoleAssignmentOverlay
   );
-  const metadata2OverlayRailSections = compactOverlayRailSections(
-    hasMetadata2ScopeRailOverlay
+  const metadata2EditOverlayRailSections = editSettingsPanelVisible
+    ? hasMetadata2ScopeRailOverlay
       ? [
           renderFloatingOverlaySection(
             'metadataName',
@@ -1340,6 +1409,9 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             { expandedWidthClassName: 'w-[25rem] max-w-[calc(100%_-_1.5rem)]' }
           ),
         ]
+    : [];
+  const metadata2OverlayRailSections = compactOverlayRailSections(
+    todoOverlayActive ? [renderActiveTodoOverlaySection('metadata2')] : metadata2EditOverlayRailSections
   );
   const overlayRailRooms: OverlayRailRoom[] = [
     { tab: 'position', sections: positionOverlayRailSections },

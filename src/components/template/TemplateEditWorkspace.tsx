@@ -19384,9 +19384,28 @@ export default function TemplateEditWorkspace({
   const toggleCanvasFullscreen = React.useCallback(() => {
     setCanvasFullscreen((previous) => !previous);
   }, []);
+  const closeTodoPanelAndShowEditSettings = React.useCallback(() => {
+    setTodoPanelVisible(false);
+    setEditSettingsPanelVisible(true);
+  }, []);
   const toggleEditSettingsPanelVisible = React.useCallback(() => {
+    setTodoPanelVisible(false);
     setEditSettingsPanelVisible((previous) => !previous);
   }, []);
+  const toggleTodoPanelVisible = React.useCallback(() => {
+    if (!editSettingsPanelVisible) {
+      setEditSettingsPanelVisible(true);
+      setTodoPanelVisible(true);
+      return;
+    }
+
+    if (todoPanelVisible) {
+      closeTodoPanelAndShowEditSettings();
+      return;
+    }
+
+    setTodoPanelVisible(true);
+  }, [closeTodoPanelAndShowEditSettings, editSettingsPanelVisible, todoPanelVisible]);
   const clampPreviewZoomPercent = React.useCallback((value: number) => {
     if (!Number.isFinite(value)) {
       return 100;
@@ -36973,13 +36992,8 @@ export default function TemplateEditWorkspace({
             onSave={() => {
               void saveTemplate();
             }}
-            onToggleTodoPanel={todoPanel ? () => setTodoPanelVisible((previous) => !previous) : undefined}
+            onToggleTodoPanel={todoPanel ? toggleTodoPanelVisible : undefined}
           />
-          {todoPanelVisible && todoPanel ? (
-            <CardContent className={`border-b border-slate-200 bg-slate-50 px-6 py-4 ${canvasFullscreen ? 'shrink-0' : ''}`}>
-              {todoPanel}
-            </CardContent>
-          ) : null}
           <TemplateEditPreviewSurface
             key="template-preview-stage:live"
             renderedPreviewHtml={surfaceRenderedPreviewHtml}
@@ -37001,8 +37015,15 @@ export default function TemplateEditWorkspace({
             templateUsagePreviewPending={templateUsagePreviewPending}
             showEditorRoomAsUsagePreviewFallback={documentDraftSaveEnabled || readOnlyDraftOutput}
             selectionPanelTab={activeCanvasSurfaceSelectionPanelTab}
-            editSettingsPanelVisible={editSettingsPanelVisible && !documentDraftSaveEnabled && !readOnlyDraftOutput}
+            editSettingsPanelVisible={
+              editSettingsPanelVisible &&
+              !readOnlyDraftOutput &&
+              (!documentDraftSaveEnabled || todoPanelVisible)
+            }
             showMetadataIcons={templateUsagePreviewActive ? false : showMetadataIcons}
+            todoOverlay={editSettingsPanelVisible && !readOnlyDraftOutput && todoPanelVisible ? todoPanel : null}
+            todoOverlayLabel={todoButtonLabel}
+            onCloseTodoOverlay={closeTodoPanelAndShowEditSettings}
             actionOverlay={positionActionOverlayNode}
             actionOverlayLabel={canvasActionOverlayLabel}
             actionOverlayExpandedWidthClassName={canvasActionOverlayWidthClassName}
