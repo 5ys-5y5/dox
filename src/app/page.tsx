@@ -44,7 +44,7 @@ const pageGroups: Array<{
       {
         href: '/canvas',
         title: '상자 편집 캔버스',
-        summary: '템플릿 모드, 문서 모드, 읽기 모드를 한 화면에서 직접 확인하는 공용 캔버스 owner 페이지입니다.',
+        summary: '페이지별 상자 편집 캔버스 환경설정을 한 화면에서 직접 확인하는 공용 캔버스 owner 페이지입니다.',
         status: '완료',
         statusVariant: 'blue',
       },

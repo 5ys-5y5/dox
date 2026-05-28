@@ -645,6 +645,7 @@ export type TemplateEditWorkspaceCanvasToolbarVisibility = {
 };
 
 export type TemplateEditWorkspaceCanvasViewMode = TemplateCanvasViewMode;
+export type TemplateEditWorkspaceCanvasTab = TemplateCanvasViewMode;
 
 export type TemplateEditWorkspacePersistenceVisibility = {
   showTemplateList?: boolean;
@@ -726,7 +727,6 @@ export type TemplateCanvasSelectionChangeOptions = {
 export type TemplateEditWorkspaceProps = {
   initialTemplateId?: string;
   initialDraft?: TemplateEditWorkspaceInitialDraft | null;
-  workspaceMode?: 'template' | 'document' | 'read';
   editableValueKeys?: string[] | null;
   hideHeader?: boolean;
   hidePersistencePanel?: boolean;
@@ -775,8 +775,8 @@ export type TemplateEditWorkspaceProps = {
   documentAttachmentTagOptions?: string[];
   documentAttachmentTagColorByName?: Record<string, string>;
   selectionInactiveOverlayOpacity?: number;
+  initialCanvasTab?: TemplateEditWorkspaceCanvasTab;
   canvasTextInteractionMode?: 'default' | 'selection-only';
-  canvasViewMode?: TemplateEditWorkspaceCanvasViewMode;
   canvasSelectionMode?: TemplateCanvasSelectionMode;
   canvasSelectablePolicy?: TemplateCanvasSelectablePolicy;
   selectedCanvasBoxes?: TemplateCanvasSelectedBox[];

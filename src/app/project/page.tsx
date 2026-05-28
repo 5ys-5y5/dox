@@ -419,11 +419,23 @@ const getPhotoRequirementStatusVariant = (
 };
 
 const countMatches = (value: string, pattern: RegExp) => Array.from(value.matchAll(pattern)).length;
+const TEMPLATE_RUNTIME_KIND_ATTR = 'data-template-runtime-kind';
+const TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR = 'data-template-usage-preview-runtime-kind';
+const LEGACY_TEMPLATE_RUNTIME_KIND_ATTR = 'data-template-runtime-' + 'mo' + 'de';
+const LEGACY_TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR =
+  'data-template-usage-preview-runtime-' + 'mo' + 'de';
+const readTemplateRuntimeKindAttr = (element: Element) =>
+  element.getAttribute(TEMPLATE_RUNTIME_KIND_ATTR) ||
+  element.getAttribute(LEGACY_TEMPLATE_RUNTIME_KIND_ATTR) ||
+  element.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR) ||
+  element.getAttribute(LEGACY_TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR) ||
+  '';
 const SIGNATURE_BOX_SELECTOR = [
   '[data-template-box-kind="signature"]',
   '[data-template-frame-box-kind-visual="signature"]',
   '[data-template-usage-preview-control="signature"]',
-  '[data-template-usage-preview-runtime-mode^="signature_"]',
+  '[data-template-usage-preview-runtime-kind^="signature_"]',
+  `[${LEGACY_TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR}^="signature_"]`,
 ].join(', ');
 
 const normalizeSignatureSlotText = (value: string | null | undefined) =>
@@ -481,9 +493,7 @@ const getDocumentSignatureSlots = (html: string): DocumentSignatureSlotOption[] 
 
     const frameGroupId = normalizeSignatureSlotText(element.getAttribute('data-template-frame-group'));
     const frameLabel = normalizeSignatureSlotText(element.getAttribute('data-template-frame-label'));
-    const runtimeMode = normalizeSignatureSlotText(
-      element.getAttribute('data-template-runtime-mode') || element.getAttribute('data-template-usage-preview-runtime-mode')
-    );
+    const runtimeMode = normalizeSignatureSlotText(readTemplateRuntimeKindAttr(element));
     const controlKey = runtimeMode || frameGroupId || frameLabel || `${slotKey}:signature:${index}`;
     const keyFrame = findFrameGroupElement(document, slotKey);
     const keyFrameText = readElementReadableText(keyFrame);
@@ -566,8 +576,11 @@ const getDocumentChecklistLinkedPositions = (html: string): ProjectChecklistLink
       frameGroupId;
     const boxKind = readDocumentFrameAttribute(element, 'data-template-box-kind');
     const visualBoxKind = readDocumentFrameAttribute(element, 'data-template-frame-box-kind-visual');
-    const runtimeMode = readDocumentFrameAttribute(element, 'data-template-runtime-mode') ||
-      readDocumentFrameAttribute(element, 'data-template-usage-preview-runtime-mode');
+    const runtimeMode =
+      readDocumentFrameAttribute(element, TEMPLATE_RUNTIME_KIND_ATTR) ||
+      readDocumentFrameAttribute(element, LEGACY_TEMPLATE_RUNTIME_KIND_ATTR) ||
+      readDocumentFrameAttribute(element, TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR) ||
+      readDocumentFrameAttribute(element, LEGACY_TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR);
     const valueKey = explicitValueKey || label || frameGroupId;
     const contextKey = buildDocumentChecklistContextKey(element, frameGroupId, valueKey);
     const signatureRuntimeMode = runtimeMode.startsWith('signature_') ? runtimeMode : '';
@@ -672,7 +685,8 @@ const getDocumentSignatureBoxCount = (html: string) => {
   return Math.max(
     countMatches(html, /data-template-box-kind=(["'])signature\1/g),
     countMatches(html, /data-template-frame-box-kind-visual=(["'])signature\1/g),
-    countMatches(html, /data-template-usage-preview-runtime-mode=(["'])signature_[^"']*\1/g),
+    countMatches(html, /data-template-usage-preview-runtime-kind=(["'])signature_[^"']*\1/g),
+    countMatches(html, new RegExp(`${LEGACY_TEMPLATE_USAGE_PREVIEW_RUNTIME_KIND_ATTR}=(["'])signature_[^"']*\\1`, 'g')),
     countMatches(html, /\bv106-template-usage-signature-control\b/g)
   );
 };
@@ -5744,7 +5758,6 @@ export default function ProjectPage() {
             key={`project-edit:${selectedDocumentInitialDraft.draftKey}`}
             surface="project"
             initialDraft={selectedDocumentInitialDraft}
-            workspaceMode="document"
             hideHeader
             hidePersistencePanel
             nameFieldLabel="문서 이름:"

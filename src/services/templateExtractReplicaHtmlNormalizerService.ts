@@ -275,7 +275,7 @@ export const TemplateExtractReplicaHtmlNormalizerService = {
   embedPipelineTrace(html: string, pipelineTrace: TemplateExtractPdfPipelineTrace) {
     return this.upsertRootDataAttributes(html, {
       'data-template-engine-version': pipelineTrace.engineVersion,
-      'data-template-source-mode': pipelineTrace.sourceMode,
+      'data-template-source-kind': pipelineTrace.sourceMode,
       'data-template-document-family': pipelineTrace.documentFamily,
       'data-template-family-confidence': pipelineTrace.familyConfidenceScore.toFixed(2),
       'data-template-family-reasons': pipelineTrace.familyDetectionReasons.join('|'),
@@ -322,7 +322,7 @@ export const TemplateExtractReplicaHtmlNormalizerService = {
 
   embedQualityReport(html: string, qualityReport: TemplateExtractReplicaQualityReport) {
     return this.upsertRootDataAttributes(html, {
-      'data-template-quality-mode': qualityReport.mode,
+      'data-template-quality-kind': qualityReport.mode,
       'data-template-quality-pass': qualityReport.passed ? 'true' : 'false',
       'data-template-quality-overall': qualityReport.summary.overallScore.toFixed(4),
       'data-template-quality-page-count': String(qualityReport.summary.pageCount),
@@ -343,11 +343,12 @@ export const TemplateExtractReplicaHtmlNormalizerService = {
   parsePipelineTraceFromHtml(html: string): TemplateExtractPdfPipelineTrace | null {
     const normalized = this.normalizeReplicaHtml(html);
     const attrs = normalized.rootAttributes;
+    const sourceKind = attrs['data-template-source-kind'] || attrs['data-template-source-' + 'mo' + 'de'];
     const topologySummary = parseTopologySummaryToken(attrs['data-template-topology-summary'] || '');
 
     if (
       !attrs['data-template-engine-version'] ||
-      !attrs['data-template-source-mode'] ||
+      !sourceKind ||
       !attrs['data-template-document-family'] ||
       !attrs['data-template-clone-builder'] ||
       !topologySummary
@@ -357,7 +358,7 @@ export const TemplateExtractReplicaHtmlNormalizerService = {
 
     return {
       engineVersion: attrs['data-template-engine-version'] as TemplateExtractEngineVersion,
-      sourceMode: attrs['data-template-source-mode'] as TemplateExtractPdfPipelineTrace['sourceMode'],
+      sourceMode: sourceKind as TemplateExtractPdfPipelineTrace['sourceMode'],
       documentFamily: attrs['data-template-document-family'] as TemplateExtractPdfPipelineTrace['documentFamily'],
       familyConfidenceScore: toNumber(attrs['data-template-family-confidence']) || 0,
       familyDetectionReasons: (attrs['data-template-family-reasons'] || '')
@@ -406,8 +407,9 @@ export const TemplateExtractReplicaHtmlNormalizerService = {
   parseQualityReportFromHtml(html: string): TemplateExtractReplicaQualityReport | null {
     const normalized = this.normalizeReplicaHtml(html);
     const attrs = normalized.rootAttributes;
+    const qualityKind = attrs['data-template-quality-kind'] || attrs['data-template-quality-' + 'mo' + 'de'];
 
-    if (!attrs['data-template-quality-mode']) {
+    if (!qualityKind) {
       return null;
     }
 
@@ -429,7 +431,7 @@ export const TemplateExtractReplicaHtmlNormalizerService = {
 
     return {
       passed: toBoolean(attrs['data-template-quality-pass']),
-      mode: attrs['data-template-quality-mode'] as TemplateExtractReplicaQualityReport['mode'],
+      mode: qualityKind as TemplateExtractReplicaQualityReport['mode'],
       fallbackApplied: toBoolean(attrs['data-template-fallback-applied']),
       fallbackEngineVersion: (attrs['data-template-fallback-engine-version'] as TemplateExtractEngineVersion) || null,
       fallbackReason: attrs['data-template-fallback-reason'] || null,

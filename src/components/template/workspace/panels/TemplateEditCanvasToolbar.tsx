@@ -25,8 +25,8 @@ import type { SelectionPanelTab, TemplateEditWorkspaceCanvasToolbarVisibility } 
 import { DeferredValueInput } from './DeferredValueInput';
 
 type TemplateEditCanvasToolbarProps = {
-  documentMode: boolean;
-  readMode: boolean;
+  documentDraftSaveEnabled: boolean;
+  readOnlyDraftOutput: boolean;
   nameFieldLabel: string;
   saveButtonLabel: string;
   templateNameReadOnly: boolean;
@@ -53,7 +53,7 @@ type TemplateEditCanvasToolbarProps = {
   onToggleCanvasFullscreen: () => void;
   onToggleEditSettingsPanel: () => void;
   onSelectionPanelTabChange: (tab: SelectionPanelTab) => void;
-  onToggleTemplateUsagePreviewMode: () => void;
+  onToggleTemplateUsagePreviewMode: (options?: { forceEnter?: boolean; forceExit?: boolean }) => void;
   onCanvasInteractionModeChange: (mode: 'select' | 'move') => void;
   onUndoCanvasHistory: () => void;
   onRedoCanvasHistory: () => void;
@@ -69,6 +69,7 @@ const canvasZoomButtonClassName =
   'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900';
 const canvasToolbarButtonBaseClassName =
   'v106-canvas-toolbar-button relative inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border border-slate-300 px-2 text-xs font-semibold transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900 disabled:pointer-events-none disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100';
+const canvasOwnerEnv = (definitionName = '') => ({ env: definitionName });
 
 const getCanvasToolbarButtonStateClassName = (active: boolean, disabled = false) => {
   if (disabled) {
@@ -148,8 +149,8 @@ const applyImmediateSelectionPanelTabVisualState = (
       const metadataVisualActive = activeTabKey === 'metadata' || activeTabKey === 'metadata2';
       editorRoot.removeAttribute('aria-hidden');
       editorRoot.setAttribute('data-selection-panel-tab', activeTabKey);
-      editorRoot.setAttribute('data-metadata-visual-mode', metadataVisualActive ? 'true' : 'false');
-      editorRoot.setAttribute('data-canvas-prepared-view-mode', activeTabKey);
+      editorRoot.setAttribute('data-metadata-visual-active', metadataVisualActive ? 'true' : 'false');
+      editorRoot.setAttribute('data-canvas-prepared-view-tab', activeTabKey);
       editorRoot.setAttribute('data-canvas-prepared-view-cache-key', `${activeTabKey}:${activeTabKey}`);
       editorRoot.setAttribute('data-canvas-prepared-view-requested-tab', activeTabKey);
     } else if (useTemplatePreviewRoom) {
@@ -186,6 +187,12 @@ const applyImmediateSelectionPanelTabVisualState = (
   }
 };
 
+const readImmediatePreviewTabActive = (target: HTMLElement) =>
+  target
+    .closest('[data-canvas-owner-item="canvas-container-상자-편집-탭"]')
+    ?.querySelector<HTMLElement>('[data-canvas-toolbar-view-tab-key="preview"]')
+    ?.getAttribute('aria-pressed') === 'true';
+
 const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'middle' | 'last') => {
   if (position === 'single') {
     return 'rounded-md';
@@ -203,8 +210,8 @@ const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'mi
 };
 
 export const TemplateEditCanvasToolbar = ({
-  documentMode,
-  readMode,
+  documentDraftSaveEnabled,
+  readOnlyDraftOutput,
   nameFieldLabel,
   saveButtonLabel,
   templateNameReadOnly,
@@ -250,14 +257,14 @@ export const TemplateEditCanvasToolbar = ({
   const showFullscreenControl = visibility?.showFullscreenControl !== false;
   const showEditSettingsToggle = visibility?.showEditSettingsToggle !== false;
   const showSelectionPanelTabs = visibility?.showSelectionPanelTabs !== false;
-  const renderTemplateNameInput = !documentMode && !readMode && showTemplateNameInput;
-  const renderSaveButton = !readMode && showSaveButton;
-  const renderTodoButton = !readMode && showTodoButton && Boolean(onToggleTodoPanel);
-  const renderInteractionModeControls = !documentMode && !readMode && showInteractionModeControls;
-  const renderEditSettingsToggle = !documentMode && !readMode && showEditSettingsToggle;
-  const renderSelectionPanelTabs = !documentMode && !readMode && showSelectionPanelTabs;
-  const renderPreviewToggle = !readMode && showPreviewToggle && !renderSelectionPanelTabs;
-  const renderHistoryControls = !readMode && showHistoryControls;
+  const renderTemplateNameInput = showTemplateNameInput;
+  const renderSaveButton = showSaveButton;
+  const renderTodoButton = showTodoButton;
+  const renderInteractionModeControls = showInteractionModeControls;
+  const renderEditSettingsToggle = showEditSettingsToggle;
+  const renderSelectionPanelTabs = showSelectionPanelTabs;
+  const renderPreviewToggle = showPreviewToggle && !renderSelectionPanelTabs;
+  const renderHistoryControls = showHistoryControls;
   const renderZoomControls = showZoomControls;
   const renderFullscreenControl = showFullscreenControl;
   const showHeaderActions = renderTemplateNameInput || renderSaveButton || renderTodoButton;
@@ -277,14 +284,14 @@ export const TemplateEditCanvasToolbar = ({
     <CardHeader className={`space-y-4 pb-3 ${canvasFullscreen ? 'shrink-0' : ''}`}>
       <div className="flex items-center gap-3">
         {showCanvasTitle ? (
-        <div className="min-w-0 shrink-0">
+        <div className="min-w-0 shrink-0" {...canvasOwnerEnv('canvasToolbarVisibility.showCanvasTitle')}>
           <CardTitle>상자 편집 캔버스</CardTitle>
         </div>
         ) : null}
-        {readMode ? null : (
+        {showHeaderActions ? (
           <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
             {renderTemplateNameInput ? (
-              <div className="relative min-w-0 max-w-[420px] flex-1">
+              <div className="relative min-w-0 max-w-[420px] flex-1" {...canvasOwnerEnv('canvasToolbarVisibility.showTemplateNameInput')}>
                 <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">
                   <span className="sm:hidden">이름:</span>
                   <span className="hidden sm:inline">{nameFieldLabel}</span>
@@ -301,8 +308,9 @@ export const TemplateEditCanvasToolbar = ({
             ) : null}
             {renderSaveButton ? (
               <Button
+                {...canvasOwnerEnv('canvasToolbarVisibility.showSaveButton')}
                 onClick={onSave}
-                disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentMode)}
+                disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentDraftSaveEnabled)}
                 aria-label={saving ? '저장 중...' : saveButtonLabel}
                 className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-4"
               >
@@ -313,10 +321,11 @@ export const TemplateEditCanvasToolbar = ({
             ) : null}
             {renderTodoButton ? (
               <Button
+                {...canvasOwnerEnv('canvasToolbarVisibility.showTodoButton')}
                 type="button"
                 variant="outline"
                 onClick={onToggleTodoPanel}
-                disabled={todoButtonDisabled}
+                disabled={todoButtonDisabled || !onToggleTodoPanel}
                 aria-pressed={todoPanelOpen}
                 aria-label={todoButtonLabel}
                 className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-3"
@@ -332,7 +341,7 @@ export const TemplateEditCanvasToolbar = ({
               </Button>
             ) : null}
           </div>
-        )}
+        ) : null}
       </div>
     </CardHeader>
     ) : null}
@@ -340,30 +349,34 @@ export const TemplateEditCanvasToolbar = ({
       <CardContent className={`border-b border-slate-200 bg-white px-6 pb-6 pt-0 ${canvasFullscreen ? 'shrink-0' : ''}`}>
       <div className="v106-canvas-toolbar flex w-full min-w-0 flex-wrap items-stretch gap-2 md:gap-3">
         {renderPreviewToggle ? (
-        <div className={`${canvasToolbarGroupClassName} shrink-0`}>
+        <div className={`${canvasToolbarGroupClassName} shrink-0`} {...canvasOwnerEnv('canvasToolbarVisibility.showPreviewToggle')}>
           <button
             type="button"
             className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(templateUsagePreviewMode, !renderedPreviewHtml.trim())}`}
-            onClick={documentMode ? undefined : onToggleTemplateUsagePreviewMode}
+            onClick={documentDraftSaveEnabled ? undefined : () => onToggleTemplateUsagePreviewMode()}
             disabled={!renderedPreviewHtml.trim()}
             aria-pressed={templateUsagePreviewMode}
-            aria-label={documentMode ? '미리보기' : templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
-            title={documentMode ? '미리보기' : templateUsagePreviewMode ? '편집 모드로 보기' : '실제 사용 미리보기'}
+            aria-label={documentDraftSaveEnabled ? '미리보기' : templateUsagePreviewMode ? '편집 화면으로 보기' : '실제 사용 미리보기'}
+            title={documentDraftSaveEnabled ? '미리보기' : templateUsagePreviewMode ? '편집 화면으로 보기' : '실제 사용 미리보기'}
           >
-            {documentMode ? <Eye className="h-4 w-4" /> : templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            <span className="v106-canvas-toolbar-label">{documentMode ? '미리보기' : templateUsagePreviewMode ? '편집 모드' : '미리보기'}</span>
+            {documentDraftSaveEnabled ? <Eye className="h-4 w-4" /> : templateUsagePreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            <span className="v106-canvas-toolbar-label">{documentDraftSaveEnabled ? '미리보기' : templateUsagePreviewMode ? '편집 화면' : '미리보기'}</span>
           </button>
         </div>
         ) : null}
         {renderInteractionModeControls ? (
-          <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 조작 모드">
+          <div
+            className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`}
+            aria-label="캔버스 조작"
+            {...canvasOwnerEnv('canvasToolbarVisibility.showInteractionToolControls')}
+          >
             <button
               type="button"
               className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'select', templateUsagePreviewMode)}`}
               onClick={() => onCanvasInteractionModeChange('select')}
               disabled={templateUsagePreviewMode}
-              aria-label="선택 모드"
-              title="선택 모드"
+              aria-label="선택"
+              title="선택"
             >
               <MousePointer2 className="h-4 w-4" />
               <span className="v106-canvas-toolbar-label">선택</span>
@@ -373,8 +386,8 @@ export const TemplateEditCanvasToolbar = ({
               className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(canvasInteractionMode === 'move', templateUsagePreviewMode)}`}
               onClick={() => onCanvasInteractionModeChange('move')}
               disabled={templateUsagePreviewMode}
-              aria-label="이동 모드"
-              title="이동 모드"
+              aria-label="이동"
+              title="이동"
             >
               <Move className="h-4 w-4" />
               <span className="v106-canvas-toolbar-label">이동</span>
@@ -382,13 +395,17 @@ export const TemplateEditCanvasToolbar = ({
           </div>
         ) : null}
         {renderHistoryControls ? (
-        <div className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`} aria-label="캔버스 실행 기록">
+        <div
+          className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`}
+          aria-label="캔버스 실행 기록"
+          {...canvasOwnerEnv('canvasToolbarVisibility.showHistoryControls')}
+        >
           <button
             type="button"
-            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !documentMode && (!canUndoCanvasHistory || templateUsagePreviewMode))}`}
-            onMouseDown={documentMode ? (event) => event.preventDefault() : undefined}
+            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('first')} ${getCanvasToolbarButtonStateClassName(false, !documentDraftSaveEnabled && (!canUndoCanvasHistory || templateUsagePreviewMode))}`}
+            onMouseDown={documentDraftSaveEnabled ? (event) => event.preventDefault() : undefined}
             onClick={onUndoCanvasHistory}
-            disabled={!documentMode && (!canUndoCanvasHistory || templateUsagePreviewMode)}
+            disabled={!documentDraftSaveEnabled && (!canUndoCanvasHistory || templateUsagePreviewMode)}
             aria-label="되돌리기"
             title="되돌리기"
           >
@@ -397,10 +414,10 @@ export const TemplateEditCanvasToolbar = ({
           </button>
           <button
             type="button"
-            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !documentMode && (!canRedoCanvasHistory || templateUsagePreviewMode))}`}
-            onMouseDown={documentMode ? (event) => event.preventDefault() : undefined}
+            className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('last')} ${getCanvasToolbarButtonStateClassName(false, !documentDraftSaveEnabled && (!canRedoCanvasHistory || templateUsagePreviewMode))}`}
+            onMouseDown={documentDraftSaveEnabled ? (event) => event.preventDefault() : undefined}
             onClick={onRedoCanvasHistory}
-            disabled={!documentMode && (!canRedoCanvasHistory || templateUsagePreviewMode)}
+            disabled={!documentDraftSaveEnabled && (!canRedoCanvasHistory || templateUsagePreviewMode)}
             aria-label="다시 실행하기"
             title="다시 실행하기"
           >
@@ -410,7 +427,10 @@ export const TemplateEditCanvasToolbar = ({
         </div>
         ) : null}
         {renderZoomControls ? (
-        <div className="v106-canvas-toolbar-zoom-group flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 py-0">
+        <div
+          className="v106-canvas-toolbar-zoom-group flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 py-0"
+          {...canvasOwnerEnv('canvasToolbarVisibility.showZoomControls')}
+        >
           <button
             type="button"
             className={canvasZoomButtonClassName}
@@ -449,7 +469,7 @@ export const TemplateEditCanvasToolbar = ({
         </div>
         ) : null}
         {renderFullscreenControl ? (
-        <div className={`${canvasToolbarGroupClassName} shrink-0`}>
+        <div className={`${canvasToolbarGroupClassName} shrink-0`} {...canvasOwnerEnv('canvasToolbarVisibility.showFullscreenControl')}>
           <button
             type="button"
             className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(canvasFullscreen)}`}
@@ -464,7 +484,7 @@ export const TemplateEditCanvasToolbar = ({
         </div>
         ) : null}
         {renderEditSettingsToggle ? (
-          <div className={`${canvasToolbarGroupClassName} shrink-0`}>
+          <div className={`${canvasToolbarGroupClassName} shrink-0`} {...canvasOwnerEnv('canvasToolbarVisibility.showEditSettingsToggle')}>
             <button
               type="button"
               className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(
@@ -484,10 +504,11 @@ export const TemplateEditCanvasToolbar = ({
         ) : null}
         {renderSelectionPanelTabs ? (
           <div
-            className={`inline-grid h-9 shrink-0 grid-cols-4 ${canvasToolbarGroupClassName}`}
+            className={`inline-grid h-9 shrink-0 ${showPreviewToggle ? 'grid-cols-4' : 'grid-cols-3'} ${canvasToolbarGroupClassName}`}
             aria-label="상자 편집 탭"
             data-canvas-owner-item="canvas-container-상자-편집-탭"
             data-canvas-owner-name="상자 편집 탭"
+            {...canvasOwnerEnv('canvasToolbarVisibility.showSelectionPanelTabs')}
           >
             {([
               {
@@ -495,31 +516,36 @@ export const TemplateEditCanvasToolbar = ({
                 label: '미리보기',
                 icon: Eye,
                 ownerItem: 'canvas-container-상자-편집-탭-미리보기',
+                env: 'canvasToolbarVisibility.showPreviewToggle',
               },
               {
                 key: 'position',
                 label: '크기 및 위치',
                 icon: Move,
                 ownerItem: 'canvas-container-상자-편집-탭-크기-및-위치',
+                env: 'canvasToolbarVisibility.showSelectionPanelTabs',
               },
               {
                 key: 'metadata',
                 label: '속성',
                 icon: KeyRound,
                 ownerItem: 'canvas-container-상자-편집-탭-속성',
+                env: 'canvasToolbarVisibility.showSelectionPanelTabs',
               },
               {
                 key: 'metadata2',
                 label: '역할',
                 icon: KeyRound,
                 ownerItem: 'canvas-container-상자-편집-탭-역할',
+                env: 'canvasToolbarVisibility.showSelectionPanelTabs',
               },
             ] as const satisfies ReadonlyArray<{
               key: CanvasToolbarViewTabKey;
               label: string;
               icon: LucideIcon;
               ownerItem: string;
-            }>).map((tab, index, tabs) => {
+              env: string;
+            }>).filter((tab) => tab.key !== 'preview' || showPreviewToggle).map((tab, index, tabs) => {
               const TabIcon = tab.icon;
               const isPreviewTab = tab.key === 'preview';
               const isActive = isPreviewTab ? templateUsagePreviewMode : !templateUsagePreviewMode && selectionPanelTab === tab.key;
@@ -532,17 +558,18 @@ export const TemplateEditCanvasToolbar = ({
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(shape)} ${getCanvasToolbarButtonStateClassName(isActive)}`}
                   onClick={(event) => {
                     if (isPreviewTab) {
-                      if (!templateUsagePreviewMode) {
+                      if (!readImmediatePreviewTabActive(event.currentTarget)) {
                         applyImmediateSelectionPanelTabVisualState(event.currentTarget, tab.key);
-                        onToggleTemplateUsagePreviewMode();
+                        onToggleTemplateUsagePreviewMode({ forceEnter: true });
                       }
                       return;
                     }
 
+                    const previewVisuallyActive = templateUsagePreviewMode || readImmediatePreviewTabActive(event.currentTarget);
                     applyImmediateSelectionPanelTabVisualState(event.currentTarget, tab.key);
                     onSelectionPanelTabChange(tab.key);
-                    if (templateUsagePreviewMode) {
-                      onToggleTemplateUsagePreviewMode();
+                    if (previewVisuallyActive) {
+                      onToggleTemplateUsagePreviewMode({ forceExit: true });
                     }
                   }}
                   disabled={isPreviewTab && !renderedPreviewHtml.trim()}
@@ -552,6 +579,7 @@ export const TemplateEditCanvasToolbar = ({
                   data-canvas-owner-item={tab.ownerItem}
                   data-canvas-owner-name={tab.label}
                   data-canvas-toolbar-view-tab-key={tab.key}
+                  {...canvasOwnerEnv(tab.env)}
                 >
                   <TabIcon className="h-4 w-4" />
                   <span className="v106-canvas-toolbar-label">{tab.label}</span>

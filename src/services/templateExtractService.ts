@@ -67,7 +67,7 @@ const getSupabase = () => {
 const TEMPLATE_EXTRACT_DB_SCHEMA = 'template_extracts';
 const DEFAULT_LAYOUT_MODE: TemplateLayoutResizeMode = 'grow_height';
 const EXTRACT_POSITION_ATTR_NAMES = [
-  'data-template-frame-position-mode',
+  'data-template-frame-position-kind',
   'data-template-frame-relative-anchor-kind',
   'data-template-frame-relative-anchor-id',
   'data-template-frame-relative-anchor-x',

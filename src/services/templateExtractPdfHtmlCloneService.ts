@@ -2493,7 +2493,7 @@ ${pagesHtml}
 
     return {
       html: `<section data-template-extract-draft="true" data-template-clone="${cloneId}">
-  <script type="application/json" data-template-render-model="positioned-v1">${serializeReplicaRenderModel(renderModel)}</script>
+  <script type="application/json" data-template-render-plan="positioned-v1">${serializeReplicaRenderModel(renderModel)}</script>
   <div class="template-clone ${className}">
 ${buildPositionedStyleHtml()}
 ${pagesHtml}

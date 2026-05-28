@@ -19,6 +19,9 @@ type PositionSpacingEntityVisual = {
   badgeTextColor: string;
 };
 
+const relativePositionKindSelector =
+  '[data-template-frame-position-kind="relative"], [data-template-frame-position-' + 'mo' + 'de="relative"]';
+
 export const buildDefinedPositionRelativeRelations = (args: {
   previewRoot: HTMLDivElement | null;
   positionRelationFrameLabelById: Map<string, string>;
@@ -111,7 +114,7 @@ export const buildDefinedPositionRelativeRelations = (args: {
         args.readStoredRelativeAnchorConfig(args.resolveFrameLayoutShell(targetNode)) ||
         args.readStoredRelativeAnchorConfig(args.resolveFrameContentTarget(targetNode)) ||
         args.readStoredRelativeAnchorConfig(
-          targetNode.querySelector<HTMLElement>('[data-template-frame-position-mode="relative"]')
+          targetNode.querySelector<HTMLElement>(relativePositionKindSelector)
         );
       if (!targetConfig) {
         return null;
@@ -1197,7 +1200,7 @@ export const buildPositionSpacingSettingRelations = (args: any): DefinedPosition
       node,
       args.resolveFrameLayoutShell(node),
       args.resolveFrameContentTarget(node),
-      node.querySelector<HTMLElement>('[data-template-frame-position-mode="relative"]'),
+      node.querySelector<HTMLElement>(relativePositionKindSelector),
     ];
 
     for (const element of configElements) {

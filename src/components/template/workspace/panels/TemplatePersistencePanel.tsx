@@ -37,6 +37,8 @@ type TemplatePersistencePanelProps = {
   onLayoutResizeModeChange: (nextMode: string) => void;
 };
 
+const canvasOwnerEnv = (definitionName = '') => ({ env: definitionName });
+
 export const TemplatePersistencePanel = ({
   templateListDisplay,
   additionalControlPanels,
@@ -66,7 +68,7 @@ export const TemplatePersistencePanel = ({
   const showFieldGrid = showTemplateNameInput || showLayoutResizeModeSelect || showSourceDocumentNameInput;
 
   return (
-  <div className="space-y-6">
+  <div className="space-y-6" {...canvasOwnerEnv('hidePersistencePanel')}>
     {additionalControlPanels}
     <Card className="border-slate-200">
       <CardHeader>
@@ -74,7 +76,7 @@ export const TemplatePersistencePanel = ({
       </CardHeader>
       <CardContent className="space-y-4">
         {showTemplateList ? (
-        <div className="space-y-2">
+        <div className="space-y-2" {...canvasOwnerEnv('persistenceVisibility.showTemplateList')}>
           <label className="text-sm font-medium text-slate-800">
             {templateListDisplay === 'inline' ? '템플릿 리스트' : '저장된 템플릿'}
           </label>
@@ -144,13 +146,13 @@ export const TemplatePersistencePanel = ({
         {showFieldGrid ? (
         <div className="grid grid-cols-2 gap-4">
           {showTemplateNameInput ? (
-          <div className="space-y-2">
+          <div className="space-y-2" {...canvasOwnerEnv('persistenceVisibility.showTemplateNameInput')}>
             <label className="text-sm font-medium text-slate-800">템플릿 이름</label>
             <DeferredValueInput value={templateName} onCommit={onTemplateNameChange} />
           </div>
           ) : null}
           {showLayoutResizeModeSelect ? (
-          <div className="space-y-2">
+          <div className="space-y-2" {...canvasOwnerEnv('persistenceVisibility.showLayoutResizePolicySelect')}>
             <label className="text-sm font-medium text-slate-800">레이아웃 확장 정책</label>
             <select
               value={layoutResizeMode}
@@ -164,7 +166,7 @@ export const TemplatePersistencePanel = ({
           </div>
           ) : null}
           {showSourceDocumentNameInput ? (
-          <div className="col-span-2 space-y-2">
+          <div className="col-span-2 space-y-2" {...canvasOwnerEnv('persistenceVisibility.showSourceDocumentNameInput')}>
             <label className="text-sm font-medium text-slate-800">원본 문서명</label>
             <Input value={sourceDocumentName} readOnly className="cursor-not-allowed bg-slate-50 text-slate-500" />
           </div>
@@ -174,6 +176,7 @@ export const TemplatePersistencePanel = ({
 
         {showSaveButton ? (
         <Button
+          {...canvasOwnerEnv('persistenceVisibility.showSaveButton')}
           className="h-11 min-h-11 w-full"
           onClick={onSave}
           disabled={saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode}

@@ -171,7 +171,7 @@ export function OwnerSharedUiPreview({
                   badge: <Badge variant="blue" className="px-2 py-0 text-[10px]">선택</Badge>,
                   detailRows: [
                     { label: 'surface', value: 'canvas' },
-                    { label: 'mode', value: 'template' },
+                    { label: 'settings', value: 'page-owned' },
                   ],
                 },
               ]}
@@ -204,7 +204,7 @@ export function OwnerSharedUiPreview({
               ariaLabel="공용 UI 탭 리스트 미리보기"
               options={[
                 { value: 'page', label: '페이지' },
-                { value: 'mode', label: '모드' },
+                { value: 'settings', label: '설정' },
               ]}
               onChange={noopString}
             />

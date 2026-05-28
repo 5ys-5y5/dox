@@ -5,6 +5,7 @@ type OwnerDomNamingOptions = {
   autoNamedAttribute: string;
   itemPrefix: string;
   existingItems?: Set<string>;
+  envAttribute?: string;
 };
 
 type OwnerDomWatcherOptions = OwnerDomNamingOptions & {
@@ -20,6 +21,8 @@ type OwnerIdleWindow = Window &
   };
 
 const OWNER_AUTO_ITEM_MAX_LENGTH = 120;
+// DOM 계약값은 요청된 표기인 "_slibling" 철자를 그대로 사용한다.
+const OWNER_ENV_RELATED_SUFFIX = '_slibling';
 const OWNER_VISUAL_ONLY_SELECTORS = [
   '.v106-frame-selection-fill',
   '.v106-frame-selection-badge',
@@ -187,6 +190,38 @@ const readOwnerElementKind = (element: Element) => {
 const shouldSkipOwnerAutoElement = (element: Element) =>
   OWNER_VISUAL_ONLY_SELECTORS.some((selector) => element.matches(selector));
 
+const readNearestOwnerEnvValue = (element: Element, root: HTMLElement, envAttribute: string) => {
+  let parent = element.parentElement;
+
+  while (parent && parent !== root.parentElement) {
+    const parentEnv = parent.getAttribute(envAttribute);
+
+    if (parentEnv) {
+      return parentEnv.endsWith(OWNER_ENV_RELATED_SUFFIX)
+        ? parentEnv
+        : `${parentEnv}${OWNER_ENV_RELATED_SUFFIX}`;
+    }
+
+    if (parent === root) {
+      return '';
+    }
+
+    parent = parent.parentElement;
+  }
+
+  return '';
+};
+
+const ensureOwnerEnvAttribute = (element: Element, root: HTMLElement, envAttribute: string) => {
+  const currentEnv = element.getAttribute(envAttribute);
+
+  if (currentEnv) {
+    return;
+  }
+
+  element.setAttribute(envAttribute, readNearestOwnerEnvValue(element, root, envAttribute));
+};
+
 const readOwnerSemanticDataParts = (element: Element) => {
   const parts: string[] = [];
   const externalItem =
@@ -349,6 +384,7 @@ export const annotateOwnerUnnamedElements = ({
   autoNamedAttribute,
   itemPrefix,
   existingItems: providedExistingItems,
+  envAttribute = 'env',
 }: OwnerDomNamingOptions) => {
   if (shouldSkipOwnerAutoElement(root)) {
     return;
@@ -360,6 +396,8 @@ export const annotateOwnerUnnamedElements = ({
   const existingItems = providedExistingItems || collectExistingOwnerItems(root, itemAttribute);
 
   elements.forEach((element) => {
+    ensureOwnerEnvAttribute(element, root, envAttribute);
+
     const item = element.getAttribute(itemAttribute);
     const name = element.getAttribute(nameAttribute);
     const autoNamed = element.getAttribute(autoNamedAttribute);

@@ -1,4 +1,0 @@
-#!/bin/zsh
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-node "$SCRIPT_DIR/chrome_devtools_manager.mjs" "$@"

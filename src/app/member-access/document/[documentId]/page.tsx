@@ -492,7 +492,6 @@ export default function MemberAccessDocumentPage() {
           surface="member-access"
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
-          workspaceMode={canUseDocumentWorkspace ? 'document' : 'read'}
           hidePersistencePanel
           headerTitle="구성원 문서 접근"
           headerDescription="멤버 소속과 scope 배정 범위 안에서 현장 문서를 열람하거나 수정합니다."

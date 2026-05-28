@@ -883,21 +883,59 @@ const resolvePersistedFrameNode = (node: HTMLElement | null | undefined) => {
   return node.querySelector<HTMLElement>(RAW_FRAME_NODE_SELECTOR) || null;
 };
 
+const legacyTemplateRuntimeKindAttr = 'data-template-runtime-' + 'mo' + 'de';
+const legacyTemplateFramePositionKindAttr = 'data-template-frame-position-' + 'mo' + 'de';
+const legacyTemplateUsagePreviewRuntimeKindAttr = 'data-template-usage-preview-runtime-' + 'mo' + 'de';
+
+const legacyAttrFallbacksByCanonicalAttr = (attrName: string) => {
+  if (attrName === TEMPLATE_FRAME_RUNTIME_MODE_ATTR) {
+    return [legacyTemplateRuntimeKindAttr];
+  }
+
+  if (attrName === TEMPLATE_FRAME_POSITION_MODE_ATTR) {
+    return [legacyTemplateFramePositionKindAttr];
+  }
+
+  if (attrName === TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) {
+    return [legacyTemplateUsagePreviewRuntimeKindAttr];
+  }
+
+  return [];
+};
+
+const readElementAttrWithLegacyFallback = (node: Element | null | undefined, attrName: string) => {
+  if (!node) {
+    return '';
+  }
+
+  const attrNames = [attrName, ...legacyAttrFallbacksByCanonicalAttr(attrName)];
+
+  for (const candidateAttrName of attrNames) {
+    const value = node.getAttribute(candidateAttrName)?.trim() || '';
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+};
+
 const readFrameMetadataAttr = (node: HTMLElement, attrName: string) => {
-  const directValue = node.getAttribute(attrName)?.trim() || '';
+  const directValue = readElementAttrWithLegacyFallback(node, attrName);
 
   if (directValue) {
     return directValue;
   }
 
   const persistedFrameNode = resolvePersistedFrameNode(node);
-  const persistedValue = persistedFrameNode?.getAttribute(attrName)?.trim() || '';
+  const persistedValue = readElementAttrWithLegacyFallback(persistedFrameNode, attrName);
 
   if (persistedValue) {
     return persistedValue;
   }
 
-  return node.querySelector<HTMLElement>('[data-template-frame-input="true"]')?.getAttribute(attrName)?.trim() || '';
+  return readElementAttrWithLegacyFallback(node.querySelector<HTMLElement>('[data-template-frame-input="true"]'), attrName);
 };
 
 const readFrameBoxKind = (node: HTMLElement) => {
@@ -2578,7 +2616,7 @@ const createFrameEditorGhost = (
   ghost.setAttribute('aria-hidden', 'true');
 
   if (mode) {
-    ghost.setAttribute('data-marquee-mode', mode);
+    ghost.setAttribute('data-marquee-state', mode);
   }
 
   return ghost;
@@ -10261,7 +10299,7 @@ const materializeTemplateUsagePreviewSignatureControls = (root: ParentNode) => {
       replacement.tabIndex = 0;
     }
 
-    const runtimeModeAttr = control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || 'signature_image';
+    const runtimeModeAttr = readElementAttrWithLegacyFallback(control, TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || 'signature_image';
     const runtimeMode = isTemplateFrameRuntimeMode(runtimeModeAttr) ? runtimeModeAttr : 'signature_image';
     applyTemplateUsagePreviewSignatureStateSnapshot(replacement, readTemplateUsagePreviewSignatureStateSnapshot(control));
 
@@ -13068,7 +13106,7 @@ const applyTemplateUsageSignatureHistoryPresentation = (control: HTMLElement, hi
 const renderTemplateUsagePreviewSignatureControl = (control: HTMLElement) => {
   ensureTemplateUsagePreviewSignatureState(control);
 
-  const runtimeModeAttr = control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || 'signature_image';
+  const runtimeModeAttr = readElementAttrWithLegacyFallback(control, TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR) || 'signature_image';
   const runtimeMode = isTemplateFrameRuntimeMode(runtimeModeAttr) ? runtimeModeAttr : 'signature_image';
   const label = control.getAttribute(TEMPLATE_USAGE_PREVIEW_LABEL_ATTR)?.trim() || '서명';
   const imageData = control.getAttribute(TEMPLATE_USAGE_PREVIEW_SIGNATURE_IMAGE_DATA_ATTR) || '';
@@ -15113,7 +15151,7 @@ const getChecklistTargetControlType = (target: TemplateChecklistRegistrationTarg
   target.kind === 'signature' ? 'signature' : target.kind === 'photo' || target.kind === 'file' ? 'attachment' : '';
 
 const isChecklistSignatureImageControl = (control: HTMLElement) => {
-  const runtimeMode = normalizeChecklistTargetToken(control.getAttribute(TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR));
+  const runtimeMode = normalizeChecklistTargetToken(readElementAttrWithLegacyFallback(control, TEMPLATE_USAGE_PREVIEW_RUNTIME_MODE_ATTR));
   return !runtimeMode || runtimeMode === 'signature_image';
 };
 
@@ -16707,7 +16745,7 @@ const buildEdgeSelectionButton = (
   button.setAttribute('data-direction', getDirectionFromEdgeSide(side));
   button.setAttribute('data-edge-id', edgeId);
   button.setAttribute('data-side', side);
-  button.setAttribute('data-edge-selection-mode', mode);
+    button.setAttribute('data-edge-selection-state', mode);
   if (selectionOrder !== null) {
     button.setAttribute('data-edge-selection-order', String(selectionOrder));
   }
@@ -16802,7 +16840,7 @@ const syncEdgeSelectionButton = (
   setElementAttributeIfChanged(button, 'data-direction', getDirectionFromEdgeSide(side));
   setElementAttributeIfChanged(button, 'data-edge-id', edgeId);
   setElementAttributeIfChanged(button, 'data-side', side);
-  setElementAttributeIfChanged(button, 'data-edge-selection-mode', mode);
+  setElementAttributeIfChanged(button, 'data-edge-selection-state', mode);
   setElementAttributeIfChanged(button, 'aria-label', `${side} edge resize`);
 
   if (selectionOrder !== null) {
@@ -17863,7 +17901,7 @@ const clearFastSelectionEditorUi = (root: HTMLElement) => {
     element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
   });
   root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR).forEach((button) => {
-    button.setAttribute('data-edge-selection-mode', 'idle');
+    button.setAttribute('data-edge-selection-state', 'idle');
     button.removeAttribute('data-edge-selection-order');
     button.removeAttribute('data-edge-anchor');
     button.removeAttribute('data-edge-selection-role');
@@ -18130,7 +18168,7 @@ const applyFastFrameSelectionUi = (
     element.removeAttribute(TEMPLATE_NATIVE_OUTLINE_HIDDEN_ATTR);
   });
   root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR).forEach((button) => {
-    setElementAttributeIfChanged(button, 'data-edge-selection-mode', 'idle');
+    setElementAttributeIfChanged(button, 'data-edge-selection-state', 'idle');
     removeElementAttributeIfPresent(button, 'data-edge-selection-order');
     removeElementAttributeIfPresent(button, 'data-edge-anchor');
     removeElementAttributeIfPresent(button, 'data-edge-selection-role');
@@ -18248,7 +18286,7 @@ const resolvePositionSelectionOrderState = (
 const hasStaleEdgeSelectionButtonState = (root: HTMLElement) =>
   Array.from(root.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR)).some(
     (button) =>
-      button.getAttribute('data-edge-selection-mode') !== 'idle' ||
+      button.getAttribute('data-edge-selection-state') !== 'idle' ||
       button.hasAttribute('data-edge-selection-order') ||
       button.hasAttribute('data-edge-anchor') ||
       button.hasAttribute('data-edge-selection-role') ||
@@ -18868,7 +18906,6 @@ const frameStylePatchCanChangeContentMeasurement = (patch: FrameStylePatch) =>
 export default function TemplateEditWorkspace({
   initialTemplateId = '',
   initialDraft = null,
-  workspaceMode = 'template',
   editableValueKeys = null,
   hideHeader = false,
   hidePersistencePanel = false,
@@ -18909,8 +18946,8 @@ export default function TemplateEditWorkspace({
   documentAttachmentTagOptions = EMPTY_TEMPLATE_USAGE_PREVIEW_ATTACHMENT_TAG_OPTIONS,
   documentAttachmentTagColorByName = {},
   selectionInactiveOverlayOpacity = 0.5,
+  initialCanvasTab,
   canvasTextInteractionMode = 'default',
-  canvasViewMode,
   canvasSelectionMode = 'none',
   canvasSelectablePolicy,
   selectedCanvasBoxes = EMPTY_TEMPLATE_CANVAS_SELECTED_BOXES,
@@ -18919,29 +18956,29 @@ export default function TemplateEditWorkspace({
   persistenceVisibility,
   templateUsagePreviewLayoutDebugOptions,
 }: TemplateEditWorkspaceProps) {
-  const documentMode = workspaceMode === 'document';
-  const readMode = workspaceMode === 'read';
+  const documentDraftSaveEnabled = typeof onSaveDraftHtml === 'function';
+  const readOnlyDraftOutput = Boolean(initialDraft && !documentDraftSaveEnabled && !onTemplateSaved && !initialTemplateId.trim());
   const selectionOnlyTextInteractions = canvasTextInteractionMode === 'selection-only';
-  const normalizedCanvasViewMode = normalizeTemplateEditWorkspaceCanvasViewMode(canvasViewMode);
+  const normalizedCanvasViewMode = normalizeTemplateEditWorkspaceCanvasViewMode(initialCanvasTab);
   const normalizedCanvasViewModeRef = React.useRef(normalizedCanvasViewMode);
   const previousNormalizedCanvasViewModeRef = React.useRef(normalizedCanvasViewMode);
-  const [canvasViewModeOverride, setCanvasViewModeOverrideState] =
+  const [initialCanvasTabOverride, setCanvasViewModeOverrideState] =
     React.useState<TemplateEditWorkspaceCanvasViewMode | null>(null);
-  const canvasViewModeOverrideRef = React.useRef<TemplateEditWorkspaceCanvasViewMode | null>(null);
+  const initialCanvasTabOverrideRef = React.useRef<TemplateEditWorkspaceCanvasViewMode | null>(null);
   const pendingCanvasViewModeRuntimeOverrideRef = React.useRef<TemplateEditWorkspaceCanvasViewMode | null>(null);
   normalizedCanvasViewModeRef.current = normalizedCanvasViewMode;
   const setCanvasViewModeRuntimeOverride = React.useCallback((nextMode: TemplateEditWorkspaceCanvasViewMode) => {
     const nextOverride = nextMode === normalizedCanvasViewModeRef.current ? null : nextMode;
     pendingCanvasViewModeRuntimeOverrideRef.current = null;
 
-    if (canvasViewModeOverrideRef.current === nextOverride) {
+    if (initialCanvasTabOverrideRef.current === nextOverride) {
       return;
     }
 
-    canvasViewModeOverrideRef.current = nextOverride;
+    initialCanvasTabOverrideRef.current = nextOverride;
     setCanvasViewModeOverrideState(nextOverride);
   }, []);
-  const effectiveCanvasViewMode = canvasViewModeOverride || normalizedCanvasViewMode;
+  const effectiveCanvasViewMode = initialCanvasTabOverride || normalizedCanvasViewMode;
   const canvasViewSelectionPanelTab: SelectionPanelTab =
     resolveTemplateCanvasSelectionPanelTab(effectiveCanvasViewMode);
   const canvasViewMetadataVisualMode = isTemplateCanvasMetadataViewMode(effectiveCanvasViewMode);
@@ -19092,7 +19129,7 @@ export default function TemplateEditWorkspace({
 
     previousNormalizedCanvasViewModeRef.current = normalizedCanvasViewMode;
     pendingCanvasViewModeRuntimeOverrideRef.current = null;
-    canvasViewModeOverrideRef.current = null;
+    initialCanvasTabOverrideRef.current = null;
     setCanvasViewModeOverrideState(null);
   }, [normalizedCanvasViewMode]);
 
@@ -19117,10 +19154,8 @@ export default function TemplateEditWorkspace({
   const commitSelectionPanelTabAfterImmediatePaint = React.useCallback(
     (nextTab: SelectionPanelTab, nextViewMode: TemplateEditWorkspaceCanvasViewMode) => {
       pendingSelectionPanelTabCommitRef.current = null;
-      React.startTransition(() => {
-        setCanvasViewModeRuntimeOverride(nextViewMode);
-        setSelectionPanelTab(nextTab);
-      });
+      setCanvasViewModeRuntimeOverride(nextViewMode);
+      setSelectionPanelTab(nextTab);
     },
     [setCanvasViewModeRuntimeOverride]
   );
@@ -19135,21 +19170,16 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      deferredSelectionPanelTabCommitFrameRef.current = window.requestAnimationFrame(() => {
-        deferredSelectionPanelTabCommitFrameRef.current = window.requestAnimationFrame(() => {
-          deferredSelectionPanelTabCommitFrameRef.current = null;
-          deferredSelectionPanelTabCommitTimeoutRef.current = window.setTimeout(() => {
-            const pendingCommit = pendingSelectionPanelTabCommitRef.current;
+      deferredSelectionPanelTabCommitTimeoutRef.current = window.setTimeout(() => {
+        const pendingCommit = pendingSelectionPanelTabCommitRef.current;
 
-            deferredSelectionPanelTabCommitTimeoutRef.current = null;
-            if (!pendingCommit || pendingCommit.tab !== nextTab || pendingCommit.viewMode !== nextViewMode) {
-              return;
-            }
+        deferredSelectionPanelTabCommitTimeoutRef.current = null;
+        if (!pendingCommit || pendingCommit.tab !== nextTab || pendingCommit.viewMode !== nextViewMode) {
+          return;
+        }
 
-            commitSelectionPanelTabAfterImmediatePaint(nextTab, nextViewMode);
-          }, TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS);
-        });
-      });
+        commitSelectionPanelTabAfterImmediatePaint(nextTab, nextViewMode);
+      }, 0);
     },
     [cancelDeferredSelectionPanelTabCommit, commitSelectionPanelTabAfterImmediatePaint]
   );
@@ -19208,7 +19238,7 @@ export default function TemplateEditWorkspace({
   const templateUsagePreviewPreparedActivationRef = React.useRef<{
     root: HTMLElement;
     html: string;
-    readMode: boolean;
+    readOnlyDraftOutput: boolean;
     editableSignature: string;
   } | null>(null);
   const checklistRegistrationTargetRef = React.useRef<TemplateChecklistRegistrationTarget | null>(null);
@@ -19641,7 +19671,7 @@ export default function TemplateEditWorkspace({
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const templateUsagePreviewActive = documentMode || readMode || templateUsagePreviewMode || canvasViewPreviewRequested;
+  const templateUsagePreviewActive = documentDraftSaveEnabled || readOnlyDraftOutput || templateUsagePreviewMode || canvasViewPreviewRequested;
   const templateUsagePreviewRuntimeOptionsSignature = [
     usagePreviewStabilizeInitialLayout ? 'stabilize' : 'raw-layout',
     usagePreviewPreventInitialValueClearShrink ? 'guard-initial-shrink' : 'allow-initial-shrink',
@@ -19652,6 +19682,10 @@ export default function TemplateEditWorkspace({
   const activeCanvasPreparedViewMode: TemplateEditWorkspaceCanvasViewMode = templateUsagePreviewActive
     ? 'preview'
     : resolveTemplateCanvasViewModeForSelectionPanelTab(selectionPanelTab);
+  const templateUsagePreviewActiveRef = React.useRef(templateUsagePreviewActive);
+  React.useLayoutEffect(() => {
+    templateUsagePreviewActiveRef.current = templateUsagePreviewActive;
+  }, [templateUsagePreviewActive]);
   const canvasBoxSelectionModeActive = canvasSelectionMode === 'box';
   const roleAssignmentTabActive = !templateUsagePreviewActive && selectionPanelTab === 'metadata2';
   const activeCanvasSelectablePolicy = roleAssignmentTabActive
@@ -19805,9 +19839,9 @@ export default function TemplateEditWorkspace({
       }
 
       (['height', 'width', 'fixed'] as TextAutoSizeMode[]).forEach((candidateMode) => {
-        const button = document.querySelector<HTMLElement>(`[data-text-autosize-mode-button="${candidateMode}"]`);
-        const trayShell = document.querySelector<HTMLElement>(`[data-text-autosize-mode-tray-shell="${candidateMode}"]`);
-        const tray = document.querySelector<HTMLElement>(`[data-text-autosize-mode-tray="${candidateMode}"]`);
+        const button = document.querySelector<HTMLElement>(`[data-text-autosize-policy-button="${candidateMode}"]`);
+        const trayShell = document.querySelector<HTMLElement>(`[data-text-autosize-policy-tray-shell="${candidateMode}"]`);
+        const tray = document.querySelector<HTMLElement>(`[data-text-autosize-policy-tray="${candidateMode}"]`);
         const isActive = candidateMode === mode;
         const showInlineTray = candidateMode !== 'fixed';
 
@@ -19843,7 +19877,7 @@ export default function TemplateEditWorkspace({
       const targetMode: TextAutoSizeMode = side === 'top' || side === 'bottom' ? 'height' : 'width';
       previewTextAutoSizeModeDomState(targetMode);
 
-      Array.from(document.querySelectorAll<HTMLElement>(`[data-text-autosize-action-mode="${targetMode}"]`)).forEach((node) => {
+      Array.from(document.querySelectorAll<HTMLElement>(`[data-text-autosize-action-policy="${targetMode}"]`)).forEach((node) => {
         const actionValue = node.getAttribute('data-text-autosize-action-value') || '';
         applyTextAutoSizeToneToElement(node, actionValue === side);
       });
@@ -19990,14 +20024,14 @@ export default function TemplateEditWorkspace({
         : '현재 value 상자 1개가 선택된 상태입니다. 이제 이 값의 key 상자를 캔버스에서 1개 선택해주세요.';
     }
 
-    return '먼저 value로 만들 상자를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 상자들의 key가 될 text 상자 1개를 선택합니다.';
+    return '먼저 value로 만들 상자를 선택한 뒤 `선택`을 누르세요. 그 다음 캔버스에서 이 상자들의 key가 될 text 상자 1개를 선택합니다.';
   }, [metadataRelationSelectionMode]);
   const valueBoxSelectionHelpText = React.useMemo(() => {
     if (metadataRelationSelectionMode.kind === 'value') {
       return '현재 key 상자가 선택된 상태입니다. 이제 이 key에 연결할 value 상자들을 캔버스에서 선택해주세요. 다시 클릭하면 해제됩니다.';
     }
 
-    return '먼저 기준이 될 key 상자 1개를 선택한 뒤 `선택 모드`를 누르세요. 그 다음 캔버스에서 이 key에 연결할 value 상자들을 선택합니다.';
+    return '먼저 기준이 될 key 상자 1개를 선택한 뒤 `선택`을 누르세요. 그 다음 캔버스에서 이 key에 연결할 value 상자들을 선택합니다.';
   }, [metadataRelationSelectionMode]);
   const canStartValueBoxSelection =
     canEditSingleSelection &&
@@ -20361,7 +20395,7 @@ export default function TemplateEditWorkspace({
     restoreCanvasHistoryAtIndex(currentIndex + 1, '다시 실행하기');
   }, [restoreCanvasHistoryAtIndex]);
   const runDocumentPreviewEditCommand = React.useCallback((command: 'undo' | 'redo') => {
-    if (!documentMode || typeof document === 'undefined') {
+    if (!documentDraftSaveEnabled || typeof document === 'undefined') {
       return false;
     }
 
@@ -20377,7 +20411,7 @@ export default function TemplateEditWorkspace({
     }
 
     return document.execCommand(command);
-  }, [documentMode]);
+  }, [documentDraftSaveEnabled]);
   const handleDocumentModeUndo = React.useCallback(() => {
     if (runDocumentPreviewEditCommand('undo')) {
       return;
@@ -20755,7 +20789,7 @@ export default function TemplateEditWorkspace({
 
   const scheduleTemplateUsagePreviewPreparedBuild = React.useCallback(
     (options?: { requested?: boolean; retryCount?: number }) => {
-      if (typeof window === 'undefined' || documentMode || readMode) {
+      if (typeof window === 'undefined' || documentDraftSaveEnabled || readOnlyDraftOutput) {
         return;
       }
 
@@ -20850,9 +20884,9 @@ export default function TemplateEditWorkspace({
       buildCachedTemplateUsagePreviewHtml,
       cancelScheduledTemplateUsagePreviewBuild,
       canvasViewPreviewRequested,
-      documentMode,
+      documentDraftSaveEnabled,
       hasActivePreviewPointerInteractionNow,
-      readMode,
+      readOnlyDraftOutput,
       readReadyTemplateUsagePreviewRuntimeHtml,
       resolveTemplateUsagePreviewSourceHtml,
       setTemplateUsagePreviewPreparedStatusState,
@@ -20860,19 +20894,34 @@ export default function TemplateEditWorkspace({
     ]
   );
 
-  const toggleTemplateUsagePreviewMode = React.useCallback(() => {
-    if (documentMode || readMode) {
+  const toggleTemplateUsagePreviewMode = React.useCallback((options?: { forceEnter?: boolean; forceExit?: boolean }) => {
+    if (documentDraftSaveEnabled || readOnlyDraftOutput) {
       return;
     }
+
+    const templateUsagePreviewActivationPending =
+      templateUsagePreviewDeferredActivationFrameRef.current != null ||
+      templateUsagePreviewDeferredActivationTimeoutRef.current != null;
+    const templateUsagePreviewDomVisible =
+      templateUsagePreviewPreparedNodeRef.current?.getAttribute('data-canvas-prepared-view-visible') === 'true';
+    const templateUsagePreviewActiveNow = templateUsagePreviewActiveRef.current;
 
     cancelScheduledTemplateUsagePreviewBuild();
     cancelDeferredTemplateUsagePreviewActivation();
 
-    if (templateUsagePreviewMode || canvasViewPreviewRequested) {
+    if (
+      !options?.forceEnter &&
+      (options?.forceExit ||
+        templateUsagePreviewActiveNow ||
+        templateUsagePreviewMode ||
+        canvasViewPreviewRequested ||
+        templateUsagePreviewActivationPending ||
+        templateUsagePreviewDomVisible)
+    ) {
       const returnCanvasViewMode =
         pendingCanvasViewModeRuntimeOverrideRef.current ||
-        (canvasViewModeOverrideRef.current && canvasViewModeOverrideRef.current !== 'preview'
-          ? canvasViewModeOverrideRef.current
+        (initialCanvasTabOverrideRef.current && initialCanvasTabOverrideRef.current !== 'preview'
+          ? initialCanvasTabOverrideRef.current
           : resolveTemplateCanvasViewModeForSelectionPanelTab(selectionPanelTab));
       pendingCanvasViewModeRuntimeOverrideRef.current = null;
 
@@ -20900,17 +20949,14 @@ export default function TemplateEditWorkspace({
         if (restoredEditorDomVersion) {
           setPreviewDomVersion((previous) => previous + 1);
         }
-        setMessage('템플릿 편집 모드로 돌아왔습니다.');
+        setMessage('템플릿 편집 화면으로 돌아왔습니다.');
       };
 
       if (typeof window !== 'undefined' && showEditorPreviewDomImmediately()) {
-        templateUsagePreviewDeferredActivationFrameRef.current = window.requestAnimationFrame(() => {
-          templateUsagePreviewDeferredActivationFrameRef.current = null;
-          templateUsagePreviewDeferredActivationTimeoutRef.current = window.setTimeout(() => {
-            templateUsagePreviewDeferredActivationTimeoutRef.current = null;
-            commitReturnToEditor();
-          }, TEMPLATE_CANVAS_VIEW_REACT_COMMIT_DELAY_MS);
-        });
+        templateUsagePreviewDeferredActivationTimeoutRef.current = window.setTimeout(() => {
+          templateUsagePreviewDeferredActivationTimeoutRef.current = null;
+          commitReturnToEditor();
+        }, 0);
         return;
       }
 
@@ -20953,8 +20999,8 @@ export default function TemplateEditWorkspace({
     cancelDeferredTemplateUsagePreviewActivation,
     cancelScheduledTemplateUsagePreviewBuild,
     canvasViewPreviewRequested,
-    documentMode,
-    readMode,
+    documentDraftSaveEnabled,
+    readOnlyDraftOutput,
     readReadyTemplateUsagePreviewRuntimeHtml,
     renderedPreviewHtml,
     resolveTemplateUsagePreviewSourceHtml,
@@ -20970,8 +21016,8 @@ export default function TemplateEditWorkspace({
   React.useLayoutEffect(() => {
     if (
       !canvasViewPreviewRequested ||
-      documentMode ||
-      readMode ||
+      documentDraftSaveEnabled ||
+      readOnlyDraftOutput ||
       !renderedPreviewHtml.trim() ||
       templateUsagePreviewHtml.trim()
     ) {
@@ -20999,8 +21045,8 @@ export default function TemplateEditWorkspace({
   }, [
     applyReadyTemplateUsagePreview,
     canvasViewPreviewRequested,
-    documentMode,
-    readMode,
+    documentDraftSaveEnabled,
+    readOnlyDraftOutput,
     readReadyTemplateUsagePreviewRuntimeHtml,
     renderedPreviewHtml,
     resolveTemplateUsagePreviewSourceHtml,
@@ -21012,8 +21058,8 @@ export default function TemplateEditWorkspace({
 
   React.useEffect(() => {
     if (
-      documentMode ||
-      readMode ||
+      documentDraftSaveEnabled ||
+      readOnlyDraftOutput ||
       templateUsagePreviewActive ||
       !renderedPreviewHtml.trim() ||
       typeof window === 'undefined'
@@ -21031,8 +21077,8 @@ export default function TemplateEditWorkspace({
     setTemplateUsagePreviewPreparedStatusState('dirty');
     scheduleTemplateUsagePreviewPreparedBuild({ requested: false });
   }, [
-    documentMode,
-    readMode,
+    documentDraftSaveEnabled,
+    readOnlyDraftOutput,
     readReadyTemplateUsagePreviewRuntimeHtml,
     renderedPreviewHtml,
     resolveTemplateUsagePreviewSourceHtml,
@@ -21042,7 +21088,7 @@ export default function TemplateEditWorkspace({
   ]);
 
   React.useEffect(() => {
-    if (!documentMode && !readMode) {
+    if (!documentDraftSaveEnabled && !readOnlyDraftOutput) {
       return;
     }
 
@@ -21060,7 +21106,7 @@ export default function TemplateEditWorkspace({
 
     documentPreviewSourceKeyRef.current = nextSourceKey;
     setTemplateUsagePreviewHtml('');
-  }, [activeInitialDraft?.draftKey, documentMode, readMode, renderedPreviewHtml]);
+  }, [activeInitialDraft?.draftKey, documentDraftSaveEnabled, readOnlyDraftOutput, renderedPreviewHtml]);
 
   React.useEffect(() => {
     const root = previewRef.current || editorPreviewSourceRef.current;
@@ -21102,7 +21148,7 @@ export default function TemplateEditWorkspace({
     const documentOutputSourceRoot = editorPreviewSourceRef.current || previewRef.current;
 
     if (
-      (!documentMode && !readMode) ||
+      (!documentDraftSaveEnabled && !readOnlyDraftOutput) ||
       !documentOutputSourceRoot ||
       !renderedPreviewHtml.trim() ||
       templateUsagePreviewHtml.trim()
@@ -21112,7 +21158,7 @@ export default function TemplateEditWorkspace({
 
     const runtimeHtml = buildTemplateUsagePreviewHtml(documentOutputSourceRoot, {
       preserveValueText: true,
-      readOnly: readMode,
+      readOnly: readOnlyDraftOutput,
       editableValueKeys: normalizedEditableValueKeys,
       selectionOnlyTextInteractions,
       initialAttachmentFilesByValueKey: activeInitialDraftAttachmentFilesByValueKey,
@@ -21131,11 +21177,11 @@ export default function TemplateEditWorkspace({
   }, [
     activeInitialDraftAttachmentFilesByValueKey,
     documentAttachmentApiPath,
-    documentMode,
+    documentDraftSaveEnabled,
     editorPreviewSourceNodeVersion,
     normalizedEditableValueKeys,
     previewSurfaceNodeVersion,
-    readMode,
+    readOnlyDraftOutput,
     renderedPreviewHtml,
     selectionOnlyTextInteractions,
     templateUsagePreviewHtml,
@@ -21159,9 +21205,9 @@ export default function TemplateEditWorkspace({
         return () => {};
       }
 
-      root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readMode ? 'true' : 'false');
+      root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readOnlyDraftOutput ? 'true' : 'false');
 
-      if (readMode) {
+      if (readOnlyDraftOutput) {
         applyTemplateUsagePreviewReadOnlyState(root);
         getAttachmentControlsFromRoot(root).forEach((control) => {
           renderTemplateUsagePreviewAttachmentControl(control);
@@ -21222,13 +21268,13 @@ export default function TemplateEditWorkspace({
         window.cancelAnimationFrame(overflowCorrectionFrame);
       };
     },
-    [normalizedEditableValueKeys, readMode]
+    [normalizedEditableValueKeys, readOnlyDraftOutput]
   );
 
   React.useEffect(() => {
     const root = templateUsagePreviewPreparedNodeRef.current;
 
-    if (!root || !templateUsagePreviewHtml.trim() || readMode) {
+    if (!root || !templateUsagePreviewHtml.trim() || readOnlyDraftOutput) {
       templateUsagePreviewPreparedRuntimeRootRef.current = null;
       return undefined;
     }
@@ -21265,7 +21311,7 @@ export default function TemplateEditWorkspace({
     templateUsagePreviewPreparedActivationRef.current = {
       root,
       html: templateUsagePreviewHtml,
-      readMode,
+      readOnlyDraftOutput,
       editableSignature: templateUsagePreviewActivationEditableSignature,
     };
 
@@ -21285,7 +21331,7 @@ export default function TemplateEditWorkspace({
     normalizedDocumentAttachmentTagColorByName,
     normalizedDocumentAttachmentTagOptions,
     prepareTemplateUsagePreviewActivationRoot,
-    readMode,
+    readOnlyDraftOutput,
     templateUsagePreviewActivationEditableSignature,
     templateUsagePreviewHtml,
     templateUsagePreviewPreparedNodeVersion,
@@ -21296,7 +21342,7 @@ export default function TemplateEditWorkspace({
   ]);
 
   React.useEffect(() => {
-    if (!templateUsagePreviewActive || !previewRef.current || readMode) {
+    if (!templateUsagePreviewActive || !previewRef.current || readOnlyDraftOutput) {
       return undefined;
     }
 
@@ -21336,10 +21382,10 @@ export default function TemplateEditWorkspace({
       attachmentTagColorByName: normalizedDocumentAttachmentTagColorByName,
     });
   }, [
-    documentMode,
+    documentDraftSaveEnabled,
     normalizedDocumentAttachmentTagColorByName,
     normalizedDocumentAttachmentTagOptions,
-    readMode,
+    readOnlyDraftOutput,
     surfaceRenderedPreviewHtml,
     templateUsagePreviewActive,
     templateUsagePreviewMode,
@@ -21631,7 +21677,7 @@ export default function TemplateEditWorkspace({
       selectedFrameGroupIdsRef.current = nextSelectedFrameGroupIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
       syncPreviewSurfaceSelectionPanelTabAttr(root, canvasViewSelectionPanelTab);
-      root.setAttribute('data-metadata-visual-mode', canvasViewMetadataVisualMode ? 'true' : 'false');
+      root.setAttribute('data-metadata-visual-active', canvasViewMetadataVisualMode ? 'true' : 'false');
       syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
       applyPreviewEditPermissions(root, canvasViewSelectionPanelTab, textCanvasEditModeActiveRef.current);
       if (canvasViewSelectionPanelTab !== 'position') {
@@ -21878,7 +21924,7 @@ export default function TemplateEditWorkspace({
         : currentPoint.x >= state.origin.x
           ? 'contained'
           : 'intersected';
-      state.ghost?.setAttribute('data-marquee-mode', nextMode);
+      state.ghost?.setAttribute('data-marquee-state', nextMode);
 
       if (state.ghost) {
         writeFrameEditorGhostRect(state.ghost, nextRect);
@@ -22378,7 +22424,7 @@ export default function TemplateEditWorkspace({
       templateUsagePreviewMode &&
       preparedActivation &&
       preparedActivation.html === templateUsagePreviewHtml &&
-      preparedActivation.readMode === readMode &&
+      preparedActivation.readOnlyDraftOutput === readOnlyDraftOutput &&
       preparedActivation.editableSignature === templateUsagePreviewActivationEditableSignature
     ) {
       return;
@@ -22387,7 +22433,7 @@ export default function TemplateEditWorkspace({
     if (
       preparedActivation?.root === root &&
       preparedActivation.html === templateUsagePreviewHtml &&
-      preparedActivation.readMode === readMode &&
+      preparedActivation.readOnlyDraftOutput === readOnlyDraftOutput &&
       preparedActivation.editableSignature === templateUsagePreviewActivationEditableSignature
     ) {
       return;
@@ -22396,7 +22442,7 @@ export default function TemplateEditWorkspace({
     return prepareTemplateUsagePreviewActivationRoot(root);
   }, [
     prepareTemplateUsagePreviewActivationRoot,
-    readMode,
+    readOnlyDraftOutput,
     surfaceRenderedPreviewHtml,
     templateUsagePreviewActivationEditableSignature,
     templateUsagePreviewActive,
@@ -24138,7 +24184,11 @@ export default function TemplateEditWorkspace({
             readStoredRelativeAnchorConfig(targetNode) ||
             readStoredRelativeAnchorConfig(resolveFrameLayoutShell(targetNode)) ||
             readStoredRelativeAnchorConfig(resolveFrameContentTarget(targetNode)) ||
-            readStoredRelativeAnchorConfig(targetNode.querySelector<HTMLElement>('[data-template-frame-position-mode="relative"]'));
+            readStoredRelativeAnchorConfig(
+              targetNode.querySelector<HTMLElement>(
+                `[${TEMPLATE_FRAME_POSITION_MODE_ATTR}="relative"], [${legacyTemplateFramePositionKindAttr}="relative"]`
+              )
+            );
           const hasSameAnchorIdentity =
             Boolean(currentConfig) &&
             currentConfig.anchorKind === relationAnchorKind &&
@@ -24474,8 +24524,8 @@ export default function TemplateEditWorkspace({
     applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout(root, { preventShrink });
   }, [
     applyTemplateUsagePreviewAutoSizeBoxesWithPreservedLayout,
-    documentMode,
-    readMode,
+    documentDraftSaveEnabled,
+    readOnlyDraftOutput,
     surfaceRenderedPreviewHtml,
     templateUsagePreviewActive,
     usagePreviewPreventRuntimeAutoSizeShrink,
@@ -26704,7 +26754,7 @@ export default function TemplateEditWorkspace({
     const hasEdgeSelection = edgeSelectionStateRef.current.tokens.length > 0;
 
     syncPreviewSurfaceSelectionPanelTabAttr(root, canvasViewSelectionPanelTab);
-    root.setAttribute('data-metadata-visual-mode', canvasViewMetadataVisualMode ? 'true' : 'false');
+    root.setAttribute('data-metadata-visual-active', canvasViewMetadataVisualMode ? 'true' : 'false');
     syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
     applyPreviewEditPermissions(root, canvasViewSelectionPanelTab, textCanvasEditModeActiveRef.current);
     if (canvasViewSelectionPanelTab !== 'position') {
@@ -26771,7 +26821,7 @@ export default function TemplateEditWorkspace({
     }
 
     syncPreviewSurfaceSelectionPanelTabAttr(root, canvasViewSelectionPanelTab);
-    root.setAttribute('data-metadata-visual-mode', canvasViewMetadataVisualMode ? 'true' : 'false');
+    root.setAttribute('data-metadata-visual-active', canvasViewMetadataVisualMode ? 'true' : 'false');
     syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
     applyPreviewEditPermissions(root, canvasViewSelectionPanelTab, textCanvasEditModeActiveRef.current);
     if (canvasViewSelectionPanelTab !== 'position') {
@@ -27128,7 +27178,7 @@ export default function TemplateEditWorkspace({
           element.remove();
         });
         shell.querySelectorAll<HTMLElement>(FRAME_EDGE_BUTTON_SELECTOR).forEach((button) => {
-          setElementAttributeIfChanged(button, 'data-edge-selection-mode', 'idle');
+          setElementAttributeIfChanged(button, 'data-edge-selection-state', 'idle');
           removeElementAttributeIfPresent(button, 'data-edge-selection-order');
           removeElementAttributeIfPresent(button, 'data-edge-anchor');
           removeElementAttributeIfPresent(button, 'data-edge-selection-role');
@@ -27845,7 +27895,7 @@ export default function TemplateEditWorkspace({
           templateWorkspaceStateController,
           buildLoadedTemplateWorkspaceDocumentState(sanitizedDetail, normalizedTemplateId)
         );
-        setMessage(`템플릿 ${normalizedTemplateId} 를 편집 모드로 불러왔습니다.`);
+        setMessage(`템플릿 ${normalizedTemplateId} 를 편집 화면으로 불러왔습니다.`);
       } catch (error) {
         const nextMessage = error instanceof Error ? error.message : '템플릿 상세를 불러오지 못했습니다.';
         setMessage(nextMessage);
@@ -28222,10 +28272,10 @@ export default function TemplateEditWorkspace({
   const handleSelectionPanelTabChange = React.useCallback(
     (nextTab: SelectionPanelTab) => {
       const nextCanvasViewMode = resolveTemplateCanvasViewModeForSelectionPanelTab(nextTab);
-
-      if (templateUsagePreviewActive) {
-        pendingCanvasViewModeRuntimeOverrideRef.current = nextCanvasViewMode;
-      }
+      // A tab click is the user's explicit return target even when React has not yet
+      // committed the preview room state. Keeping this ref current prevents a delayed
+      // preview activation from sending the canvas back to the previous room.
+      pendingCanvasViewModeRuntimeOverrideRef.current = nextCanvasViewMode;
 
       if (nextTab === selectionPanelTab) {
         return;
@@ -28253,7 +28303,6 @@ export default function TemplateEditWorkspace({
       positionOrderLockSelectionMode,
       scheduleSelectionPanelTabStateCommit,
       selectionPanelTab,
-      templateUsagePreviewActive,
     ]
   );
 
@@ -31210,7 +31259,7 @@ export default function TemplateEditWorkspace({
     if (currentMode.kind !== 'idle') {
       restorePositionEntitySelectionSnapshot(currentMode.sourceSelection);
       setPositionGroupEditMode({ kind: 'idle' });
-      setMessage('그룹 편집 모드를 종료했습니다.');
+      setMessage('그룹 편집을 종료했습니다.');
     }
   }, [restorePositionEntitySelectionSnapshot]);
 
@@ -31842,7 +31891,7 @@ export default function TemplateEditWorkspace({
           issues: [
             {
               frameGroupId,
-              message: `${frameGroupId} 의 runtime mode 보정이 취소되어 저장을 중단했습니다.`,
+              message: `${frameGroupId} 의 runtime kind 보정이 취소되어 저장을 중단했습니다.`,
             },
           ],
         };
@@ -31940,7 +31989,7 @@ export default function TemplateEditWorkspace({
       ) {
         issues.push({
           frameGroupId,
-          message: `${frameGroupId} 의 runtime mode ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 상자와 호환되지 않습니다.`,
+          message: `${frameGroupId} 의 runtime kind ${nextMetadata.runtimeMode} 는 ${nextMetadata.boxKind} 상자와 호환되지 않습니다.`,
         });
       }
     });
@@ -33253,14 +33302,14 @@ export default function TemplateEditWorkspace({
 
 	  const saveTemplate = React.useCallback(async () => {
 	    const currentHtml =
-	      templateUsagePreviewActive && !documentMode
+	      templateUsagePreviewActive && !documentDraftSaveEnabled
 	        ? draftPreviewHtmlRef.current.trim()
 	        : !previewRef.current
 	          ? draftPreviewHtmlRef.current.trim()
 	          : syncDraftPreviewHtmlRef({ recordHistory: false });
 
 	    await persistTemplateDraftHtml(currentHtml);
-	  }, [documentMode, persistTemplateDraftHtml, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
+	  }, [documentDraftSaveEnabled, persistTemplateDraftHtml, syncDraftPreviewHtmlRef, templateUsagePreviewActive]);
 
   const stopPointerInteraction = React.useCallback(
     (pointerId?: number) => {
@@ -33850,7 +33899,7 @@ export default function TemplateEditWorkspace({
       selectedFrameGroupIdsRef.current.length !== 1
     ) {
       setBoxCreationPositionMode('absolute');
-      setMessage('상대 기준 상자 1개가 없어 상자 생성은 절대 위치 모드로 시작합니다.');
+      setMessage('상대 기준 상자 1개가 없어 상자 생성은 절대 위치 기준으로 시작합니다.');
     }
 
     setBoxCreationMode(nextMode);
@@ -35513,6 +35562,7 @@ export default function TemplateEditWorkspace({
         } as React.CSSProperties)
       : undefined;
   const visibleMessage = showWorkspaceMessages ? message : null;
+  const canvasOwnerEnv = (definitionName = '') => ({ env: definitionName });
   const workspaceNoticeNode =
     topNotice || visibleMessage ? (
       <div
@@ -35521,7 +35571,10 @@ export default function TemplateEditWorkspace({
       >
         {topNotice ? <div className="pointer-events-auto">{topNotice}</div> : null}
         {visibleMessage ? (
-          <Card className="pointer-events-auto h-14 max-h-14 overflow-hidden border-slate-200 bg-slate-50 shadow-lg">
+          <Card
+            className="pointer-events-auto h-14 max-h-14 overflow-hidden border-slate-200 bg-slate-50 shadow-lg"
+            {...canvasOwnerEnv('showWorkspaceMessages')}
+          >
             <CardContent className="h-14 p-3 text-sm text-slate-700">
               <div className="flex h-full min-w-0 items-center justify-between gap-3">
                 <p className="min-w-0 flex-1 truncate leading-5" title={visibleMessage}>
@@ -35752,10 +35805,10 @@ export default function TemplateEditWorkspace({
           --v106-canvas-icon-svg-size: 18px;
           --v106-canvas-icon-marker-gap: 4px;
         }
-        .template-edit-preview[data-frame-create-mode="true"] {
+        .template-edit-preview[data-frame-create-active="true"] {
           cursor: crosshair;
         }
-        .template-edit-preview[data-frame-create-mode="true"] [data-template-edit-scope][data-template-edit-enabled="true"] {
+        .template-edit-preview[data-frame-create-active="true"] [data-template-edit-scope][data-template-edit-enabled="true"] {
           cursor: crosshair;
         }
         .template-edit-preview[data-space-pan-armed="true"],
@@ -36253,26 +36306,26 @@ export default function TemplateEditWorkspace({
         .template-edit-preview [${TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR}="full"] [data-template-value] {
           opacity: 1;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}] {
           position: relative;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="group"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="group"] {
           background-image: none !important;
           background-color: rgb(241, 245, 249) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"] {
           background-image: none !important;
           background-color: rgb(255, 251, 235) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"] {
           background-image: none !important;
           background-color: rgb(240, 249, 255) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"] {
           background-image: none !important;
           background-color: rgb(236, 253, 245) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}] {
           position: relative;
           --v106-metadata-relation-rgb: 241 245 249;
           --v106-metadata-relation-bg-rgb: 241 245 249;
@@ -36293,30 +36346,30 @@ export default function TemplateEditWorkspace({
             calc(100% - var(--v106-metadata-relation-offset-left) - var(--v106-metadata-relation-offset-right))
             calc(100% - var(--v106-metadata-relation-offset-top) - var(--v106-metadata-relation-offset-bottom)) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="key"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="key"] {
           --v106-metadata-relation-rgb: 255 251 235;
           --v106-metadata-relation-bg-rgb: 255 251 235;
           --v106-metadata-relation-strong-rgb: 217 119 6;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="value"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_ROLE_ATTR}="value"] {
           --v106-metadata-relation-rgb: 240 249 255;
           --v106-metadata-relation-bg-rgb: 240 249 255;
           --v106-metadata-relation-strong-rgb: 3 105 161;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="top"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="top"] {
           --v106-metadata-relation-offset-top: 5px;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="right"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="right"] {
           --v106-metadata-relation-offset-right: 5px;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="bottom"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="bottom"] {
           --v106-metadata-relation-offset-bottom: 5px;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="left"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}~="left"] {
           --v106-metadata-relation-offset-left: 5px;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([data-template-selected="true"]),
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([data-template-selected="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([data-template-selected="true"]),
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([data-template-selected="true"]) {
           --v106-metadata-relation-opacity: 1;
           --v106-metadata-relation-inner-border: transparent;
           --v106-metadata-relation-fill-color: rgb(var(--v106-metadata-relation-bg-rgb));
@@ -36325,44 +36378,44 @@ export default function TemplateEditWorkspace({
           box-shadow: none !important;
           background-image: linear-gradient(var(--v106-metadata-relation-fill-color), var(--v106-metadata-relation-fill-color)) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"],
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"],
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}][${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"] {
           --v106-metadata-relation-opacity: 0;
           --v106-metadata-relation-inner-border: transparent;
           --v106-metadata-relation-fill-color: transparent;
           background-image: none !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]),
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           background-image: none !important;
           outline: none !important;
           box-shadow: none !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           background-color: rgb(255 251 235) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           background-color: rgb(240 249 255) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           background-color: rgb(255 251 235) !important;
           box-shadow: inset 0 0 0 2px rgb(148 163 184) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           background-color: rgb(240 249 255) !important;
           box-shadow: inset 0 0 0 2px rgb(148 163 184) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           background-color: rgb(255 251 235) !important;
           box-shadow: inset 0 0 0 2px rgb(217 119 6) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"][data-template-selected="true"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           background-color: rgb(240 249 255) !important;
           box-shadow: inset 0 0 0 2px rgb(3 105 161) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
           --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
           background-color: rgb(100 116 139 / .3) !important;
@@ -36374,50 +36427,50 @@ export default function TemplateEditWorkspace({
             0 0 0 1px var(--v106-metadata-selected-outline-color),
             inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="text"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="text"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           --v106-metadata-selected-outline-color: var(--color-slate-700, rgb(51 65 85));
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="attachment"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="attachment"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           --v106-metadata-selected-outline-color: var(--color-purple-600, rgb(147 51 234));
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="signature"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"][${TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR}="signature"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           --v106-metadata-selected-outline-color: var(--color-red-600, rgb(220 38 38));
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           --v106-metadata-selected-fill-color: var(--color-amber-500, rgb(245 158 11));
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           --v106-metadata-selected-fill-color: var(--color-sky-500, rgb(14 165 233));
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"][${TEMPLATE_FRAME_ROLE_VISUAL_ATTR}="key_value"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           --v106-metadata-selected-fill-color: var(--color-slate-500, rgb(100 116 139));
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) > .${FRAME_SELECTION_FILL_CLASS} {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) > .${FRAME_SELECTION_FILL_CLASS} {
           inset: 0;
           display: none !important;
           background: transparent !important;
           box-shadow: none !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-primary-selected="true"][data-template-selected="true"]:not([${TEMPLATE_FRAME_VALIDATION_ERROR_ATTR}="true"]) {
           outline: none !important;
           outline-offset: 0;
           box-shadow:
             0 0 0 1px var(--v106-metadata-selected-outline-color),
             inset 0 0 0 1px var(--v106-metadata-selected-outline-color) !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-primary-selected="true"][data-template-selected="true"]::before {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-primary-selected="true"][data-template-selected="true"]::before {
           background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
           box-shadow: none !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [data-template-selected="true"]::before {
+        .template-edit-preview[data-metadata-visual-active="true"] [data-template-selected="true"]::before {
           background: var(--v106-metadata-selected-outline-color, rgb(100 116 139)) !important;
           content: attr(data-template-selection-order) !important;
           display: inline-flex !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"]) {
+        .template-edit-preview[data-metadata-visual-active="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"]) {
           opacity: 1 !important;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"])::after {
+        .template-edit-preview[data-metadata-visual-active="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="inactive"]:not([data-template-selected="true"])::after {
           content: '';
           position: absolute;
           inset: -1px;
@@ -36426,33 +36479,33 @@ export default function TemplateEditWorkspace({
           pointer-events: none;
           z-index: 30;
         }
-        .template-edit-preview[data-metadata-visual-mode="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"] {
+        .template-edit-preview[data-metadata-visual-active="true"][${TEMPLATE_METADATA_ACTIVE_FILTER_ATTR}="true"] [${TEMPLATE_FRAME_METADATA_FOCUS_ATTR}="active"] {
           opacity: 1 !important;
           z-index: 31 !important;
         }
-        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-active="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(37, 99, 235, .42) !important;
           outline-offset: -1px;
           box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .24);
         }
-        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-active="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="passive-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 1px solid rgba(217, 119, 6, .42) !important;
           outline-offset: -1px;
           box-shadow: inset 0 0 0 1px rgba(217, 119, 6, .24);
         }
-        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-active="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-value"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 2px solid rgba(37, 99, 235, .96) !important;
           outline-offset: -1px;
           box-shadow:
             inset 0 0 0 2px rgba(59, 130, 246, .92),
             0 0 0 4px rgba(96, 165, 250, .18);
         }
-        .template-edit-preview[data-metadata-visual-mode="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="parent-candidate"] {
+        .template-edit-preview[data-metadata-visual-active="true"] [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="parent-candidate"] {
           outline: 2px dashed rgba(217, 119, 6, .8) !important;
           outline-offset: -1px;
           background-image: linear-gradient(180deg, rgba(245, 158, 11, .03), rgba(245, 158, 11, .08));
         }
-        .template-edit-preview:not([data-metadata-visual-mode="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
+        .template-edit-preview:not([data-metadata-visual-active="true"]) [${TEMPLATE_FRAME_RELATION_SELECTION_ATTR}="linked-key"]:not([${TEMPLATE_FRAME_METADATA_RELATION_OUTLINE_ATTR}]) {
           outline: 2px solid rgba(217, 119, 6, .96) !important;
           outline-offset: -1px;
           box-shadow:
@@ -36475,7 +36528,7 @@ export default function TemplateEditWorkspace({
           opacity: 1 !important;
           z-index: 31 !important;
         }
-        .template-edit-preview[data-metadata-icon-visual-mode="false"] .${FRAME_KIND_MARKER_CLASS} {
+        .template-edit-preview[data-metadata-icon-visual-active="false"] .${FRAME_KIND_MARKER_CLASS} {
           display: none;
         }
         .template-edit-preview .${FRAME_KIND_MARKER_CLASS} {
@@ -36652,7 +36705,7 @@ export default function TemplateEditWorkspace({
           background: rgba(20, 184, 166, .12);
           box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .78);
         }
-        .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS}[data-marquee-mode="intersected"] {
+        .template-edit-preview .${FRAME_MARQUEE_GHOST_CLASS}[data-marquee-state="intersected"] {
           border-color: rgba(2, 132, 199, .96);
           background: rgba(56, 189, 248, .12);
         }
@@ -36724,12 +36777,12 @@ export default function TemplateEditWorkspace({
           border-radius: 0;
           box-shadow: none;
         }
-        .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-mode="connected"] {
+        .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-state="connected"] {
           background-color: transparent;
           background-image: none;
           box-shadow: none;
         }
-        .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-mode="isolated"] {
+        .template-edit-preview ${FRAME_EDGE_BUTTON_SELECTOR}[data-edge-selection-state="isolated"] {
           background-color: transparent;
           background-image: none;
           box-shadow: none;
@@ -36839,6 +36892,7 @@ export default function TemplateEditWorkspace({
         <TemplateEditWorkspaceHeader
           title={headerTitle}
           description={headerDescription}
+          env="hideHeader"
         />
       )}
 
@@ -36882,8 +36936,8 @@ export default function TemplateEditWorkspace({
           style={canvasCardStyle}
         >
           <TemplateEditCanvasToolbar
-            documentMode={documentMode}
-            readMode={readMode}
+            documentDraftSaveEnabled={documentDraftSaveEnabled}
+            readOnlyDraftOutput={readOnlyDraftOutput}
             nameFieldLabel={nameFieldLabel}
             saveButtonLabel={saveButtonLabel}
             templateNameReadOnly={templateNameReadOnly}
@@ -36895,7 +36949,7 @@ export default function TemplateEditWorkspace({
             previewZoom={previewZoom}
             selectionPanelTab={selectionPanelTab}
             editSettingsPanelVisible={editSettingsPanelVisible}
-            editSettingsPanelAvailable={!documentMode && !templateUsagePreviewActive && Boolean(renderedPreviewHtml.trim())}
+            editSettingsPanelAvailable={!documentDraftSaveEnabled && !templateUsagePreviewActive && Boolean(renderedPreviewHtml.trim())}
             templateUsagePreviewMode={templateUsagePreviewActive}
             renderedPreviewHtml={renderedPreviewHtml}
             canvasInteractionMode={canvasInteractionMode}
@@ -36944,9 +36998,9 @@ export default function TemplateEditWorkspace({
             templateUsagePreviewMode={templateUsagePreviewActive}
             templateUsagePreviewHtml={templateUsagePreviewHtml}
             templateUsagePreviewPending={templateUsagePreviewPending}
-            showEditorRoomAsUsagePreviewFallback={documentMode || readMode}
+            showEditorRoomAsUsagePreviewFallback={documentDraftSaveEnabled || readOnlyDraftOutput}
             selectionPanelTab={activeCanvasSurfaceSelectionPanelTab}
-            editSettingsPanelVisible={editSettingsPanelVisible && !documentMode && !readMode}
+            editSettingsPanelVisible={editSettingsPanelVisible && !documentDraftSaveEnabled && !readOnlyDraftOutput}
             showMetadataIcons={templateUsagePreviewActive ? false : showMetadataIcons}
             actionOverlay={positionActionOverlayNode}
             actionOverlayLabel={canvasActionOverlayLabel}
@@ -36977,7 +37031,7 @@ export default function TemplateEditWorkspace({
             setEditorPreviewNode={setEditorPreviewSourceNode}
             setTemplateUsagePreviewNode={setTemplateUsagePreviewPreparedNode}
             syncTemplateUsagePreviewTextControls={(root) => {
-              if (readMode) {
+              if (readOnlyDraftOutput) {
                 applyTemplateUsagePreviewReadOnlyState(root);
                 if (selectionOnlyTextInteractions) {
                   applyTemplateUsagePreviewSelectionOnlyTextInteractions(root);

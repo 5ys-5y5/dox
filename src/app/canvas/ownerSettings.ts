@@ -2,16 +2,11 @@
 
 import * as React from 'react';
 import type {
+  TemplateEditWorkspaceCanvasTab,
   TemplateEditWorkspaceCanvasToolbarVisibility,
-  TemplateEditWorkspaceCanvasViewMode,
   TemplateEditWorkspacePersistenceVisibility,
   TemplateEditWorkspaceProps,
 } from '../../components/template/workspace/types';
-import { normalizeTemplateCanvasViewMode } from '../../services/templateCanvasViewModeService';
-
-export type CanvasWorkspaceMode = NonNullable<TemplateEditWorkspaceProps['workspaceMode']>;
-export type CanvasReadModeInteractionMode = 'view-only' | 'box-selection';
-export type CanvasOwnerViewMode = TemplateEditWorkspaceCanvasViewMode;
 
 export type CanvasOwnerSettings = {
   hideHeader: boolean;
@@ -25,7 +20,7 @@ export type CanvasOwnerSettings = {
   showCanvasSaveButton: boolean;
   showCanvasTodoButton: boolean;
   showCanvasPreviewToggle: boolean;
-  showCanvasInteractionModeControls: boolean;
+  showCanvasInteractionToolControls: boolean;
   showCanvasHistoryControls: boolean;
   showCanvasZoomControls: boolean;
   showCanvasFullscreenControl: boolean;
@@ -41,7 +36,7 @@ export type CanvasOwnerSettings = {
   showCanvasSelectionPanelTabs: boolean;
   showPersistenceTemplateList: boolean;
   showPersistenceTemplateNameField: boolean;
-  showPersistenceLayoutResizeModeField: boolean;
+  showPersistenceLayoutResizePolicyField: boolean;
   showPersistenceSourceDocumentNameField: boolean;
   showPersistenceSaveButton: boolean;
   suppressInitialDraftLoadedMessage: boolean;
@@ -61,25 +56,19 @@ export type CanvasOwnerSettings = {
   blockPeerClusterHeightTargets: boolean;
   blockPeerClusterWidthTargets: boolean;
   selectionInactiveOverlayOpacity: number;
-  readModeInteractionMode: CanvasReadModeInteractionMode;
-  canvasViewMode: CanvasOwnerViewMode;
+  initialCanvasTab: TemplateEditWorkspaceCanvasTab;
+  allowCanvasBoxSelection: boolean;
 };
 
 export type CanvasOwnerSettingKey = keyof CanvasOwnerSettings;
 export type CanvasOwnerSettingSource = 'default' | 'page';
 export type CanvasOwnerSettingsOverrides = Partial<CanvasOwnerSettings>;
-export type CanvasOwnerPagePolicyOverrides = {
-  allowedModes?: CanvasWorkspaceMode[];
-  defaultMode?: CanvasWorkspaceMode;
-};
 export type CanvasOwnerSettingsStore = {
-  version: 6;
+  version: 7;
   pageSettings: Record<string, CanvasOwnerSettingsOverrides>;
-  pagePolicies: Record<string, CanvasOwnerPagePolicyOverrides>;
 };
 export type CanvasOwnerSettingsContext = {
   pageId?: string;
-  workspaceMode: CanvasWorkspaceMode;
 };
 
 export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
@@ -94,7 +83,7 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   showCanvasSaveButton: true,
   showCanvasTodoButton: true,
   showCanvasPreviewToggle: true,
-  showCanvasInteractionModeControls: true,
+  showCanvasInteractionToolControls: true,
   showCanvasHistoryControls: true,
   showCanvasZoomControls: true,
   showCanvasFullscreenControl: true,
@@ -110,7 +99,7 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   showCanvasSelectionPanelTabs: true,
   showPersistenceTemplateList: true,
   showPersistenceTemplateNameField: true,
-  showPersistenceLayoutResizeModeField: true,
+  showPersistenceLayoutResizePolicyField: true,
   showPersistenceSourceDocumentNameField: true,
   showPersistenceSaveButton: true,
   suppressInitialDraftLoadedMessage: true,
@@ -130,17 +119,14 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   blockPeerClusterHeightTargets: false,
   blockPeerClusterWidthTargets: false,
   selectionInactiveOverlayOpacity: 0.5,
-  readModeInteractionMode: 'view-only',
-  canvasViewMode: 'position',
+  initialCanvasTab: 'position',
+  allowCanvasBoxSelection: false,
 };
 
 export const CANVAS_OWNER_SETTINGS_STORAGE_KEY = 'mejai.canvas.ownerSettings.v1';
 const CANVAS_OWNER_SETTINGS_EVENT_NAME = 'mejai:canvas-owner-settings-changed';
 export const canvasOwnerSettingKeys = Object.keys(defaultCanvasOwnerSettings) as CanvasOwnerSettingKey[];
-export const canvasWorkspaceModes: CanvasWorkspaceMode[] = ['template', 'document', 'read'];
 const hasOwn = (value: object, key: PropertyKey) => Object.prototype.hasOwnProperty.call(value, key);
-const isCanvasWorkspaceMode = (value: unknown): value is CanvasWorkspaceMode =>
-  canvasWorkspaceModes.includes(value as CanvasWorkspaceMode);
 const normalizeCanvasCssSizeSetting = (value: unknown, fallback = '') =>
   typeof value === 'string' ? value.trim().slice(0, 80) : fallback;
 const normalizeCanvasOpacitySetting = (value: unknown, fallback = 0.5) => {
@@ -155,45 +141,23 @@ const normalizeCanvasOpacitySetting = (value: unknown, fallback = 0.5) => {
 
   return Math.max(0, Math.min(1, alphaValue));
 };
-const normalizeCanvasReadModeInteractionMode = (
+const normalizeCanvasInitialTabSetting = (
   value: unknown,
-  fallback: CanvasReadModeInteractionMode = 'view-only'
-): CanvasReadModeInteractionMode => (value === 'box-selection' || value === 'view-only' ? value : fallback);
-const normalizeCanvasViewMode = (
-  value: unknown,
-  fallback: CanvasOwnerViewMode = 'position'
-): CanvasOwnerViewMode => normalizeTemplateCanvasViewMode(value, fallback);
-
-export const normalizeCanvasWorkspaceMode = (value: string | null | undefined): CanvasWorkspaceMode => {
-  if (value === 'document' || value === 'read') {
-    return value;
-  }
-
-  return 'template';
-};
-
-export const normalizeCanvasAllowedWorkspaceModes = (
-  value: unknown,
-  fallback: CanvasWorkspaceMode[] = canvasWorkspaceModes
-): CanvasWorkspaceMode[] => {
-  const fallbackModes = fallback.filter(isCanvasWorkspaceMode);
-  const source = Array.isArray(value) ? value : fallbackModes;
-  const normalizedModes = source.reduce<CanvasWorkspaceMode[]>((accumulator, item) => {
-    if (isCanvasWorkspaceMode(item) && !accumulator.includes(item)) {
-      accumulator.push(item);
-    }
-
-    return accumulator;
-  }, []);
-
-  return normalizedModes.length > 0 ? normalizedModes : fallbackModes.length > 0 ? fallbackModes : ['template'];
-};
-
+  fallback: TemplateEditWorkspaceCanvasTab = defaultCanvasOwnerSettings.initialCanvasTab
+): TemplateEditWorkspaceCanvasTab =>
+  value === 'preview' || value === 'position' || value === 'metadata' || value === 'metadata2'
+    ? value
+    : fallback;
 export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSettings => {
   const candidate =
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Partial<CanvasOwnerSettings>)
       : {};
+  const legacyCandidate = candidate as Partial<CanvasOwnerSettings> & {
+    canvasViewMode?: unknown;
+    showCanvasInteractionModeControls?: boolean;
+    showPersistenceLayoutResizeModeField?: boolean;
+  };
   const legacyUseSpecifiedCanvasHeight = hasOwn(candidate, 'useSpecifiedCanvasHeight')
     ? candidate.useSpecifiedCanvasHeight === true
     : false;
@@ -231,78 +195,37 @@ export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSetting
       candidate.templateListDisplay === 'picker' || candidate.templateListDisplay === 'inline'
         ? candidate.templateListDisplay
         : defaultCanvasOwnerSettings.templateListDisplay,
+    showCanvasInteractionToolControls:
+      typeof candidate.showCanvasInteractionToolControls === 'boolean'
+        ? candidate.showCanvasInteractionToolControls
+        : typeof legacyCandidate.showCanvasInteractionModeControls === 'boolean'
+          ? legacyCandidate.showCanvasInteractionModeControls
+          : defaultCanvasOwnerSettings.showCanvasInteractionToolControls,
+    showPersistenceLayoutResizePolicyField:
+      typeof candidate.showPersistenceLayoutResizePolicyField === 'boolean'
+        ? candidate.showPersistenceLayoutResizePolicyField
+        : typeof legacyCandidate.showPersistenceLayoutResizeModeField === 'boolean'
+          ? legacyCandidate.showPersistenceLayoutResizeModeField
+          : defaultCanvasOwnerSettings.showPersistenceLayoutResizePolicyField,
     selectionInactiveOverlayOpacity: normalizeCanvasOpacitySetting(
       candidate.selectionInactiveOverlayOpacity,
       defaultCanvasOwnerSettings.selectionInactiveOverlayOpacity
     ),
-    readModeInteractionMode: normalizeCanvasReadModeInteractionMode(
-      candidate.readModeInteractionMode,
-      defaultCanvasOwnerSettings.readModeInteractionMode
+    initialCanvasTab: normalizeCanvasInitialTabSetting(
+      candidate.initialCanvasTab ?? legacyCandidate.canvasViewMode,
+      defaultCanvasOwnerSettings.initialCanvasTab
     ),
-    canvasViewMode: normalizeCanvasViewMode(
-      candidate.canvasViewMode,
-      defaultCanvasOwnerSettings.canvasViewMode
-    ),
+    allowCanvasBoxSelection:
+      typeof candidate.allowCanvasBoxSelection === 'boolean'
+        ? candidate.allowCanvasBoxSelection
+        : defaultCanvasOwnerSettings.allowCanvasBoxSelection,
   };
 };
 
-const resolveDefaultCanvasViewMode = (context: CanvasOwnerSettingsContext): CanvasOwnerViewMode => {
-  if (context.workspaceMode === 'template') {
-    return 'position';
-  }
-
-  return 'preview';
-};
-
-const resolveDefaultCanvasReadModeInteractionMode = (
-  context: CanvasOwnerSettingsContext
-): CanvasReadModeInteractionMode => {
-  return defaultCanvasOwnerSettings.readModeInteractionMode;
-};
-
 export const createEmptyCanvasOwnerSettingsStore = (): CanvasOwnerSettingsStore => ({
-  version: 6,
+  version: 7,
   pageSettings: {},
-  pagePolicies: {},
 });
-
-export const normalizeCanvasOwnerPagePolicyOverrides = (value: unknown): CanvasOwnerPagePolicyOverrides => {
-  const candidate =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Partial<CanvasOwnerPagePolicyOverrides>)
-      : {};
-  const normalizedPolicy: CanvasOwnerPagePolicyOverrides = {};
-
-  if (hasOwn(candidate, 'allowedModes')) {
-    const candidateAllowedModes = Array.isArray(candidate.allowedModes)
-      ? candidate.allowedModes.reduce<CanvasWorkspaceMode[]>((accumulator, item) => {
-          if (isCanvasWorkspaceMode(item) && !accumulator.includes(item)) {
-            accumulator.push(item);
-          }
-
-          return accumulator;
-        }, [])
-      : [];
-
-    if (candidateAllowedModes.length > 0) {
-      normalizedPolicy.allowedModes = candidateAllowedModes;
-    }
-  }
-
-  if (hasOwn(candidate, 'defaultMode')) {
-    normalizedPolicy.defaultMode = normalizeCanvasWorkspaceMode(candidate.defaultMode);
-  }
-
-  if (
-    normalizedPolicy.allowedModes &&
-    normalizedPolicy.defaultMode &&
-    !normalizedPolicy.allowedModes.includes(normalizedPolicy.defaultMode)
-  ) {
-    normalizedPolicy.defaultMode = normalizedPolicy.allowedModes[0];
-  }
-
-  return normalizedPolicy;
-};
 
 export const normalizeCanvasOwnerSettingsOverrides = (value: unknown): CanvasOwnerSettingsOverrides => {
   const candidate =
@@ -333,6 +256,25 @@ export const normalizeCanvasOwnerSettingsOverrides = (value: unknown): CanvasOwn
     }
   }
 
+  if (
+    hasOwn(candidate, 'showCanvasInteractionModeControls') &&
+    !hasOwn(candidate, 'showCanvasInteractionToolControls')
+  ) {
+    normalizedOverrides.showCanvasInteractionToolControls = normalizedSettings.showCanvasInteractionToolControls;
+  }
+
+  if (
+    hasOwn(candidate, 'showPersistenceLayoutResizeModeField') &&
+    !hasOwn(candidate, 'showPersistenceLayoutResizePolicyField')
+  ) {
+    normalizedOverrides.showPersistenceLayoutResizePolicyField =
+      normalizedSettings.showPersistenceLayoutResizePolicyField;
+  }
+
+  if (hasOwn(candidate, 'canvasViewMode') && !hasOwn(candidate, 'initialCanvasTab')) {
+    normalizedOverrides.initialCanvasTab = normalizedSettings.initialCanvasTab;
+  }
+
   return normalizedOverrides;
 };
 
@@ -340,14 +282,12 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
   const candidate =
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as {
-          // Legacy v5-and-earlier storage used modeSettings. New writes never persist this field.
-          modeSettings?: unknown;
           pageSettings?: unknown;
           pagePolicies?: unknown;
         })
       : null;
 
-  if (!candidate || (!candidate.modeSettings && !candidate.pageSettings && !candidate.pagePolicies)) {
+  if (!candidate || (!candidate.pageSettings && !candidate.pagePolicies)) {
     const legacyOverrides = normalizeCanvasOwnerSettingsOverrides(value);
 
     if (Object.keys(legacyOverrides).length === 0) {
@@ -355,79 +295,34 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     }
 
     return {
-      version: 6,
+      version: 7,
       pageSettings: {
         canvas: { ...legacyOverrides },
       },
-      pagePolicies: {},
     };
   }
 
-  const modeSettingsCandidate =
-    candidate.modeSettings && typeof candidate.modeSettings === 'object' && !Array.isArray(candidate.modeSettings)
-      ? (candidate.modeSettings as Record<string, unknown>)
-      : {};
   const pageSettingsCandidate =
     candidate.pageSettings && typeof candidate.pageSettings === 'object' && !Array.isArray(candidate.pageSettings)
       ? (candidate.pageSettings as Record<string, unknown>)
       : {};
-  const pagePoliciesCandidate =
-    candidate.pagePolicies && typeof candidate.pagePolicies === 'object' && !Array.isArray(candidate.pagePolicies)
-      ? (candidate.pagePolicies as Record<string, unknown>)
-      : {};
   const pageSettings: CanvasOwnerSettingsStore['pageSettings'] = {};
-  const pagePolicies: CanvasOwnerSettingsStore['pagePolicies'] = {};
 
   Object.entries(pageSettingsCandidate).forEach(([pageId, rawPageSettings]) => {
     if (!rawPageSettings || typeof rawPageSettings !== 'object' || Array.isArray(rawPageSettings)) {
       return;
     }
 
-    const pageSettingsRecord = rawPageSettings as Record<string, unknown>;
-    const hasLegacyModeSettings = canvasWorkspaceModes.some((mode) => hasOwn(pageSettingsRecord, mode));
-    const normalizedPageSettings = hasLegacyModeSettings
-      ? normalizeCanvasOwnerSettingsOverrides({
-          ...normalizeCanvasOwnerSettingsOverrides(pageSettingsRecord.template),
-          ...normalizeCanvasOwnerSettingsOverrides(pageSettingsRecord.read),
-          ...normalizeCanvasOwnerSettingsOverrides(pageSettingsRecord.document),
-        })
-      : normalizeCanvasOwnerSettingsOverrides(rawPageSettings);
+    const normalizedPageSettings = normalizeCanvasOwnerSettingsOverrides(rawPageSettings);
 
     if (Object.keys(normalizedPageSettings).length > 0) {
       pageSettings[pageId] = normalizedPageSettings;
     }
   });
 
-  if (Object.keys(pageSettings).length === 0) {
-    const legacyModeSettings = normalizeCanvasOwnerSettingsOverrides({
-      ...normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate.template),
-      ...normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate.read),
-      ...normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate.document),
-    });
-
-    if (Object.keys(legacyModeSettings).length > 0) {
-      pageSettings.canvas = legacyModeSettings;
-    }
-  }
-
-  Object.entries(pagePoliciesCandidate).forEach(([pageId, rawPagePolicy]) => {
-    const normalizedPageId = String(pageId || '').trim();
-
-    if (!normalizedPageId) {
-      return;
-    }
-
-    const policyOverrides = normalizeCanvasOwnerPagePolicyOverrides(rawPagePolicy);
-
-    if (Object.keys(policyOverrides).length > 0) {
-      pagePolicies[normalizedPageId] = policyOverrides;
-    }
-  });
-
   return {
-    version: 6,
+    version: 7,
     pageSettings,
-    pagePolicies,
   };
 };
 
@@ -436,21 +331,9 @@ export const resolveCanvasOwnerSettings = (
   context: CanvasOwnerSettingsContext
 ) => {
   const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
-  const workspaceMode = normalizeCanvasWorkspaceMode(context.workspaceMode);
   const pageOverrides = context.pageId ? normalizedStore.pageSettings[context.pageId] || {} : {};
-  const contextDefaults = normalizeCanvasOwnerSettings({
-    ...defaultCanvasOwnerSettings,
-    readModeInteractionMode: resolveDefaultCanvasReadModeInteractionMode({
-      ...context,
-      workspaceMode,
-    }),
-    canvasViewMode: resolveDefaultCanvasViewMode({
-      ...context,
-      workspaceMode,
-    }),
-  });
   const settings = normalizeCanvasOwnerSettings({
-    ...contextDefaults,
+    ...defaultCanvasOwnerSettings,
     ...pageOverrides,
   });
   const sources = canvasOwnerSettingKeys.reduce(
@@ -469,84 +352,6 @@ export const resolveCanvasOwnerSettings = (
     settings,
     sources,
     pageOverrides,
-    workspaceMode,
-  };
-};
-
-export const resolveCanvasOwnerPagePolicy = (
-  store: CanvasOwnerSettingsStore,
-  {
-    pageId,
-    defaultAllowedModes,
-    defaultMode,
-  }: {
-    pageId?: string;
-    defaultAllowedModes: CanvasWorkspaceMode[];
-    defaultMode: CanvasWorkspaceMode;
-  }
-) => {
-  const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
-  const fallbackAllowedModes = normalizeCanvasAllowedWorkspaceModes(defaultAllowedModes, canvasWorkspaceModes);
-  const fallbackDefaultMode = fallbackAllowedModes.includes(defaultMode) ? defaultMode : fallbackAllowedModes[0];
-  const normalizedPageId = String(pageId || '').trim();
-  const pagePolicyOverrides = normalizedPageId ? normalizedStore.pagePolicies[normalizedPageId] || {} : {};
-  const allowedModes = pagePolicyOverrides.allowedModes
-    ? normalizeCanvasAllowedWorkspaceModes(pagePolicyOverrides.allowedModes, fallbackAllowedModes)
-    : fallbackAllowedModes;
-  const defaultModeOverride = pagePolicyOverrides.defaultMode;
-  const resolvedDefaultMode =
-    defaultModeOverride && allowedModes.includes(defaultModeOverride)
-      ? defaultModeOverride
-      : allowedModes.includes(fallbackDefaultMode)
-        ? fallbackDefaultMode
-        : allowedModes[0];
-
-  return {
-    allowedModes,
-    defaultMode: resolvedDefaultMode,
-    policyOverrides: pagePolicyOverrides,
-  };
-};
-
-export const updateCanvasOwnerPagePolicyOverride = <K extends keyof CanvasOwnerPagePolicyOverrides>(
-  store: CanvasOwnerSettingsStore,
-  {
-    pageId,
-    key,
-    value,
-  }: {
-    pageId: string;
-    key: K;
-    value: NonNullable<CanvasOwnerPagePolicyOverrides[K]>;
-  }
-): CanvasOwnerSettingsStore => {
-  const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
-  const normalizedPageId = String(pageId || '').trim();
-
-  if (!normalizedPageId) {
-    return normalizedStore;
-  }
-
-  const currentPolicy = normalizedStore.pagePolicies[normalizedPageId] || {};
-  const nextPolicy = normalizeCanvasOwnerPagePolicyOverrides({
-    ...currentPolicy,
-    [key]: value,
-  });
-
-  if (
-    nextPolicy.allowedModes &&
-    nextPolicy.defaultMode &&
-    !nextPolicy.allowedModes.includes(nextPolicy.defaultMode)
-  ) {
-    nextPolicy.defaultMode = nextPolicy.allowedModes[0];
-  }
-
-  return {
-    ...normalizedStore,
-    pagePolicies: {
-      ...normalizedStore.pagePolicies,
-      [normalizedPageId]: nextPolicy,
-    },
   };
 };
 
@@ -581,9 +386,7 @@ export const updateCanvasOwnerSettingsStoreOverride = <K extends CanvasOwnerSett
   };
 };
 
-const readDefaultCanvasOwnerSettings = (
-  context: CanvasOwnerSettingsContext = { pageId: 'canvas', workspaceMode: 'template' }
-) => {
+const readDefaultCanvasOwnerSettings = (context: CanvasOwnerSettingsContext = { pageId: 'canvas' }) => {
   const settingsStore = createEmptyCanvasOwnerSettingsStore();
   const resolvedSettings = resolveCanvasOwnerSettings(settingsStore, context);
 
@@ -594,9 +397,7 @@ const readDefaultCanvasOwnerSettings = (
   };
 };
 
-export const readCanvasOwnerSettingsFromStorage = (
-  context: CanvasOwnerSettingsContext = { pageId: 'canvas', workspaceMode: 'template' }
-) => {
+export const readCanvasOwnerSettingsFromStorage = (context: CanvasOwnerSettingsContext = { pageId: 'canvas' }) => {
   if (typeof window === 'undefined') {
     return readDefaultCanvasOwnerSettings(context);
   }
@@ -632,19 +433,16 @@ export const saveCanvasOwnerSettingsStoreToStorage = (settingsStore: CanvasOwner
 export const saveCanvasOwnerSettingsToStorage = (settings: CanvasOwnerSettings) => {
   const overrides = normalizeCanvasOwnerSettingsOverrides(settings);
   const nextSettingsStore: CanvasOwnerSettingsStore = {
-    version: 6,
+    version: 7,
     pageSettings: {
       canvas: { ...overrides },
     },
-    pagePolicies: {},
   };
 
   return saveCanvasOwnerSettingsStoreToStorage(nextSettingsStore);
 };
 
-export const useStoredCanvasOwnerSettings = (
-  context: CanvasOwnerSettingsContext = { pageId: 'canvas', workspaceMode: 'template' }
-) => {
+export const useStoredCanvasOwnerSettings = (context: CanvasOwnerSettingsContext = { pageId: 'canvas' }) => {
   const [state, setState] = React.useState(() => ({
     ...readDefaultCanvasOwnerSettings(context),
     loaded: false,
@@ -681,26 +479,25 @@ export const useStoredCanvasOwnerSettings = (
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener(CANVAS_OWNER_SETTINGS_EVENT_NAME, handleSettingsEvent);
     };
-  }, [context.pageId, context.workspaceMode]);
+  }, [context.pageId]);
 
   return state;
 };
 
 export const buildCanvasToolbarVisibility = (
-  settings: CanvasOwnerSettings,
-  workspaceMode: CanvasWorkspaceMode
+  settings: CanvasOwnerSettings
 ): TemplateEditWorkspaceCanvasToolbarVisibility => ({
   showCanvasTitle: settings.showCanvasTitle,
-  showTemplateNameInput: settings.showCanvasNameField && workspaceMode === 'template',
-  showSaveButton: settings.showCanvasSaveButton && workspaceMode !== 'read',
-  showTodoButton: settings.showCanvasTodoButton && workspaceMode === 'document',
-  showPreviewToggle: settings.showCanvasPreviewToggle && workspaceMode === 'template',
-  showInteractionModeControls: settings.showCanvasInteractionModeControls && workspaceMode === 'template',
-  showHistoryControls: settings.showCanvasHistoryControls && workspaceMode !== 'read',
+  showTemplateNameInput: settings.showCanvasNameField,
+  showSaveButton: settings.showCanvasSaveButton,
+  showTodoButton: settings.showCanvasTodoButton,
+  showPreviewToggle: settings.showCanvasPreviewToggle,
+  showInteractionModeControls: settings.showCanvasInteractionToolControls,
+  showHistoryControls: settings.showCanvasHistoryControls,
   showZoomControls: settings.showCanvasZoomControls,
   showFullscreenControl: settings.showCanvasFullscreenControl,
-  showEditSettingsToggle: settings.showCanvasEditSettingsToggle && workspaceMode === 'template',
-  showSelectionPanelTabs: settings.showCanvasSelectionPanelTabs && workspaceMode === 'template',
+  showEditSettingsToggle: settings.showCanvasEditSettingsToggle,
+  showSelectionPanelTabs: settings.showCanvasSelectionPanelTabs,
 });
 
 export const buildPersistenceVisibility = (
@@ -708,7 +505,7 @@ export const buildPersistenceVisibility = (
 ): TemplateEditWorkspacePersistenceVisibility => ({
   showTemplateList: settings.showPersistenceTemplateList,
   showTemplateNameInput: settings.showPersistenceTemplateNameField,
-  showLayoutResizeModeSelect: settings.showPersistenceLayoutResizeModeField,
+  showLayoutResizeModeSelect: settings.showPersistenceLayoutResizePolicyField,
   showSourceDocumentNameInput: settings.showPersistenceSourceDocumentNameField,
   showSaveButton: settings.showPersistenceSaveButton,
 });
@@ -725,19 +522,15 @@ export const buildTemplateUsagePreviewLayoutDebugOptions = (settings: CanvasOwne
 export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   baseProps,
   settings,
-  settingSources,
-  workspaceMode,
-  applyDefaultSettings = false,
+  settingSources: _settingSources,
+  applyDefaultSettings: _applyDefaultSettings = false,
 }: {
   baseProps: TemplateEditWorkspaceProps;
   settings: CanvasOwnerSettings;
   settingSources?: Record<CanvasOwnerSettingKey, CanvasOwnerSettingSource>;
-  workspaceMode: CanvasWorkspaceMode;
   applyDefaultSettings?: boolean;
 }): TemplateEditWorkspaceProps => {
-  const normalizedWorkspaceMode = normalizeCanvasWorkspaceMode(workspaceMode);
-  const shouldApplySetting = (key: CanvasOwnerSettingKey) =>
-    applyDefaultSettings || !settingSources || settingSources[key] !== 'default';
+  const shouldApplySetting = (_key: CanvasOwnerSettingKey) => true;
   const headerTitle = settings.headerTitle.trim() || baseProps.headerTitle;
   const headerDescription = settings.headerDescription.trim() || baseProps.headerDescription;
   const nameFieldLabel = settings.nameFieldLabel.trim() || baseProps.nameFieldLabel;
@@ -760,23 +553,22 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     canvasToolbarVisibility.showCanvasTitle = settings.showCanvasTitle;
   }
   if (shouldApplySetting('showCanvasNameField')) {
-    canvasToolbarVisibility.showTemplateNameInput = settings.showCanvasNameField && normalizedWorkspaceMode === 'template';
+    canvasToolbarVisibility.showTemplateNameInput = settings.showCanvasNameField;
   }
   if (shouldApplySetting('showCanvasSaveButton')) {
-    canvasToolbarVisibility.showSaveButton = settings.showCanvasSaveButton && normalizedWorkspaceMode !== 'read';
+    canvasToolbarVisibility.showSaveButton = settings.showCanvasSaveButton;
   }
   if (shouldApplySetting('showCanvasTodoButton')) {
-    canvasToolbarVisibility.showTodoButton = settings.showCanvasTodoButton && normalizedWorkspaceMode === 'document';
+    canvasToolbarVisibility.showTodoButton = settings.showCanvasTodoButton;
   }
   if (shouldApplySetting('showCanvasPreviewToggle')) {
-    canvasToolbarVisibility.showPreviewToggle = settings.showCanvasPreviewToggle && normalizedWorkspaceMode === 'template';
+    canvasToolbarVisibility.showPreviewToggle = settings.showCanvasPreviewToggle;
   }
-  if (shouldApplySetting('showCanvasInteractionModeControls')) {
-    canvasToolbarVisibility.showInteractionModeControls =
-      settings.showCanvasInteractionModeControls && normalizedWorkspaceMode === 'template';
+  if (shouldApplySetting('showCanvasInteractionToolControls')) {
+    canvasToolbarVisibility.showInteractionModeControls = settings.showCanvasInteractionToolControls;
   }
   if (shouldApplySetting('showCanvasHistoryControls')) {
-    canvasToolbarVisibility.showHistoryControls = settings.showCanvasHistoryControls && normalizedWorkspaceMode !== 'read';
+    canvasToolbarVisibility.showHistoryControls = settings.showCanvasHistoryControls;
   }
   if (shouldApplySetting('showCanvasZoomControls')) {
     canvasToolbarVisibility.showZoomControls = settings.showCanvasZoomControls;
@@ -785,12 +577,10 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     canvasToolbarVisibility.showFullscreenControl = settings.showCanvasFullscreenControl;
   }
   if (shouldApplySetting('showCanvasEditSettingsToggle')) {
-    canvasToolbarVisibility.showEditSettingsToggle =
-      settings.showCanvasEditSettingsToggle && normalizedWorkspaceMode === 'template';
+    canvasToolbarVisibility.showEditSettingsToggle = settings.showCanvasEditSettingsToggle;
   }
   if (shouldApplySetting('showCanvasSelectionPanelTabs')) {
-    canvasToolbarVisibility.showSelectionPanelTabs =
-      settings.showCanvasSelectionPanelTabs && normalizedWorkspaceMode === 'template';
+    canvasToolbarVisibility.showSelectionPanelTabs = settings.showCanvasSelectionPanelTabs;
   }
   if (shouldApplySetting('showPersistenceTemplateList')) {
     persistenceVisibility.showTemplateList = settings.showPersistenceTemplateList;
@@ -798,8 +588,8 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   if (shouldApplySetting('showPersistenceTemplateNameField')) {
     persistenceVisibility.showTemplateNameInput = settings.showPersistenceTemplateNameField;
   }
-  if (shouldApplySetting('showPersistenceLayoutResizeModeField')) {
-    persistenceVisibility.showLayoutResizeModeSelect = settings.showPersistenceLayoutResizeModeField;
+  if (shouldApplySetting('showPersistenceLayoutResizePolicyField')) {
+    persistenceVisibility.showLayoutResizeModeSelect = settings.showPersistenceLayoutResizePolicyField;
   }
   if (shouldApplySetting('showPersistenceSourceDocumentNameField')) {
     persistenceVisibility.showSourceDocumentNameInput = settings.showPersistenceSourceDocumentNameField;
@@ -825,41 +615,18 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   if (shouldApplySetting('blockPeerClusterWidthTargets')) {
     templateUsagePreviewLayoutDebugOptions.measurePeerClusterWidthTargets = !settings.blockPeerClusterWidthTargets;
   }
-  const readModeInteractionSettingApplies =
-    normalizedWorkspaceMode === 'read' &&
-    (shouldApplySetting('readModeInteractionMode') ||
-      settings.readModeInteractionMode !== defaultCanvasOwnerSettings.readModeInteractionMode);
-  const readModeInteractionProps: Partial<TemplateEditWorkspaceProps> = readModeInteractionSettingApplies
-    ? settings.readModeInteractionMode === 'box-selection'
-      ? {
-          canvasTextInteractionMode: 'selection-only',
-          canvasSelectionMode: 'box',
-        }
-      : {
-          canvasTextInteractionMode: 'default',
-          canvasSelectionMode: 'none',
-          checklistSelectableTargets: [],
-          onChecklistSelectableTargetSelect: undefined,
-          onChecklistSelectableTargetsSelect: undefined,
-          onChecklistSelectionClear: undefined,
-        }
+  const canvasBoxSelectionProps: Partial<TemplateEditWorkspaceProps> = settings.allowCanvasBoxSelection
+    ? {
+        canvasTextInteractionMode: 'selection-only',
+        canvasSelectionMode: 'box',
+      }
     : {};
 
   return {
     ...baseProps,
     hideHeader: shouldApplySetting('hideHeader') ? settings.hideHeader : baseProps.hideHeader,
-    hidePersistencePanel:
-      normalizedWorkspaceMode === 'read'
-        ? true
-        : shouldApplySetting('hidePersistencePanel')
-          ? settings.hidePersistencePanel
-          : baseProps.hidePersistencePanel,
-    templateListDisplay:
-      normalizedWorkspaceMode === 'template'
-        ? shouldApplySetting('templateListDisplay')
-          ? settings.templateListDisplay
-          : baseProps.templateListDisplay
-        : undefined,
+    hidePersistencePanel: shouldApplySetting('hidePersistencePanel') ? settings.hidePersistencePanel : baseProps.hidePersistencePanel,
+    templateListDisplay: shouldApplySetting('templateListDisplay') ? settings.templateListDisplay : baseProps.templateListDisplay,
     showWorkspaceMessages: shouldApplySetting('showWorkspaceMessages') ? settings.showWorkspaceMessages : baseProps.showWorkspaceMessages,
     suppressInitialDraftLoadedMessage: shouldApplySetting('suppressInitialDraftLoadedMessage')
       ? settings.suppressInitialDraftLoadedMessage
@@ -869,11 +636,10 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     nameFieldLabel: shouldApplySetting('nameFieldLabel') ? nameFieldLabel : baseProps.nameFieldLabel,
     saveButtonLabel: shouldApplySetting('saveButtonLabel') ? saveButtonLabel : baseProps.saveButtonLabel,
     templateNameReadOnly: shouldApplySetting('templateNameReadOnly')
-      ? Boolean(baseProps.templateNameReadOnly || settings.templateNameReadOnly)
+      ? settings.templateNameReadOnly
       : baseProps.templateNameReadOnly,
-    saveDisabled: shouldApplySetting('saveDisabled')
-      ? Boolean(baseProps.saveDisabled || normalizedWorkspaceMode === 'read' || settings.saveDisabled)
-      : Boolean(baseProps.saveDisabled || normalizedWorkspaceMode === 'read'),
+    saveDisabled: shouldApplySetting('saveDisabled') ? settings.saveDisabled : baseProps.saveDisabled,
+    initialCanvasTab: shouldApplySetting('initialCanvasTab') ? settings.initialCanvasTab : baseProps.initialCanvasTab,
     defaultCanvasFullscreen: shouldApplySetting('defaultCanvasFullscreen')
       ? settings.defaultCanvasFullscreen
       : baseProps.defaultCanvasFullscreen,
@@ -902,24 +668,15 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
       shouldApplySetting('pageContainerWidth')
         ? specifiedCanvasWidth
         : baseProps.canvasSpecifiedWidth,
-    documentAttachmentApiPath:
-      normalizedWorkspaceMode === 'document' &&
-      (!shouldApplySetting('enableDocumentAttachmentApiPath') || settings.enableDocumentAttachmentApiPath !== false)
-        ? baseProps.documentAttachmentApiPath
-        : '',
+    documentAttachmentApiPath: shouldApplySetting('enableDocumentAttachmentApiPath') && settings.enableDocumentAttachmentApiPath
+      ? baseProps.documentAttachmentApiPath
+      : '',
     canvasToolbarVisibility,
     persistenceVisibility,
     templateUsagePreviewLayoutDebugOptions,
     selectionInactiveOverlayOpacity: shouldApplySetting('selectionInactiveOverlayOpacity')
       ? settings.selectionInactiveOverlayOpacity
       : baseProps.selectionInactiveOverlayOpacity,
-    canvasViewMode:
-      applyDefaultSettings ||
-      !settingSources ||
-      settingSources.canvasViewMode !== 'default' ||
-      Boolean(settings.canvasViewMode)
-        ? settings.canvasViewMode
-        : baseProps.canvasViewMode,
-    ...readModeInteractionProps,
+    ...canvasBoxSelectionProps,
   };
 };

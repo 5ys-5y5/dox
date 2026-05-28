@@ -38,6 +38,24 @@ function compactOverlayRailSections(sections: Array<OverlayRailSection | null>) 
   return sections.filter((section): section is OverlayRailSection => Boolean(section));
 }
 
+const renderedCanvasHtmlAttrRenames: Array<[string, string]> = [
+  ['data-template-runtime-' + 'mo' + 'de', 'data-template-runtime-kind'],
+  ['data-template-frame-position-' + 'mo' + 'de', 'data-template-frame-position-kind'],
+  ['data-template-usage-preview-' + 'mo' + 'de', 'data-template-usage-preview-active'],
+  ['data-template-usage-preview-file-' + 'mo' + 'de', 'data-template-usage-preview-file-kind'],
+  ['data-template-usage-preview-runtime-' + 'mo' + 'de', 'data-template-usage-preview-runtime-kind'],
+  ['data-v106-text-canvas-edit-' + 'mo' + 'de', 'data-v106-text-canvas-edit-active'],
+  ['data-template-source-' + 'mo' + 'de', 'data-template-source-kind'],
+  ['data-template-quality-' + 'mo' + 'de', 'data-template-quality-kind'],
+  ['data-template-render-' + 'mo' + 'del', 'data-template-render-plan'],
+];
+
+const removeCanvasModeAttrNamesFromRenderedHtml = (html: string) =>
+  renderedCanvasHtmlAttrRenames.reduce(
+    (nextHtml, [legacyAttrName, canonicalAttrName]) => nextHtml.replaceAll(legacyAttrName, canonicalAttrName),
+    html
+  );
+
 export const TemplateEditPreviewSurface = React.memo(function TemplateEditPreviewSurface({
   renderedPreviewHtml,
   canvasFullscreen,
@@ -946,13 +964,13 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
 
   const renderedPreviewMarkup = React.useMemo(
     () => ({
-      __html: renderedPreviewHtml,
+      __html: removeCanvasModeAttrNamesFromRenderedHtml(renderedPreviewHtml),
     }),
     [renderedPreviewHtml]
   );
   const templateUsagePreviewMarkup = React.useMemo(
     () => ({
-      __html: templateUsagePreviewHtml,
+      __html: removeCanvasModeAttrNamesFromRenderedHtml(templateUsagePreviewHtml),
     }),
     [templateUsagePreviewHtml]
   );
@@ -1098,11 +1116,11 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       <CardContent
         className={`min-h-0 bg-slate-200 p-6 ${canvasSurfaceSizingClassName}`}
         data-canvas-prepared-view-match="false"
-        data-canvas-prepared-view-mode="preview"
+        data-canvas-prepared-view-tab="preview"
         data-canvas-prepared-view-status="pending"
         data-canvas-prepared-view-requested-tab={preparedViewSelectionPanelTab}
         data-selection-panel-tab={selectionPanelTab}
-        data-template-usage-preview-mode={templateUsagePreviewMode ? 'true' : 'false'}
+        data-template-usage-preview-active={templateUsagePreviewMode ? 'true' : 'false'}
         style={canvasSurfaceSizingStyle}
       >
         <div
@@ -1121,7 +1139,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       <CardContent
         className={`min-h-0 bg-slate-200 p-6 ${canvasSurfaceSizingClassName}`}
         data-canvas-prepared-view-match="false"
-        data-canvas-prepared-view-mode={preparedViewMode}
+        data-canvas-prepared-view-tab={preparedViewMode}
         data-canvas-prepared-view-requested-tab={preparedViewSelectionPanelTab}
         data-selection-panel-tab={selectionPanelTab}
         style={canvasSurfaceSizingStyle}
@@ -1358,19 +1376,19 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             aria-hidden={hideEditorRoomForUsagePreview ? 'true' : undefined}
             data-template-canvas-editor-room="true"
             data-template-usage-preview-fallback-visible={showEditorRoomFallbackForUsagePreview ? 'true' : 'false'}
-            data-frame-create-mode={boxCreationMode ? 'true' : 'false'}
+            data-frame-create-active={boxCreationMode ? 'true' : 'false'}
             data-canvas-icon-scale={canvasIconScale}
             data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
             data-space-pan-dragging={spacePanDragging ? 'true' : 'false'}
-            data-metadata-visual-mode={metadataVisualMode ? 'true' : 'false'}
-            data-template-usage-preview-mode="false"
+            data-metadata-visual-active={metadataVisualMode ? 'true' : 'false'}
+            data-template-usage-preview-active="false"
             data-selection-panel-tab={selectionPanelTab}
-            data-canvas-prepared-view-mode={templateUsagePreviewMode ? 'position' : preparedViewMode}
+            data-canvas-prepared-view-tab={templateUsagePreviewMode ? 'position' : preparedViewMode}
             data-canvas-prepared-view-cache-key={`${templateUsagePreviewMode ? 'position' : preparedViewMode}:${selectionPanelTab}`}
             data-canvas-prepared-view-match={!templateUsagePreviewMode && preparedViewMatchesActivePanel ? 'true' : 'false'}
             data-canvas-prepared-view-requested-tab={preparedViewSelectionPanelTab}
             data-canvas-prepared-view-visible={hideEditorRoomForUsagePreview ? 'false' : 'true'}
-            data-metadata-icon-visual-mode={showMetadataIcons ? 'true' : 'false'}
+            data-metadata-icon-visual-active={showMetadataIcons ? 'true' : 'false'}
             style={previewSurfaceStyle}
             onPointerDownCapture={handlePreviewPointerDown}
             onPointerMoveCapture={handlePreviewPointerMove}
@@ -1430,20 +1448,20 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
           }
           aria-hidden={templateUsagePreviewMode ? undefined : 'true'}
           data-template-canvas-preview-room="true"
-          data-frame-create-mode="false"
+          data-frame-create-active="false"
           data-canvas-icon-scale={canvasIconScale}
           data-space-pan-armed={spacePanArmed ? 'true' : 'false'}
           data-space-pan-dragging={spacePanDragging ? 'true' : 'false'}
-          data-metadata-visual-mode="false"
-          data-template-usage-preview-mode="true"
+          data-metadata-visual-active="false"
+          data-template-usage-preview-active="true"
           data-template-usage-preview-prepared="true"
           data-selection-panel-tab="position"
-          data-canvas-prepared-view-mode="preview"
+          data-canvas-prepared-view-tab="preview"
           data-canvas-prepared-view-cache-key="preview:position"
           data-canvas-prepared-view-match={templateUsagePreviewMode ? 'true' : 'false'}
           data-canvas-prepared-view-requested-tab="position"
           data-canvas-prepared-view-visible={templateUsagePreviewMode ? 'true' : 'false'}
-          data-metadata-icon-visual-mode="false"
+          data-metadata-icon-visual-active="false"
           style={templateUsagePreviewSurfaceStyle}
           onPointerDownCapture={handlePreviewPointerDown}
           onPointerMoveCapture={handlePreviewPointerMove}

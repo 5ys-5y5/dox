@@ -241,7 +241,7 @@ export const TemplatePositionBoxSizeOverlay = ({
               <div className="relative min-w-0 w-full overflow-hidden rounded-md border border-slate-300 bg-white">
                 <button
                   type="button"
-                  data-text-autosize-mode-button="height"
+                  data-text-autosize-policy-button="height"
                   className={autoSizeModeWithAuxButtonClass(selectedTextAutoSizeState.allHeight)}
                   onPointerDown={(event) => handleTextAutoSizeModePointerDown(event, 'height')}
                   onClick={() => handleTextAutoSizeModeClick('height')}
@@ -252,7 +252,7 @@ export const TemplatePositionBoxSizeOverlay = ({
                   <div className={autoSizeInlineActionGroupClass}>
                     <button
                       type="button"
-                      data-text-autosize-action-mode="height"
+                      data-text-autosize-action-policy="height"
                       data-text-autosize-action-value="top"
                       className={autoSizeInlineActionButtonClass(
                         selectedTextAutoSizeState.allHeight &&
@@ -269,7 +269,7 @@ export const TemplatePositionBoxSizeOverlay = ({
                     </button>
                     <button
                       type="button"
-                      data-text-autosize-action-mode="height"
+                      data-text-autosize-action-policy="height"
                       data-text-autosize-action-value="bottom"
                       className={autoSizeInlineActionButtonClass(
                         selectedTextAutoSizeState.allHeight &&
@@ -291,7 +291,7 @@ export const TemplatePositionBoxSizeOverlay = ({
               <div className="relative min-w-0 w-full overflow-hidden rounded-md border border-slate-300 bg-white">
                 <button
                   type="button"
-                  data-text-autosize-mode-button="width"
+                  data-text-autosize-policy-button="width"
                   className={autoSizeModeWithAuxButtonClass(selectedTextAutoSizeState.allWidth)}
                   onPointerDown={(event) => handleTextAutoSizeModePointerDown(event, 'width')}
                   onClick={() => handleTextAutoSizeModeClick('width')}
@@ -302,7 +302,7 @@ export const TemplatePositionBoxSizeOverlay = ({
                   <div className={autoSizeInlineActionGroupClass}>
                     <button
                       type="button"
-                      data-text-autosize-action-mode="width"
+                      data-text-autosize-action-policy="width"
                       data-text-autosize-action-value="left"
                       className={autoSizeInlineActionButtonClass(
                         selectedTextAutoSizeState.allWidth &&
@@ -319,7 +319,7 @@ export const TemplatePositionBoxSizeOverlay = ({
                     </button>
                     <button
                       type="button"
-                      data-text-autosize-action-mode="width"
+                      data-text-autosize-action-policy="width"
                       data-text-autosize-action-value="right"
                       className={autoSizeInlineActionButtonClass(
                         selectedTextAutoSizeState.allWidth &&
@@ -339,7 +339,7 @@ export const TemplatePositionBoxSizeOverlay = ({
             </div>
             <button
               type="button"
-              data-text-autosize-mode-button="fixed"
+              data-text-autosize-policy-button="fixed"
               className={`${autoSizeRowToneClass(selectedTextAutoSizeState.allFixed)} col-span-2 h-10 w-full justify-center rounded-md border border-slate-300`}
               onPointerDown={(event) => handleTextAutoSizeModePointerDown(event, 'fixed')}
               onClick={() => handleTextAutoSizeModeClick('fixed')}

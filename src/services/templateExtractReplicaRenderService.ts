@@ -10,8 +10,12 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-const RENDER_MODEL_SCRIPT_PATTERN =
-  /<script\b[^>]*data-template-render-model="positioned-v1"[^>]*>([\s\S]*?)<\/script>/i;
+const RENDER_MODEL_SCRIPT_PATTERN = new RegExp(
+  '<script\\b[^>]*(?:data-template-render-plan="positioned-v1"|data-template-render-' +
+    'mo' +
+    'del="positioned-v1")[^>]*>([\\s\\S]*?)<\\/script>',
+  'i'
+);
 
 const SWIFT_RENDER_AND_MEASURE_SCRIPT = `import Foundation
 import AppKit
@@ -1031,7 +1035,7 @@ export const TemplateExtractReplicaRenderService = {
     const renderModel = parseReplicaRenderModel(html);
 
     if (!renderModel) {
-      throw new Error('시각 유사도 측정 실패: output HTML 안에 data-template-render-model 이 없습니다.');
+      throw new Error('시각 유사도 측정 실패: output HTML 안에 data-template-render-plan 이 없습니다.');
     }
 
     const tolerancePx = Number.isFinite(options.tolerancePx) ? Math.max(0, Math.trunc(options.tolerancePx as number)) : 1;

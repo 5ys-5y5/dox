@@ -1,0 +1,206 @@
+import Link from 'next/link';
+import { Badge } from '../components/ui/Badge';
+import { cn } from '../lib/utils';
+
+const pageGroups: Array<{
+  title: string;
+  description: string;
+  pages: Array<{
+    href: string;
+    title: string;
+    summary: string;
+    status: string;
+    statusVariant?: 'blue' | 'green' | 'amber' | 'slate' | 'red';
+  }>;
+}> = [
+  {
+    title: '현장 관리',
+    description: '현장별 템플릿 문서, 원본 파일, 사진, 서명, 구성원 운영을 통합해서 확인하는 화면입니다.',
+    pages: [
+      {
+        href: '/project',
+        title: '현장 관리',
+        summary: '현장별 템플릿 문서, 원본 파일(PDF/HWP 등), 사진, 서명, 구성원을 한 화면에서 관리합니다.',
+        status: '구현중',
+      },
+    ],
+  },
+  {
+    title: '전자 서명',
+    description: '무결성 검증과 본인확인 흐름을 확인하는 페이지입니다.',
+    pages: [
+      {
+        href: '/test-sign',
+        title: '서명 테스트',
+        summary: '서명 요청, 본인확인 흐름, 서명 저장을 확인합니다.',
+        status: '진행중',
+      },
+    ],
+  },
+  {
+    title: '서류 관리',
+    description: '문서 저장, 현장 체크리스트, 템플릿, 사진 라벨링, 일괄 입력을 확인합니다.',
+    pages: [
+      {
+        href: '/canvas',
+        title: '상자 편집 캔버스',
+        summary: '템플릿 모드, 문서 모드, 읽기 모드를 한 화면에서 직접 확인하는 공용 캔버스 owner 페이지입니다.',
+        status: '완료',
+        statusVariant: 'blue',
+      },
+      {
+        href: '/sites',
+        title: '현장별 필요 서류 누락 방지',
+        summary: '현장 생성, 규칙 저장, 체크리스트 계산을 다룹니다.',
+        status: '구현중',
+      },
+      {
+        href: '/templates',
+        title: '템플릿 등록',
+        summary: '템플릿 메타데이터, 필드, 라벨, 서명 영역을 관리합니다.',
+        status: '완료',
+        statusVariant: 'blue',
+      },
+      {
+        href: '/templates/extract',
+        title: '템플릿 추출',
+        summary: '입력값이 있는 문서에서 draft HTML과 후보 필드를 만듭니다.',
+        status: '완료',
+        statusVariant: 'blue',
+      },
+      {
+        href: '/templates/edit',
+        title: '템플릿 편집',
+        summary: '저장된 템플릿 편집 전용 레거시 진입점입니다. /canvas 환경 설정으로 대체되어 삭제 예정입니다.',
+        status: '레거시',
+        statusVariant: 'slate',
+      },
+      {
+        href: '/photos',
+        title: '사진 라벨링 보관',
+        summary: '사진 메타데이터, 라벨 저장, 누락 경고를 다룹니다.',
+        status: '구현중',
+      },
+      {
+        href: '/bulk-ops',
+        title: '일괄 정보 입력',
+        summary: '같은 라벨 키의 일반 값을 미리보기 후 일괄 반영합니다.',
+        status: '구현중',
+      },
+      {
+        href: '/request-links',
+        title: '일괄 요청',
+        summary: '허용 라벨만 수정 가능한 제한 입력 링크를 발급하고 검증합니다.',
+        status: '구현중',
+      },
+      {
+        href: '/exports',
+        title: '변환 저장',
+        summary: 'export job과 출력본 메타데이터를 관리합니다.',
+        status: '구현중',
+      },
+    ],
+  },
+  {
+    title: '독립 알림 서비스',
+    description: '문자 및 이메일 발송 도메인을 다른 기능과 분리해 운영하는 화면입니다.',
+    pages: [
+      {
+        href: '/messaging',
+        title: '문자 발송 운영',
+        summary: '발신번호/수신번호 등록, 기본 설정, 최근 문자 발송 이력과 상태 동기화를 다룹니다.',
+        status: '구현중',
+      },
+    ],
+  },
+];
+
+type HomePageStatusVariant = 'blue' | 'green' | 'amber' | 'slate' | 'red';
+
+const resolvePageStatusVariant = (page: {
+  status: string;
+  statusVariant?: HomePageStatusVariant;
+}): HomePageStatusVariant => {
+  if (page.statusVariant) {
+    return page.statusVariant;
+  }
+
+  if (page.status === '완료') {
+    return 'blue';
+  }
+
+  if (page.status === '구현중' || page.status === '진행중') {
+    return 'amber';
+  }
+
+  return 'green';
+};
+
+const pageCardToneClassNameByVariant: Record<HomePageStatusVariant, string> = {
+  blue: 'border-blue-200 bg-blue-50/70 hover:border-blue-300 hover:bg-blue-50',
+  green: 'border-emerald-200 bg-emerald-50/70 hover:border-emerald-300 hover:bg-emerald-50',
+  amber: 'border-amber-200 bg-amber-50/75 hover:border-amber-300 hover:bg-amber-50',
+  slate: 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-50',
+  red: 'border-rose-200 bg-rose-50/70 hover:border-rose-300 hover:bg-rose-50',
+};
+
+export default function HomePage() {
+  return (
+    <main className="min-h-screen bg-white">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-10 md:px-8">
+        <header className="space-y-4 border-b border-slate-200 pb-8">
+          <Badge variant="slate">APP-HOME-01</Badge>
+          <div className="space-y-2">
+            <h1 className="text-4xl font-semibold text-slate-950">구현 기능 진입점</h1>
+            <p className="max-w-3xl text-sm text-slate-600">
+              현재 구현된 사용자용 페이지를 한 곳에서 바로 열 수 있도록 정리한 홈 화면입니다. 각 기능은 독립 서비스
+              단위로 나뉘어 있고, 이 화면은 그 진입점만 제공합니다.
+            </p>
+          </div>
+        </header>
+
+        <div className="space-y-8">
+          {pageGroups.map((group) => (
+            <div key={group.title} className="space-y-4">
+              <div className="space-y-1">
+                <h2 className="text-2xl font-semibold text-slate-950">{group.title}</h2>
+                <p className="text-sm text-slate-600">{group.description}</p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {group.pages.map((page) => {
+                  const statusVariant = resolvePageStatusVariant(page);
+                  const legacyTextClassName = page.status === '레거시' ? 'text-slate-300' : '';
+
+                  return (
+                    <Link
+                      key={page.href}
+                      href={page.href}
+                      className={cn(
+                        'flex min-h-[180px] flex-col justify-between rounded-2xl p-5 transition-colors',
+                        pageCardToneClassNameByVariant[statusVariant],
+                        legacyTextClassName
+                      )}
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Badge variant={statusVariant} className={legacyTextClassName}>{page.status}</Badge>
+                          <span className={cn('text-xs text-slate-500', legacyTextClassName)}>{page.href}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className={cn('text-xl font-semibold text-slate-950', legacyTextClassName)}>{page.title}</h3>
+                          <p className={cn('text-sm text-slate-600', legacyTextClassName)}>{page.summary}</p>
+                        </div>
+                      </div>
+                      <div className={cn('pt-4 text-sm font-medium text-slate-900', legacyTextClassName)}>페이지 열기</div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}

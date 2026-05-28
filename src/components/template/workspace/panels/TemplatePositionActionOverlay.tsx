@@ -133,7 +133,7 @@ export const TemplatePositionActionOverlay = ({
             type="button"
             className="inline-flex h-6 items-center justify-center rounded border border-amber-300 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
             onClick={onCancelPositionGroupEditMode}
-            aria-label="그룹 편집 모드 종료"
+            aria-label="그룹 편집 종료"
           >
             x
           </button>

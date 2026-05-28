@@ -115,13 +115,13 @@ const inferSourceModeFromPageSources = (
   if (scannedPageCount > 0 && digitalPageCount === 0) {
     return {
       sourceMode: 'scanned',
-      detectionReasons: [`source-mode:ocr-only-pages(${scannedPageCount})`],
+      detectionReasons: [`source-kind:ocr-only-pages(${scannedPageCount})`],
     };
   }
 
   return {
     sourceMode: 'digital',
-    detectionReasons: [`source-mode:text-pages(${digitalPageCount || pageSources.length})`],
+    detectionReasons: [`source-kind:text-pages(${digitalPageCount || pageSources.length})`],
   };
 };
 
@@ -180,7 +180,7 @@ export const TemplateExtractPdfFamilyService = {
       documentFamily: familyResult.documentFamily,
       confidenceScore: familyResult.confidenceScore,
       matchedSignals: familyResult.matchedSignals,
-      detectionReasons: ['source-mode:rule-ocr-model', ...familyResult.detectionReasons],
+      detectionReasons: ['source-kind:rule-ocr-plan', ...familyResult.detectionReasons],
     };
   },
 };

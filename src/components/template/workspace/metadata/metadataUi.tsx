@@ -99,8 +99,8 @@ export const confirmPromoteRuntimeMode = (
   }
 
   return window.confirm(
-    `${frameGroupId} 의 runtime mode ${currentRuntimeMode} 는 현재 상자 타입과 호환되지 않습니다.\n` +
-      `호환 가능한 runtime mode(${nextRuntimeMode})로 변경할까요?`
+    `${frameGroupId} 의 runtime kind ${currentRuntimeMode} 는 현재 상자 타입과 호환되지 않습니다.\n` +
+      `호환 가능한 runtime kind(${nextRuntimeMode})로 변경할까요?`
   );
 };
 

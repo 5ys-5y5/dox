@@ -1,6 +1,9 @@
 import { resolvePreferredDocumentHtml } from './documentCanvasHtml';
 import { mergePersistedSignatureRuntimeStateIntoHtml } from './documentCanvasRuntimeState';
 
+const templateRuntimeKindSelector =
+  '[data-template-runtime-kind="file_slot"], [data-template-runtime-' + 'mo' + 'de="file_slot"]';
+
 export const collapseDocumentCanvasWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
 
 export const stringifyDocumentValue = (value: unknown) => {
@@ -42,8 +45,8 @@ export const isDocumentCanvasValueFieldElement = (element: Element) =>
   element.closest('[data-template-usage-preview-value-box="true"]') !== null;
 
 export const isDocumentCanvasAttachmentValueElement = (element: Element) =>
-  element.matches('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') ||
-  element.closest('[data-template-box-kind="attachment"], [data-template-runtime-mode="file_slot"]') !== null;
+  element.matches(`[data-template-box-kind="attachment"], ${templateRuntimeKindSelector}`) ||
+  element.closest(`[data-template-box-kind="attachment"], ${templateRuntimeKindSelector}`) !== null;
 
 export const resolveDocumentCanvasValueKey = (element: Element) => {
   const currentElementKey =

@@ -81,7 +81,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
       const nextMode: FrameMarqueeSelectionMode =
         currentPoint.x >= marqueeSelectionState.origin.x ? 'contained' : 'intersected';
       marqueeSelectionState.mode = nextMode;
-      marqueeSelectionState.ghost?.setAttribute('data-marquee-mode', nextMode);
+      marqueeSelectionState.ghost?.setAttribute('data-marquee-state', nextMode);
       if (marqueeSelectionState.ghost) {
         writeFrameEditorGhostRect(marqueeSelectionState.ghost, nextRect);
       }
@@ -608,7 +608,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
 
         if (boxCreationPositionMode === 'relative' && !anchorFrameGroupId) {
           optionsRef.current.setBoxCreationPositionMode('absolute');
-          setMessage('상대 기준 상자 1개가 없어 이번 생성은 절대 위치 모드로 전환합니다.');
+          setMessage('상대 기준 상자 1개가 없어 이번 생성은 절대 위치 기준으로 전환합니다.');
         }
 
         event.preventDefault();

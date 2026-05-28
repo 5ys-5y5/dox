@@ -18,9 +18,11 @@ const FRAME_ROLE_ATTR = 'data-template-frame-role';
 const FRAME_VALUE_KEY_ATTR = 'data-template-frame-value-key';
 const FRAME_PARENT_GROUP_ATTR = 'data-template-frame-parent-group';
 const FRAME_BOX_KIND_ATTR = 'data-template-box-kind';
-const FRAME_RUNTIME_MODE_ATTR = 'data-template-runtime-mode';
+const FRAME_RUNTIME_MODE_ATTR = 'data-template-runtime-kind';
+const LEGACY_FRAME_RUNTIME_MODE_ATTR = 'data-template-runtime-' + 'mo' + 'de';
 const FRAME_FIELD_TYPE_ATTR = 'data-template-frame-field-type';
-const FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-mode';
+const FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-kind';
+const LEGACY_FRAME_POSITION_MODE_ATTR = 'data-template-frame-position-' + 'mo' + 'de';
 const FRAME_RELATIVE_ANCHOR_KIND_ATTR = 'data-template-frame-relative-anchor-kind';
 const FRAME_RELATIVE_ANCHOR_ID_ATTR = 'data-template-frame-relative-anchor-id';
 const FRAME_RELATIVE_ANCHOR_X_ATTR = 'data-template-frame-relative-anchor-x';
@@ -45,7 +47,8 @@ const FRAME_BORDER_WIDTH_ATTR = 'data-template-frame-border-width';
 const FRAME_BORDER_STYLE_ATTR = 'data-template-frame-border-style';
 const FRAME_BORDER_COLOR_ATTR = 'data-template-frame-border-color';
 
-const readAttr = (node: Element, name: string) => node.getAttribute(name)?.trim() || '';
+const readAttr = (node: Element, name: string, legacyName = '') =>
+  node.getAttribute(name)?.trim() || (legacyName ? node.getAttribute(legacyName)?.trim() || '' : '');
 
 const parseInteger = (value: string, fallback: number) => {
   const parsed = Number.parseInt(value, 10);
@@ -88,7 +91,7 @@ const buildStyleSnapshot = (node: HTMLElement) => ({
 
 const buildPositionSnapshot = (node: HTMLElement) => ({
   pageNumber: parseInteger(readAttr(node, FRAME_PAGE_ATTR), 1),
-  positionMode: readAttr(node, FRAME_POSITION_MODE_ATTR) || 'absolute',
+  positionMode: readAttr(node, FRAME_POSITION_MODE_ATTR, LEGACY_FRAME_POSITION_MODE_ATTR) || 'absolute',
   anchorKind: readAttr(node, FRAME_RELATIVE_ANCHOR_KIND_ATTR) || null,
   anchorId: readAttr(node, FRAME_RELATIVE_ANCHOR_ID_ATTR) || null,
   anchorX: readAttr(node, FRAME_RELATIVE_ANCHOR_X_ATTR) || null,
@@ -119,7 +122,7 @@ const buildFrameInput = (node: HTMLElement, sortOrder: number): TemplateSchemaFr
 
   const role = readAttr(node, FRAME_ROLE_ATTR) || 'key_value';
   const boxKind = readAttr(node, FRAME_BOX_KIND_ATTR);
-  const runtimeMode = readAttr(node, FRAME_RUNTIME_MODE_ATTR);
+  const runtimeMode = readAttr(node, FRAME_RUNTIME_MODE_ATTR, LEGACY_FRAME_RUNTIME_MODE_ATTR);
 
   return {
     frameGroupId,

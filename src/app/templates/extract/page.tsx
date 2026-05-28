@@ -12,7 +12,6 @@ export default function TemplateExtractPage() {
             key={draft.draftKey}
             surface="templates-extract-preview"
             initialDraft={draft}
-            workspaceMode="read"
             hideHeader
             hidePersistencePanel
             suppressInitialDraftLoadedMessage

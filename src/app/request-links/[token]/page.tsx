@@ -617,7 +617,7 @@ export default function RequestLinkTokenPage() {
     [initialDraft, loadRequestLink, requestLink, setTaskBusy, setTaskMessage, submittedBy, token, updateRequestTask]
   );
 
-  const workspaceMode = requestLink?.status === 'active' ? 'document' : 'read';
+  const requestLinkEditable = requestLink?.status === 'active';
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
@@ -625,7 +625,7 @@ export default function RequestLinkTokenPage() {
         <Badge variant="slate">REQ-LINK-02</Badge>
         <h1 className="text-3xl font-semibold text-slate-950">제한 입력 요청 링크</h1>
         <p className="text-sm text-slate-600">
-          허용된 항목만 기록할 수 있는 문서 화면입니다. 활성 링크는 문서 모드로 기록할 수 있고, 제출되었거나 만료된 링크는 읽기 전용으로 확인만 가능합니다.
+          허용된 항목만 기록할 수 있는 문서 화면입니다. 활성 링크는 기록할 수 있고, 제출되었거나 만료된 링크는 읽기 전용으로 확인만 가능합니다.
         </p>
       </div>
 
@@ -650,14 +650,13 @@ export default function RequestLinkTokenPage() {
               <CanvasOwnedWorkspace
                 surface="request-links"
                 initialDraft={initialDraft}
-                workspaceMode={workspaceMode}
-                editableValueKeys={workspaceMode === 'document' ? requestLink?.allowedLabels || [] : null}
+                editableValueKeys={requestLinkEditable ? requestLink?.allowedLabels || [] : null}
                 hidePersistencePanel
                 suppressInitialDraftLoadedMessage
                 templateNameReadOnly
-                saveDisabled={workspaceMode !== 'document' || loading}
+                saveDisabled={!requestLinkEditable || loading}
                 documentAttachmentApiPath={requestLink ? `/api/request-links/${encodeURIComponent(token)}/attachments` : ''}
-                onSaveDraftHtml={workspaceMode === 'document' ? handleSaveDraft : undefined}
+                onSaveDraftHtml={requestLinkEditable ? handleSaveDraft : undefined}
                 canvasSelectablePolicy={canvasSelectablePolicy}
                 selectedCanvasBoxes={selectedCanvasBoxes}
                 onCanvasSelectionChange={handleCanvasSelectionChange}
@@ -714,7 +713,7 @@ export default function RequestLinkTokenPage() {
                   {requestLink.requestTasks.map((task) => {
                     const active = task.id === activeTaskId;
                     const busy = Boolean(taskBusyById[task.id]);
-                    const canEditTask = workspaceMode === 'document' && requestLink.status === 'active';
+                    const canEditTask = requestLinkEditable && requestLink.status === 'active';
 
                     return (
                       <div
@@ -812,7 +811,7 @@ export default function RequestLinkTokenPage() {
                 <Input
                   value={submittedBy}
                   onChange={(event) => setSubmittedBy(event.target.value)}
-                  disabled={workspaceMode !== 'document'}
+                  disabled={!requestLinkEditable}
                 />
               </div>
               {submitResult ? (

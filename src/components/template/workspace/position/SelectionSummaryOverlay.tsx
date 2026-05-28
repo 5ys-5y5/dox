@@ -315,7 +315,7 @@ export const SelectionSummaryOverlay = ({
             [
               renderPositionSummaryCountRow('position-summary-edge-token-count', '선택 엣지 토큰', edgeSelectionTokensLength),
               renderPositionSummaryCountRow('position-summary-edge-member-count', '선택 엣지', selectedEdgeMemberCount),
-              renderPositionSummaryTextRow('position-summary-edge-mode', '선택 엣지 모드', selectedEdgeMode || ''),
+              renderPositionSummaryTextRow('position-summary-edge-state', '선택 엣지 상태', selectedEdgeMode || ''),
               renderPositionSummaryListRow('position-summary-edge-anchors', '선택 엣지 앵커', selectedEdgeAnchorIds),
             ]
           )}
@@ -354,7 +354,7 @@ export const SelectionSummaryOverlay = ({
                 frameMetadataDraft.role ? FRAME_ROLE_LABELS[frameMetadataDraft.role] : ''
               ),
               renderPositionSummaryTextRow(
-                'position-summary-runtime-mode',
+                'position-summary-runtime-kind',
                 '상세 기능',
                 frameMetadataDraft.runtimeMode ? FRAME_RUNTIME_MODE_LABELS[frameMetadataDraft.runtimeMode] : ''
               ),

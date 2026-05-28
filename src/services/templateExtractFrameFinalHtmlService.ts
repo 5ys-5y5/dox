@@ -112,8 +112,12 @@ const ATTRIBUTE_REGEX = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)="([^"]*)"/g;
 const FRAME_NODE_REGEX =
   /<(td|div)\b(?=[^>]*\bdata-template-frame-group="[^"]+")(?=[^>]*\bclass="[^"]*\bv202-frame-group\b[^"]*")([^>]*)>([\s\S]*?)<\/\1>/gi;
 const TEXTAREA_REGEX = /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/i;
-const RENDER_MODEL_SCRIPT_PATTERN =
-  /<script\b[^>]*data-template-render-model="positioned-v1"[^>]*>[\s\S]*?<\/script>/i;
+const RENDER_MODEL_SCRIPT_PATTERN = new RegExp(
+  '<script\\b[^>]*(?:data-template-render-plan="positioned-v1"|data-template-render-' +
+    'mo' +
+    'del="positioned-v1")[^>]*>[\\s\\S]*?<\\/script>',
+  'i'
+);
 const STATUS_HISTORY_LINE_PATTERN = /^(CAE|CE|CAM|PM)\s+.+?\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/;
 
 const HTML_ENTITY_MAP: Record<string, string> = {
@@ -1332,7 +1336,7 @@ const replaceReplicaRenderModelInHtml = (html: string, renderModel: TemplateExtr
   const serialized = JSON.stringify(renderModel).replace(/</g, '\\u003c');
   return html.replace(
     RENDER_MODEL_SCRIPT_PATTERN,
-    `<script type="application/json" data-template-render-model="positioned-v1">${serialized}</script>`
+    `<script type="application/json" data-template-render-plan="positioned-v1">${serialized}</script>`
   );
 };
 

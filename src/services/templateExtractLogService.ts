@@ -82,7 +82,7 @@ const buildMeasurementNote = (
     return '시각 유사도는 아직 측정되지 않았습니다. 현재 값은 구조 진단값이며, PDF와 HTML을 같은 렌더 조건으로 비교한 1px 이내 픽셀 중첩률이 아닙니다.';
   }
 
-  return `측정 모드: ${qualityReport.mode}`;
+  return `측정 방식: ${qualityReport.mode}`;
 };
 
 const buildMeasurementStatus = (
