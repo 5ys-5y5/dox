@@ -27,8 +27,6 @@ import {
   canvasWorkspaceModes,
   defaultCanvasOwnerSettings,
   createEmptyCanvasOwnerSettingsStore,
-  normalizeCanvasOwnerSettingsOverrides,
-  normalizeCanvasOwnerSettingsStore,
   normalizeCanvasWorkspaceMode,
   readCanvasOwnerSettingsFromStorage,
   resolveCanvasOwnerPagePolicy,
@@ -52,6 +50,7 @@ import {
   OwnerSettingsActionBar,
   OwnerSettingsManagedTargetControls,
   OwnerSettingsSectionHeader,
+  OwnerSettingsTabList,
 } from '../../components/ui/OwnerSettingsLayout';
 import { OwnerSharedUiPreview } from '../../components/ui/OwnerSharedUiPreview';
 import { SettingToggleRow } from '../../components/ui/SettingToggleRow';
@@ -70,6 +69,7 @@ import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKe
 import type { TemplateRecordDto } from '../../lib/templateDtos';
 
 type CanvasWorkspaceMode = 'template' | 'document' | 'read';
+type CanvasOwnerControlTab = 'page' | 'mode';
 type ManagedCanvasPageId =
   | 'canvas'
   | 'templates'
@@ -190,15 +190,15 @@ const buildCanvasMemberLabelById = (
 };
 
 const modeDescriptions: Record<CanvasWorkspaceMode, string> = {
-  template: '템플릿 구조 자체를 편집합니다. 상자 추가, 이동, 속성 조정 등 모든 기능을 사용합니다.',
-  document: '문서를 기록합니다. 값 입력, 첨부파일, 서명 등 실제 문서 기록만 허용합니다.',
-  read: '열람 전용입니다. 상단 기능과 본문 편집이 모두 비활성화됩니다.',
+  template: '템플릿 구조 자체를 편집하는 원본 모드입니다. 상자 추가, 이동, 속성 조정 등 모든 기능을 사용합니다.',
+  document: '문서를 기록하는 문서 모드입니다. 값 입력, 첨부파일, 서명 등 실제 문서 기록만 허용합니다.',
+  read: '열람 전용 읽기 모드입니다. 상단 기능과 본문 편집이 모두 비활성화됩니다.',
 };
 
 const modeLabels: Record<CanvasWorkspaceMode, string> = {
-  template: '템플릿 편집',
-  document: '문서 작성',
-  read: '읽기 전용',
+  template: '템플릿 모드',
+  document: '문서 모드',
+  read: '읽기 모드',
 };
 
 const canvasViewModeLabels: Record<CanvasOwnerSettings['canvasViewMode'], string> = {
@@ -235,7 +235,7 @@ const defaultManagedCanvasPages: ManagedCanvasPage[] = [
     label: '공용 캔버스 관리자',
     path: '/canvas',
     surface: 'canvas',
-    description: '공용 캔버스 owner 설정과 페이지별 동작을 검증하는 기준 페이지입니다.',
+    description: '공용 캔버스 owner 설정과 모드별 동작을 검증하는 기준 페이지입니다.',
     allowedModes: ['template', 'document', 'read'],
     defaultMode: 'template',
   },
@@ -374,7 +374,7 @@ export default function CanvasOwnerPage() {
     createEmptyCanvasOwnerSettingsStore()
   );
   const [canvasSettingsLoaded, setCanvasSettingsLoaded] = React.useState(false);
-  const [settingsImportSourcePageId, setSettingsImportSourcePageId] = React.useState('');
+  const [activeControlTab, setActiveControlTab] = React.useState<CanvasOwnerControlTab>('page');
   const managedCanvasPages = React.useMemo<ManagedCanvasPage[]>(
     () =>
       defaultManagedCanvasPages.map((page) => {
@@ -394,33 +394,22 @@ export default function CanvasOwnerPage() {
   );
   const selectedManagedPage = getManagedCanvasPageFromList(managedCanvasPages, selectedManagedPageId);
   const workspaceMode = resolveManagedCanvasWorkspaceMode(selectedManagedPage, searchParams.get('mode'));
-  const settingsImportOptions = React.useMemo<EntityPickerOption[]>(
-    () =>
-      managedCanvasPages
-        .filter((page) => page.id !== selectedManagedPage.id)
-        .map((page) => ({
-          id: page.id,
-          label: page.label,
-          meta: page.path,
-          keywords: [page.id, page.surface, page.path],
-        })),
-    [managedCanvasPages, selectedManagedPage.id]
-  );
 
   const selectedTemplateId = templateIdFromQuery || templates[0]?.id || '';
   const selectedDocumentId = documentIdFromQuery || documents[0]?.document.id || '';
   const settingsSignature = React.useMemo(() => JSON.stringify(settingsStore), [settingsStore]);
   const savedSettingsSignature = React.useMemo(() => JSON.stringify(savedSettingsStore), [savedSettingsStore]);
   const hasUnsavedCanvasSettings = settingsSignature !== savedSettingsSignature;
+  const activeSettingsScope = activeControlTab === 'mode' ? 'mode' : 'page';
   const effectiveWorkspaceMode = workspaceMode;
   const canEditCurrentWorkspace = effectiveWorkspaceMode !== 'read';
   const resolvedSettings = React.useMemo(
     () =>
       resolveCanvasOwnerSettings(settingsStore, {
-        pageId: selectedManagedPage.id,
+        pageId: activeSettingsScope === 'page' ? selectedManagedPage.id : undefined,
         workspaceMode: effectiveWorkspaceMode,
       }),
-    [effectiveWorkspaceMode, selectedManagedPage.id, settingsStore]
+    [activeSettingsScope, effectiveWorkspaceMode, selectedManagedPage.id, settingsStore]
   );
   const settings = resolvedSettings.settings;
   const settingSources = resolvedSettings.sources;
@@ -471,9 +460,11 @@ export default function CanvasOwnerPage() {
     setSavedSettingsStore(nextSettingsStore);
     setSettingsStore(nextSettingsStore);
     setOwnerEventMessage(
-      `${selectedManagedPage.label} 상자 편집 캔버스 환경설정을 저장했습니다.`
+      activeSettingsScope === 'page'
+        ? `${selectedManagedPage.label} · ${modeLabels[effectiveWorkspaceMode]} 설정을 저장했습니다.`
+        : `${modeLabels[effectiveWorkspaceMode]} 설정을 저장했습니다.`
     );
-  }, [selectedManagedPage.label, settingsStore]);
+  }, [activeSettingsScope, effectiveWorkspaceMode, selectedManagedPage.label, settingsStore]);
 
   const resetCanvasOwnerSettings = React.useCallback(() => {
     setSettingsStore(savedSettingsStore);
@@ -484,13 +475,15 @@ export default function CanvasOwnerPage() {
     <K extends keyof CanvasOwnerSettings>(key: K, value: CanvasOwnerSettings[K]) => {
       setSettingsStore((previous) =>
         updateCanvasOwnerSettingsStoreOverride(previous, {
+          scope: activeSettingsScope,
           pageId: selectedManagedPage.id,
+          workspaceMode: effectiveWorkspaceMode,
           key,
           value,
         })
       );
     },
-    [selectedManagedPage.id]
+    [activeSettingsScope, effectiveWorkspaceMode, selectedManagedPage.id]
   );
 
   const updateQuery = React.useCallback(
@@ -580,60 +573,6 @@ export default function CanvasOwnerPage() {
     [selectedManagedPage.allowedModes, selectedManagedPage.id]
   );
 
-  const importCanvasSettingsFromPage = React.useCallback(
-    (sourcePageId: ManagedCanvasPageId) => {
-      if (sourcePageId === selectedManagedPage.id) {
-        return;
-      }
-
-      const sourcePage = getManagedCanvasPageFromList(managedCanvasPages, sourcePageId);
-
-      setSettingsStore((previous) => {
-        const normalizedStore = normalizeCanvasOwnerSettingsStore(previous);
-        const sourceResolvedSettings = resolveCanvasOwnerSettings(normalizedStore, {
-          pageId: sourcePage.id,
-          workspaceMode: effectiveWorkspaceMode,
-        });
-        const sourcePolicy = resolveCanvasOwnerPagePolicy(normalizedStore, {
-          pageId: sourcePage.id,
-          defaultAllowedModes: sourcePage.allowedModes,
-          defaultMode: sourcePage.defaultMode,
-        });
-
-        return {
-          ...normalizedStore,
-          pageSettings: {
-            ...normalizedStore.pageSettings,
-            [selectedManagedPage.id]: normalizeCanvasOwnerSettingsOverrides(sourceResolvedSettings.settings),
-          },
-          pagePolicies: {
-            ...normalizedStore.pagePolicies,
-            [selectedManagedPage.id]: {
-              allowedModes: [...sourcePolicy.allowedModes],
-              defaultMode: sourcePolicy.defaultMode,
-            },
-          },
-        };
-      });
-      setOwnerEventMessage(`${sourcePage.label} 설정을 ${selectedManagedPage.label}에 불러왔습니다.`);
-    },
-    [effectiveWorkspaceMode, managedCanvasPages, selectedManagedPage.id, selectedManagedPage.label]
-  );
-
-  const handleSelectSettingsImportSource = React.useCallback(
-    (sourcePageId: string) => {
-      const normalizedSourcePageId = normalizeManagedCanvasPageId(sourcePageId);
-
-      if (normalizedSourcePageId === selectedManagedPage.id) {
-        return;
-      }
-
-      setSettingsImportSourcePageId(normalizedSourcePageId);
-      importCanvasSettingsFromPage(normalizedSourcePageId);
-    },
-    [importCanvasSettingsFromPage, selectedManagedPage.id]
-  );
-
   const handlePreviewCanvasSelectionChange = React.useCallback(
     (boxes: TemplateCanvasSelectedBox[], options?: TemplateCanvasSelectionChangeOptions) => {
       setPreviewSelectedCanvasBoxes((current) => {
@@ -678,10 +617,6 @@ export default function CanvasOwnerPage() {
     setPreviewSelectedCanvasBoxes([]);
   }, [effectiveWorkspaceMode, selectedDocumentId, selectedManagedPage.id, selectedTemplateId]);
 
-  React.useEffect(() => {
-    setSettingsImportSourcePageId('');
-  }, [selectedManagedPage.id]);
-
   const handleSelectManagedPage = React.useCallback(
     (pageId: ManagedCanvasPageId) => {
       const nextPage = getManagedCanvasPageFromList(managedCanvasPages, pageId);
@@ -718,7 +653,9 @@ export default function CanvasOwnerPage() {
 
       setSettingsStore((previous) => {
         const nextStore = updateCanvasOwnerSettingsStoreOverride(previous, {
+          scope: activeSettingsScope,
           pageId: selectedManagedPage.id,
+          workspaceMode: nextWorkspaceMode,
           key: 'canvasViewMode',
           value: viewMode,
         });
@@ -728,7 +665,9 @@ export default function CanvasOwnerPage() {
         }
 
         return updateCanvasOwnerSettingsStoreOverride(nextStore, {
+          scope: activeSettingsScope,
           pageId: selectedManagedPage.id,
+          workspaceMode: nextWorkspaceMode,
           key: 'readModeInteractionMode',
           value: viewMode === 'preview' ? 'view-only' : 'box-selection',
         });
@@ -739,6 +678,7 @@ export default function CanvasOwnerPage() {
       }
     },
     [
+      activeSettingsScope,
       selectedManagedPage.allowedModes,
       selectedManagedPage.id,
       updateQuery,
@@ -1364,9 +1304,15 @@ export default function CanvasOwnerPage() {
   const getSettingSourceLabel = (source: CanvasOwnerSettingSource) =>
     source === 'page'
       ? '페이지'
-      : '기본';
+      : source === 'mode'
+        ? '모드'
+        : '기본';
   const getModeManagedClassName = (settingKey: CanvasOwnerSettingKey | null) =>
-    'bg-white';
+    activeControlTab === 'page' &&
+    settingKey &&
+    settingSources[settingKey] === 'mode'
+      ? 'border-slate-300 bg-slate-100'
+      : 'bg-white';
   const getTextSettingClassName = (settingKey: CanvasOwnerSettingKey) =>
     `space-y-1 rounded border px-2 py-1 ${getModeManagedClassName(settingKey)}`;
   const renderSettingSourceBadge = (settingKey: CanvasOwnerSettingKey) => (
@@ -2276,9 +2222,9 @@ export default function CanvasOwnerPage() {
         ),
         detailRows: [
           { label: 'route', value: page.path },
-          { label: '기본 동작', value: modeLabels[page.defaultMode] },
+          { label: '기본 모드', value: modeLabels[page.defaultMode] },
           {
-            label: '허용 동작',
+            label: '허용 모드',
             value: page.allowedModes.map((mode) => (
               <Badge key={mode} variant={workspaceMode === mode ? 'blue' : 'slate'} className="px-1.5 py-0 text-[9px]">
                 {mode}
@@ -2291,40 +2237,39 @@ export default function CanvasOwnerPage() {
       onChange={(nextValue) => handleSelectManagedPage(nextValue as ManagedCanvasPageId)}
     />
   );
+  const renderModeControls = () => (
+    <div className="space-y-2.5">
+      <div className="rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700">
+        <div className="font-semibold text-slate-900">{selectedManagedPage.label}</div>
+        <div className="mt-0.5 text-[10px] leading-4 text-slate-500">
+          모드는 선택한 페이지의 owner policy 안에서만 변경할 수 있습니다.
+        </div>
+      </div>
+      {renderWorkspaceModeButtons()}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-slate-800">기본 출력 뷰</span>
+          {renderSettingSourceBadge('canvasViewMode')}
+        </div>
+        {renderCanvasViewModeButtons()}
+      </div>
+      <p className="text-xs leading-5 text-slate-500">
+        {modeDescriptions[workspaceMode]} 기본 출력 뷰: {canvasViewModeLabels[settings.canvasViewMode]}
+      </p>
+    </div>
+  );
   const renderPageWorkspaceModeSettings = () => (
     <div className="space-y-3">
       <OwnerSettingsSectionHeader
-        label="이 페이지의 캔버스 환경설정"
-        description="설정은 페이지가 소유합니다. 다른 페이지 설정이 필요하면 불러와 복사합니다."
+        label="이 페이지에서 사용할 모드"
+        description="템플릿, 문서, 읽기 모드는 페이지별 상호작용 프리셋입니다."
       />
-      <div
-        className="space-y-2 rounded-md border border-slate-200 px-3 py-2"
-        {...canvasOwnerItem('canvas-page-settings-import-container', '설정 불러오기 영역')}
-      >
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-slate-800" {...canvasOwnerItem('canvas-page-settings-import-title', '설정 불러오기 제목')}>설정 불러오기</div>
-          <p className="text-[10px] leading-4 text-slate-500" {...canvasOwnerItem('canvas-page-settings-import-description', '설정 불러오기 설명')}>
-            다른 페이지의 현재 설정을 이 페이지로 복사합니다. 불러온 뒤에는 서로 연결되지 않습니다.
-          </p>
-        </div>
-        <EntityPicker
-          value={settingsImportSourcePageId}
-          options={settingsImportOptions}
-          onChange={handleSelectSettingsImportSource}
-          placeholder="불러올 페이지 설정 선택"
-          searchPlaceholder="페이지 이름이나 경로 검색"
-          optionLayout="stacked"
-          ownerItemKey="canvas-page-settings-import-picker"
-          ownerItemName="설정 불러오기 선택기"
-          ownerItemAttributes={canvasOwnerItem}
-        />
-      </div>
       <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold text-slate-800">허용 동작</div>
+            <div className="text-[11px] font-semibold text-slate-800">허용 모드</div>
             <p className="text-[10px] leading-4 text-slate-500">
-              이 페이지에서 선택할 수 있는 캔버스 동작을 정합니다. 최소 1개는 항상 유지됩니다.
+              이 페이지에서 선택할 수 있는 workspaceMode를 정합니다. 최소 1개는 항상 유지됩니다.
             </p>
           </div>
           <Badge variant="slate" className="w-fit px-2 py-0 text-[9px]">
@@ -2345,7 +2290,7 @@ export default function CanvasOwnerPage() {
                 disabled={disabled}
                 aria-pressed={enabled}
                 onClick={() => toggleSelectedPageAllowedMode(mode)}
-                {...canvasOwnerItem(`canvas-page-policy-allowed-mode-${mode}`, `${modeLabels[mode]} 허용 동작`)}
+                {...canvasOwnerItem(`canvas-page-policy-allowed-mode-${mode}`, `${modeLabels[mode]} 허용 모드`)}
               >
                 {modeLabels[mode]}
               </Button>
@@ -2354,7 +2299,7 @@ export default function CanvasOwnerPage() {
         </div>
       </div>
       <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
-        <div className="text-[11px] font-semibold text-slate-800">기본 동작</div>
+        <div className="text-[11px] font-semibold text-slate-800">기본 모드</div>
         <div className="grid gap-1.5 sm:grid-cols-3">
           {canvasWorkspaceModes.map((mode) => {
             const allowed = selectedManagedPage.allowedModes.includes(mode);
@@ -2368,7 +2313,7 @@ export default function CanvasOwnerPage() {
                 className={`h-8 justify-start px-2 text-xs ${allowed ? '' : 'cursor-not-allowed opacity-50'}`}
                 disabled={!allowed}
                 onClick={() => updateSelectedPageDefaultMode(mode)}
-                {...canvasOwnerItem(`canvas-page-policy-default-mode-${mode}`, `${modeLabels[mode]} 기본 동작`)}
+                {...canvasOwnerItem(`canvas-page-policy-default-mode-${mode}`, `${modeLabels[mode]} 기본 모드`)}
               >
                 {modeLabels[mode]}
               </Button>
@@ -2377,7 +2322,7 @@ export default function CanvasOwnerPage() {
         </div>
       </div>
       <div className="space-y-1.5">
-        <div className="text-[11px] font-semibold text-slate-800">현재 미리보기 동작</div>
+        <div className="text-[11px] font-semibold text-slate-800">현재 미리보기 모드</div>
         {renderWorkspaceModeButtons()}
         <p className="text-xs leading-5 text-slate-500">{modeDescriptions[workspaceMode]}</p>
       </div>
@@ -2679,7 +2624,7 @@ export default function CanvasOwnerPage() {
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold text-slate-950">상자 편집 캔버스</h1>
             <p className="max-w-4xl text-sm text-slate-600">
-              모든 문서 출력의 기준이 되는 owner 페이지입니다. 이 화면에서 템플릿 편집, 문서 기록, 읽기 전용 상태를 직접 확인하고 공용 캔버스의 페이지별 동작을 검증할 수 있습니다.
+              모든 문서 출력의 기준이 되는 owner 페이지입니다. 이 화면에서 템플릿 편집, 문서 기록, 읽기 전용 상태를 직접 확인하고 공용 캔버스의 모드별 동작을 검증할 수 있습니다.
             </p>
           </div>
         </header>
@@ -2703,11 +2648,20 @@ export default function CanvasOwnerPage() {
             <CardHeader className="space-y-1 p-4 pb-3" {...canvasOwnerItem('canvas-management-panel-header', '공용 캔버스 관리 패널 머리글')}>
               <CardTitle className="text-sm" {...canvasOwnerItem('canvas-management-panel-title', '공용 캔버스 관리 패널 제목')}>공용 캔버스 관리</CardTitle>
               <CardDescription className="text-xs leading-5" {...canvasOwnerItem('canvas-management-panel-description', '공용 캔버스 관리 패널 설명')}>
-                공용 캔버스를 쓰는 페이지를 선택하고, 페이지별 환경설정을 관리합니다.
+                페이지와 모드를 분리해서 선택합니다. 페이지 탭에서 공용 캔버스를 쓰는 모든 경로를 관리합니다.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 p-4 pt-0" {...canvasOwnerItem('canvas-management-panel-content', '공용 캔버스 관리 패널 내용')}>
-              {renderManagedPageControls()}
+              <OwnerSettingsTabList
+                value={activeControlTab}
+                ariaLabel="공용 캔버스 관리 탭"
+                options={[
+                  { value: 'page', label: '페이지' },
+                  { value: 'mode', label: '모드' },
+                ]}
+                onChange={(value) => setActiveControlTab(value as CanvasOwnerControlTab)}
+              />
+              {activeControlTab === 'page' ? renderManagedPageControls() : renderModeControls()}
             </CardContent>
           </Card>
 
@@ -2780,7 +2734,9 @@ export default function CanvasOwnerPage() {
                   <div className="space-y-1">
 	                    <CardTitle className="text-sm">상자 편집 캔버스 환경설정</CardTitle>
 	                    <CardDescription className="text-xs leading-5">
-	                      {`${selectedManagedPage.label} 페이지 설정을 편집합니다. ${modeLabels[effectiveWorkspaceMode]}은 현재 미리보기 동작일 뿐 저장 단위가 아닙니다.`}
+	                      {activeSettingsScope === 'page'
+	                        ? `${selectedManagedPage.label} · ${modeLabels[effectiveWorkspaceMode]} 설정을 편집합니다. 회색 항목은 모드 설정에서 관리 중이며, 변경하면 페이지 설정이 우선됩니다.`
+	                        : `${modeLabels[effectiveWorkspaceMode]} 설정을 편집합니다. 페이지 설정이 있는 항목은 실제 출력에서 페이지 설정이 우선됩니다.`}
 	                    </CardDescription>
                   </div>
                   <OwnerSettingsActionBar
@@ -2791,7 +2747,7 @@ export default function CanvasOwnerPage() {
                 </div>
 		            </CardHeader>
 		            <CardContent className="space-y-3 p-4 pt-0">
-			              {renderPageWorkspaceModeSettings()}
+			              {activeControlTab === 'page' ? renderPageWorkspaceModeSettings() : null}
 			              {renderCanvasSizeSettings()}
 		              {renderCanvasSelectionOverlaySettings()}
 		              {renderCanvasTextSettings()}

@@ -81,7 +81,8 @@ const resolveCanvasOwnedSurfacePolicy = (
 ): CanvasSurfacePolicy => {
   const policy = CANVAS_SURFACE_POLICIES[surface];
   const resolvedPolicy = resolveCanvasOwnerPagePolicy(settingsStore || {
-    version: 6,
+    version: 5,
+    modeSettings: {},
     pageSettings: {},
     pagePolicies: {},
   }, {

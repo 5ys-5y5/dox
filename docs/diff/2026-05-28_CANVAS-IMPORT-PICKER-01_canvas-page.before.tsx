@@ -374,7 +374,6 @@ export default function CanvasOwnerPage() {
     createEmptyCanvasOwnerSettingsStore()
   );
   const [canvasSettingsLoaded, setCanvasSettingsLoaded] = React.useState(false);
-  const [settingsImportSourcePageId, setSettingsImportSourcePageId] = React.useState('');
   const managedCanvasPages = React.useMemo<ManagedCanvasPage[]>(
     () =>
       defaultManagedCanvasPages.map((page) => {
@@ -394,18 +393,6 @@ export default function CanvasOwnerPage() {
   );
   const selectedManagedPage = getManagedCanvasPageFromList(managedCanvasPages, selectedManagedPageId);
   const workspaceMode = resolveManagedCanvasWorkspaceMode(selectedManagedPage, searchParams.get('mode'));
-  const settingsImportOptions = React.useMemo<EntityPickerOption[]>(
-    () =>
-      managedCanvasPages
-        .filter((page) => page.id !== selectedManagedPage.id)
-        .map((page) => ({
-          id: page.id,
-          label: page.label,
-          meta: page.path,
-          keywords: [page.id, page.surface, page.path],
-        })),
-    [managedCanvasPages, selectedManagedPage.id]
-  );
 
   const selectedTemplateId = templateIdFromQuery || templates[0]?.id || '';
   const selectedDocumentId = documentIdFromQuery || documents[0]?.document.id || '';
@@ -620,20 +607,6 @@ export default function CanvasOwnerPage() {
     [effectiveWorkspaceMode, managedCanvasPages, selectedManagedPage.id, selectedManagedPage.label]
   );
 
-  const handleSelectSettingsImportSource = React.useCallback(
-    (sourcePageId: string) => {
-      const normalizedSourcePageId = normalizeManagedCanvasPageId(sourcePageId);
-
-      if (normalizedSourcePageId === selectedManagedPage.id) {
-        return;
-      }
-
-      setSettingsImportSourcePageId(normalizedSourcePageId);
-      importCanvasSettingsFromPage(normalizedSourcePageId);
-    },
-    [importCanvasSettingsFromPage, selectedManagedPage.id]
-  );
-
   const handlePreviewCanvasSelectionChange = React.useCallback(
     (boxes: TemplateCanvasSelectedBox[], options?: TemplateCanvasSelectionChangeOptions) => {
       setPreviewSelectedCanvasBoxes((current) => {
@@ -677,10 +650,6 @@ export default function CanvasOwnerPage() {
   React.useEffect(() => {
     setPreviewSelectedCanvasBoxes([]);
   }, [effectiveWorkspaceMode, selectedDocumentId, selectedManagedPage.id, selectedTemplateId]);
-
-  React.useEffect(() => {
-    setSettingsImportSourcePageId('');
-  }, [selectedManagedPage.id]);
 
   const handleSelectManagedPage = React.useCallback(
     (pageId: ManagedCanvasPageId) => {
@@ -2297,27 +2266,32 @@ export default function CanvasOwnerPage() {
         label="이 페이지의 캔버스 환경설정"
         description="설정은 페이지가 소유합니다. 다른 페이지 설정이 필요하면 불러와 복사합니다."
       />
-      <div
-        className="space-y-2 rounded-md border border-slate-200 px-3 py-2"
-        {...canvasOwnerItem('canvas-page-settings-import-container', '설정 불러오기 영역')}
-      >
+      <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-slate-800" {...canvasOwnerItem('canvas-page-settings-import-title', '설정 불러오기 제목')}>설정 불러오기</div>
-          <p className="text-[10px] leading-4 text-slate-500" {...canvasOwnerItem('canvas-page-settings-import-description', '설정 불러오기 설명')}>
+          <div className="text-[11px] font-semibold text-slate-800">설정 불러오기</div>
+          <p className="text-[10px] leading-4 text-slate-500">
             다른 페이지의 현재 설정을 이 페이지로 복사합니다. 불러온 뒤에는 서로 연결되지 않습니다.
           </p>
         </div>
-        <EntityPicker
-          value={settingsImportSourcePageId}
-          options={settingsImportOptions}
-          onChange={handleSelectSettingsImportSource}
-          placeholder="불러올 페이지 설정 선택"
-          searchPlaceholder="페이지 이름이나 경로 검색"
-          optionLayout="stacked"
-          ownerItemKey="canvas-page-settings-import-picker"
-          ownerItemName="설정 불러오기 선택기"
-          ownerItemAttributes={canvasOwnerItem}
-        />
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {managedCanvasPages
+            .filter((page) => page.id !== selectedManagedPage.id)
+            .map((page) => (
+              <Button
+                key={page.id}
+                type="button"
+                variant="outline"
+                className="h-auto min-h-8 justify-start px-2 py-1.5 text-left text-xs"
+                onClick={() => importCanvasSettingsFromPage(page.id)}
+                {...canvasOwnerItem(`canvas-page-settings-import-${page.id}`, `${page.label} 설정 불러오기`)}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold">{page.label}</span>
+                  <span className="block truncate text-[10px] font-normal opacity-80">{page.path}</span>
+                </span>
+              </Button>
+            ))}
+        </div>
       </div>
       <div className="space-y-2 rounded-md border border-slate-200 px-3 py-2">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">

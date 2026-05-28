@@ -66,15 +66,16 @@ export type CanvasOwnerSettings = {
 };
 
 export type CanvasOwnerSettingKey = keyof CanvasOwnerSettings;
-export type CanvasOwnerSettingSource = 'default' | 'page';
+export type CanvasOwnerSettingSource = 'default' | 'mode' | 'page';
 export type CanvasOwnerSettingsOverrides = Partial<CanvasOwnerSettings>;
 export type CanvasOwnerPagePolicyOverrides = {
   allowedModes?: CanvasWorkspaceMode[];
   defaultMode?: CanvasWorkspaceMode;
 };
 export type CanvasOwnerSettingsStore = {
-  version: 6;
-  pageSettings: Record<string, CanvasOwnerSettingsOverrides>;
+  version: 5;
+  modeSettings: Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>;
+  pageSettings: Record<string, Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>>>;
   pagePolicies: Record<string, CanvasOwnerPagePolicyOverrides>;
 };
 export type CanvasOwnerSettingsContext = {
@@ -261,7 +262,8 @@ const resolveDefaultCanvasReadModeInteractionMode = (
 };
 
 export const createEmptyCanvasOwnerSettingsStore = (): CanvasOwnerSettingsStore => ({
-  version: 6,
+  version: 5,
+  modeSettings: {},
   pageSettings: {},
   pagePolicies: {},
 });
@@ -340,7 +342,6 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
   const candidate =
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as {
-          // Legacy v5-and-earlier storage used modeSettings. New writes never persist this field.
           modeSettings?: unknown;
           pageSettings?: unknown;
           pagePolicies?: unknown;
@@ -355,10 +356,13 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     }
 
     return {
-      version: 6,
-      pageSettings: {
-        canvas: { ...legacyOverrides },
+      version: 5,
+      modeSettings: {
+        template: { ...legacyOverrides },
+        document: { ...legacyOverrides },
+        read: { ...legacyOverrides },
       },
+      pageSettings: {},
       pagePolicies: {},
     };
   }
@@ -375,40 +379,38 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
     candidate.pagePolicies && typeof candidate.pagePolicies === 'object' && !Array.isArray(candidate.pagePolicies)
       ? (candidate.pagePolicies as Record<string, unknown>)
       : {};
+  const modeSettings: CanvasOwnerSettingsStore['modeSettings'] = {};
   const pageSettings: CanvasOwnerSettingsStore['pageSettings'] = {};
   const pagePolicies: CanvasOwnerSettingsStore['pagePolicies'] = {};
+
+  canvasWorkspaceModes.forEach((mode) => {
+    const overrides = normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate[mode]);
+
+    if (Object.keys(overrides).length > 0) {
+      modeSettings[mode] = overrides;
+    }
+  });
 
   Object.entries(pageSettingsCandidate).forEach(([pageId, rawPageSettings]) => {
     if (!rawPageSettings || typeof rawPageSettings !== 'object' || Array.isArray(rawPageSettings)) {
       return;
     }
 
-    const pageSettingsRecord = rawPageSettings as Record<string, unknown>;
-    const hasLegacyModeSettings = canvasWorkspaceModes.some((mode) => hasOwn(pageSettingsRecord, mode));
-    const normalizedPageSettings = hasLegacyModeSettings
-      ? normalizeCanvasOwnerSettingsOverrides({
-          ...normalizeCanvasOwnerSettingsOverrides(pageSettingsRecord.template),
-          ...normalizeCanvasOwnerSettingsOverrides(pageSettingsRecord.read),
-          ...normalizeCanvasOwnerSettingsOverrides(pageSettingsRecord.document),
-        })
-      : normalizeCanvasOwnerSettingsOverrides(rawPageSettings);
+    const normalizedPageSettings: Partial<Record<CanvasWorkspaceMode, CanvasOwnerSettingsOverrides>> = {};
+    const pageModeSettings = rawPageSettings as Record<string, unknown>;
+
+    canvasWorkspaceModes.forEach((mode) => {
+      const overrides = normalizeCanvasOwnerSettingsOverrides(pageModeSettings[mode]);
+
+      if (Object.keys(overrides).length > 0) {
+        normalizedPageSettings[mode] = overrides;
+      }
+    });
 
     if (Object.keys(normalizedPageSettings).length > 0) {
       pageSettings[pageId] = normalizedPageSettings;
     }
   });
-
-  if (Object.keys(pageSettings).length === 0) {
-    const legacyModeSettings = normalizeCanvasOwnerSettingsOverrides({
-      ...normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate.template),
-      ...normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate.read),
-      ...normalizeCanvasOwnerSettingsOverrides(modeSettingsCandidate.document),
-    });
-
-    if (Object.keys(legacyModeSettings).length > 0) {
-      pageSettings.canvas = legacyModeSettings;
-    }
-  }
 
   Object.entries(pagePoliciesCandidate).forEach(([pageId, rawPagePolicy]) => {
     const normalizedPageId = String(pageId || '').trim();
@@ -425,7 +427,8 @@ export const normalizeCanvasOwnerSettingsStore = (value: unknown): CanvasOwnerSe
   });
 
   return {
-    version: 6,
+    version: 5,
+    modeSettings,
     pageSettings,
     pagePolicies,
   };
@@ -437,7 +440,8 @@ export const resolveCanvasOwnerSettings = (
 ) => {
   const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
   const workspaceMode = normalizeCanvasWorkspaceMode(context.workspaceMode);
-  const pageOverrides = context.pageId ? normalizedStore.pageSettings[context.pageId] || {} : {};
+  const modeOverrides = normalizedStore.modeSettings[workspaceMode] || {};
+  const pageOverrides = context.pageId ? normalizedStore.pageSettings[context.pageId]?.[workspaceMode] || {} : {};
   const contextDefaults = normalizeCanvasOwnerSettings({
     ...defaultCanvasOwnerSettings,
     readModeInteractionMode: resolveDefaultCanvasReadModeInteractionMode({
@@ -451,6 +455,7 @@ export const resolveCanvasOwnerSettings = (
   });
   const settings = normalizeCanvasOwnerSettings({
     ...contextDefaults,
+    ...modeOverrides,
     ...pageOverrides,
   });
   const sources = canvasOwnerSettingKeys.reduce(
@@ -461,6 +466,9 @@ export const resolveCanvasOwnerSettings = (
     {} as Record<CanvasOwnerSettingKey, CanvasOwnerSettingSource>
   );
 
+  Object.keys(modeOverrides).forEach((key) => {
+    sources[key as CanvasOwnerSettingKey] = 'mode';
+  });
   Object.keys(pageOverrides).forEach((key) => {
     sources[key as CanvasOwnerSettingKey] = 'page';
   });
@@ -468,6 +476,7 @@ export const resolveCanvasOwnerSettings = (
   return {
     settings,
     sources,
+    modeOverrides,
     pageOverrides,
     workspaceMode,
   };
@@ -553,16 +562,35 @@ export const updateCanvasOwnerPagePolicyOverride = <K extends keyof CanvasOwnerP
 export const updateCanvasOwnerSettingsStoreOverride = <K extends CanvasOwnerSettingKey>(
   store: CanvasOwnerSettingsStore,
   {
+    scope,
     pageId,
+    workspaceMode,
     key,
     value,
   }: {
-    pageId: string;
+    scope: 'mode' | 'page';
+    pageId?: string;
+    workspaceMode: CanvasWorkspaceMode;
     key: K;
     value: CanvasOwnerSettings[K];
   }
 ): CanvasOwnerSettingsStore => {
   const normalizedStore = normalizeCanvasOwnerSettingsStore(store);
+  const normalizedMode = normalizeCanvasWorkspaceMode(workspaceMode);
+
+  if (scope === 'mode') {
+    return {
+      ...normalizedStore,
+      modeSettings: {
+        ...normalizedStore.modeSettings,
+        [normalizedMode]: {
+          ...(normalizedStore.modeSettings[normalizedMode] || {}),
+          [key]: value,
+        },
+      },
+    };
+  }
+
   const normalizedPageId = String(pageId || '').trim();
 
   if (!normalizedPageId) {
@@ -575,7 +603,10 @@ export const updateCanvasOwnerSettingsStoreOverride = <K extends CanvasOwnerSett
       ...normalizedStore.pageSettings,
       [normalizedPageId]: {
         ...(normalizedStore.pageSettings[normalizedPageId] || {}),
-        [key]: value,
+        [normalizedMode]: {
+          ...(normalizedStore.pageSettings[normalizedPageId]?.[normalizedMode] || {}),
+          [key]: value,
+        },
       },
     },
   };
@@ -632,10 +663,13 @@ export const saveCanvasOwnerSettingsStoreToStorage = (settingsStore: CanvasOwner
 export const saveCanvasOwnerSettingsToStorage = (settings: CanvasOwnerSettings) => {
   const overrides = normalizeCanvasOwnerSettingsOverrides(settings);
   const nextSettingsStore: CanvasOwnerSettingsStore = {
-    version: 6,
-    pageSettings: {
-      canvas: { ...overrides },
+    version: 5,
+    modeSettings: {
+      template: { ...overrides },
+      document: { ...overrides },
+      read: { ...overrides },
     },
+    pageSettings: {},
     pagePolicies: {},
   };
 
