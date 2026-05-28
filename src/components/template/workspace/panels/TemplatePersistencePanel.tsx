@@ -26,6 +26,7 @@ type TemplatePersistencePanelProps = {
   layoutResizeMode: string;
   saving: boolean;
   loading: boolean;
+  saveDisabled?: boolean;
   renderedPreviewHtml: string;
   templateUsagePreviewMode: boolean;
   visibility?: TemplateEditWorkspacePersistenceVisibility;
@@ -51,6 +52,7 @@ export const TemplatePersistencePanel = ({
   layoutResizeMode,
   saving,
   loading,
+  saveDisabled = false,
   renderedPreviewHtml,
   templateUsagePreviewMode,
   visibility,
@@ -179,7 +181,7 @@ export const TemplatePersistencePanel = ({
           {...canvasOwnerEnv('persistenceVisibility.showSaveButton')}
           className="h-11 min-h-11 w-full"
           onClick={onSave}
-          disabled={saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode}
+          disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || templateUsagePreviewMode}
         >
           {saving ? '저장 중...' : templateDetailTemplateId ? '현재 템플릿 저장' : '초안 저장'}
         </Button>

@@ -29,7 +29,6 @@ export type CanvasOwnerSettings = {
   pageContainerHeight: string;
   autoCanvasHeight: boolean;
   autoCanvasWidth: boolean;
-  useSpecifiedCanvasHeight: boolean;
   specifiedCanvasHeight: string;
   specifiedCanvasWidth: string;
   showCanvasEditSettingsToggle: boolean;
@@ -92,7 +91,6 @@ export const defaultCanvasOwnerSettings: CanvasOwnerSettings = {
   pageContainerHeight: '',
   autoCanvasHeight: true,
   autoCanvasWidth: true,
-  useSpecifiedCanvasHeight: false,
   specifiedCanvasHeight: '70vh',
   specifiedCanvasWidth: '100%',
   showCanvasEditSettingsToggle: true,
@@ -157,9 +155,10 @@ export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSetting
     canvasViewMode?: unknown;
     showCanvasInteractionModeControls?: boolean;
     showPersistenceLayoutResizeModeField?: boolean;
+    useSpecifiedCanvasHeight?: unknown;
   };
-  const legacyUseSpecifiedCanvasHeight = hasOwn(candidate, 'useSpecifiedCanvasHeight')
-    ? candidate.useSpecifiedCanvasHeight === true
+  const legacyUseSpecifiedCanvasHeight = hasOwn(legacyCandidate, 'useSpecifiedCanvasHeight')
+    ? legacyCandidate.useSpecifiedCanvasHeight === true
     : false;
   const legacyPageContainerWidth = normalizeCanvasCssSizeSetting(candidate.pageContainerWidth);
   const resolvedAutoCanvasHeight =
@@ -174,7 +173,6 @@ export const normalizeCanvasOwnerSettings = (value: unknown): CanvasOwnerSetting
     ...candidate,
     autoCanvasHeight: resolvedAutoCanvasHeight,
     autoCanvasWidth: resolvedAutoCanvasWidth,
-    useSpecifiedCanvasHeight: !resolvedAutoCanvasHeight,
     pageContainerWidth: normalizeCanvasCssSizeSetting(
       candidate.pageContainerWidth,
       defaultCanvasOwnerSettings.pageContainerWidth
@@ -242,7 +240,7 @@ export const normalizeCanvasOwnerSettingsOverrides = (value: unknown): CanvasOwn
   });
 
   if (hasOwn(candidate, 'useSpecifiedCanvasHeight') && !hasOwn(candidate, 'autoCanvasHeight')) {
-    normalizedOverrides.autoCanvasHeight = !normalizedSettings.useSpecifiedCanvasHeight;
+    normalizedOverrides.autoCanvasHeight = normalizedSettings.autoCanvasHeight;
   }
 
   if (hasOwn(candidate, 'pageContainerWidth') && !hasOwn(candidate, 'autoCanvasWidth')) {
@@ -615,18 +613,31 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
   if (shouldApplySetting('blockPeerClusterWidthTargets')) {
     templateUsagePreviewLayoutDebugOptions.measurePeerClusterWidthTargets = !settings.blockPeerClusterWidthTargets;
   }
-  const canvasBoxSelectionProps: Partial<TemplateEditWorkspaceProps> = settings.allowCanvasBoxSelection
-    ? {
-        canvasTextInteractionMode: 'selection-only',
-        canvasSelectionMode: 'box',
-      }
-    : {};
-
   return {
     ...baseProps,
     hideHeader: shouldApplySetting('hideHeader') ? settings.hideHeader : baseProps.hideHeader,
     hidePersistencePanel: shouldApplySetting('hidePersistencePanel') ? settings.hidePersistencePanel : baseProps.hidePersistencePanel,
     templateListDisplay: shouldApplySetting('templateListDisplay') ? settings.templateListDisplay : baseProps.templateListDisplay,
+    topNotice: shouldApplySetting('showTopNotice')
+      ? settings.showTopNotice
+        ? baseProps.topNotice
+        : null
+      : baseProps.topNotice,
+    additionalControlPanels: shouldApplySetting('showAdditionalControlPanels')
+      ? settings.showAdditionalControlPanels
+        ? baseProps.additionalControlPanels
+        : null
+      : baseProps.additionalControlPanels,
+    editableValueKeys: shouldApplySetting('limitEditableValueKeys')
+      ? settings.limitEditableValueKeys
+        ? baseProps.editableValueKeys
+        : null
+      : baseProps.editableValueKeys,
+    onTemplateSaved: shouldApplySetting('enableOnTemplateSaved')
+      ? settings.enableOnTemplateSaved
+        ? baseProps.onTemplateSaved
+        : undefined
+      : baseProps.onTemplateSaved,
     showWorkspaceMessages: shouldApplySetting('showWorkspaceMessages') ? settings.showWorkspaceMessages : baseProps.showWorkspaceMessages,
     suppressInitialDraftLoadedMessage: shouldApplySetting('suppressInitialDraftLoadedMessage')
       ? settings.suppressInitialDraftLoadedMessage
@@ -649,12 +660,10 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     canvasPageContainerHeight: shouldApplySetting('pageContainerHeight')
       ? pageContainerHeight
       : baseProps.canvasPageContainerHeight,
-    canvasSpecifiedHeightEnabled: shouldApplySetting('useSpecifiedCanvasHeight')
-      || shouldApplySetting('autoCanvasHeight')
+    canvasSpecifiedHeightEnabled: shouldApplySetting('autoCanvasHeight')
       ? !settings.autoCanvasHeight
       : baseProps.canvasSpecifiedHeightEnabled,
     canvasSpecifiedHeight:
-      shouldApplySetting('useSpecifiedCanvasHeight') ||
       shouldApplySetting('autoCanvasHeight') ||
       shouldApplySetting('specifiedCanvasHeight')
         ? specifiedCanvasHeight
@@ -677,6 +686,15 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     selectionInactiveOverlayOpacity: shouldApplySetting('selectionInactiveOverlayOpacity')
       ? settings.selectionInactiveOverlayOpacity
       : baseProps.selectionInactiveOverlayOpacity,
-    ...canvasBoxSelectionProps,
+    canvasTextInteractionMode: shouldApplySetting('allowCanvasBoxSelection')
+      ? settings.allowCanvasBoxSelection
+        ? 'selection-only'
+        : 'default'
+      : baseProps.canvasTextInteractionMode,
+    canvasSelectionMode: shouldApplySetting('allowCanvasBoxSelection')
+      ? settings.allowCanvasBoxSelection
+        ? 'box'
+        : 'none'
+      : baseProps.canvasSelectionMode,
   };
 };

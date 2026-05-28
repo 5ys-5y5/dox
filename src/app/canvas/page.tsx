@@ -1115,8 +1115,7 @@ export default function CanvasOwnerPage() {
   const previewUsesRouteProps = routeEquivalentPreviewEnabled
     ? 'route-defaults + canvas-owner-settings'
     : 'canvas-owner-settings';
-  const previewAdditionalControlPanelsEnabled =
-    selectedManagedPage.id === 'templates' || (!routeEquivalentPreviewEnabled && Boolean(templateExtractPanel || previewSettings.showAdditionalControlPanels));
+  const previewAdditionalControlPanelsEnabled = Boolean(previewAdditionalControlPanels);
   const previewTopNoticeEnabled = Boolean(previewTopNotice);
   const previewTodoPanelEnabled = documentSaveEnabled && Boolean(selectedDocumentInitialDraft);
   const previewTodoCount = previewTodoPanelEnabled ? documentRequestTasks.length : 0;
@@ -1140,7 +1139,6 @@ export default function CanvasOwnerPage() {
     pageContainerHeight: 'pageContainerHeight',
     autoCanvasHeight: 'autoCanvasHeight',
     autoCanvasWidth: 'autoCanvasWidth',
-    useSpecifiedCanvasHeight: 'useSpecifiedCanvasHeight',
     specifiedCanvasHeight: 'specifiedCanvasHeight',
     specifiedCanvasWidth: 'specifiedCanvasWidth',
     'canvasToolbarVisibility.showEditSettingsToggle': 'showCanvasEditSettingsToggle',
@@ -2071,6 +2069,32 @@ export default function CanvasOwnerPage() {
           )}
         </div>
       </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className={getTextSettingClassName('pageContainerWidth')} {...canvasOwnerEnv('pageContainerWidth')}>
+          <label className="flex items-center justify-between gap-2 text-[11px] font-medium text-slate-700">
+            <span>페이지 컨테이너 폭</span>
+            {renderSettingBadges('pageContainerWidth')}
+          </label>
+          <Input
+            className={compactInputClassName}
+            placeholder="예: 100%, 1280px, min(100%, 1800px)"
+            value={settings.pageContainerWidth}
+            onChange={(event) => updateSetting('pageContainerWidth', event.target.value)}
+          />
+        </div>
+        <div className={getTextSettingClassName('pageContainerHeight')} {...canvasOwnerEnv('pageContainerHeight')}>
+          <label className="flex items-center justify-between gap-2 text-[11px] font-medium text-slate-700">
+            <span>페이지 컨테이너 높이</span>
+            {renderSettingBadges('pageContainerHeight')}
+          </label>
+          <Input
+            className={compactInputClassName}
+            placeholder="비워두면 기본 높이 정책 사용"
+            value={settings.pageContainerHeight}
+            onChange={(event) => updateSetting('pageContainerHeight', event.target.value)}
+          />
+        </div>
+      </div>
     </div>
   );
   const renderCanvasSelectionOverlaySettings = () => {
@@ -2125,6 +2149,31 @@ export default function CanvasOwnerPage() {
               onChange={(event) => updateOverlayOpacity(event.target.value)}
               className={compactInputClassName}
             />
+          </div>
+        </div>
+        <div
+          className={`space-y-2 rounded border px-2 py-1.5 ${getSettingPanelClassName('allowCanvasBoxSelection')}`}
+          {...canvasOwnerEnv('allowCanvasBoxSelection')}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-800">
+                <span>읽기 출력 상자 선택 허용</span>
+                {renderSettingBadges('allowCanvasBoxSelection')}
+              </div>
+              <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
+                ON이면 텍스트 상호작용 대신 상자 선택 정책을 사용하고, OFF이면 보기 전용 기본 정책을 사용합니다.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant={settings.allowCanvasBoxSelection ? 'default' : 'outline'}
+              className="h-7 shrink-0 px-2 text-[11px]"
+              onClick={() => updateSetting('allowCanvasBoxSelection', !settings.allowCanvasBoxSelection)}
+            >
+              {settings.allowCanvasBoxSelection ? 'ON' : 'OFF'}
+            </Button>
           </div>
         </div>
       </div>

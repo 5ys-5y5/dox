@@ -36910,6 +36910,7 @@ export default function TemplateEditWorkspace({
             layoutResizeMode={layoutResizeMode}
             saving={saving}
             loading={loading}
+            saveDisabled={saveDisabled}
             renderedPreviewHtml={renderedPreviewHtml}
             templateUsagePreviewMode={templateUsagePreviewMode}
             visibility={persistenceVisibility}
