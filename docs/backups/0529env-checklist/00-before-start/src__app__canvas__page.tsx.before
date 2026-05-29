@@ -30,14 +30,14 @@ import {
   normalizeCanvasOwnerSettingsStore,
   readCanvasOwnerSettingsFromStorage,
   resolveCanvasOwnerSettings,
-  resolveCanvasOwnerUiFeatureDiagnostics,
+  resolveCanvasOwnerUiFeatureStates,
   saveCanvasOwnerSettingsStoreToStorage,
   updateCanvasOwnerSettingsStoreOverride,
   type CanvasOwnerSettings,
   type CanvasOwnerSettingKey,
   type CanvasOwnerSettingSource,
   type CanvasOwnerSettingsStore,
-  type CanvasOwnerUiFeatureDiagnostic,
+  type CanvasOwnerUiFeatureState,
 } from './ownerSettings';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -1105,7 +1105,7 @@ export default function CanvasOwnerPage() {
     todoButtonLabel: '할 일',
     todoCount: previewTodoCount,
   };
-  const previewUiFeatureDiagnostics = resolveCanvasOwnerUiFeatureDiagnostics({
+  const previewUiFeatureStates = resolveCanvasOwnerUiFeatureStates({
     settings: previewSettings,
     baseProps: previewBaseWorkspaceProps,
   });
@@ -1150,8 +1150,8 @@ export default function CanvasOwnerPage() {
     : 'canvas-owner-settings';
   const previewAdditionalControlPanelsEnabled = Boolean(previewAdditionalControlPanels);
   const previewTopNoticeEnabled = Boolean(previewTopNotice);
-  const previewUiFeatureDiagnosticByDefinitionName = new Map(
-    previewUiFeatureDiagnostics.map((featureDiagnostic) => [featureDiagnostic.definitionName, featureDiagnostic])
+  const previewUiFeatureStateByDefinitionName = new Map(
+    previewUiFeatureStates.map((featureState) => [featureState.definitionName, featureState])
   );
   const settingKeyByDefinitionName: Record<string, CanvasOwnerSettingKey> = {
     hideHeader: 'hideHeader',
@@ -1219,86 +1219,58 @@ export default function CanvasOwnerPage() {
   const renderSettingBadges = (settingKey: CanvasOwnerSettingKey) => (
     <span className="inline-flex shrink-0 flex-wrap items-center justify-end gap-1">{renderSettingSourceBadge(settingKey)}</span>
   );
-  const getUiFeatureDiagnosticForDefinitionName = (definitionName: string) =>
-    previewUiFeatureDiagnosticByDefinitionName.get(definitionName) || null;
-  const getUiFeaturePanelClassName = (featureDiagnostic: CanvasOwnerUiFeatureDiagnostic | null) => {
-    if (!featureDiagnostic) {
+  const getUiFeatureStateForDefinitionName = (definitionName: string) =>
+    previewUiFeatureStateByDefinitionName.get(definitionName) || null;
+  const getUiFeaturePanelClassName = (featureState: CanvasOwnerUiFeatureState | null) => {
+    if (!featureState) {
       return '';
     }
 
-    if (featureDiagnostic.modeDiagnosticLevel === 'warning') {
+    if (!featureState.supported) {
       return 'bg-amber-50';
     }
 
-    if (featureDiagnostic.actionAvailability === 'missing-runtime-condition') {
+    if (featureState.configuredVisible !== featureState.effectiveVisible) {
       return 'bg-slate-50';
     }
 
     return 'bg-white';
   };
   const getUiFeatureStatusItems = (
-    featureDiagnostic: CanvasOwnerUiFeatureDiagnostic | null
+    featureState: CanvasOwnerUiFeatureState | null
   ): Array<{ label: string; value: string; tone?: 'default' | 'success' | 'warning' | 'muted' }> | undefined => {
-    if (!featureDiagnostic) {
+    if (!featureState) {
       return undefined;
     }
 
     const statusItems: Array<{ label: string; value: string; tone?: 'default' | 'success' | 'warning' | 'muted' }> = [
       {
         label: '설정',
-        value: featureDiagnostic.configuredVisible ? 'ON' : 'OFF',
-        tone: featureDiagnostic.configuredVisible ? 'success' : 'muted',
+        value: featureState.configuredVisible ? 'ON' : 'OFF',
+        tone: featureState.configuredVisible ? 'success' : 'muted',
+      },
+      {
+        label: '지원',
+        value: featureState.supported ? '지원' : '미지원',
+        tone: featureState.supported ? 'success' : 'warning',
       },
       {
         label: '출력',
-        value: featureDiagnostic.visible ? '출력' : '숨김',
-        tone: featureDiagnostic.visible ? 'success' : 'muted',
+        value: featureState.effectiveVisible ? '출력' : '숨김',
+        tone: featureState.effectiveVisible ? 'success' : 'muted',
       },
       {
-        label: '모드',
-        value:
-          featureDiagnostic.modeDiagnosticLevel === 'warning'
-            ? '알림'
-            : featureDiagnostic.modeDiagnosticLevel === 'info'
-              ? '정보'
-              : '정상',
-        tone:
-          featureDiagnostic.modeDiagnosticLevel === 'warning'
-            ? 'warning'
-            : featureDiagnostic.modeDiagnosticLevel === 'info'
-              ? 'default'
-              : 'success',
-      },
-      {
-        label: '실행 조건',
-        value:
-          featureDiagnostic.actionAvailability === 'missing-runtime-condition'
-            ? '확인 필요'
-            : featureDiagnostic.actionAvailability === 'available'
-              ? '연결됨'
-              : '해당 없음',
-        tone:
-          featureDiagnostic.actionAvailability === 'missing-runtime-condition'
-            ? 'warning'
-            : featureDiagnostic.actionAvailability === 'available'
-              ? 'success'
-              : 'muted',
+        label: '동작',
+        value: featureState.enabled ? '활성' : '비활성',
+        tone: featureState.enabled ? 'success' : featureState.supported ? 'muted' : 'warning',
       },
     ];
 
-    if (featureDiagnostic.modeDiagnosticMessage) {
+    if (featureState.disabledReason) {
       statusItems.push({
-        label: '알림',
-        value: featureDiagnostic.modeDiagnosticMessage,
+        label: '사유',
+        value: featureState.disabledReason,
         tone: 'warning',
-      });
-    }
-
-    if (featureDiagnostic.actionAvailabilityMessage) {
-      statusItems.push({
-        label: '조건',
-        value: featureDiagnostic.actionAvailabilityMessage,
-        tone: featureDiagnostic.actionAvailability === 'missing-runtime-condition' ? 'warning' : 'default',
       });
     }
 
@@ -1413,7 +1385,7 @@ export default function CanvasOwnerPage() {
       sectionLabel: '상자 캔버스 편집',
       label: '미리보기 버튼 표시',
       definitionName: 'canvasToolbarVisibility.showPreviewToggle',
-      description: '실제 사용 미리보기/편집 전환 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
+      description: '템플릿 작성 페이지에서 실제 사용 미리보기/편집 전환 버튼을 표시합니다. 문서 출력/읽기 전용 페이지에서는 숨겨집니다.',
       checked: settings.showCanvasPreviewToggle,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showCanvasPreviewToggle', checked),
@@ -1423,7 +1395,7 @@ export default function CanvasOwnerPage() {
       sectionLabel: '상자 캔버스 편집',
       label: '선택/이동 표시',
       definitionName: 'canvasToolbarVisibility.showInteractionToolControls',
-      description: '선택과 이동 전환 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
+      description: '선택과 이동 전환 버튼을 표시합니다. 템플릿 작성 페이지에서만 유효합니다.',
       checked: settings.showCanvasInteractionToolControls,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showCanvasInteractionToolControls', checked),
@@ -1473,7 +1445,7 @@ export default function CanvasOwnerPage() {
       sectionLabel: '상자 캔버스 편집',
       label: '편집 설정 표시',
       definitionName: 'canvasToolbarVisibility.showEditSettingsToggle',
-      description: '상자 편집 패널 열기/닫기 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
+      description: '상자 편집 패널 열기/닫기 버튼을 표시합니다. 템플릿 작성 페이지에서만 유효합니다.',
       checked: settings.showCanvasEditSettingsToggle,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showCanvasEditSettingsToggle', checked),
@@ -1483,7 +1455,7 @@ export default function CanvasOwnerPage() {
       sectionLabel: '상자 캔버스 편집',
       label: '편집 탭 표시',
       definitionName: 'canvasToolbarVisibility.showSelectionPanelTabs',
-      description: '미리보기/크기 및 위치/속성/역할 탭 전환 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
+      description: '크기 및 위치/속성 탭 전환 버튼을 표시합니다. 템플릿 작성 페이지에서만 유효합니다.',
       checked: settings.showCanvasSelectionPanelTabs,
       disabled: false,
       onCheckedChange: (checked: boolean) => updateSetting('showCanvasSelectionPanelTabs', checked),
@@ -1961,32 +1933,30 @@ export default function CanvasOwnerPage() {
       value: value ? 'true' : 'false',
       description: '불러오기 및 저장 패널의 항목별 실제 표시 여부입니다.',
     })),
-    ...previewUiFeatureDiagnostics.flatMap((featureDiagnostic) => [
+    ...previewUiFeatureStates.flatMap((featureState) => [
       {
         section: 'uiFeatureState',
-        name: `${featureDiagnostic.key}.configuredVisible`,
-        value: featureDiagnostic.configuredVisible ? 'true' : 'false',
-        description: `${featureDiagnostic.label}: 환경 설정에서 선택한 표시/기능 값입니다.`,
+        name: `${featureState.key}.configuredVisible`,
+        value: featureState.configuredVisible ? 'true' : 'false',
+        description: `${featureState.label}: 환경 설정에서 선택한 표시/기능 값입니다.`,
       },
       {
         section: 'uiFeatureState',
-        name: `${featureDiagnostic.key}.visible`,
-        value: featureDiagnostic.visible ? 'true' : 'false',
-        description: `${featureDiagnostic.label}: 모드 진단과 무관하게 설정값만 반영한 실제 출력 상태입니다.`,
+        name: `${featureState.key}.supported`,
+        value: featureState.supported ? 'true' : 'false',
+        description: featureState.supported ? `${featureState.label}: 현재 페이지에서 지원됩니다.` : featureState.disabledReason,
       },
       {
         section: 'uiFeatureState',
-        name: `${featureDiagnostic.key}.modeDiagnosticLevel`,
-        value: featureDiagnostic.modeDiagnosticLevel,
-        description: featureDiagnostic.modeDiagnosticMessage || `${featureDiagnostic.label}: 모드 진단 알림이 없습니다.`,
+        name: `${featureState.key}.effectiveVisible`,
+        value: featureState.effectiveVisible ? 'true' : 'false',
+        description: `${featureState.label}: 설정값과 현재 페이지 capability를 합친 실제 출력 상태입니다.`,
       },
       {
         section: 'uiFeatureState',
-        name: `${featureDiagnostic.key}.actionAvailability`,
-        value: featureDiagnostic.actionAvailability,
-        description:
-          featureDiagnostic.actionAvailabilityMessage ||
-          `${featureDiagnostic.label}: 별도 실행 조건 진단이 없습니다.`,
+        name: `${featureState.key}.enabled`,
+        value: featureState.enabled ? 'true' : 'false',
+        description: featureState.enabled ? `${featureState.label}: 현재 동작 가능합니다.` : featureState.disabledReason || `${featureState.label}: 현재 동작하지 않습니다.`,
       },
     ]),
     {
@@ -2072,9 +2042,9 @@ export default function CanvasOwnerPage() {
     {
       key: 'uiFeatureState',
       sourceSection: 'uiFeatureState',
-      label: 'UI 기능 진단 상태',
-      definitionName: 'resolvedUiFeatureDiagnostics',
-      description: '환경 설정값을 실제 출력 기준으로 두고, 모드 불일치와 실행 조건은 알림으로만 보여줍니다.',
+      label: 'UI 기능 effective 상태',
+      definitionName: 'resolvedUiFeatures',
+      description: '환경 설정값과 현재 페이지 capability를 합친 실제 출력/동작 상태입니다.',
     },
   ].map((section) => ({
     ...section,
@@ -2426,7 +2396,7 @@ export default function CanvasOwnerPage() {
             <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
               {section.rows.map((row) => {
                 const settingKey = getSettingKeyForDefinitionName(row.definitionName);
-                const featureDiagnostic = getUiFeatureDiagnosticForDefinitionName(row.definitionName);
+                const featureState = getUiFeatureStateForDefinitionName(row.definitionName);
 
                 return (
                   <SettingToggleRow
@@ -2436,10 +2406,10 @@ export default function CanvasOwnerPage() {
                     definitionName={`${row.definitionName}${settingKey ? ` · ${getSettingSourceLabel(settingSources[settingKey])}` : ''}`}
                     env={row.definitionName}
                     description={row.description}
-                    statusItems={getUiFeatureStatusItems(featureDiagnostic)}
+                    statusItems={getUiFeatureStatusItems(featureState)}
                     checked={row.checked}
                     disabled={row.disabled}
-                    className={`${getSettingPanelClassName(settingKey)} ${getUiFeaturePanelClassName(featureDiagnostic)}`}
+                    className={`${getSettingPanelClassName(settingKey)} ${getUiFeaturePanelClassName(featureState)}`}
                     onCheckedChange={row.onCheckedChange}
                   />
                 );

@@ -324,11 +324,11 @@ docs/backups/0529env-checklist/
 | `src/app/canvas/ownerSettings.ts` | settings와 진단 resolver 분리 |
 | `src/app/canvas/page.tsx` | 환경설정 화면 진단 표시 조정 |
 | `src/components/ui/SettingToggleRow.tsx` | 진단 배지 표시만 필요할 때 |
-| `src/components/template/TemplateEditWorkspace.tsx` | runtime preview 상태와 toolbar 탭 상태 분리 |
-| `src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx` | 탭 active 판정과 편집 설정 disabled 조건 분리 |
 
 기본 수정 금지:
 
+- `src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx`
+- `src/components/template/TemplateEditWorkspace.tsx`
 - `src/components/template/workspace/types.ts`
 - `src/components/template/workspace/canvas/**`
 - `src/app/project/**`
@@ -366,8 +366,6 @@ docs/backups/0529env-checklist/
 - [ ] `09-diff-whitelist-check`: `git diff --name-only`가 whitelist 안에만 있는지 검증
 - [ ] `10-static-check`: `git diff --check`, 번들 검사, 가능한 타입 검사 실행
 - [ ] `11-browser-check`: 브라우저에서 `/canvas?page=project&mode=template`와 템플릿 편집 가능 페이지 확인
-- [ ] `12-runtime-toolbar-state`: 문서 저장 runtime preview와 toolbar preview 탭 active 상태를 분리
-- [ ] `13-edit-settings-runtime-condition`: 편집 설정 버튼 disabled 조건을 실제 HTML 존재 여부 중심으로 축소
 
 ## 완료 기준
 

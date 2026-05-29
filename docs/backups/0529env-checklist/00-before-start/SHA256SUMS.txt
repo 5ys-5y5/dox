@@ -1,0 +1,5 @@
+48e09a4dbf1fca95420d7e3c76f71c3b4d3b0e6bfbe58de9115435794721347e  docs/backups/0529env-checklist/00-before-start/docs__0529env-checklist.md.before
+8fdbf33974cab759c76a17edcb7f744b49ff7043167a5f2ba76a430ba594d0b1  docs/backups/0529env-checklist/00-before-start/docs__0529env.md.before
+fff46c1748101497112c74a62b110d8c673a4046522ceda1ca55b80f02dfcef1  docs/backups/0529env-checklist/00-before-start/src__app__canvas__ownerSettings.ts.before
+417688302e43a359c3c0a0da435d6dc88419717cfa727ceb083584824e656ba3  docs/backups/0529env-checklist/00-before-start/src__app__canvas__page.tsx.before
+23d0d17392033ee7218e6903f45a5c60d2e0336afdf9f4fed18d36dd8afe68ae  docs/backups/0529env-checklist/00-before-start/src__components__ui__SettingToggleRow.tsx.before

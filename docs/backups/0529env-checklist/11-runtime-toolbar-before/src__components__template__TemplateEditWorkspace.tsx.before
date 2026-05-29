@@ -19690,7 +19690,6 @@ export default function TemplateEditWorkspace({
     [previewHtml, templateDetail?.template.draftHtml]
   );
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
-  const toolbarTemplateUsagePreviewActive = templateUsagePreviewMode || canvasViewPreviewRequested;
   const templateUsagePreviewActive = documentDraftSaveEnabled || readOnlyDraftOutput || templateUsagePreviewMode || canvasViewPreviewRequested;
   const templateUsagePreviewRuntimeOptionsSignature = [
     usagePreviewStabilizeInitialLayout ? 'stabilize' : 'raw-layout',
@@ -19698,8 +19697,8 @@ export default function TemplateEditWorkspace({
     usagePreviewMeasurePeerClusterHeightTargets ? 'measure-peer-height' : 'skip-peer-height',
     usagePreviewMeasurePeerClusterWidthTargets ? 'measure-peer-width' : 'skip-peer-width',
   ].join('|');
-  const activeCanvasSurfaceSelectionPanelTab: SelectionPanelTab = toolbarTemplateUsagePreviewActive ? 'position' : selectionPanelTab;
-  const activeCanvasPreparedViewMode: TemplateEditWorkspaceCanvasViewMode = toolbarTemplateUsagePreviewActive
+  const activeCanvasSurfaceSelectionPanelTab: SelectionPanelTab = templateUsagePreviewActive ? 'position' : selectionPanelTab;
+  const activeCanvasPreparedViewMode: TemplateEditWorkspaceCanvasViewMode = templateUsagePreviewActive
     ? 'preview'
     : resolveTemplateCanvasViewModeForSelectionPanelTab(selectionPanelTab);
   const templateUsagePreviewActiveRef = React.useRef(templateUsagePreviewActive);
@@ -37066,8 +37065,8 @@ export default function TemplateEditWorkspace({
             previewZoom={previewZoom}
             selectionPanelTab={selectionPanelTab}
             editSettingsPanelVisible={editSettingsPanelVisible}
-            editSettingsPanelAvailable={Boolean(renderedPreviewHtml.trim())}
-            templateUsagePreviewMode={toolbarTemplateUsagePreviewActive}
+            editSettingsPanelAvailable={!documentDraftSaveEnabled && !templateUsagePreviewActive && Boolean(renderedPreviewHtml.trim())}
+            templateUsagePreviewMode={templateUsagePreviewActive}
             renderedPreviewHtml={renderedPreviewHtml}
             canvasInteractionMode={canvasInteractionMode}
             canUndoCanvasHistory={canUndoCanvasHistory}
@@ -37097,12 +37096,12 @@ export default function TemplateEditWorkspace({
             canvasFullscreen={canvasFullscreen}
             canvasSurfaceHeight={resolvedCanvasSpecifiedHeight}
             canvasSurfaceFillAvailableHeight={canvasCardFillContainerHeight && !resolvedCanvasSpecifiedHeight}
-            boxCreationMode={toolbarTemplateUsagePreviewActive ? false : boxCreationMode}
+            boxCreationMode={templateUsagePreviewActive ? false : boxCreationMode}
             canvasIconScale={canvasIconScale}
             spacePanArmed={spacePanArmed}
             spacePanDragging={spacePanDragging}
             metadataVisualMode={
-              !toolbarTemplateUsagePreviewActive &&
+              !templateUsagePreviewActive &&
               isTemplateCanvasMetadataSelectionPanelTab(activeCanvasSurfaceSelectionPanelTab)
             }
             preparedViewMode={activeCanvasPreparedViewMode}
@@ -37114,9 +37113,10 @@ export default function TemplateEditWorkspace({
             selectionPanelTab={activeCanvasSurfaceSelectionPanelTab}
             editSettingsPanelVisible={
               editSettingsPanelVisible &&
-              !readOnlyDraftOutput
+              !readOnlyDraftOutput &&
+              (!documentDraftSaveEnabled || todoPanelVisible)
             }
-            showMetadataIcons={toolbarTemplateUsagePreviewActive ? false : showMetadataIcons}
+            showMetadataIcons={templateUsagePreviewActive ? false : showMetadataIcons}
             todoOverlay={editSettingsPanelVisible && !readOnlyDraftOutput && todoPanelVisible ? todoPanel : null}
             todoOverlayLabel={todoButtonLabel}
             onCloseTodoOverlay={closeTodoPanelAndShowEditSettings}
@@ -37185,8 +37185,8 @@ export default function TemplateEditWorkspace({
             previewZoom={previewZoom}
             selectionPanelTab={selectionPanelTab}
             editSettingsPanelVisible={editSettingsPanelVisible}
-            editSettingsPanelAvailable={Boolean(renderedPreviewHtml.trim())}
-            templateUsagePreviewMode={toolbarTemplateUsagePreviewActive}
+            editSettingsPanelAvailable={!documentDraftSaveEnabled && !templateUsagePreviewActive && Boolean(renderedPreviewHtml.trim())}
+            templateUsagePreviewMode={templateUsagePreviewActive}
             renderedPreviewHtml={renderedPreviewHtml}
             canvasInteractionMode={canvasInteractionMode}
             canUndoCanvasHistory={canUndoCanvasHistory}
