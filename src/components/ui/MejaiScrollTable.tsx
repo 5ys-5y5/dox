@@ -47,6 +47,7 @@ type MejaiScrollTableProps = {
   indexHeaderLabel?: React.ReactNode;
   indexWidth?: number | string;
   minTableWidth?: number | string;
+  fixedColumnWidths?: boolean;
   ownerItemKey?: string;
   ownerItemName?: string;
   ownerItemAttributes?: MejaiScrollTableItemAttributes;
@@ -192,6 +193,7 @@ export function MejaiScrollTable({
   indexHeaderLabel = '번호',
   indexWidth = 42,
   minTableWidth,
+  fixedColumnWidths = false,
   ownerItemKey,
   ownerItemName = '스크롤 표',
   ownerItemAttributes,
@@ -780,13 +782,19 @@ export function MejaiScrollTable({
       )}
       className={cn(
         'm-0 border-collapse text-inherit',
-        pane === 'fixed-right' ? 'w-full table-fixed bg-white' : 'w-max min-w-full table-auto'
+        pane === 'fixed-right'
+          ? 'w-full table-fixed bg-white'
+          : fixedColumnWidths
+            ? 'w-max table-fixed'
+            : 'w-max min-w-full table-auto'
       )}
       style={
         pane === 'fixed-right'
           ? { minWidth: stickyRightOffsetPx, width: stickyRightOffsetPx }
-          : computedMinTableWidth
-            ? { minWidth: computedMinTableWidth }
+          : fixedColumnWidths && computedMinTableWidth
+            ? { minWidth: computedMinTableWidth, width: computedMinTableWidth }
+            : computedMinTableWidth
+              ? { minWidth: computedMinTableWidth }
             : undefined
       }
     >

@@ -141,13 +141,6 @@ type ProjectDashboardSiteSummary = {
   checklist: SiteChecklistSummaryDto | null;
   hasError: boolean;
 };
-type ProjectDashboardTodoItem = {
-  key: string;
-  label: string;
-  statusLabel: string;
-  statusVariant: ProjectListStatusVariant;
-  summary: string;
-};
 type DocumentChecklistTab = 'signature' | 'photo' | 'file' | 'value';
 type DocumentSignatureSlotOption = {
   slotKey: string;
@@ -1464,10 +1457,10 @@ const PROJECT_DOCUMENT_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   {
     key: 'label',
     label: '문서',
-    width: 320,
-    minWidth: 240,
-    maxWidth: 460,
-    clampLines: 2,
+    width: 180,
+    minWidth: 180,
+    maxWidth: 180,
+    clampLines: 1,
   },
 ];
 
@@ -1568,33 +1561,33 @@ const PROJECT_MEMBER_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   {
     key: 'label',
     label: '이름',
-    width: 132,
-    minWidth: 112,
-    maxWidth: 164,
+    width: 60,
+    minWidth: 60,
+    maxWidth: 60,
     clampLines: 1,
   },
   {
     key: 'contact',
     label: '연락처',
-    width: 132,
-    minWidth: 118,
-    maxWidth: 156,
+    width: 90,
+    minWidth: 90,
+    maxWidth: 90,
     clampLines: 1,
   },
   {
     key: 'status',
     label: '인증',
-    width: 76,
-    minWidth: 72,
-    maxWidth: 84,
+    width: 60,
+    minWidth: 60,
+    maxWidth: 60,
     align: 'center',
   },
   {
     key: 'scope',
     label: '범위',
-    width: 160,
-    minWidth: 132,
-    maxWidth: 190,
+    width: 120,
+    minWidth: 120,
+    maxWidth: 120,
     clampLines: 1,
   },
 ];
@@ -1741,30 +1734,16 @@ function MetricCard({
   label: string;
   value: string;
   description: string;
-  ownerItemKey: string;
+  ownerItemKey?: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" {...projectOwnerItem(ownerItemKey, `${label} 지표 카드`)}>
-      <div className="flex items-center justify-between gap-3" {...projectOwnerItem(`${ownerItemKey}-header`, `${label} 지표 카드 머리글`)}>
-        <div className="text-xs font-medium text-slate-500" {...projectOwnerItem(`${ownerItemKey}-label`, `${label} 지표 라벨`)}>{label}</div>
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" {...(ownerItemKey ? projectOwnerItem(ownerItemKey, `${label} 지표 카드`) : {})}>
+      <div className="flex items-center justify-between gap-3" {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-header`, `${label} 지표 카드 머리글`) : {})}>
+        <div className="text-xs font-medium text-slate-500" {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-label`, `${label} 지표 라벨`) : {})}>{label}</div>
         <Icon className="h-4 w-4 text-slate-400" />
       </div>
-      <div className="mt-3 text-2xl font-semibold text-slate-950" {...projectOwnerItem(`${ownerItemKey}-value`, `${label} 지표 값`)}>{value}</div>
-      <div className="mt-1 text-xs text-slate-500" {...projectOwnerItem(`${ownerItemKey}-description`, `${label} 지표 설명`)}>{description}</div>
-    </div>
-  );
-}
-
-function DashboardTodoCard({ item }: { item: ProjectDashboardTodoItem }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4" {...projectOwnerItem(`dashboard-todo-card-${item.key}`, `${item.label} 대시보드 할 일 카드`)}>
-      <div className="flex items-center justify-between gap-3" {...projectOwnerItem(`dashboard-todo-card-${item.key}-header`, `${item.label} 대시보드 할 일 머리글`)}>
-        <div className="min-w-0 text-sm font-semibold text-slate-900" {...projectOwnerItem(`dashboard-todo-card-${item.key}-label`, `${item.label} 대시보드 할 일 라벨`)}>{item.label}</div>
-        <Badge variant={item.statusVariant} className="shrink-0" {...projectOwnerItem(`dashboard-todo-card-${item.key}-status`, `${item.label} 대시보드 할 일 상태`)}>
-          {item.statusLabel}
-        </Badge>
-      </div>
-      <div className="mt-2 text-xs leading-5 text-slate-600" {...projectOwnerItem(`dashboard-todo-card-${item.key}-summary`, `${item.label} 대시보드 할 일 요약`)}>{item.summary}</div>
+      <div className="mt-3 text-2xl font-semibold text-slate-950" {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-value`, `${label} 지표 값`) : {})}>{value}</div>
+      <div className="mt-1 text-xs text-slate-500" {...(ownerItemKey ? projectOwnerItem(`${ownerItemKey}-description`, `${label} 지표 설명`) : {})}>{description}</div>
     </div>
   );
 }
@@ -1921,6 +1900,8 @@ function ProjectInfoList({
   maxBodyHeightClassName,
   minTableWidth,
   variant = 'detail',
+  actionColumnWidth = PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
+  fixedColumnWidths = false,
   ownerItemKey,
   ownerItemName = '현장 관리 목록',
 }: {
@@ -1929,6 +1910,8 @@ function ProjectInfoList({
   maxBodyHeightClassName?: string;
   minTableWidth?: number;
   variant?: 'detail' | 'document' | 'photo' | 'signature' | 'member' | 'memberDocument' | 'checklist';
+  actionColumnWidth?: number;
+  fixedColumnWidths?: boolean;
   ownerItemKey?: string;
   ownerItemName?: string;
 }) {
@@ -1950,33 +1933,42 @@ function ProjectInfoList({
               : variant === 'checklist'
                 ? PROJECT_CHECKLIST_LIST_COLUMNS
               : PROJECT_INFO_LIST_COLUMNS;
+  const resolveActionColumn = (column: MejaiScrollTableColumn): MejaiScrollTableColumn =>
+    actionColumnWidth === PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH
+      ? column
+      : {
+          ...column,
+          width: actionColumnWidth,
+          minWidth: actionColumnWidth,
+          maxWidth: actionColumnWidth,
+        };
   const columns = [
     ...baseColumns,
-    ...(hasDetailColumn ? [PROJECT_INFO_LIST_DETAIL_COLUMN] : []),
-    ...(hasDocumentLinkColumn ? [PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN] : []),
-    ...(hasRegisterColumn ? [PROJECT_INFO_LIST_REGISTER_COLUMN] : []),
-    ...(hasActionColumn ? [PROJECT_INFO_LIST_ACTION_COLUMN] : []),
+    ...(hasDetailColumn ? [resolveActionColumn(PROJECT_INFO_LIST_DETAIL_COLUMN)] : []),
+    ...(hasDocumentLinkColumn ? [resolveActionColumn(PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN)] : []),
+    ...(hasRegisterColumn ? [resolveActionColumn(PROJECT_INFO_LIST_REGISTER_COLUMN)] : []),
+    ...(hasActionColumn ? [resolveActionColumn(PROJECT_INFO_LIST_ACTION_COLUMN)] : []),
   ];
-  const detailColumnWidth = hasDetailColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
-  const linkColumnWidth = hasDocumentLinkColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
-  const registerColumnWidth = hasRegisterColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
-  const actionColumnWidth = hasActionColumn ? PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH : 0;
+  const detailColumnWidth = hasDetailColumn ? actionColumnWidth : 0;
+  const linkColumnWidth = hasDocumentLinkColumn ? actionColumnWidth : 0;
+  const registerColumnWidth = hasRegisterColumn ? actionColumnWidth : 0;
+  const rowActionColumnWidth = hasActionColumn ? actionColumnWidth : 0;
   const baseMinTableWidth =
     variant === 'document'
-      ? 320
+      ? 180
       : variant === 'photo'
         ? 556
         : variant === 'signature'
           ? 860
           : variant === 'member'
-            ? 580
+            ? 330
             : variant === 'memberDocument'
               ? 400
               : variant === 'checklist'
                 ? 900
               : 492;
   const resolvedMinTableWidth =
-    minTableWidth || baseMinTableWidth + detailColumnWidth + linkColumnWidth + registerColumnWidth + actionColumnWidth;
+    minTableWidth || baseMinTableWidth + detailColumnWidth + linkColumnWidth + registerColumnWidth + rowActionColumnWidth;
   const renderLinkActionButton = (action: ProjectListAction | undefined) =>
     action ? (
       <ProjectListActionButton
@@ -2066,6 +2058,7 @@ function ProjectInfoList({
         emptyMessage={emptyMessage || '표시할 항목이 없습니다.'}
         maxHeightClassName={maxBodyHeightClassName}
         minTableWidth={resolvedMinTableWidth}
+        fixedColumnWidths={fixedColumnWidths}
         showIndexColumn={false}
         ownerItemKey={ownerItemKey ? `${ownerItemKey}-scroll-table` : undefined}
         ownerItemName={`${ownerItemName} 스크롤 표`}
@@ -2096,7 +2089,7 @@ export default function ProjectPage() {
   const [selectedPhotoId, setSelectedPhotoId] = React.useState('');
   const [selectedDocumentDetail, setSelectedDocumentDetail] = React.useState<DocumentDetailResult | null>(null);
   const [dashboardSummaries, setDashboardSummaries] = React.useState<ProjectDashboardSiteSummary[]>([]);
-  const [loadingDashboardSummaries, setLoadingDashboardSummaries] = React.useState(false);
+  const [, setLoadingDashboardSummaries] = React.useState(false);
   const [dashboardRefreshKey, setDashboardRefreshKey] = React.useState(0);
   const [showCreateSiteForm, setShowCreateSiteForm] = React.useState(false);
   const [newSiteName, setNewSiteName] = React.useState('');
@@ -5295,56 +5288,6 @@ export default function ProjectPage() {
     dashboardPhotoReviewNeededCount +
     dashboardPhotoMissingCount +
     dashboardDataIssueCount;
-  const dashboardScopeLabel =
-    selectedSiteIds.length > 0 ? `선택 현장 ${dashboardSiteCount}곳` : `전체 현장 ${dashboardSiteCount}곳`;
-  const dashboardTodoItems = React.useMemo<ProjectDashboardTodoItem[]>(
-    () => [
-      {
-        key: 'documents',
-        label: '문서 작성',
-        statusLabel: dashboardMissingDocumentCount > 0 || dashboardDraftDocumentCount > 0 ? '할 일' : '정상',
-        statusVariant: dashboardMissingDocumentCount > 0 || dashboardDraftDocumentCount > 0 ? 'amber' : 'green',
-        summary:
-          dashboardMissingDocumentCount > 0 || dashboardDraftDocumentCount > 0
-            ? `필요 문서 ${dashboardMissingDocumentCount}건, 작성 중 문서 ${dashboardDraftDocumentCount}건을 확인해 주세요.`
-            : '문서 작성 상태가 정리되어 있습니다.',
-      },
-      {
-        key: 'photos',
-        label: '사진 등록·검토',
-        statusLabel: dashboardPhotoMissingCount > 0 || dashboardPhotoReviewNeededCount > 0 ? '할 일' : '정상',
-        statusVariant: dashboardPhotoMissingCount > 0 || dashboardPhotoReviewNeededCount > 0 ? 'amber' : 'green',
-        summary:
-          dashboardPhotoMissingCount > 0 || dashboardPhotoReviewNeededCount > 0
-            ? `누락 ${dashboardPhotoMissingCount}건, 검토 필요 ${dashboardPhotoReviewNeededCount}건이 있습니다.`
-            : '사진 증빙 상태가 정리되어 있습니다.',
-      },
-      {
-        key: 'signature',
-        label: '서명 요청',
-        statusLabel: '확인',
-        statusVariant: 'slate',
-        summary: '서명이 필요한 문서를 선택해 요청 상태와 완료 여부를 확인해 주세요.',
-      },
-      {
-        key: 'data',
-        label: '정보 확인',
-        statusLabel: dashboardDataIssueCount > 0 ? '확인 필요' : '정상',
-        statusVariant: dashboardDataIssueCount > 0 ? 'red' : 'green',
-        summary:
-          dashboardDataIssueCount > 0
-            ? `${dashboardDataIssueCount}곳의 현장 정보를 다시 불러와 확인해 주세요.`
-            : '현장별 문서와 사진 정보를 정상적으로 확인했습니다.',
-      },
-    ],
-    [
-      dashboardDataIssueCount,
-      dashboardDraftDocumentCount,
-      dashboardMissingDocumentCount,
-      dashboardPhotoMissingCount,
-      dashboardPhotoReviewNeededCount,
-    ]
-  );
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -5792,6 +5735,10 @@ export default function ProjectPage() {
       ) : null}
 
       <div className="space-y-6" {...projectOwnerItem('project-main-content', '현장 관리 주요 내용')}>
+        <div
+          className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]"
+          {...projectOwnerItem('project-primary-row-layout', '현장 선택과 현장 대시보드 2열 배치')}
+        >
         <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-selection-panel', '1. 현장 선택과 기본 정보 패널')}>
           <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0" {...projectOwnerItem('site-selection-panel-header', '현장 선택과 기본 정보 제목 영역')}>
             <div className="space-y-1.5" {...projectOwnerItem('site-selection-panel-heading-group', '현장 선택과 기본 정보 제목 묶음')}>
@@ -5971,68 +5918,46 @@ export default function ProjectPage() {
           </CardContent>
         </Card>
 
-        <div
-          className={cn(
-            'grid min-w-0 grid-cols-1 gap-6',
-            selectedSiteIds.length > 0 && selectedSite && !showCreateSiteForm
-              ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'
-              : ''
-          )}
-          {...projectOwnerItem('site-dashboard-document-member-layout', '현장 대시보드와 현장 문서 구성원 배치')}
-        >
-          <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-dashboard-content', '현장 대시보드 내용')}>
-            <CardContent className="space-y-3 p-6" {...projectOwnerItem('site-dashboard-content-body', '현장 대시보드 내용 본문')}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between" {...projectOwnerItem('site-dashboard-header', '현장 대시보드 머리글')}>
-                <div {...projectOwnerItem('site-dashboard-heading-group', '현장 대시보드 제목 묶음')}>
-                  <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-dashboard-title', '현장 대시보드 제목')}>현장 대시보드</div>
-                  <p className="mt-1 text-xs leading-5 text-slate-500" {...projectOwnerItem('site-dashboard-description', '현장 대시보드 설명')}>
-                    현장을 따로 고르지 않으면 모든 현장의 문서, 사진, 할 일을 합산해서 보여줍니다.
-                  </p>
-                </div>
-                <Badge variant={loadingDashboardSummaries ? 'slate' : 'green'} className="w-fit shrink-0" {...projectOwnerItem('site-dashboard-scope-badge', '현장 대시보드 범위 배지')}>
-                  {loadingDashboardSummaries ? '불러오는 중' : dashboardScopeLabel}
-                </Badge>
-              </div>
-
+          <Card className="min-w-0 border-slate-200">
+            <CardHeader>
+              <CardTitle>현장 대시보드</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-0">
               <div className="grid gap-3 sm:grid-cols-2" {...projectOwnerItem('site-dashboard-metric-grid', '현장 대시보드 지표 목록')}>
                 <MetricCard
                   icon={FolderKanban}
                   label="현장"
                   value={String(dashboardSiteCount)}
                   description="대시보드에 포함된 현장"
-                  ownerItemKey="site-dashboard-site-count-card"
                 />
                 <MetricCard
                   icon={FileStack}
                   label="문서"
                   value={String(dashboardDocumentCount)}
                   description="포함된 현장의 전체 문서"
-                  ownerItemKey="site-dashboard-document-count-card"
                 />
                 <MetricCard
                   icon={FileImage}
                   label="사진"
                   value={String(dashboardPhotoCount)}
                   description="포함된 현장의 전체 사진"
-                  ownerItemKey="site-dashboard-photo-count-card"
                 />
                 <MetricCard
                   icon={Signature}
                   label="할 일"
                   value={String(dashboardTodoCount)}
                   description="문서, 사진, 확인 필요 항목"
-                  ownerItemKey="site-dashboard-todo-count-card"
                 />
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2" {...projectOwnerItem('site-dashboard-todo-card-grid', '현장 대시보드 할 일 카드 목록')}>
-                {dashboardTodoItems.map((item) => (
-                  <DashboardTodoCard key={item.key} item={item} />
-                ))}
               </div>
             </CardContent>
           </Card>
+        </div>
 
+        <div
+          className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]"
+          {...projectOwnerItem('project-secondary-row-layout', '현장 문서 구성원과 현장 문서 출력 2열 배치')}
+        >
+          <div className="min-w-0">
           {selectedSiteIds.length > 0 && selectedSite && !showCreateSiteForm ? (
             <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-document-member-panel', '현장 문서 구성원 패널')}>
                 <CardHeader {...projectOwnerItem('site-document-member-panel-header', '현장 문서 구성원 제목 영역')}>
@@ -6108,6 +6033,8 @@ export default function ProjectPage() {
                           variant="document"
                           emptyMessage="아직 만든 현장 문서가 없습니다."
                           maxBodyHeightClassName="max-h-[220px]"
+                          actionColumnWidth={44}
+                          fixedColumnWidths
                           ownerItemKey="site-document-list"
                           ownerItemName="현장 문서 목록"
                         />
@@ -6378,6 +6305,8 @@ export default function ProjectPage() {
 	                            variant="member"
 	                            emptyMessage="아직 현장 소속 구성원이 없습니다."
 	                            maxBodyHeightClassName="max-h-[260px]"
+	                            actionColumnWidth={44}
+	                            fixedColumnWidths
 	                            ownerItemKey="site-member-list"
 	                            ownerItemName="현장 소속 구성원 목록"
 	                          />
@@ -6503,13 +6432,13 @@ export default function ProjectPage() {
 		                </CardContent>
 		              </Card>
           ) : null}
+          </div>
+
+          <div className="min-w-0 space-y-4" {...projectOwnerItem('document-output-section', '현장 문서 하단 출력 섹션')}>
+            {renderProjectDocumentOutputTabs()}
+          </div>
         </div>
-		      </div>
-
-      <div className="space-y-4" {...projectOwnerItem('document-output-section', '현장 문서 하단 출력 섹션')}>
-        {renderProjectDocumentOutputTabs()}
       </div>
-
       </div>
     </DoxAppShell>
   );
