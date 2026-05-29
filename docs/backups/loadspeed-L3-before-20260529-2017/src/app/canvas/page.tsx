@@ -29,12 +29,10 @@ import {
   normalizeCanvasOwnerSettingsStore,
   readCanvasOwnerSettingsFromStorage,
   resolveCanvasOwnerSettings,
-  resolveCanvasOwnerSettingDiagnostics,
   resolveCanvasOwnerUiFeatureDiagnostics,
   saveCanvasOwnerSettingsStoreToStorage,
   updateCanvasOwnerSettingsStoreOverride,
   type CanvasOwnerSettings,
-  type CanvasOwnerSettingDiagnostic,
   type CanvasOwnerSettingKey,
   type CanvasOwnerSettingSource,
   type CanvasOwnerSettingsStore,
@@ -69,8 +67,6 @@ import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import { buildDocumentAttachmentTextByValueKey, groupDocumentValueFilesByValueKey } from '../../lib/documentAttachmentValues';
 import type { TemplateRecordDto } from '../../lib/templateDtos';
 
-const MemoOwnerSharedUiPreview = React.memo(OwnerSharedUiPreview);
-
 type ManagedCanvasPageId =
   | 'canvas'
   | 'templates'
@@ -88,20 +84,6 @@ type ManagedCanvasPage = {
   usesTemplateList: boolean;
   documentSaveEnabled: boolean;
   readOnlyCanvasOutput: boolean;
-};
-type EffectivePropBooleanControl = {
-  settingKey: CanvasOwnerSettingKey;
-  trueValue: CanvasOwnerSettings[CanvasOwnerSettingKey];
-  falseValue: CanvasOwnerSettings[CanvasOwnerSettingKey];
-  trueLabel?: string;
-  falseLabel?: string;
-};
-type EffectiveTemplateWorkspacePropRow = {
-  section: string;
-  name: string;
-  value: string;
-  description: string;
-  booleanControl?: EffectivePropBooleanControl;
 };
 
 const fetchSuccessData = async <T,>(url: string): Promise<T> => {
@@ -313,8 +295,6 @@ export default function CanvasOwnerPage() {
   const [documentRequestTasks, setDocumentRequestTasks] = React.useState<DocumentRequestTaskDto[]>([]);
   const [documentTaskMemberLabelById, setDocumentTaskMemberLabelById] = React.useState<Record<string, string>>({});
   const [loadingLists, setLoadingLists] = React.useState(false);
-  const [templatesLoaded, setTemplatesLoaded] = React.useState(false);
-  const [documentsLoaded, setDocumentsLoaded] = React.useState(false);
   const [loadingDocumentDetail, setLoadingDocumentDetail] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [ownerEventMessage, setOwnerEventMessage] = React.useState<string | null>(null);
@@ -372,8 +352,6 @@ export default function CanvasOwnerPage() {
   );
   const previewSettings = previewResolvedSettings.settings;
   const previewSettingSources = previewResolvedSettings.sources;
-  const workspacePreviewSettings = React.useDeferredValue(previewSettings);
-  const workspacePreviewSettingSources = React.useDeferredValue(previewSettingSources);
 
   React.useEffect(() => {
     const canvasRoot = canvasOwnerRootRef.current;
@@ -430,56 +408,6 @@ export default function CanvasOwnerPage() {
       );
     },
     [selectedManagedPage.id]
-  );
-  const applyCanvasOwnerSettingUpdates = React.useCallback(
-    (
-      updates: Array<{
-        settingKey: CanvasOwnerSettingKey;
-        value: CanvasOwnerSettings[CanvasOwnerSettingKey];
-      }>
-    ) => {
-      if (updates.length === 0) {
-        return;
-      }
-
-      setSettingsStore((previous) =>
-        updates.reduce(
-          (nextStore, update) =>
-            updateCanvasOwnerSettingsStoreOverride(nextStore, {
-              pageId: selectedManagedPage.id,
-              key: update.settingKey,
-              value: update.value as never,
-            }),
-          previous
-        )
-      );
-    },
-    [selectedManagedPage.id]
-  );
-  const applySettingDiagnosticFix = React.useCallback(
-    (settingDiagnostic: CanvasOwnerSettingDiagnostic) => {
-      if (settingDiagnostic.fixes.length === 0) {
-        return;
-      }
-
-      applyCanvasOwnerSettingUpdates(settingDiagnostic.fixes);
-      setOwnerEventMessage(
-        `${settingDiagnostic.label} 진단 수정안을 적용했습니다. 저장하려면 환경설정 저장을 누르세요.`
-      );
-    },
-    [applyCanvasOwnerSettingUpdates]
-  );
-  const applyEffectivePropBooleanControl = React.useCallback(
-    (control: EffectivePropBooleanControl, nextValue: CanvasOwnerSettings[CanvasOwnerSettingKey]) => {
-      applyCanvasOwnerSettingUpdates([
-        {
-          settingKey: control.settingKey,
-          value: nextValue,
-        },
-      ]);
-      setOwnerEventMessage(`${control.settingKey} 값을 변경했습니다. 저장하려면 환경설정 저장을 누르세요.`);
-    },
-    [applyCanvasOwnerSettingUpdates]
   );
 
   const updateQuery = React.useCallback(
@@ -596,40 +524,21 @@ export default function CanvasOwnerPage() {
     [managedCanvasPages, updateQuery]
   );
 
-  const loadLists = React.useCallback(async (options: { templates?: boolean; documents?: boolean; force?: boolean } = {}) => {
-    const shouldLoadTemplates = Boolean(options.templates ?? usesTemplateList) && (options.force || !templatesLoaded);
-    const shouldLoadDocuments = Boolean(options.documents ?? !usesTemplateList) && (options.force || !documentsLoaded);
-
-    if (!shouldLoadTemplates && !shouldLoadDocuments) {
-      return;
-    }
-
+  const loadLists = React.useCallback(async () => {
     setLoadingLists(true);
     try {
       const [templateItems, documentItems] = await Promise.all([
-        shouldLoadTemplates
-          ? fetchSuccessData<TemplateRecordDto[]>('/api/templates?limit=128')
-          : Promise.resolve(null),
-        shouldLoadDocuments
-          ? fetchSuccessData<DocumentListItem[]>(buildPickerDocumentListPath())
-          : Promise.resolve(null),
+        fetchSuccessData<TemplateRecordDto[]>('/api/templates?limit=128'),
+        fetchSuccessData<DocumentListItem[]>(buildPickerDocumentListPath()),
       ]);
-
-      if (templateItems) {
-        setTemplates(templateItems);
-        setTemplatesLoaded(true);
-      }
-
-      if (documentItems) {
-        setDocuments(documentItems);
-        setDocumentsLoaded(true);
-      }
+      setTemplates(templateItems);
+      setDocuments(documentItems);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '캔버스 목록을 불러오지 못했습니다.');
     } finally {
       setLoadingLists(false);
     }
-  }, [documentsLoaded, templatesLoaded, usesTemplateList]);
+  }, []);
 
   React.useEffect(() => {
     void loadLists();
@@ -789,7 +698,7 @@ export default function CanvasOwnerPage() {
         buildOwnerWorkspaceDocumentDetailPath(selectedDocumentDetail.document.id)
       );
       setSelectedDocumentDetail(refreshedDetail);
-      await loadLists({ documents: true, templates: false, force: true });
+      await loadLists();
       setOwnerEventMessage('문서 저장 콜백이 실행되었습니다.');
 
       return {
@@ -809,11 +718,11 @@ export default function CanvasOwnerPage() {
   const effectiveEditableValueKeys =
     !canEditCurrentWorkspace ||
     !documentSaveEnabled ||
-    !workspacePreviewSettings.limitEditableValueKeys ||
+    !previewSettings.limitEditableValueKeys ||
     !selectedPageAllowsEditableValueKeys
       ? null
       : editableValueKeyCandidates;
-  const topNotice = workspacePreviewSettings.showTopNotice ? (
+  const topNotice = previewSettings.showTopNotice ? (
     <div
       className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800"
       {...canvasOwnerEnv('topNotice')}
@@ -866,7 +775,7 @@ export default function CanvasOwnerPage() {
         onAutoSaveComplete={(result) => {
           updateQuery({ templateId: result.templateId });
           setOwnerEventMessage(`PDF 추출 저장 완료: ${result.templateId}`);
-          void loadLists({ templates: true, documents: false, force: true });
+          void loadLists();
         }}
         onStatusChange={setExtractStatus}
       />
@@ -874,7 +783,7 @@ export default function CanvasOwnerPage() {
   const additionalControlPanels = (
     <>
       {templateExtractPanel}
-      {workspacePreviewSettings.showAdditionalControlPanels ? (
+      {previewSettings.showAdditionalControlPanels ? (
     <div
       className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700"
       {...canvasOwnerEnv('additionalControlPanels')}
@@ -981,16 +890,16 @@ export default function CanvasOwnerPage() {
     );
   }, [documentRequestTasks, documentTaskMemberLabelById]);
   const effectiveCanvasToolbarVisibility = React.useMemo(
-    () => buildCanvasToolbarVisibility(workspacePreviewSettings),
-    [workspacePreviewSettings]
+    () => buildCanvasToolbarVisibility(previewSettings),
+    [previewSettings]
   );
   const effectivePersistenceVisibility = React.useMemo(
-    () => buildPersistenceVisibility(workspacePreviewSettings),
-    [workspacePreviewSettings]
+    () => buildPersistenceVisibility(previewSettings),
+    [previewSettings]
   );
   const templateUsagePreviewLayoutDebugOptions = React.useMemo(
-    () => buildTemplateUsagePreviewLayoutDebugOptions(workspacePreviewSettings),
-    [workspacePreviewSettings]
+    () => buildTemplateUsagePreviewLayoutDebugOptions(previewSettings),
+    [previewSettings]
   );
   const previewDocumentId = selectedDocumentDetail?.document.id || selectedDocumentId;
   const routeContractAdditionalControlPanels =
@@ -1057,23 +966,17 @@ export default function CanvasOwnerPage() {
     },
   });
   const previewUiFeatureDiagnostics = resolveCanvasOwnerUiFeatureDiagnostics({
-    settings: workspacePreviewSettings,
+    settings: previewSettings,
     baseProps: previewBaseWorkspaceProps,
   });
   const previewWorkspaceProps = applyCanvasOwnerSettingsToWorkspaceProps({
     baseProps: previewBaseWorkspaceProps,
-    settings: workspacePreviewSettings,
-    settingSources: workspacePreviewSettingSources,
-  });
-  const previewSettingDiagnostics = resolveCanvasOwnerSettingDiagnostics({
-    settings: workspacePreviewSettings,
-    settingSources: workspacePreviewSettingSources,
-    baseProps: previewBaseWorkspaceProps,
-    workspaceProps: previewWorkspaceProps,
+    settings: previewSettings,
+    settingSources: previewSettingSources,
   });
   const previewHideHeader = Boolean(previewWorkspaceProps.hideHeader);
   const previewHidePersistencePanel = Boolean(previewWorkspaceProps.hidePersistencePanel);
-  const previewTemplateListDisplay = previewWorkspaceProps.templateListDisplay ?? workspacePreviewSettings.templateListDisplay;
+  const previewTemplateListDisplay = previewWorkspaceProps.templateListDisplay ?? previewSettings.templateListDisplay;
   const previewEditableValueKeys = previewWorkspaceProps.editableValueKeys ?? null;
   const previewAdditionalControlPanels = previewWorkspaceProps.additionalControlPanels;
   const previewTopNotice = previewWorkspaceProps.topNotice;
@@ -1092,11 +995,11 @@ export default function CanvasOwnerPage() {
   const previewCanvasSpecifiedWidthEnabled = Boolean(previewWorkspaceProps.canvasSpecifiedWidthEnabled);
   const previewCanvasSpecifiedWidth = previewWorkspaceProps.canvasSpecifiedWidth ?? '';
   const previewDocumentAttachmentApiPath = previewWorkspaceProps.documentAttachmentApiPath ?? '';
-  const previewInitialCanvasTab = previewWorkspaceProps.initialCanvasTab ?? workspacePreviewSettings.initialCanvasTab;
+  const previewInitialCanvasTab = previewWorkspaceProps.initialCanvasTab ?? previewSettings.initialCanvasTab;
   const previewCanvasTextInteractionMode = previewWorkspaceProps.canvasTextInteractionMode ?? 'default';
   const previewCanvasSelectionMode = previewWorkspaceProps.canvasSelectionMode ?? 'none';
   const previewSelectionInactiveOverlayOpacity =
-    previewWorkspaceProps.selectionInactiveOverlayOpacity ?? workspacePreviewSettings.selectionInactiveOverlayOpacity;
+    previewWorkspaceProps.selectionInactiveOverlayOpacity ?? previewSettings.selectionInactiveOverlayOpacity;
   const previewCanvasToolbarVisibility = previewWorkspaceProps.canvasToolbarVisibility ?? effectiveCanvasToolbarVisibility;
   const previewPersistenceVisibility = previewWorkspaceProps.persistenceVisibility ?? effectivePersistenceVisibility;
   const previewTemplateUsagePreviewLayoutDebugOptions =
@@ -1107,18 +1010,6 @@ export default function CanvasOwnerPage() {
   const previewUiFeatureDiagnosticByDefinitionName = new Map(
     previewUiFeatureDiagnostics.map((featureDiagnostic) => [featureDiagnostic.definitionName, featureDiagnostic])
   );
-  const previewSettingDiagnosticBySettingKey = new Map(
-    previewSettingDiagnostics.map((settingDiagnostic) => [settingDiagnostic.settingKey, settingDiagnostic])
-  );
-  const previewProblemSettingDiagnostics = previewSettingDiagnostics.filter(
-    (settingDiagnostic) => settingDiagnostic.severity !== 'none'
-  );
-  const previewBlockingSettingDiagnosticCount = previewProblemSettingDiagnostics.filter(
-    (settingDiagnostic) => settingDiagnostic.severity === 'blocking-risk'
-  ).length;
-  const previewWarningSettingDiagnosticCount = previewProblemSettingDiagnostics.filter(
-    (settingDiagnostic) => settingDiagnostic.severity === 'warning'
-  ).length;
   const settingKeyByDefinitionName: Record<string, CanvasOwnerSettingKey> = {
     hideHeader: 'hideHeader',
     hidePersistencePanel: 'hidePersistencePanel',
@@ -1175,88 +1066,15 @@ export default function CanvasOwnerPage() {
     source === 'page'
       ? '페이지'
       : '기본';
-  const getSettingDiagnosticForKey = (settingKey: CanvasOwnerSettingKey | null) =>
-    settingKey ? previewSettingDiagnosticBySettingKey.get(settingKey) || null : null;
-  const getSettingDiagnosticTone = (settingDiagnostic: CanvasOwnerSettingDiagnostic | null) => {
-    if (!settingDiagnostic || settingDiagnostic.severity === 'none') {
-      return 'none';
-    }
-
-    return settingDiagnostic.severity;
-  };
-  const getSettingPanelClassName = (settingKey: CanvasOwnerSettingKey | null) => {
-    const diagnosticTone = getSettingDiagnosticTone(getSettingDiagnosticForKey(settingKey));
-
-    if (diagnosticTone === 'blocking-risk') {
-      return 'border-rose-200 bg-rose-50';
-    }
-
-    if (diagnosticTone === 'warning') {
-      return 'border-amber-200 bg-amber-50';
-    }
-
-    if (diagnosticTone === 'info') {
-      return 'border-blue-100 bg-blue-50';
-    }
-
-    return 'bg-white';
-  };
+  const getSettingPanelClassName = (settingKey: CanvasOwnerSettingKey | null) =>
+    'bg-white';
   const getTextSettingClassName = (settingKey: CanvasOwnerSettingKey) =>
     `space-y-1 rounded border px-2 py-1 ${getSettingPanelClassName(settingKey)}`;
   const renderSettingSourceBadge = (settingKey: CanvasOwnerSettingKey) => (
     <span className="text-[9px] font-semibold text-slate-400">{getSettingSourceLabel(settingSources[settingKey])}</span>
   );
-  const getSettingDiagnosticBadgeClassName = (severity: CanvasOwnerSettingDiagnostic['severity']) => {
-    if (severity === 'blocking-risk') {
-      return 'bg-rose-100 text-rose-700';
-    }
-
-    if (severity === 'warning') {
-      return 'bg-amber-100 text-amber-700';
-    }
-
-    if (severity === 'info') {
-      return 'bg-blue-100 text-blue-700';
-    }
-
-    return 'bg-slate-100 text-slate-500';
-  };
-  const getSettingDiagnosticLabel = (settingDiagnostic: CanvasOwnerSettingDiagnostic) => {
-    if (settingDiagnostic.severity === 'blocking-risk') {
-      return '위험';
-    }
-
-    if (settingDiagnostic.severity === 'warning') {
-      return '알림';
-    }
-
-    if (settingDiagnostic.severity === 'info') {
-      return '정보';
-    }
-
-    return '정상';
-  };
-  const renderSettingDiagnosticBadge = (settingKey: CanvasOwnerSettingKey) => {
-    const settingDiagnostic = getSettingDiagnosticForKey(settingKey);
-
-    if (!settingDiagnostic || settingDiagnostic.severity === 'none') {
-      return null;
-    }
-
-    return (
-      <span
-        className={`rounded px-1 py-0.5 text-[9px] font-semibold leading-none ${getSettingDiagnosticBadgeClassName(settingDiagnostic.severity)}`}
-        title={`${settingDiagnostic.message} ${settingDiagnostic.recommendedAction}`}
-      >
-        {getSettingDiagnosticLabel(settingDiagnostic)}
-      </span>
-    );
-  };
   const renderSettingBadges = (settingKey: CanvasOwnerSettingKey) => (
-    <span className="inline-flex shrink-0 flex-wrap items-center justify-end gap-1">
-      {renderSettingDiagnosticBadge(settingKey)}
-      {renderSettingSourceBadge(settingKey)}
-    </span>
+    <span className="inline-flex shrink-0 flex-wrap items-center justify-end gap-1">{renderSettingSourceBadge(settingKey)}</span>
   );
   const getUiFeatureDiagnosticForDefinitionName = (definitionName: string) =>
     previewUiFeatureDiagnosticByDefinitionName.get(definitionName) || null;
@@ -1276,19 +1094,10 @@ export default function CanvasOwnerPage() {
     return 'bg-white';
   };
   const getUiFeatureStatusItems = (
-    featureDiagnostic: CanvasOwnerUiFeatureDiagnostic | null,
-    settingDiagnostic?: CanvasOwnerSettingDiagnostic | null
+    featureDiagnostic: CanvasOwnerUiFeatureDiagnostic | null
   ): Array<{ label: string; value: string; tone?: 'default' | 'success' | 'warning' | 'muted' }> | undefined => {
     if (!featureDiagnostic) {
-      return settingDiagnostic && settingDiagnostic.severity !== 'none'
-        ? [
-            {
-              label: '설정 진단',
-              value: settingDiagnostic.message,
-              tone: settingDiagnostic.severity === 'info' ? 'default' : 'warning',
-            },
-          ]
-        : undefined;
+      return undefined;
     }
 
     const statusItems: Array<{ label: string; value: string; tone?: 'default' | 'success' | 'warning' | 'muted' }> = [
@@ -1350,19 +1159,6 @@ export default function CanvasOwnerPage() {
       });
     }
 
-    if (settingDiagnostic && settingDiagnostic.severity !== 'none') {
-      statusItems.push({
-        label:
-          settingDiagnostic.severity === 'blocking-risk'
-            ? '위험'
-            : settingDiagnostic.severity === 'warning'
-              ? '설정 알림'
-              : '설정 정보',
-        value: settingDiagnostic.message,
-        tone: settingDiagnostic.severity === 'info' ? 'default' : 'warning',
-      });
-    }
-
     return statusItems;
   };
   const formatOptionalBooleanProp = (value: boolean | undefined) =>
@@ -1378,62 +1174,6 @@ export default function CanvasOwnerPage() {
 
     return name;
   };
-  const createEffectivePropBooleanControl = (
-    settingKey: CanvasOwnerSettingKey,
-    trueValue: CanvasOwnerSettings[CanvasOwnerSettingKey] = true,
-    falseValue: CanvasOwnerSettings[CanvasOwnerSettingKey] = false,
-    trueLabel = 'true',
-    falseLabel = 'false'
-  ): EffectivePropBooleanControl => ({
-    settingKey,
-    trueValue,
-    falseValue,
-    trueLabel,
-    falseLabel,
-  });
-  const createOptionalEffectivePropBooleanControl = (
-    settingKey: CanvasOwnerSettingKey | undefined,
-    trueValue: CanvasOwnerSettings[CanvasOwnerSettingKey] = true,
-    falseValue: CanvasOwnerSettings[CanvasOwnerSettingKey] = false,
-    trueLabel = 'true',
-    falseLabel = 'false'
-  ) =>
-    settingKey
-      ? createEffectivePropBooleanControl(settingKey, trueValue, falseValue, trueLabel, falseLabel)
-      : undefined;
-  const canvasToolbarVisibilitySettingKeys: Partial<Record<string, CanvasOwnerSettingKey>> = {
-    showCanvasTitle: 'showCanvasTitle',
-    showTemplateNameInput: 'showCanvasNameField',
-    showSaveButton: 'showCanvasSaveButton',
-    showTodoButton: 'showCanvasTodoButton',
-    showPreviewToggle: 'showCanvasPreviewToggle',
-    showInteractionModeControls: 'showCanvasInteractionToolControls',
-    showHistoryControls: 'showCanvasHistoryControls',
-    showZoomControls: 'showCanvasZoomControls',
-    showFullscreenControl: 'showCanvasFullscreenControl',
-    showEditSettingsToggle: 'showCanvasEditSettingsToggle',
-    showSelectionPanelTabs: 'showCanvasSelectionPanelTabs',
-  };
-  const persistenceVisibilitySettingKeys: Partial<Record<string, CanvasOwnerSettingKey>> = {
-    showTemplateList: 'showPersistenceTemplateList',
-    showTemplateNameInput: 'showPersistenceTemplateNameField',
-    showLayoutResizeModeSelect: 'showPersistenceLayoutResizePolicyField',
-    showSourceDocumentNameInput: 'showPersistenceSourceDocumentNameField',
-    showSaveButton: 'showPersistenceSaveButton',
-  };
-  const handleCanvasConfigRowCheckedChange = React.useCallback(
-    (checked: boolean, settingKey?: string) => {
-      if (!settingKey) {
-        return;
-      }
-
-      updateSetting(
-        settingKey as CanvasOwnerSettingKey,
-        checked as CanvasOwnerSettings[CanvasOwnerSettingKey]
-      );
-    },
-    [updateSetting]
-  );
   const canvasConfigRows = [
     {
       sectionKey: 'workspaceFrame',
@@ -1443,6 +1183,7 @@ export default function CanvasOwnerPage() {
       description: '공용 캔버스 내부 제목과 설명 헤더를 렌더링하지 않습니다.',
       checked: settings.hideHeader,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('hideHeader', checked),
     },
     {
       sectionKey: 'persistencePanel',
@@ -1452,6 +1193,7 @@ export default function CanvasOwnerPage() {
       description: '템플릿 이름, 원본 문서명, 저장 버튼이 포함된 패널을 숨깁니다.',
       checked: settings.hidePersistencePanel,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('hidePersistencePanel', checked),
     },
     {
       sectionKey: 'workspaceFrame',
@@ -1461,6 +1203,7 @@ export default function CanvasOwnerPage() {
       description: '외부에서 topNotice로 주입하는 상단 안내 영역을 표시합니다.',
       checked: settings.showTopNotice,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showTopNotice', checked),
     },
     {
       sectionKey: 'workspaceFrame',
@@ -1470,6 +1213,7 @@ export default function CanvasOwnerPage() {
       description: 'setMessage(...)로 출력되는 상자 편집 캔버스 내부 실행 알림을 표시합니다. topNotice와는 별개입니다.',
       checked: settings.showWorkspaceMessages,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showWorkspaceMessages', checked),
     },
     {
       sectionKey: 'workspaceFrame',
@@ -1479,6 +1223,7 @@ export default function CanvasOwnerPage() {
       description: '기본 툴바 외의 보조 제어 패널을 함께 표시합니다.',
       checked: settings.showAdditionalControlPanels,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showAdditionalControlPanels', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1488,6 +1233,7 @@ export default function CanvasOwnerPage() {
       description: '상자 편집 캔버스 카드 상단의 제목을 표시합니다.',
       checked: settings.showCanvasTitle,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasTitle', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1497,6 +1243,7 @@ export default function CanvasOwnerPage() {
       description: '캔버스 상단 이름 입력 영역을 표시합니다. 문서 출력/읽기 전용 페이지에서는 런타임 안전 정책에 따라 숨겨질 수 있습니다.',
       checked: settings.showCanvasNameField,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasNameField', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1506,6 +1253,7 @@ export default function CanvasOwnerPage() {
       description: '캔버스 상단 저장 버튼을 표시합니다. 읽기 전용 페이지에서는 런타임 안전 정책에 따라 숨겨질 수 있습니다.',
       checked: settings.showCanvasSaveButton,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasSaveButton', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1515,6 +1263,7 @@ export default function CanvasOwnerPage() {
       description: '템플릿/문서 화면에서 저장 버튼 오른쪽의 할 일 버튼을 표시합니다. 읽기 전용 페이지에서는 숨겨질 수 있습니다.',
       checked: settings.showCanvasTodoButton,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasTodoButton', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1524,6 +1273,7 @@ export default function CanvasOwnerPage() {
       description: '실제 사용 미리보기/편집 전환 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
       checked: settings.showCanvasPreviewToggle,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasPreviewToggle', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1533,6 +1283,7 @@ export default function CanvasOwnerPage() {
       description: '선택과 이동 전환 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
       checked: settings.showCanvasInteractionToolControls,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasInteractionToolControls', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1542,6 +1293,7 @@ export default function CanvasOwnerPage() {
       description: '되돌리기와 다시 실행 버튼을 표시합니다.',
       checked: settings.showCanvasHistoryControls,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasHistoryControls', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1551,6 +1303,7 @@ export default function CanvasOwnerPage() {
       description: '문서 확대/축소 슬라이더와 버튼을 표시합니다.',
       checked: settings.showCanvasZoomControls,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasZoomControls', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1560,6 +1313,7 @@ export default function CanvasOwnerPage() {
       description: '전체 화면 진입/종료 버튼을 표시합니다.',
       checked: settings.showCanvasFullscreenControl,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasFullscreenControl', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1569,6 +1323,7 @@ export default function CanvasOwnerPage() {
       description: '상자 편집 캔버스를 처음 열 때 전체 화면 상태로 시작합니다.',
       checked: settings.defaultCanvasFullscreen,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('defaultCanvasFullscreen', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1578,6 +1333,7 @@ export default function CanvasOwnerPage() {
       description: '상자 편집 패널 열기/닫기 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
       checked: settings.showCanvasEditSettingsToggle,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasEditSettingsToggle', checked),
     },
     {
       sectionKey: 'canvasEditor',
@@ -1587,6 +1343,7 @@ export default function CanvasOwnerPage() {
       description: '미리보기/크기 및 위치/속성/역할 탭 전환 버튼을 표시합니다. 현재 페이지 흐름과 맞지 않으면 알림만 표시합니다.',
       checked: settings.showCanvasSelectionPanelTabs,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showCanvasSelectionPanelTabs', checked),
     },
     {
       sectionKey: 'persistencePanel',
@@ -1596,6 +1353,7 @@ export default function CanvasOwnerPage() {
       description: '불러오기 및 저장 안의 템플릿 선택 목록을 표시합니다.',
       checked: settings.showPersistenceTemplateList,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showPersistenceTemplateList', checked),
     },
     {
       sectionKey: 'persistencePanel',
@@ -1605,6 +1363,7 @@ export default function CanvasOwnerPage() {
       description: '불러오기 및 저장 안의 템플릿 이름 입력을 표시합니다.',
       checked: settings.showPersistenceTemplateNameField,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showPersistenceTemplateNameField', checked),
     },
     {
       sectionKey: 'persistencePanel',
@@ -1614,6 +1373,7 @@ export default function CanvasOwnerPage() {
       description: '불러오기 및 저장 안의 레이아웃 확장 정책 선택을 표시합니다.',
       checked: settings.showPersistenceLayoutResizePolicyField,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showPersistenceLayoutResizePolicyField', checked),
     },
     {
       sectionKey: 'persistencePanel',
@@ -1623,6 +1383,7 @@ export default function CanvasOwnerPage() {
       description: '불러오기 및 저장 안의 원본 문서명 읽기 전용 필드를 표시합니다.',
       checked: settings.showPersistenceSourceDocumentNameField,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showPersistenceSourceDocumentNameField', checked),
     },
     {
       sectionKey: 'persistencePanel',
@@ -1632,6 +1393,7 @@ export default function CanvasOwnerPage() {
       description: '불러오기 및 저장 안의 전체 너비 저장 버튼을 표시합니다.',
       checked: settings.showPersistenceSaveButton,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('showPersistenceSaveButton', checked),
     },
     {
       sectionKey: 'initialLayout',
@@ -1641,6 +1403,7 @@ export default function CanvasOwnerPage() {
       description: '초기 draft 로드 완료 메시지를 사용자 알림으로 출력하지 않습니다.',
       checked: settings.suppressInitialDraftLoadedMessage,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('suppressInitialDraftLoadedMessage', checked),
     },
     {
       sectionKey: 'initialLayout',
@@ -1650,6 +1413,7 @@ export default function CanvasOwnerPage() {
       description: '미리보기 HTML 생성 직후 숨김 측정으로 자동 크기와 peer edge 배치를 먼저 확정합니다.',
       checked: settings.stabilizeInitialLayout,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('stabilizeInitialLayout', checked),
     },
     {
       sectionKey: 'initialLayout',
@@ -1659,6 +1423,7 @@ export default function CanvasOwnerPage() {
       description: '미리보기 런타임 연결 직후 자동 높이와 자동 너비 계산을 한 번 더 실행합니다.',
       checked: settings.enableRuntimeInitialAutoSize,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('enableRuntimeInitialAutoSize', checked),
     },
     {
       sectionKey: 'initialLayout',
@@ -1668,6 +1433,7 @@ export default function CanvasOwnerPage() {
       description: '미리보기 HTML 안정화 중 자동 크기 대상이 아닌 프레임이 예시 value 제거 영향으로 줄어드는 것을 막습니다. 자동 높이/너비 상자는 자체 규칙을 우선합니다.',
       checked: settings.preventInitialValueClearShrink,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('preventInitialValueClearShrink', checked),
     },
     {
       sectionKey: 'peerAutoSize',
@@ -1677,6 +1443,7 @@ export default function CanvasOwnerPage() {
       description: '자동 높이 측정 시 같은 peer cluster의 연동 높이 대상을 제외하고 현재 상자 기준으로 계산합니다.',
       checked: settings.blockPeerClusterHeightTargets,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('blockPeerClusterHeightTargets', checked),
     },
     {
       sectionKey: 'peerAutoSize',
@@ -1686,6 +1453,7 @@ export default function CanvasOwnerPage() {
       description: '자동 너비 측정 시 같은 peer cluster의 연동 너비 대상을 제외하고 현재 상자 기준으로 계산합니다.',
       checked: settings.blockPeerClusterWidthTargets,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('blockPeerClusterWidthTargets', checked),
     },
     {
       sectionKey: 'peerAutoSize',
@@ -1695,6 +1463,7 @@ export default function CanvasOwnerPage() {
       description: '입력, 첨부, 서명 이후 자동 크기 재계산에서 음수 delta를 차단합니다. 기본 OFF가 자동 높이 축소/확장 정상 동작입니다.',
       checked: settings.preventRuntimeAutoSizeShrink,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('preventRuntimeAutoSizeShrink', checked),
     },
     {
       sectionKey: 'saveInput',
@@ -1704,6 +1473,7 @@ export default function CanvasOwnerPage() {
       description: '이름 입력 필드는 표시하되 사용자가 직접 수정할 수 없게 합니다.',
       checked: settings.templateNameReadOnly,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('templateNameReadOnly', checked),
     },
     {
       sectionKey: 'saveInput',
@@ -1713,6 +1483,7 @@ export default function CanvasOwnerPage() {
       description: '저장 버튼을 렌더링하지만 클릭할 수 없는 상태로 만듭니다.',
       checked: settings.saveDisabled,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('saveDisabled', checked),
     },
     {
       sectionKey: 'documentBinding',
@@ -1722,6 +1493,7 @@ export default function CanvasOwnerPage() {
       description: '문서 출력 페이지에서 첨부파일 상자가 실제 문서 첨부 API를 사용하게 합니다.',
       checked: settings.enableDocumentAttachmentApiPath,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('enableDocumentAttachmentApiPath', checked),
     },
     {
       sectionKey: 'documentBinding',
@@ -1731,6 +1503,7 @@ export default function CanvasOwnerPage() {
       description: '문서 출력 페이지에서 전달된 editableValueKeys에 포함된 value 상자만 수정할 수 있게 제한합니다.',
       checked: settings.limitEditableValueKeys,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('limitEditableValueKeys', checked),
     },
     {
       sectionKey: 'saveInput',
@@ -1740,6 +1513,7 @@ export default function CanvasOwnerPage() {
       description: '템플릿 저장 성공 시 owner 페이지의 저장 후처리 콜백을 실행합니다.',
       checked: settings.enableOnTemplateSaved,
       disabled: false,
+      onCheckedChange: (checked: boolean) => updateSetting('enableOnTemplateSaved', checked),
     },
   ];
   const canvasConfigSections = [
@@ -1782,7 +1556,7 @@ export default function CanvasOwnerPage() {
     ...section,
     rows: canvasConfigRows.filter((row) => row.sectionKey === section.key),
   }));
-  const effectiveTemplateWorkspacePropRows: EffectiveTemplateWorkspacePropRow[] = [
+  const effectiveTemplateWorkspacePropRows = [
     {
       section: 'Page routing',
       name: 'page',
@@ -1830,14 +1604,12 @@ export default function CanvasOwnerPage() {
       name: 'hideHeader',
       value: previewHideHeader ? 'true' : 'false',
       description: '공용 캔버스 내부 헤더 출력 여부를 제어합니다.',
-      booleanControl: createEffectivePropBooleanControl('hideHeader'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'hidePersistencePanel',
       value: previewHidePersistencePanel ? 'true' : 'false',
       description: '불러오기 및 저장 패널 출력 여부를 제어합니다.',
-      booleanControl: createEffectivePropBooleanControl('hidePersistencePanel'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -1849,29 +1621,25 @@ export default function CanvasOwnerPage() {
       section: 'TemplateEditWorkspaceProps',
       name: 'additionalControlPanels',
       value: previewAdditionalControlPanelsEnabled ? 'enabled' : 'disabled',
-      description: '상위 표시 설정과 page의 추가 패널 전달이 모두 맞을 때 enabled가 됩니다.',
-      booleanControl: createEffectivePropBooleanControl('showAdditionalControlPanels', true, false, 'enabled', 'disabled'),
+      description: 'PDF 추출 등 외부 제어 패널 주입 여부입니다.',
     },
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'topNotice',
       value: previewTopNoticeEnabled ? 'enabled' : 'disabled',
-      description: '상위 표시 설정과 page의 topNotice 전달이 모두 맞을 때 enabled가 됩니다.',
-      booleanControl: createEffectivePropBooleanControl('showTopNotice', true, false, 'enabled', 'disabled'),
+      description: '공용 캔버스 상단 알림 주입 여부입니다.',
     },
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'showWorkspaceMessages',
       value: previewShowWorkspaceMessages ? 'true' : 'false',
       description: '상자 편집 캔버스 내부 실행 알림(message) 출력 여부입니다.',
-      booleanControl: createEffectivePropBooleanControl('showWorkspaceMessages'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'suppressInitialDraftLoadedMessage',
       value: previewSuppressInitialDraftLoadedMessage ? 'true' : 'false',
       description: '초기 초안 로드 알림을 억제합니다.',
-      booleanControl: createEffectivePropBooleanControl('suppressInitialDraftLoadedMessage'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -1902,14 +1670,12 @@ export default function CanvasOwnerPage() {
       name: 'templateNameReadOnly',
       value: previewTemplateNameReadOnly ? 'true' : 'false',
       description: '이름 입력 필드를 읽기 전용으로 둘지 정합니다.',
-      booleanControl: createEffectivePropBooleanControl('templateNameReadOnly'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'saveDisabled',
       value: previewSaveDisabled ? 'true' : 'false',
       description: '저장 버튼의 실제 비활성 상태입니다.',
-      booleanControl: createEffectivePropBooleanControl('saveDisabled'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -1934,7 +1700,6 @@ export default function CanvasOwnerPage() {
       name: 'defaultCanvasFullscreen',
       value: previewWorkspaceProps.defaultCanvasFullscreen ? 'true' : 'false',
       description: '상자 편집 캔버스의 초기 전체 화면 활성 상태입니다.',
-      booleanControl: createEffectivePropBooleanControl('defaultCanvasFullscreen'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -1945,9 +1710,8 @@ export default function CanvasOwnerPage() {
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'allowCanvasBoxSelection',
-      value: workspacePreviewSettings.allowCanvasBoxSelection ? 'true' : 'false',
+      value: previewSettings.allowCanvasBoxSelection ? 'true' : 'false',
       description: '읽기 전용 페이지에서 보기만 할지, 텍스트 상호작용 없이 상자 선택을 허용할지 정하는 owner 설정입니다.',
-      booleanControl: createEffectivePropBooleanControl('allowCanvasBoxSelection'),
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -1984,7 +1748,6 @@ export default function CanvasOwnerPage() {
       name: 'canvasSpecifiedHeightEnabled',
       value: previewCanvasSpecifiedHeightEnabled ? 'true' : 'false',
       description: '자동 높이를 끄고 편집부 높이를 직접 지정하는지 여부입니다.',
-      booleanControl: createEffectivePropBooleanControl('autoCanvasHeight', false, true),
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -1997,7 +1760,6 @@ export default function CanvasOwnerPage() {
       name: 'canvasSpecifiedWidthEnabled',
       value: previewCanvasSpecifiedWidthEnabled ? 'true' : 'false',
       description: '자동 너비를 끄고 캔버스 컨테이너 너비를 직접 지정하는지 여부입니다.',
-      booleanControl: createEffectivePropBooleanControl('autoCanvasWidth', false, true),
     },
     {
       section: 'TemplateEditWorkspaceProps',
@@ -2032,28 +1794,25 @@ export default function CanvasOwnerPage() {
         (selectedManagedPage.id === 'templates' || (selectedManagedPage.id === 'canvas' && settings.enableOnTemplateSaved))
           ? 'enabled'
           : 'disabled',
-      description: '상위 콜백 연결 설정과 page의 저장 콜백 전달이 모두 맞을 때 enabled가 됩니다.',
-      booleanControl: createEffectivePropBooleanControl('enableOnTemplateSaved', true, false, 'enabled', 'disabled'),
+      description: '템플릿 저장 후 owner 페이지 콜백 연결 여부입니다.',
     },
     {
       section: 'TemplateEditWorkspaceProps',
       name: 'onSaveDraftHtml',
       value: canEditCurrentWorkspace && documentSaveEnabled ? 'enabled' : 'disabled',
-      description: '문서 출력 페이지 저장 콜백 연결 여부입니다. 저장 비활성 설정은 이 콜백 사용 가능 상태와 별도로 진단합니다.',
+      description: '문서 출력 페이지 저장 콜백 연결 여부입니다.',
     },
     ...(previewCanvasToolbarVisibility ? Object.entries(previewCanvasToolbarVisibility) : []).map(([name, value]) => ({
       section: 'canvasToolbarVisibility',
       name: displayEffectivePropName(name),
       value: value ? 'true' : 'false',
       description: '상자 캔버스 편집 영역의 항목별 실제 표시 여부입니다.',
-      booleanControl: createOptionalEffectivePropBooleanControl(canvasToolbarVisibilitySettingKeys[name]),
     })),
     ...(previewPersistenceVisibility ? Object.entries(previewPersistenceVisibility) : []).map(([name, value]) => ({
       section: 'persistenceVisibility',
       name: displayEffectivePropName(name),
       value: value ? 'true' : 'false',
       description: '불러오기 및 저장 패널의 항목별 실제 표시 여부입니다.',
-      booleanControl: createOptionalEffectivePropBooleanControl(persistenceVisibilitySettingKeys[name]),
     })),
     ...previewUiFeatureDiagnostics.flatMap((featureDiagnostic) => [
       {
@@ -2061,14 +1820,12 @@ export default function CanvasOwnerPage() {
         name: `${featureDiagnostic.key}.configuredVisible`,
         value: featureDiagnostic.configuredVisible ? 'true' : 'false',
         description: `${featureDiagnostic.label}: 환경 설정에서 선택한 표시/기능 값입니다.`,
-        booleanControl: createEffectivePropBooleanControl(featureDiagnostic.settingKey),
       },
       {
         section: 'uiFeatureState',
         name: `${featureDiagnostic.key}.visible`,
         value: featureDiagnostic.visible ? 'true' : 'false',
         description: `${featureDiagnostic.label}: 모드 진단과 무관하게 설정값만 반영한 실제 출력 상태입니다.`,
-        booleanControl: createEffectivePropBooleanControl(featureDiagnostic.settingKey),
       },
       {
         section: 'uiFeatureState',
@@ -2085,70 +1842,41 @@ export default function CanvasOwnerPage() {
           `${featureDiagnostic.label}: 별도 실행 조건 진단이 없습니다.`,
       },
     ]),
-    ...(previewProblemSettingDiagnostics.length
-      ? previewProblemSettingDiagnostics.flatMap((settingDiagnostic) => [
-          {
-            section: 'settingDiagnostics',
-            name: `${settingDiagnostic.settingKey}.severity`,
-            value: settingDiagnostic.severity,
-            description: `${settingDiagnostic.label}: ${settingDiagnostic.category}`,
-          },
-          {
-            section: 'settingDiagnostics',
-            name: `${settingDiagnostic.settingKey}.message`,
-            value: settingDiagnostic.message,
-            description: settingDiagnostic.recommendedAction,
-          },
-        ])
-      : [
-          {
-            section: 'settingDiagnostics',
-            name: 'checkedSettings',
-            value: `${previewSettingDiagnostics.length} checked`,
-            description: '현재 선택한 page 조건에서 설정 충돌이 감지되지 않았습니다.',
-          },
-        ]),
     {
       section: 'templateUsagePreviewLayoutDebugOptions',
       name: 'stabilizeInitialLayout',
       value: formatOptionalBooleanProp(previewTemplateUsagePreviewLayoutDebugOptions?.stabilizeInitialLayout),
       description: '미리보기 HTML 생성 직후 숨김 측정으로 자동 크기와 peer edge 배치를 확정합니다.',
-      booleanControl: createEffectivePropBooleanControl('stabilizeInitialLayout'),
     },
     {
       section: 'templateUsagePreviewLayoutDebugOptions',
       name: 'enableInitialAutoSize',
       value: formatOptionalBooleanProp(previewTemplateUsagePreviewLayoutDebugOptions?.enableInitialAutoSize),
       description: '런타임 연결 직후 자동 크기 계산을 한 번 더 실행합니다.',
-      booleanControl: createEffectivePropBooleanControl('enableRuntimeInitialAutoSize'),
     },
     {
       section: 'templateUsagePreviewLayoutDebugOptions',
       name: 'preventInitialValueClearShrink',
       value: formatOptionalBooleanProp(previewTemplateUsagePreviewLayoutDebugOptions?.preventInitialValueClearShrink),
       description: '자동 크기 대상이 아닌 프레임의 미리보기 진입 1회성 축소만 차단합니다.',
-      booleanControl: createEffectivePropBooleanControl('preventInitialValueClearShrink'),
     },
     {
       section: 'templateUsagePreviewLayoutDebugOptions',
       name: 'preventRuntimeAutoSizeShrink',
       value: formatOptionalBooleanProp(previewTemplateUsagePreviewLayoutDebugOptions?.preventRuntimeAutoSizeShrink),
       description: '입력/첨부/서명 이후 런타임 자동 크기 축소를 차단합니다. 기본 OFF입니다.',
-      booleanControl: createEffectivePropBooleanControl('preventRuntimeAutoSizeShrink'),
     },
     {
       section: 'templateUsagePreviewLayoutDebugOptions',
       name: 'measurePeerClusterHeightTargets',
       value: formatOptionalBooleanProp(previewTemplateUsagePreviewLayoutDebugOptions?.measurePeerClusterHeightTargets),
       description: '자동 높이 측정에서 peer cluster 높이 대상을 포함합니다.',
-      booleanControl: createEffectivePropBooleanControl('blockPeerClusterHeightTargets', false, true),
     },
     {
       section: 'templateUsagePreviewLayoutDebugOptions',
       name: 'measurePeerClusterWidthTargets',
       value: formatOptionalBooleanProp(previewTemplateUsagePreviewLayoutDebugOptions?.measurePeerClusterWidthTargets),
       description: '자동 너비 측정에서 peer cluster 너비 대상을 포함합니다.',
-      booleanControl: createEffectivePropBooleanControl('blockPeerClusterWidthTargets', false, true),
     },
   ];
   const effectiveTemplateWorkspacePropSections = [
@@ -2200,13 +1928,6 @@ export default function CanvasOwnerPage() {
       label: 'UI 기능 진단 상태',
       definitionName: 'resolvedUiFeatureDiagnostics',
       description: '환경 설정값을 실제 출력 기준으로 두고, 모드 불일치와 실행 조건은 알림으로만 보여줍니다.',
-    },
-    {
-      key: 'settingDiagnostics',
-      sourceSection: 'settingDiagnostics',
-      label: '설정 충돌 진단',
-      definitionName: 'resolvedSettingDiagnostics',
-      description: '환경 설정값은 그대로 두고, page 모드와 런타임 조건 충돌만 표시합니다.',
     },
   ].map((section) => ({
     ...section,
@@ -2559,7 +2280,6 @@ export default function CanvasOwnerPage() {
               {section.rows.map((row) => {
                 const settingKey = getSettingKeyForDefinitionName(row.definitionName);
                 const featureDiagnostic = getUiFeatureDiagnosticForDefinitionName(row.definitionName);
-                const settingDiagnostic = getSettingDiagnosticForKey(settingKey);
 
                 return (
                   <SettingToggleRow
@@ -2567,14 +2287,13 @@ export default function CanvasOwnerPage() {
                     label={row.label}
                     sectionLabel={row.sectionLabel}
                     definitionName={`${row.definitionName}${settingKey ? ` · ${getSettingSourceLabel(settingSources[settingKey])}` : ''}`}
-                    settingKey={settingKey || undefined}
                     env={row.definitionName}
                     description={row.description}
-                    statusItems={getUiFeatureStatusItems(featureDiagnostic, settingDiagnostic)}
+                    statusItems={getUiFeatureStatusItems(featureDiagnostic)}
                     checked={row.checked}
                     disabled={row.disabled}
                     className={`${getSettingPanelClassName(settingKey)} ${getUiFeaturePanelClassName(featureDiagnostic)}`}
-                    onCheckedChange={handleCanvasConfigRowCheckedChange}
+                    onCheckedChange={row.onCheckedChange}
                   />
                 );
               })}
@@ -2584,150 +2303,6 @@ export default function CanvasOwnerPage() {
       )}
     </div>
   );
-  const renderSettingConflictDiagnostics = () => (
-    <div className="space-y-1.5" {...canvasOwnerItem('setting-conflict-diagnostics', '설정 충돌 진단')}>
-      <OwnerSettingsSectionHeader
-        label="설정 충돌 진단"
-        description="환경설정 값은 그대로 두고 현재 page 조건에서 문제가 되는 충돌만 표시합니다."
-        count={`${previewProblemSettingDiagnostics.length}개 / ${previewSettingDiagnostics.length}개 점검`}
-        badge={
-          <span className="flex items-center gap-1">
-            {previewBlockingSettingDiagnosticCount > 0 ? (
-              <Badge variant="red" className="px-2 py-0 text-[10px]">
-                위험 {previewBlockingSettingDiagnosticCount}
-              </Badge>
-            ) : null}
-            {previewWarningSettingDiagnosticCount > 0 ? (
-              <Badge variant="amber" className="px-2 py-0 text-[10px]">
-                알림 {previewWarningSettingDiagnosticCount}
-              </Badge>
-            ) : null}
-          </span>
-        }
-      />
-      {previewProblemSettingDiagnostics.length > 0 ? (
-        <div className="grid gap-1 md:grid-cols-2">
-          {previewProblemSettingDiagnostics.map((settingDiagnostic) => {
-            const diagnosticFixLabel = settingDiagnostic.fixes.map((fix) => fix.label).join(' · ');
-            const diagnosticCardClassName = `min-w-0 rounded border px-2 py-1.5 text-left text-[11px] transition-colors ${
-              settingDiagnostic.severity === 'blocking-risk'
-                ? 'border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100'
-                : settingDiagnostic.severity === 'warning'
-                  ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
-                  : 'border-blue-100 bg-blue-50 text-blue-800 hover:bg-blue-100'
-            } ${settingDiagnostic.fixes.length > 0 ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500' : ''}`;
-            const diagnosticCardContent = (
-              <>
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                  <div className="min-w-0 truncate font-semibold">
-                    {settingDiagnostic.label}
-                  </div>
-                  <span
-                    className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold leading-none ${getSettingDiagnosticBadgeClassName(settingDiagnostic.severity)}`}
-                  >
-                    {getSettingDiagnosticLabel(settingDiagnostic)}
-                  </span>
-                </div>
-                <div className="mt-0.5 truncate text-[10px] font-semibold" title={settingDiagnostic.definitionName}>
-                  {settingDiagnostic.definitionName}
-                </div>
-                <p className="mt-1 text-[10px] leading-4">
-                  {settingDiagnostic.message}
-                </p>
-                <p className="mt-0.5 text-[10px] leading-4 opacity-80">
-                  {settingDiagnostic.recommendedAction}
-                </p>
-                {diagnosticFixLabel ? (
-                  <div className="mt-1 truncate rounded bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold" title={diagnosticFixLabel}>
-                    클릭 적용: {diagnosticFixLabel}
-                  </div>
-                ) : null}
-                <div className="mt-1 grid gap-1 text-[9px] font-semibold opacity-80 sm:grid-cols-2">
-                  <div className="truncate" title={settingDiagnostic.configuredValue}>
-                    설정 {settingDiagnostic.configuredValue}
-                  </div>
-                  <div className="truncate" title={settingDiagnostic.effectiveValue}>
-                    적용 {settingDiagnostic.effectiveValue}
-                  </div>
-                </div>
-              </>
-            );
-
-            return settingDiagnostic.fixes.length > 0 ? (
-              <button
-                key={`${settingDiagnostic.settingKey}:${settingDiagnostic.severity}`}
-                type="button"
-                className={diagnosticCardClassName}
-                title={diagnosticFixLabel}
-                onClick={() => applySettingDiagnosticFix(settingDiagnostic)}
-                {...canvasOwnerEnv(settingDiagnostic.definitionName)}
-              >
-                {diagnosticCardContent}
-              </button>
-            ) : (
-              <div
-                key={`${settingDiagnostic.settingKey}:${settingDiagnostic.severity}`}
-                className={diagnosticCardClassName}
-                {...canvasOwnerEnv(settingDiagnostic.definitionName)}
-              >
-                {diagnosticCardContent}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[11px] font-medium text-emerald-700">
-          현재 선택한 page 조건에서 설정 충돌이 감지되지 않았습니다.
-        </div>
-      )}
-    </div>
-  );
-  const renderEffectivePropValue = (row: EffectiveTemplateWorkspacePropRow) => {
-    const booleanControl = row.booleanControl;
-
-    if (!booleanControl) {
-      return (
-        <div className="mt-0.5 truncate text-[10px] font-semibold leading-[11px] text-blue-700" title={row.value}>
-          {row.value}
-        </div>
-      );
-    }
-
-    const trueLabel = booleanControl.trueLabel || 'true';
-    const falseLabel = booleanControl.falseLabel || 'false';
-    const valueOptions = [
-      {
-        label: trueLabel,
-        value: booleanControl.trueValue,
-        active: row.value === trueLabel,
-      },
-      {
-        label: falseLabel,
-        value: booleanControl.falseValue,
-        active: row.value === falseLabel,
-      },
-    ];
-
-    return (
-      <div className="mt-0.5 flex min-w-0 flex-wrap gap-1" title={`${row.name}: ${row.value}`}>
-        {valueOptions.map((option) => (
-          <button
-            key={`${row.section}:${row.name}:${option.label}`}
-            type="button"
-            className={`h-5 min-w-[44px] rounded border px-1 text-[10px] font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 ${
-              option.active
-                ? 'border-blue-600 bg-blue-600 text-white'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700'
-            }`}
-            aria-pressed={option.active}
-            onClick={() => applyEffectivePropBooleanControl(booleanControl, option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    );
-  };
   const renderEffectiveTemplateWorkspaceProps = () => (
     <div className="space-y-1.5">
       <OwnerSettingsSectionHeader
@@ -2749,7 +2324,9 @@ export default function CanvasOwnerPage() {
                   <div className="flex min-w-0 items-center gap-1 leading-3">
                     <span className="min-w-0 truncate font-semibold text-slate-800">{row.name}</span>
                   </div>
-                  {renderEffectivePropValue(row)}
+                  <div className="mt-0.5 truncate text-[10px] font-semibold leading-[11px] text-blue-700" title={row.value}>
+                    {row.value}
+                  </div>
                   <div className="mt-0.5 truncate text-[10px] leading-[11px] text-slate-500" title={row.description}>
                     {row.description}
                   </div>
@@ -2895,11 +2472,10 @@ export default function CanvasOwnerPage() {
 		            <CardContent className="min-w-0 max-w-full space-y-3 p-4 pt-0">
 			              {renderPageSettingsImportSection()}
 			              {renderCanvasSizeSettings()}
-			              {renderCanvasSelectionOverlaySettings()}
-			              {renderCanvasTextSettings()}
-			              {renderCanvasConfigSections()}
-		              {renderSettingConflictDiagnostics()}
-		              {renderEffectiveTemplateWorkspaceProps()}
+		              {renderCanvasSelectionOverlaySettings()}
+		              {renderCanvasTextSettings()}
+		              {renderCanvasConfigSections()}
+	              {renderEffectiveTemplateWorkspaceProps()}
 	            </CardContent>
 	          </Card>
 
@@ -2913,8 +2489,8 @@ export default function CanvasOwnerPage() {
                   key={`canvas-owner:${selectedManagedPage.id}:${selectedTemplateId || 'no-template'}`}
                   surface={selectedManagedPage.surface}
                   applyStoredCanvasOwnerSettings={false}
-                  canvasOwnerSettings={workspacePreviewSettings}
-                  canvasOwnerSettingSources={workspacePreviewSettingSources}
+                  canvasOwnerSettings={previewSettings}
+                  canvasOwnerSettingSources={previewSettingSources}
                   initialTemplateId={selectedTemplateId}
                   canvasOwnerAdditionalControlPanels={routeContractAdditionalControlPanels}
                   canvasOwnerCanEditWorkspace={canEditCurrentWorkspace}
@@ -2935,8 +2511,8 @@ export default function CanvasOwnerPage() {
                   key={`canvas-owner:${selectedManagedPage.id}:${selectedDocumentInitialDraft.draftKey}`}
                   surface={selectedManagedPage.surface}
                   applyStoredCanvasOwnerSettings={false}
-                  canvasOwnerSettings={workspacePreviewSettings}
-                  canvasOwnerSettingSources={workspacePreviewSettingSources}
+                  canvasOwnerSettings={previewSettings}
+                  canvasOwnerSettingSources={previewSettingSources}
                   initialDraft={selectedDocumentInitialDraft}
                   editableValueKeys={previewBaseWorkspaceProps.editableValueKeys}
                   canvasOwnerAdditionalControlPanels={routeContractAdditionalControlPanels}
@@ -2961,7 +2537,7 @@ export default function CanvasOwnerPage() {
           </div>
 
           <div className="min-w-0 max-w-full xl:col-span-2">
-            <MemoOwnerSharedUiPreview
+            <OwnerSharedUiPreview
               ownerLabel={`공용 캔버스 · ${selectedManagedPage.label}`}
               itemAttributes={canvasOwnerItem}
             />

@@ -1,6 +1,5 @@
 'use client';
 
-import * as React from 'react';
 import TemplateEditWorkspace from '../../components/template/TemplateEditWorkspace';
 import type { TemplateEditWorkspaceProps } from '../../components/template/workspace/types';
 import {
@@ -47,7 +46,7 @@ const resolveCanvasOwnedWorkspaceProps = ({
   });
 };
 
-export const CanvasOwnedWorkspace = React.memo(function CanvasOwnedWorkspace({
+export function CanvasOwnedWorkspace({
   applyStoredCanvasOwnerSettings = true,
   canvasOwnerSettings: explicitCanvasOwnerSettings,
   canvasOwnerSettingSources: explicitCanvasOwnerSettingSources,
@@ -89,4 +88,4 @@ export const CanvasOwnedWorkspace = React.memo(function CanvasOwnedWorkspace({
       <TemplateEditWorkspace {...resolvedWorkspaceProps} />
     </div>
   );
-});
+}

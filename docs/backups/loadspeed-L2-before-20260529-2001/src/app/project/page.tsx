@@ -40,7 +40,6 @@ import { Input } from '../../components/ui/Input';
 import { DoxAppShell } from '../../components/design-system/layout';
 import { MejaiScrollTable, type MejaiScrollTableColumn, type MejaiScrollTableRow } from '../../components/ui/MejaiScrollTable';
 import { MultiEntityPicker } from '../../components/ui/MultiEntityPicker';
-import { buildOwnerWorkspaceDocumentDetailPath, buildPickerDocumentListPath } from '../../lib/documentApiPaths';
 import { buildDocumentHtmlContentKey } from '../../lib/documentCanvasHtml';
 import {
   collapseDocumentCanvasWhitespace as collapseWhitespace,
@@ -259,6 +258,9 @@ const fetchSuccessDataWithTimeout = async <T,>(url: string, timeoutMs = 8000): P
     }
   }
 };
+
+const buildOwnerWorkspaceDocumentDetailPath = (documentId: string) =>
+  `/api/documents/${encodeURIComponent(documentId)}?profile=owner-workspace`;
 
 const getTodayInputValue = () => {
   const now = new Date();
@@ -4267,7 +4269,7 @@ export default function ProjectPage() {
 
       try {
         const [nextDocuments, nextPhotos] = await Promise.allSettled([
-          fetchSuccessData<DocumentListItem[]>(buildPickerDocumentListPath({ siteId: selectedSiteId })),
+          fetchSuccessData<DocumentListItem[]>(`/api/documents?siteId=${encodeURIComponent(selectedSiteId)}`),
           fetchSuccessData<PhotoListItemDto[]>(`/api/photos?siteId=${encodeURIComponent(selectedSiteId)}`),
         ]);
 
@@ -4311,7 +4313,7 @@ export default function ProjectPage() {
       const results = await Promise.allSettled(
         selectedListSiteIds.map(async (siteId) => {
           const nextDocuments = await fetchSuccessData<DocumentListItem[]>(
-            buildPickerDocumentListPath({ siteId })
+            `/api/documents?siteId=${encodeURIComponent(siteId)}`
           );
           const safeDocuments = Array.isArray(nextDocuments) ? nextDocuments : [];
           const [memberResult, documentMemberResult] = await Promise.allSettled([
@@ -4389,7 +4391,7 @@ export default function ProjectPage() {
         sites.map(async (site) => {
           const encodedSiteId = encodeURIComponent(site.id);
           const [documentResult, photoResult, checklistResult] = await Promise.allSettled([
-            fetchSuccessData<DocumentListItem[]>(buildPickerDocumentListPath({ siteId: site.id })),
+            fetchSuccessData<DocumentListItem[]>(`/api/documents?siteId=${encodedSiteId}`),
             fetchSuccessData<PhotoListItemDto[]>(`/api/photos?siteId=${encodedSiteId}`),
             fetchSuccessData<SiteChecklistSummaryDto>(`/api/sites/${encodedSiteId}/checklist`),
           ]);
@@ -4531,7 +4533,7 @@ export default function ProjectPage() {
 
   const syncSiteDocuments = React.useCallback(async (siteId: string) => {
     const nextDocuments = await fetchSuccessData<DocumentListItem[]>(
-      buildPickerDocumentListPath({ siteId })
+      `/api/documents?siteId=${encodeURIComponent(siteId)}`
     );
     const safeDocuments = Array.isArray(nextDocuments) ? nextDocuments : [];
     const nextScopeContexts = await fetchTemplateScopeContextsForSiteDocuments(siteId, safeDocuments).catch(() => null);

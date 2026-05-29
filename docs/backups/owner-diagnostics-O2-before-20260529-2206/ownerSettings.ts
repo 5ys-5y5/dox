@@ -114,11 +114,6 @@ export type CanvasOwnerSettingDiagnosticCategory =
   | 'persistence-performance'
   | 'layout-risk'
   | 'feedback-risk';
-export type CanvasOwnerSettingDiagnosticFix = {
-  settingKey: CanvasOwnerSettingKey;
-  value: CanvasOwnerSettings[CanvasOwnerSettingKey];
-  label: string;
-};
 export type CanvasOwnerSettingDiagnostic = {
   settingKey: CanvasOwnerSettingKey;
   definitionName: string;
@@ -129,7 +124,6 @@ export type CanvasOwnerSettingDiagnostic = {
   effectiveValue: string;
   message: string;
   recommendedAction: string;
-  fixes: CanvasOwnerSettingDiagnosticFix[];
 };
 
 type CanvasOwnerUiFeatureDiagnosticState = {
@@ -642,16 +636,6 @@ const formatCanvasOwnerDiagnosticValue = (value: unknown) => {
   return 'enabled';
 };
 
-const createCanvasOwnerSettingDiagnosticFix = <K extends CanvasOwnerSettingKey>(
-  settingKey: K,
-  value: CanvasOwnerSettings[K],
-  label?: string
-): CanvasOwnerSettingDiagnosticFix => ({
-  settingKey,
-  value,
-  label: label || `${canvasOwnerSettingLabels[settingKey]} = ${formatCanvasOwnerDiagnosticValue(value)}`,
-});
-
 const readCssPixelValue = (value: string) => {
   const match = value.trim().match(/^(\d+(?:\.\d+)?)px$/);
   return match ? Number(match[1]) : null;
@@ -743,7 +727,7 @@ export const resolveCanvasOwnerSettingDiagnostics = ({
   };
   const diagnosticsByKey = new Map<
     CanvasOwnerSettingKey,
-    Pick<CanvasOwnerSettingDiagnostic, 'severity' | 'category' | 'message' | 'recommendedAction' | 'fixes'>
+    Pick<CanvasOwnerSettingDiagnostic, 'severity' | 'category' | 'message' | 'recommendedAction'>
   >();
   const isPageSetting = (key: CanvasOwnerSettingKey) => settingSources?.[key] === 'page';
   const report = (
@@ -751,8 +735,7 @@ export const resolveCanvasOwnerSettingDiagnostics = ({
     severity: CanvasOwnerSettingDiagnosticSeverity,
     category: CanvasOwnerSettingDiagnosticCategory,
     message: string,
-    recommendedAction: string,
-    fixes: CanvasOwnerSettingDiagnosticFix[] = []
+    recommendedAction: string
   ) => {
     const current = diagnosticsByKey.get(settingKey);
     if (
@@ -767,149 +750,69 @@ export const resolveCanvasOwnerSettingDiagnostics = ({
       category,
       message,
       recommendedAction,
-      fixes,
     });
   };
 
   if (context.templateEditMode && settings.hidePersistencePanel) {
-    report(
-      'hidePersistencePanel',
-      'warning',
-      'capability-blocked',
-      '템플릿 편집 화면에서 불러오기 및 저장 패널이 숨김 상태입니다.',
-      '템플릿 저장/불러오기가 필요하면 이 설정을 OFF로 바꾸세요.',
-      [createCanvasOwnerSettingDiagnosticFix('hidePersistencePanel', false)]
-    );
+    report('hidePersistencePanel', 'warning', 'capability-blocked', '템플릿 편집 화면에서 불러오기 및 저장 패널이 숨김 상태입니다.', '템플릿 저장/불러오기가 필요하면 이 설정을 OFF로 바꾸세요.');
   }
   if (context.hasInitialDraft && persistencePanelVisible) {
-    report(
-      'hidePersistencePanel',
-      'warning',
-      'persistence-performance',
-      '문서 기반 화면에서 불러오기 및 저장 패널이 표시되어 템플릿 목록 로드가 발생할 수 있습니다.',
-      '문서 편집 화면에서 템플릿 persistence가 필요하지 않다면 패널 숨김을 검토하세요.',
-      [createCanvasOwnerSettingDiagnosticFix('hidePersistencePanel', true, '문서 화면에서 불러오기/저장 패널 숨김')]
-    );
-    report(
-      'templateListDisplay',
-      'warning',
-      'persistence-performance',
-      '문서 기반 화면에서 템플릿 목록 표시 방식이 런타임 로드 비용을 만들 수 있습니다.',
-      '문서 편집 화면에서는 persistence 표시 설정과 함께 판단하세요.',
-      [createCanvasOwnerSettingDiagnosticFix('hidePersistencePanel', true, '문서 화면에서 persistence 패널 숨김')]
-    );
+    report('hidePersistencePanel', 'warning', 'persistence-performance', '문서 기반 화면에서 불러오기 및 저장 패널이 표시되어 템플릿 목록 로드가 발생할 수 있습니다.', '문서 편집 화면에서 템플릿 persistence가 필요하지 않다면 패널 숨김을 검토하세요.');
+    report('templateListDisplay', 'warning', 'persistence-performance', '문서 기반 화면에서 템플릿 목록 표시 방식이 런타임 로드 비용을 만들 수 있습니다.', '문서 편집 화면에서는 persistence 표시 설정과 함께 판단하세요.');
   }
   if (!persistencePanelVisible && isPageSetting('templateListDisplay')) {
     report('templateListDisplay', 'info', 'inactive-setting', '불러오기 및 저장 패널이 숨겨져 templateListDisplay 값이 화면에 적용되지 않습니다.', '패널을 표시할 때만 이 설정이 의미가 있습니다.');
   }
   if (settings.showTopNotice && !baseProps.topNotice) {
-    report(
-      'showTopNotice',
-      'info',
-      'runtime-missing',
-      '상단 알림 표시가 켜져 있지만 이 page가 전달한 topNotice가 없어 effective 값은 disabled입니다.',
-      '상단 알림은 상위 설정 ON과 page의 topNotice 전달이 모두 있어야 표시됩니다.',
-      [createCanvasOwnerSettingDiagnosticFix('showTopNotice', false, '런타임 값이 없으므로 상단 알림 OFF')]
-    );
+    report('showTopNotice', 'info', 'runtime-missing', '상단 알림 표시가 켜져 있지만 이 page가 전달한 topNotice가 없습니다.', '알림이 필요한 page인지 확인하세요.');
   }
   if (!settings.showTopNotice && baseProps.topNotice) {
-    report(
-      'showTopNotice',
-      'warning',
-      'feedback-risk',
-      '이 page가 topNotice를 전달하지만 설정이 꺼져 effective 값은 disabled입니다.',
-      '필수 안내라면 상단 알림 표시를 켜세요.',
-      [createCanvasOwnerSettingDiagnosticFix('showTopNotice', true)]
-    );
+    report('showTopNotice', 'warning', 'feedback-risk', '이 page가 topNotice를 전달하지만 설정이 꺼져 표시되지 않습니다.', '필수 안내라면 상단 알림 표시를 켜세요.');
   }
   if (!settings.showWorkspaceMessages && context.editableMode) {
-    report(
-      'showWorkspaceMessages',
-      'warning',
-      'feedback-risk',
-      '편집 가능한 화면에서 실행 알림이 숨김 상태입니다.',
-      '저장, 선택, 첨부 결과를 사용자가 확인해야 하면 켜두세요.',
-      [createCanvasOwnerSettingDiagnosticFix('showWorkspaceMessages', true)]
-    );
+    report('showWorkspaceMessages', 'warning', 'feedback-risk', '편집 가능한 화면에서 실행 알림이 숨김 상태입니다.', '저장, 선택, 첨부 결과를 사용자가 확인해야 하면 켜두세요.');
   }
   if (settings.showAdditionalControlPanels && !baseProps.additionalControlPanels) {
-    report(
-      'showAdditionalControlPanels',
-      'info',
-      'runtime-missing',
-      '추가 제어 패널 표시가 켜져 있지만 연결된 패널이 없어 effective 값은 disabled입니다.',
-      '추가 제어 패널은 상위 설정 ON과 page의 패널 전달이 모두 있어야 표시됩니다.',
-      [createCanvasOwnerSettingDiagnosticFix('showAdditionalControlPanels', false, '런타임 패널이 없으므로 추가 제어 패널 OFF')]
-    );
+    report('showAdditionalControlPanels', 'info', 'runtime-missing', '추가 제어 패널 표시가 켜져 있지만 연결된 패널이 없습니다.', '이 page가 추가 패널을 제공하는지 확인하세요.');
   }
   if (!settings.showAdditionalControlPanels && baseProps.additionalControlPanels) {
-    report(
-      'showAdditionalControlPanels',
-      'info',
-      'inactive-setting',
-      '추가 제어 패널이 전달됐지만 설정이 꺼져 effective 값은 disabled입니다.',
-      '해당 패널을 써야 하면 설정을 켜세요.',
-      [createCanvasOwnerSettingDiagnosticFix('showAdditionalControlPanels', true)]
-    );
+    report('showAdditionalControlPanels', 'info', 'inactive-setting', '추가 제어 패널이 전달됐지만 설정이 꺼져 표시되지 않습니다.', '해당 패널을 써야 하면 설정을 켜세요.');
   }
   if (settings.hideHeader && !settings.showCanvasTitle) {
     report('showCanvasTitle', 'info', 'mode-mismatch', '헤더와 캔버스 제목이 모두 숨김이라 현재 화면 문맥이 약해질 수 있습니다.', '외부 header가 충분한지 확인하세요.');
   }
   if (!settings.showCanvasNameField && context.templateEditMode) {
-    report('showCanvasNameField', 'warning', 'capability-blocked', '템플릿 편집 화면에서 이름 입력이 숨김 상태입니다.', '템플릿 이름을 편집해야 하면 이름 입력 표시를 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasNameField', true),
-    ]);
+    report('showCanvasNameField', 'warning', 'capability-blocked', '템플릿 편집 화면에서 이름 입력이 숨김 상태입니다.', '템플릿 이름을 편집해야 하면 이름 입력 표시를 켜세요.');
   }
   if (settings.showCanvasNameField && context.readOnlyDraftOutput) {
     report('showCanvasNameField', 'info', 'mode-mismatch', '읽기 전용 출력 화면에 이름 입력 표시 설정이 켜져 있습니다.', '읽기 전용 화면에서 필요한 표시인지 확인하세요.');
   }
   if (!settings.showCanvasSaveButton && !saveDisabled && (saveCallbackConnected || templateSaveCallbackConnected)) {
-    report('showCanvasSaveButton', 'warning', 'capability-blocked', '저장 가능한 화면이지만 상단 저장 버튼이 숨김 상태입니다.', '사용자가 저장할 수 있어야 하면 저장 버튼 표시를 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasSaveButton', true),
-    ]);
+    report('showCanvasSaveButton', 'warning', 'capability-blocked', '저장 가능한 화면이지만 상단 저장 버튼이 숨김 상태입니다.', '사용자가 저장할 수 있어야 하면 저장 버튼 표시를 켜세요.');
   }
   if (settings.showCanvasSaveButton && (saveDisabled || (!saveCallbackConnected && !templateSaveCallbackConnected))) {
-    report(
-      'showCanvasSaveButton',
-      'warning',
-      'runtime-missing',
-      '저장 버튼 표시가 켜져 있지만 현재 런타임에서는 저장할 수 없습니다.',
-      '저장 callback과 saveDisabled 상태를 함께 확인하세요.',
-      saveDisabled && (saveCallbackConnected || templateSaveCallbackConnected)
-        ? [createCanvasOwnerSettingDiagnosticFix('saveDisabled', false, '저장 callback이 있으므로 저장 비활성 OFF')]
-        : [createCanvasOwnerSettingDiagnosticFix('showCanvasSaveButton', false, '저장 callback이 없으므로 저장 버튼 숨김')]
-    );
+    report('showCanvasSaveButton', 'warning', 'runtime-missing', '저장 버튼 표시가 켜져 있지만 현재 런타임에서는 저장할 수 없습니다.', '저장 callback과 saveDisabled 상태를 함께 확인하세요.');
   }
   if (settings.showCanvasTodoButton && !baseProps.todoPanel) {
-    report('showCanvasTodoButton', 'warning', 'runtime-missing', '할 일 버튼 표시가 켜져 있지만 열 수 있는 패널이 없습니다.', 'todoPanel 연결 여부를 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasTodoButton', false, '런타임 패널이 없으므로 할 일 버튼 숨김'),
-    ]);
+    report('showCanvasTodoButton', 'warning', 'runtime-missing', '할 일 버튼 표시가 켜져 있지만 열 수 있는 패널이 없습니다.', 'todoPanel 연결 여부를 확인하세요.');
   }
   if (!settings.showCanvasTodoButton && (baseProps.todoCount || 0) > 0) {
     report('showCanvasTodoButton', 'info', 'inactive-setting', '할 일 항목이 있지만 버튼이 숨김 상태입니다.', '할 일 확인이 필요하면 버튼 표시를 켜세요.');
   }
   if (!settings.showCanvasPreviewToggle && context.templateEditMode) {
-    report('showCanvasPreviewToggle', 'warning', 'capability-blocked', '편집 화면에서 미리보기 전환 버튼이 숨김 상태입니다.', '미리보기 확인이 필요하면 표시를 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasPreviewToggle', true),
-    ]);
+    report('showCanvasPreviewToggle', 'warning', 'capability-blocked', '편집 화면에서 미리보기 전환 버튼이 숨김 상태입니다.', '미리보기 확인이 필요하면 표시를 켜세요.');
   }
   if (settings.showCanvasPreviewToggle && context.readOnlyDraftOutput) {
     report('showCanvasPreviewToggle', 'info', 'mode-mismatch', '읽기 전용 출력 화면에 미리보기 전환 버튼 표시 설정이 켜져 있습니다.', '읽기 화면에서 필요한 제어인지 확인하세요.');
   }
   if (settings.showCanvasInteractionToolControls && canvasSelectionMode === 'none') {
-    report('showCanvasInteractionToolControls', 'blocking-risk', 'capability-blocked', '선택/이동 버튼은 표시되지만 실제 상자 선택 정책이 none입니다.', '선택이 필요하면 allowCanvasBoxSelection 또는 선택 정책 설정을 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('allowCanvasBoxSelection', true, '상자 선택 정책을 box로 변경'),
-    ]);
+    report('showCanvasInteractionToolControls', 'blocking-risk', 'capability-blocked', '선택/이동 버튼은 표시되지만 실제 상자 선택 정책이 none입니다.', '선택이 필요하면 allowCanvasBoxSelection 또는 선택 정책 설정을 확인하세요.');
   }
   if (!settings.showCanvasInteractionToolControls && context.editableMode) {
-    report('showCanvasInteractionToolControls', 'warning', 'capability-blocked', '편집 가능한 화면에서 선택/이동 전환 버튼이 숨김 상태입니다.', '상자 선택과 이동이 필요하면 표시를 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasInteractionToolControls', true),
-    ]);
+    report('showCanvasInteractionToolControls', 'warning', 'capability-blocked', '편집 가능한 화면에서 선택/이동 전환 버튼이 숨김 상태입니다.', '상자 선택과 이동이 필요하면 표시를 켜세요.');
   }
   if (!settings.showCanvasHistoryControls && context.editableMode) {
-    report('showCanvasHistoryControls', 'warning', 'capability-blocked', '편집 가능한 화면에서 되돌리기/다시 실행 UI가 숨김 상태입니다.', '편집 복구가 필요하면 실행 기록 표시를 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasHistoryControls', true),
-    ]);
+    report('showCanvasHistoryControls', 'warning', 'capability-blocked', '편집 가능한 화면에서 되돌리기/다시 실행 UI가 숨김 상태입니다.', '편집 복구가 필요하면 실행 기록 표시를 켜세요.');
   }
   if (settings.showCanvasHistoryControls && context.readOnlyDraftOutput) {
     report('showCanvasHistoryControls', 'info', 'mode-mismatch', '읽기 전용 출력 화면에 실행 기록 표시 설정이 켜져 있습니다.', '읽기 화면에서 필요한 제어인지 확인하세요.');
@@ -930,57 +833,39 @@ export const resolveCanvasOwnerSettingDiagnostics = ({
   const specifiedCanvasWidthPx = readCssPixelValue(settings.specifiedCanvasWidth);
 
   if (isInvalidCanvasCssSize(settings.pageContainerWidth) || (pageContainerWidthPx !== null && pageContainerWidthPx < 480)) {
-    report('pageContainerWidth', 'warning', 'layout-risk', '페이지 컨테이너 폭 값이 너무 작거나 유효하지 않을 수 있습니다.', '문서가 잘리지 않는 폭인지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('pageContainerWidth', '100%'),
-    ]);
+    report('pageContainerWidth', 'warning', 'layout-risk', '페이지 컨테이너 폭 값이 너무 작거나 유효하지 않을 수 있습니다.', '문서가 잘리지 않는 폭인지 확인하세요.');
   }
   if (isInvalidCanvasCssSize(settings.pageContainerHeight) || (pageContainerHeightPx !== null && pageContainerHeightPx < 240)) {
-    report('pageContainerHeight', 'warning', 'layout-risk', '페이지 컨테이너 높이 값이 너무 작거나 유효하지 않을 수 있습니다.', '편집부가 압축되지 않는 높이인지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('pageContainerHeight', '', '페이지 컨테이너 높이 기본값 사용'),
-    ]);
+    report('pageContainerHeight', 'warning', 'layout-risk', '페이지 컨테이너 높이 값이 너무 작거나 유효하지 않을 수 있습니다.', '편집부가 압축되지 않는 높이인지 확인하세요.');
   }
   if (settings.autoCanvasHeight && isPageSetting('specifiedCanvasHeight')) {
     report('specifiedCanvasHeight', 'info', 'inactive-setting', '자동 높이가 켜져 있어 지정 높이 값은 직접 적용되지 않습니다.', '지정 높이를 쓰려면 자동 높이를 끄세요.');
   }
   if (!settings.autoCanvasHeight && (isInvalidCanvasCssSize(settings.specifiedCanvasHeight) || (specifiedCanvasHeightPx !== null && specifiedCanvasHeightPx < 240))) {
-    report('autoCanvasHeight', 'warning', 'layout-risk', '자동 높이가 꺼졌지만 지정 높이가 너무 작거나 유효하지 않습니다.', '지정 높이 값을 조정하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('autoCanvasHeight', true, '자동 높이 ON'),
-    ]);
-    report('specifiedCanvasHeight', 'warning', 'layout-risk', '지정 높이가 너무 작거나 유효하지 않아 편집 영역이 압축될 수 있습니다.', '문서 편집에 충분한 높이를 지정하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('specifiedCanvasHeight', '70vh'),
-    ]);
+    report('autoCanvasHeight', 'warning', 'layout-risk', '자동 높이가 꺼졌지만 지정 높이가 너무 작거나 유효하지 않습니다.', '지정 높이 값을 조정하세요.');
+    report('specifiedCanvasHeight', 'warning', 'layout-risk', '지정 높이가 너무 작거나 유효하지 않아 편집 영역이 압축될 수 있습니다.', '문서 편집에 충분한 높이를 지정하세요.');
   }
   if (settings.autoCanvasWidth && isPageSetting('specifiedCanvasWidth')) {
     report('specifiedCanvasWidth', 'info', 'inactive-setting', '자동 너비가 켜져 있어 지정 너비 값은 직접 적용되지 않습니다.', '지정 너비를 쓰려면 자동 너비를 끄세요.');
   }
   if (!settings.autoCanvasWidth && (isInvalidCanvasCssSize(settings.specifiedCanvasWidth) || (specifiedCanvasWidthPx !== null && specifiedCanvasWidthPx < 480))) {
-    report('autoCanvasWidth', 'warning', 'layout-risk', '자동 너비가 꺼졌지만 지정 너비가 너무 작거나 유효하지 않습니다.', '지정 너비 값을 조정하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('autoCanvasWidth', true, '자동 너비 ON'),
-    ]);
-    report('specifiedCanvasWidth', 'warning', 'layout-risk', '지정 너비가 너무 작거나 유효하지 않아 문서가 잘릴 수 있습니다.', '문서 편집에 충분한 너비를 지정하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('specifiedCanvasWidth', '100%'),
-    ]);
+    report('autoCanvasWidth', 'warning', 'layout-risk', '자동 너비가 꺼졌지만 지정 너비가 너무 작거나 유효하지 않습니다.', '지정 너비 값을 조정하세요.');
+    report('specifiedCanvasWidth', 'warning', 'layout-risk', '지정 너비가 너무 작거나 유효하지 않아 문서가 잘릴 수 있습니다.', '문서 편집에 충분한 너비를 지정하세요.');
   }
   if (!settings.showCanvasEditSettingsToggle && context.editableMode) {
-    report('showCanvasEditSettingsToggle', 'warning', 'capability-blocked', '편집 가능한 화면에서 편집 설정 버튼이 숨김 상태입니다.', '상자 편집 패널 접근이 필요하면 표시를 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasEditSettingsToggle', true),
-    ]);
+    report('showCanvasEditSettingsToggle', 'warning', 'capability-blocked', '편집 가능한 화면에서 편집 설정 버튼이 숨김 상태입니다.', '상자 편집 패널 접근이 필요하면 표시를 켜세요.');
   }
   if (settings.showCanvasEditSettingsToggle && context.readOnlyDraftOutput) {
     report('showCanvasEditSettingsToggle', 'info', 'mode-mismatch', '읽기 전용 출력 화면에 편집 설정 버튼 표시 설정이 켜져 있습니다.', '읽기 화면에서 필요한 제어인지 확인하세요.');
   }
   if (!settings.showCanvasSelectionPanelTabs && context.editableMode) {
-    report('showCanvasSelectionPanelTabs', 'warning', 'capability-blocked', '편집 가능한 화면에서 편집 탭이 숨김 상태입니다.', '크기, 속성, 역할 탭 접근이 필요하면 표시를 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasSelectionPanelTabs', true),
-    ]);
+    report('showCanvasSelectionPanelTabs', 'warning', 'capability-blocked', '편집 가능한 화면에서 편집 탭이 숨김 상태입니다.', '크기, 속성, 역할 탭 접근이 필요하면 표시를 켜세요.');
   }
   if (settings.showCanvasSelectionPanelTabs && context.readOnlyDraftOutput) {
     report('showCanvasSelectionPanelTabs', 'info', 'mode-mismatch', '읽기 전용 출력 화면에 편집 탭 표시 설정이 켜져 있습니다.', '읽기 화면에서 필요한 제어인지 확인하세요.');
   }
   if (!settings.showCanvasSelectionPanelTabs && selectedTab !== 'preview') {
-    report('initialCanvasTab', 'warning', 'capability-blocked', '초기 탭은 편집 탭이지만 탭 UI가 숨김 상태입니다.', '초기 탭과 탭 표시 설정을 함께 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('showCanvasSelectionPanelTabs', true, '편집 탭 표시 ON'),
-    ]);
+    report('initialCanvasTab', 'warning', 'capability-blocked', '초기 탭은 편집 탭이지만 탭 UI가 숨김 상태입니다.', '초기 탭과 탭 표시 설정을 함께 확인하세요.');
   }
   if (!persistencePanelVisible) {
     ([
@@ -1004,9 +889,7 @@ export const resolveCanvasOwnerSettingDiagnostics = ({
       'showPersistenceSaveButton',
     ] as CanvasOwnerSettingKey[]).forEach((settingKey) => {
       if (settings[settingKey]) {
-        report(settingKey, 'warning', 'persistence-performance', '문서 기반 화면에서 persistence 항목이 표시되어 불필요한 템플릿 런타임을 만들 수 있습니다.', '문서 편집 화면에서 이 항목이 필요한지 확인하세요.', [
-          createCanvasOwnerSettingDiagnosticFix(settingKey, false, `${canvasOwnerSettingLabels[settingKey]} OFF`),
-        ]);
+        report(settingKey, 'warning', 'persistence-performance', '문서 기반 화면에서 persistence 항목이 표시되어 불필요한 템플릿 런타임을 만들 수 있습니다.', '문서 편집 화면에서 이 항목이 필요한지 확인하세요.');
       }
     });
   }
@@ -1026,96 +909,64 @@ export const resolveCanvasOwnerSettingDiagnostics = ({
     report('saveButtonLabel', 'info', 'inactive-setting', 'saveButtonLabel이 비어 있어 기본 저장 문구로 fallback됩니다.', '의도한 버튼 문구이면 값을 입력하세요.');
   }
   if (settings.templateNameReadOnly && context.templateEditMode) {
-    report('templateNameReadOnly', 'warning', 'capability-blocked', '템플릿 편집 화면에서 이름 입력이 읽기 전용입니다.', '템플릿 이름을 수정해야 하면 읽기 전용을 끄세요.', [
-      createCanvasOwnerSettingDiagnosticFix('templateNameReadOnly', false),
-    ]);
+    report('templateNameReadOnly', 'warning', 'capability-blocked', '템플릿 편집 화면에서 이름 입력이 읽기 전용입니다.', '템플릿 이름을 수정해야 하면 읽기 전용을 끄세요.');
   }
   if (!settings.templateNameReadOnly && context.hasInitialDraft) {
-    report('templateNameReadOnly', 'warning', 'mode-mismatch', '문서 기반 화면에서 템플릿/문서 이름 입력이 수정 가능하게 설정되어 있습니다.', '문서 출력 화면에서 이름 수정이 필요한지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('templateNameReadOnly', true),
-    ]);
+    report('templateNameReadOnly', 'warning', 'mode-mismatch', '문서 기반 화면에서 템플릿/문서 이름 입력이 수정 가능하게 설정되어 있습니다.', '문서 출력 화면에서 이름 수정이 필요한지 확인하세요.');
   }
   if (settings.saveDisabled && (saveCallbackConnected || templateSaveCallbackConnected)) {
-    report('saveDisabled', 'warning', 'capability-blocked', '저장 callback은 연결되어 있지만 저장 비활성이 켜져 있습니다.', '저장을 허용해야 하면 저장 비활성을 끄세요.', [
-      createCanvasOwnerSettingDiagnosticFix('saveDisabled', false),
-    ]);
+    report('saveDisabled', 'warning', 'capability-blocked', '저장 callback은 연결되어 있지만 저장 비활성이 켜져 있습니다.', '저장을 허용해야 하면 저장 비활성을 끄세요.');
   }
   if (!settings.saveDisabled && context.editableMode && !saveCallbackConnected && !templateSaveCallbackConnected) {
-    report('saveDisabled', 'warning', 'runtime-missing', '저장 비활성은 꺼져 있지만 저장 callback이 없습니다.', '저장 동작을 연결하거나 저장 비활성을 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('saveDisabled', true, '저장 callback이 없으므로 저장 비활성 ON'),
-    ]);
+    report('saveDisabled', 'warning', 'runtime-missing', '저장 비활성은 꺼져 있지만 저장 callback이 없습니다.', '저장 동작을 연결하거나 저장 비활성을 켜세요.');
   }
   if (settings.enableDocumentAttachmentApiPath && context.hasInitialDraft && !workspaceProps.documentAttachmentApiPath) {
-    report('enableDocumentAttachmentApiPath', 'warning', 'runtime-missing', '첨부파일 API 연결이 켜져 있지만 실제 API 경로가 없습니다.', '문서 첨부 기능이 필요한 page인지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('enableDocumentAttachmentApiPath', false, '런타임 경로가 없으므로 첨부 API 연결 OFF'),
-    ]);
+    report('enableDocumentAttachmentApiPath', 'warning', 'runtime-missing', '첨부파일 API 연결이 켜져 있지만 실제 API 경로가 없습니다.', '문서 첨부 기능이 필요한 page인지 확인하세요.');
   }
   if (!settings.enableDocumentAttachmentApiPath && baseProps.documentAttachmentApiPath && context.documentEditMode) {
-    report('enableDocumentAttachmentApiPath', 'warning', 'capability-blocked', '문서 첨부 API 경로가 있지만 설정이 꺼져 첨부 저장이 차단됩니다.', '첨부 파일 편집이 필요하면 API 연결을 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('enableDocumentAttachmentApiPath', true),
-    ]);
+    report('enableDocumentAttachmentApiPath', 'warning', 'capability-blocked', '문서 첨부 API 경로가 있지만 설정이 꺼져 첨부 저장이 차단됩니다.', '첨부 파일 편집이 필요하면 API 연결을 켜세요.');
   }
   if (settings.limitEditableValueKeys && !baseProps.editableValueKeys?.length) {
-    report('limitEditableValueKeys', 'warning', 'capability-blocked', '편집 가능 value 키 제한이 켜져 있지만 전달된 key 목록이 없습니다.', '권한 제한 목록이 실제로 전달되는지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('limitEditableValueKeys', false, '전달 key가 없으므로 제한 OFF'),
-    ]);
+    report('limitEditableValueKeys', 'warning', 'capability-blocked', '편집 가능 value 키 제한이 켜져 있지만 전달된 key 목록이 없습니다.', '권한 제한 목록이 실제로 전달되는지 확인하세요.');
   }
   if (!settings.limitEditableValueKeys && baseProps.editableValueKeys?.length) {
-    report('limitEditableValueKeys', 'warning', 'mode-mismatch', '제한 가능한 editableValueKeys가 전달됐지만 설정이 꺼져 있습니다.', '요청 링크나 구성원 접근처럼 제한이 필요한 화면인지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('limitEditableValueKeys', true),
-    ]);
+    report('limitEditableValueKeys', 'warning', 'mode-mismatch', '제한 가능한 editableValueKeys가 전달됐지만 설정이 꺼져 있습니다.', '요청 링크나 구성원 접근처럼 제한이 필요한 화면인지 확인하세요.');
   }
   if (!settings.enableOnTemplateSaved && baseProps.onTemplateSaved) {
-    report('enableOnTemplateSaved', 'warning', 'capability-blocked', '템플릿 저장 후 콜백이 전달됐지만 설정이 꺼져 실행되지 않습니다.', '저장 후처리가 필요하면 콜백 연결을 켜세요.', [
-      createCanvasOwnerSettingDiagnosticFix('enableOnTemplateSaved', true),
-    ]);
+    report('enableOnTemplateSaved', 'warning', 'capability-blocked', '템플릿 저장 후 콜백이 전달됐지만 설정이 꺼져 실행되지 않습니다.', '저장 후처리가 필요하면 콜백 연결을 켜세요.');
   }
   if (settings.enableOnTemplateSaved && context.templateEditMode && !baseProps.onTemplateSaved) {
     report('enableOnTemplateSaved', 'info', 'runtime-missing', '저장 완료 콜백 연결이 켜져 있지만 이 page가 onTemplateSaved를 전달하지 않습니다.', '템플릿 저장 page인지 확인하세요.');
   }
   if (!settings.stabilizeInitialLayout && context.hasInitialDraft) {
-    report('stabilizeInitialLayout', 'warning', 'layout-risk', '문서 출력 화면에서 초기 레이아웃 안정화가 꺼져 있습니다.', '초기 표시 흔들림이나 edge 위치 문제가 없는지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('stabilizeInitialLayout', true),
-    ]);
+    report('stabilizeInitialLayout', 'warning', 'layout-risk', '문서 출력 화면에서 초기 레이아웃 안정화가 꺼져 있습니다.', '초기 표시 흔들림이나 edge 위치 문제가 없는지 확인하세요.');
   }
   if (!settings.enableRuntimeInitialAutoSize && context.hasInitialDraft) {
-    report('enableRuntimeInitialAutoSize', 'warning', 'layout-risk', '문서 출력 화면에서 런타임 초기 자동 크기가 꺼져 있습니다.', '초기 value 병합 뒤 자동 크기 계산이 필요한지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('enableRuntimeInitialAutoSize', true),
-    ]);
+    report('enableRuntimeInitialAutoSize', 'warning', 'layout-risk', '문서 출력 화면에서 런타임 초기 자동 크기가 꺼져 있습니다.', '초기 value 병합 뒤 자동 크기 계산이 필요한지 확인하세요.');
   }
   if (!settings.preventInitialValueClearShrink && context.hasInitialDraft) {
-    report('preventInitialValueClearShrink', 'warning', 'layout-risk', '문서 출력 화면에서 초기 value 제거 축소 방지가 꺼져 있습니다.', '초기 레이아웃 축소가 재현되는지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('preventInitialValueClearShrink', true),
-    ]);
+    report('preventInitialValueClearShrink', 'warning', 'layout-risk', '문서 출력 화면에서 초기 value 제거 축소 방지가 꺼져 있습니다.', '초기 레이아웃 축소가 재현되는지 확인하세요.');
   }
   if (settings.preventRuntimeAutoSizeShrink && isPageSetting('preventRuntimeAutoSizeShrink')) {
     report('preventRuntimeAutoSizeShrink', 'info', 'layout-risk', '런타임 자동 크기 축소 차단이 켜져 있어 정상 축소까지 막을 수 있습니다.', '값 입력 후 높이/너비 축소가 필요한 문서인지 확인하세요.');
   }
   if (settings.blockPeerClusterHeightTargets) {
-    report('blockPeerClusterHeightTargets', 'warning', 'layout-risk', 'peer cluster 높이 측정이 차단되어 연동 높이 계산이 달라질 수 있습니다.', 'peer edge 높이 연동이 필요한 문서인지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('blockPeerClusterHeightTargets', false),
-    ]);
+    report('blockPeerClusterHeightTargets', 'warning', 'layout-risk', 'peer cluster 높이 측정이 차단되어 연동 높이 계산이 달라질 수 있습니다.', 'peer edge 높이 연동이 필요한 문서인지 확인하세요.');
   }
   if (settings.blockPeerClusterWidthTargets) {
-    report('blockPeerClusterWidthTargets', 'warning', 'layout-risk', 'peer cluster 너비 측정이 차단되어 연동 너비 계산이 달라질 수 있습니다.', 'peer edge 너비 연동이 필요한 문서인지 확인하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('blockPeerClusterWidthTargets', false),
-    ]);
+    report('blockPeerClusterWidthTargets', 'warning', 'layout-risk', 'peer cluster 너비 측정이 차단되어 연동 너비 계산이 달라질 수 있습니다.', 'peer edge 너비 연동이 필요한 문서인지 확인하세요.');
   }
   if (canvasSelectionMode === 'none' && isPageSetting('selectionInactiveOverlayOpacity')) {
     report('selectionInactiveOverlayOpacity', 'info', 'inactive-setting', '상자 선택 정책이 none이라 선택 오버레이 강도는 체감되지 않습니다.', '선택 정책을 켤 때만 이 설정이 의미가 있습니다.');
   }
   if (settings.selectionInactiveOverlayOpacity >= 0.85 && canvasSelectionMode === 'box') {
-    report('selectionInactiveOverlayOpacity', 'warning', 'layout-risk', '선택 오버레이 강도가 높아 선택되지 않은 항목 가독성이 떨어질 수 있습니다.', '가독성을 확인하고 강도를 낮출지 결정하세요.', [
-      createCanvasOwnerSettingDiagnosticFix('selectionInactiveOverlayOpacity', 0.5, '비활성 오버레이 강도 50%'),
-    ]);
+    report('selectionInactiveOverlayOpacity', 'warning', 'layout-risk', '선택 오버레이 강도가 높아 선택되지 않은 항목 가독성이 떨어질 수 있습니다.', '가독성을 확인하고 강도를 낮출지 결정하세요.');
   }
   if (context.readOnlyDraftOutput && selectedTab !== 'preview') {
     report('initialCanvasTab', 'info', 'mode-mismatch', '읽기 전용 출력 화면이 편집 탭에서 시작하도록 설정되어 있습니다.', '읽기 화면에서는 미리보기 시작이 적절한지 확인하세요.');
   }
   if (context.editableMode && !settings.allowCanvasBoxSelection) {
-    report('allowCanvasBoxSelection', 'blocking-risk', 'capability-blocked', '편집 가능한 화면이지만 상자 선택 정책이 none입니다.', '선택/이동 버튼을 쓸 수 있어야 하면 이 설정을 ON으로 바꾸세요.', [
-      createCanvasOwnerSettingDiagnosticFix('allowCanvasBoxSelection', true, '상자 선택 정책을 box로 변경'),
-    ]);
+    report('allowCanvasBoxSelection', 'blocking-risk', 'capability-blocked', '편집 가능한 화면이지만 상자 선택 정책이 none입니다.', '선택/이동 버튼을 쓸 수 있어야 하면 이 설정을 ON으로 바꾸세요.');
   }
   if (context.readOnlyDraftOutput && settings.allowCanvasBoxSelection) {
     report('allowCanvasBoxSelection', 'info', 'mode-mismatch', `읽기 출력 화면에서 ${canvasTextInteractionMode} 텍스트 상호작용 정책이 적용됩니다.`, '읽기 화면에서 상자 선택이 필요한지 확인하세요.');
@@ -1134,7 +985,6 @@ export const resolveCanvasOwnerSettingDiagnostics = ({
       effectiveValue: formatCanvasOwnerDiagnosticValue(effectiveValues[settingKey]),
       message: diagnostic?.message || '현재 선택한 page 조건에서 별도 충돌이 감지되지 않았습니다.',
       recommendedAction: diagnostic?.recommendedAction || '현재 설정을 유지해도 됩니다.',
-      fixes: diagnostic?.fixes || [],
     };
   });
 };

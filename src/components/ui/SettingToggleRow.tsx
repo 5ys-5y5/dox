@@ -5,6 +5,7 @@ type SettingToggleRowProps = {
   label: string;
   sectionLabel?: string;
   definitionName?: string;
+  settingKey?: string;
   env?: string;
   description?: string;
   statusItems?: Array<{
@@ -15,13 +16,26 @@ type SettingToggleRowProps = {
   checked: boolean;
   disabled?: boolean;
   className?: string;
-  onCheckedChange: (checked: boolean) => void;
+  onCheckedChange: (checked: boolean, settingKey?: string) => void;
 };
 
-export function SettingToggleRow({
+const settingToggleStatusItemsEqual = (
+  left: SettingToggleRowProps['statusItems'] = [],
+  right: SettingToggleRowProps['statusItems'] = []
+) =>
+  left.length === right.length &&
+  left.every(
+    (item, index) =>
+      item.label === right[index]?.label &&
+      item.value === right[index]?.value &&
+      item.tone === right[index]?.tone
+  );
+
+export const SettingToggleRow = React.memo(function SettingToggleRow({
   label,
   sectionLabel,
   definitionName,
+  settingKey,
   env = '',
   description,
   statusItems = [],
@@ -83,11 +97,23 @@ export function SettingToggleRow({
           disabled={disabled}
           aria-pressed={checked}
           aria-label={`${label} ${checked ? 'ON' : 'OFF'}`}
-          onClick={() => onCheckedChange(!checked)}
+          onClick={() => onCheckedChange(!checked, settingKey)}
         >
           {checked ? 'ON' : 'OFF'}
         </Button>
       </div>
     </div>
   );
-}
+}, (previous, next) =>
+  previous.label === next.label &&
+  previous.sectionLabel === next.sectionLabel &&
+  previous.definitionName === next.definitionName &&
+  previous.settingKey === next.settingKey &&
+  previous.env === next.env &&
+  previous.description === next.description &&
+  previous.checked === next.checked &&
+  previous.disabled === next.disabled &&
+  previous.className === next.className &&
+  previous.onCheckedChange === next.onCheckedChange &&
+  settingToggleStatusItemsEqual(previous.statusItems, next.statusItems)
+);

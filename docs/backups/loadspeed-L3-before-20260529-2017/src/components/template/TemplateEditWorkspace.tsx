@@ -19170,29 +19170,16 @@ export default function TemplateEditWorkspace({
         return;
       }
 
-      deferredSelectionPanelTabCommitFrameRef.current = window.requestAnimationFrame(() => {
-        deferredSelectionPanelTabCommitFrameRef.current = null;
+      deferredSelectionPanelTabCommitTimeoutRef.current = window.setTimeout(() => {
         const pendingCommit = pendingSelectionPanelTabCommitRef.current;
 
+        deferredSelectionPanelTabCommitTimeoutRef.current = null;
         if (!pendingCommit || pendingCommit.tab !== nextTab || pendingCommit.viewMode !== nextViewMode) {
           return;
         }
 
-        deferredSelectionPanelTabCommitTimeoutRef.current = window.setTimeout(() => {
-          const latestPendingCommit = pendingSelectionPanelTabCommitRef.current;
-
-          deferredSelectionPanelTabCommitTimeoutRef.current = null;
-          if (
-            !latestPendingCommit ||
-            latestPendingCommit.tab !== nextTab ||
-            latestPendingCommit.viewMode !== nextViewMode
-          ) {
-            return;
-          }
-
-          commitSelectionPanelTabAfterImmediatePaint(nextTab, nextViewMode);
-        }, 0);
-      });
+        commitSelectionPanelTabAfterImmediatePaint(nextTab, nextViewMode);
+      }, 0);
     },
     [cancelDeferredSelectionPanelTabCommit, commitSelectionPanelTabAfterImmediatePaint]
   );
@@ -28369,14 +28356,6 @@ export default function TemplateEditWorkspace({
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
       applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
-      const activeSelectionIds =
-        selectedFrameGroupIdsRef.current.length > 0
-          ? selectedFrameGroupIdsRef.current
-          : selectedFrameGroupIds;
-
-      if (activeSelectionIds.length > 0 || edgeSelectionStateRef.current.tokens.length > 0) {
-        applyRuntimeSelectionVisuals(activeSelectionIds, edgeSelectionStateRef.current);
-      }
       return;
     }
 
@@ -28502,7 +28481,6 @@ export default function TemplateEditWorkspace({
     }
   }, [
       readCachedLiveEdgeTopologySnapshot,
-      applyRuntimeSelectionVisuals,
       applyFastFrameBoxSelectionVisuals,
       edgeSelectionState,
       normalizeLiveVerticalCohorts,
