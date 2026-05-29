@@ -259,9 +259,6 @@ const fetchSuccessDataWithTimeout = async <T,>(url: string, timeoutMs = 8000): P
   }
 };
 
-const buildOwnerWorkspaceDocumentDetailPath = (documentId: string) =>
-  `/api/documents/${encodeURIComponent(documentId)}?profile=owner-workspace`;
-
 const getTodayInputValue = () => {
   const now = new Date();
   const normalized = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -3056,9 +3053,7 @@ export default function ProjectPage() {
         setLoadingDocumentDetail(true);
 
         try {
-          const detail = await fetchSuccessDataWithTimeout<DocumentDetailResult>(
-            buildOwnerWorkspaceDocumentDetailPath(refreshDocumentId)
-          );
+          const detail = await fetchSuccessDataWithTimeout<DocumentDetailResult>(`/api/documents/${refreshDocumentId}`);
 
           setSelectedDocumentDetail(detail);
           setSelectedDocumentDetailError(null);
@@ -4658,9 +4653,7 @@ export default function ProjectPage() {
       return null;
     }
 
-    const detail = await fetchSuccessDataWithTimeout<DocumentDetailResult>(
-      buildOwnerWorkspaceDocumentDetailPath(normalizedDocumentId)
-    );
+    const detail = await fetchSuccessDataWithTimeout<DocumentDetailResult>(`/api/documents/${normalizedDocumentId}`);
     setSelectedDocumentDetail(detail);
     setSelectedDocumentDetailError(null);
     setSelectedDocumentDetailErrorDebug(null);
@@ -5679,9 +5672,7 @@ export default function ProjectPage() {
 
     const loadDetail = async () => {
       try {
-        const detail = await fetchSuccessDataWithTimeout<DocumentDetailResult>(
-          buildOwnerWorkspaceDocumentDetailPath(selectedDocumentId)
-        );
+        const detail = await fetchSuccessDataWithTimeout<DocumentDetailResult>(`/api/documents/${selectedDocumentId}`);
 
         if (active) {
           setSelectedDocumentDetail(detail);

@@ -96,9 +96,6 @@ const fetchSuccessData = async <T,>(url: string): Promise<T> => {
   return result.data as T;
 };
 
-const buildOwnerWorkspaceDocumentDetailPath = (documentId: string) =>
-  `/api/documents/${encodeURIComponent(documentId)}?profile=owner-workspace`;
-
 const formatDateTime = (value: string | null | undefined) => {
   if (!value) {
     return '-';
@@ -560,7 +557,7 @@ export default function CanvasOwnerPage() {
       setLoadingDocumentDetail(true);
       try {
         const detail = await fetchSuccessData<DocumentDetailResult>(
-          buildOwnerWorkspaceDocumentDetailPath(selectedDocumentId)
+          `/api/documents/${encodeURIComponent(selectedDocumentId)}`
         );
         const [requestTasks, documentMembers, siteMembers] = await Promise.all([
           fetchSuccessData<DocumentRequestTaskDto[]>(
@@ -697,7 +694,7 @@ export default function CanvasOwnerPage() {
       }
 
       const refreshedDetail = await fetchSuccessData<DocumentDetailResult>(
-        buildOwnerWorkspaceDocumentDetailPath(selectedDocumentDetail.document.id)
+        `/api/documents/${encodeURIComponent(selectedDocumentDetail.document.id)}`
       );
       setSelectedDocumentDetail(refreshedDetail);
       await loadLists();
