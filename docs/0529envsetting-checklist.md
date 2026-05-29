@@ -1,0 +1,60 @@
+# 0529 환경 설정 UI 기능 일치 구현 체크리스트
+
+## 완료 기준
+
+이 작업은 아래 체크리스트가 모두 충족되어야 완료로 본다.
+
+- 구현 항목이 코드에 반영되어야 한다.
+- 실제 동작이 기대 결과와 일치해야 한다.
+- 정적 검증 또는 브라우저 검증 결과를 기록해야 한다.
+- 오류가 발생하거나 사용자가 문제를 제기하면 `docs/backups/0529envsetting-checklist.md`의 복구 절차로 즉시 이전 지점으로 되돌릴 수 있어야 한다.
+
+## 백업 체크
+
+- [x] 구현 전 현재 작업 파일을 `docs/backups/0529envsetting-checklist/`에 백업한다.
+- [x] 백업 파일 목록과 복구 명령을 `docs/backups/0529envsetting-checklist.md`에 기록한다.
+- [x] 구현 시작 전 백업 파일이 실제 소스 경로와 1:1로 매핑되는지 확인한다.
+- [x] 구현 완료 후에도 백업 파일은 수정하지 않는다.
+
+## 구현 체크
+
+- [x] UI/기능 요소 정의 레지스트리를 추가한다.
+- [x] 페이지별 capability resolver를 추가한다.
+- [x] settings와 capability를 합쳐 `CanvasOwnerUiFeatureState`를 생성한다.
+- [x] `canvasToolbarVisibility`가 설정값이 아니라 effective UI state에서 생성되도록 바꾼다.
+- [x] `persistenceVisibility`도 같은 정책으로 확장 가능한 구조에 연결한다.
+- [x] `편집 설정`은 미지원 상태에서 실제 toolbar에 출력되지 않도록 한다.
+- [x] `선택 패널 탭`, `미리보기`, `문서 저장`, `할 일`, `첨부파일`, `onTemplateSaved`, `onSaveDraftHtml`도 configured/effective/enabled 상태를 가진다.
+- [x] 환경 설정 UI 행에 설정값, 지원 여부, 실제 출력, 실제 동작, 사유를 표시한다.
+- [x] `전달 prop 전체` 또는 별도 섹션에 UI 기능 effective 상태를 출력한다.
+- [x] `/canvas?page=project&mode=template`에서 `showCanvasEditSettingsToggle=ON`이어도 미지원이면 실제 `편집 설정` 버튼이 나오지 않는다. 코드 레벨 resolver/visibility 검증 완료.
+- [x] `/canvas?page=templates` 또는 템플릿 편집 가능 페이지에서는 `showCanvasEditSettingsToggle=ON`일 때 `편집 설정` 버튼이 정상 출력 및 동작한다. 코드 레벨 resolver/visibility 검증 완료.
+
+## 검증 체크
+
+- [x] `git diff --check`
+- [x] `/canvas/page.tsx` 번들 검사
+- [x] `TemplateEditWorkspace.tsx` 번들 검사
+- [x] `npm run check:no-shadow-app`
+- [x] 코드 레벨 검증: project 문서 모드에서 `editSettingsToggle`, `selectionPanelTabs`, `previewToggle`, `interactionTools`가 effective false가 된다.
+- [x] 코드 레벨 검증: 템플릿 편집 모드에서 `editSettingsToggle`, `selectionPanelTabs`, `previewToggle`, `interactionTools`가 effective true가 된다.
+- [ ] 브라우저에서 `/canvas?page=project&mode=template` 확인
+- [ ] 브라우저에서 템플릿 편집 가능 페이지 확인
+- [ ] 환경 설정 화면에서 미지원 사유가 보이는지 확인
+- [ ] 실제 toolbar 출력이 effective 상태와 일치하는지 확인
+
+브라우저 검증 미완료 사유:
+
+- `curl http://localhost:3000/canvas?page=project&mode=template` 결과 로컬 서버가 떠 있지 않음.
+- `npm run dev -- --hostname 127.0.0.1 --port 3000` 결과 `listen EPERM: operation not permitted 127.0.0.1:3000`.
+- `npm run lint`는 ESLint 9 설정 파일(`eslint.config.js`) 부재로 실패했으며, `check:no-shadow-app` 자체는 통과했다.
+- `page.tsx` 포함 `tsc` 추가 검증은 기존 `TemplateEditWorkspace` 및 workspace 하위 타입 오류로 실패했다. 이번 변경의 직접 대상인 `ownerSettings.ts`, `SettingToggleRow.tsx` 대상 타입 검사는 통과했다.
+
+## 복구 체크
+
+문제가 발생하면 다음을 확인한다.
+
+- [ ] `docs/backups/0529envsetting-checklist.md`의 복구 명령을 실행한다.
+- [ ] 복구 후 `git diff --check`를 실행한다.
+- [ ] 복구 후 문제가 된 페이지를 다시 확인한다.
+- [ ] 사용자에게 어떤 파일을 어느 백업에서 복구했는지 보고한다.

@@ -30,14 +30,12 @@ import {
   normalizeCanvasOwnerSettingsStore,
   readCanvasOwnerSettingsFromStorage,
   resolveCanvasOwnerSettings,
-  resolveCanvasOwnerUiFeatureStates,
   saveCanvasOwnerSettingsStoreToStorage,
   updateCanvasOwnerSettingsStoreOverride,
   type CanvasOwnerSettings,
   type CanvasOwnerSettingKey,
   type CanvasOwnerSettingSource,
   type CanvasOwnerSettingsStore,
-  type CanvasOwnerUiFeatureState,
 } from './ownerSettings';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -1076,39 +1074,7 @@ export default function CanvasOwnerPage() {
       (documentSaveEnabled && loadingDocumentDetail),
     documentAttachmentApiPath: effectiveDocumentAttachmentApiPath,
   };
-  const previewTemplateSavedCallback =
-    !canEditCurrentWorkspace
-      ? undefined
-      : selectedManagedPage.id === 'templates'
-        ? () => setOwnerEventMessage('템플릿 생성 페이지의 onTemplateSaved 콜백이 실행되었습니다.')
-        : !routeEquivalentPreviewEnabled && settings.enableOnTemplateSaved
-          ? (template: TemplateRecordDto) => setOwnerEventMessage(`onTemplateSaved 콜백: ${template.templateName} (${template.id})`)
-          : undefined;
-  const previewSaveDraftHtmlCallback =
-    canEditCurrentWorkspace && documentSaveEnabled ? handleSaveDocumentDraft : undefined;
-  const previewTodoPanelEnabled = usesTemplateList || Boolean(selectedDocumentInitialDraft);
-  const previewTodoCount = previewTodoPanelEnabled ? documentRequestTasks.length : 0;
-  const previewBaseWorkspaceProps: TemplateEditWorkspaceProps = {
-    ...(routeEquivalentPreviewProps ?? canvasOwnerPreviewBaseProps),
-    ...(usesTemplateList
-      ? {
-          initialTemplateId: selectedTemplateId,
-          onTemplateSaved: previewTemplateSavedCallback,
-        }
-      : selectedDocumentInitialDraft
-        ? {
-            initialDraft: selectedDocumentInitialDraft,
-            onSaveDraftHtml: previewSaveDraftHtmlCallback,
-          }
-        : {}),
-    todoPanel: previewTodoPanelEnabled ? canvasTodoPanel : undefined,
-    todoButtonLabel: '할 일',
-    todoCount: previewTodoCount,
-  };
-  const previewUiFeatureStates = resolveCanvasOwnerUiFeatureStates({
-    settings: previewSettings,
-    baseProps: previewBaseWorkspaceProps,
-  });
+  const previewBaseWorkspaceProps = routeEquivalentPreviewProps ?? canvasOwnerPreviewBaseProps;
   const previewWorkspaceProps = applyCanvasOwnerSettingsToWorkspaceProps({
     baseProps: previewBaseWorkspaceProps,
     settings: previewSettings,
@@ -1150,9 +1116,8 @@ export default function CanvasOwnerPage() {
     : 'canvas-owner-settings';
   const previewAdditionalControlPanelsEnabled = Boolean(previewAdditionalControlPanels);
   const previewTopNoticeEnabled = Boolean(previewTopNotice);
-  const previewUiFeatureStateByDefinitionName = new Map(
-    previewUiFeatureStates.map((featureState) => [featureState.definitionName, featureState])
-  );
+  const previewTodoPanelEnabled = usesTemplateList || Boolean(selectedDocumentInitialDraft);
+  const previewTodoCount = previewTodoPanelEnabled ? documentRequestTasks.length : 0;
   const settingKeyByDefinitionName: Record<string, CanvasOwnerSettingKey> = {
     hideHeader: 'hideHeader',
     hidePersistencePanel: 'hidePersistencePanel',
@@ -1219,63 +1184,6 @@ export default function CanvasOwnerPage() {
   const renderSettingBadges = (settingKey: CanvasOwnerSettingKey) => (
     <span className="inline-flex shrink-0 flex-wrap items-center justify-end gap-1">{renderSettingSourceBadge(settingKey)}</span>
   );
-  const getUiFeatureStateForDefinitionName = (definitionName: string) =>
-    previewUiFeatureStateByDefinitionName.get(definitionName) || null;
-  const getUiFeaturePanelClassName = (featureState: CanvasOwnerUiFeatureState | null) => {
-    if (!featureState) {
-      return '';
-    }
-
-    if (!featureState.supported) {
-      return 'bg-amber-50';
-    }
-
-    if (featureState.configuredVisible !== featureState.effectiveVisible) {
-      return 'bg-slate-50';
-    }
-
-    return 'bg-white';
-  };
-  const getUiFeatureStatusItems = (
-    featureState: CanvasOwnerUiFeatureState | null
-  ): Array<{ label: string; value: string; tone?: 'default' | 'success' | 'warning' | 'muted' }> | undefined => {
-    if (!featureState) {
-      return undefined;
-    }
-
-    const statusItems: Array<{ label: string; value: string; tone?: 'default' | 'success' | 'warning' | 'muted' }> = [
-      {
-        label: '설정',
-        value: featureState.configuredVisible ? 'ON' : 'OFF',
-        tone: featureState.configuredVisible ? 'success' : 'muted',
-      },
-      {
-        label: '지원',
-        value: featureState.supported ? '지원' : '미지원',
-        tone: featureState.supported ? 'success' : 'warning',
-      },
-      {
-        label: '출력',
-        value: featureState.effectiveVisible ? '출력' : '숨김',
-        tone: featureState.effectiveVisible ? 'success' : 'muted',
-      },
-      {
-        label: '동작',
-        value: featureState.enabled ? '활성' : '비활성',
-        tone: featureState.enabled ? 'success' : featureState.supported ? 'muted' : 'warning',
-      },
-    ];
-
-    if (featureState.disabledReason) {
-      statusItems.push({
-        label: '사유',
-        value: featureState.disabledReason,
-        tone: 'warning',
-      });
-    }
-
-    return statusItems;
-  };
   const formatOptionalBooleanProp = (value: boolean | undefined) =>
     value === undefined ? 'not passed' : value ? 'true' : 'false';
   const displayEffectivePropName = (name: string) => {
@@ -1933,32 +1841,6 @@ export default function CanvasOwnerPage() {
       value: value ? 'true' : 'false',
       description: '불러오기 및 저장 패널의 항목별 실제 표시 여부입니다.',
     })),
-    ...previewUiFeatureStates.flatMap((featureState) => [
-      {
-        section: 'uiFeatureState',
-        name: `${featureState.key}.configuredVisible`,
-        value: featureState.configuredVisible ? 'true' : 'false',
-        description: `${featureState.label}: 환경 설정에서 선택한 표시/기능 값입니다.`,
-      },
-      {
-        section: 'uiFeatureState',
-        name: `${featureState.key}.supported`,
-        value: featureState.supported ? 'true' : 'false',
-        description: featureState.supported ? `${featureState.label}: 현재 페이지에서 지원됩니다.` : featureState.disabledReason,
-      },
-      {
-        section: 'uiFeatureState',
-        name: `${featureState.key}.effectiveVisible`,
-        value: featureState.effectiveVisible ? 'true' : 'false',
-        description: `${featureState.label}: 설정값과 현재 페이지 capability를 합친 실제 출력 상태입니다.`,
-      },
-      {
-        section: 'uiFeatureState',
-        name: `${featureState.key}.enabled`,
-        value: featureState.enabled ? 'true' : 'false',
-        description: featureState.enabled ? `${featureState.label}: 현재 동작 가능합니다.` : featureState.disabledReason || `${featureState.label}: 현재 동작하지 않습니다.`,
-      },
-    ]),
     {
       section: 'templateUsagePreviewLayoutDebugOptions',
       name: 'stabilizeInitialLayout',
@@ -2038,13 +1920,6 @@ export default function CanvasOwnerPage() {
       label: '불러오기 및 저장 표시',
       definitionName: 'persistenceVisibility',
       description: '불러오기 및 저장 패널 안에서 실제로 보이는 항목입니다.',
-    },
-    {
-      key: 'uiFeatureState',
-      sourceSection: 'uiFeatureState',
-      label: 'UI 기능 effective 상태',
-      definitionName: 'resolvedUiFeatures',
-      description: '환경 설정값과 현재 페이지 capability를 합친 실제 출력/동작 상태입니다.',
     },
   ].map((section) => ({
     ...section,
@@ -2396,7 +2271,6 @@ export default function CanvasOwnerPage() {
             <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
               {section.rows.map((row) => {
                 const settingKey = getSettingKeyForDefinitionName(row.definitionName);
-                const featureState = getUiFeatureStateForDefinitionName(row.definitionName);
 
                 return (
                   <SettingToggleRow
@@ -2406,10 +2280,9 @@ export default function CanvasOwnerPage() {
                     definitionName={`${row.definitionName}${settingKey ? ` · ${getSettingSourceLabel(settingSources[settingKey])}` : ''}`}
                     env={row.definitionName}
                     description={row.description}
-                    statusItems={getUiFeatureStatusItems(featureState)}
                     checked={row.checked}
                     disabled={row.disabled}
-                    className={`${getSettingPanelClassName(settingKey)} ${getUiFeaturePanelClassName(featureState)}`}
+                    className={getSettingPanelClassName(settingKey)}
                     onCheckedChange={row.onCheckedChange}
                   />
                 );
@@ -2634,7 +2507,15 @@ export default function CanvasOwnerPage() {
                   todoPanel={canvasTodoPanel}
                   todoButtonLabel="할 일"
                   todoCount={documentRequestTasks.length}
-                  onTemplateSaved={previewTemplateSavedCallback}
+                  onTemplateSaved={
+                    !canEditCurrentWorkspace
+                      ? undefined
+                      : selectedManagedPage.id === 'templates'
+                        ? () => setOwnerEventMessage('템플릿 생성 페이지의 onTemplateSaved 콜백이 실행되었습니다.')
+                        : !routeEquivalentPreviewEnabled && settings.enableOnTemplateSaved
+                          ? (template) => setOwnerEventMessage(`onTemplateSaved 콜백: ${template.templateName} (${template.id})`)
+                          : undefined
+                  }
                 />
               ) : selectedDocumentInitialDraft ? (
                 <CanvasOwnedWorkspace
@@ -2672,7 +2553,11 @@ export default function CanvasOwnerPage() {
                   todoPanel={canvasTodoPanel}
                   todoButtonLabel="할 일"
                   todoCount={documentRequestTasks.length}
-                  onSaveDraftHtml={previewSaveDraftHtmlCallback}
+                  onSaveDraftHtml={
+                    canEditCurrentWorkspace && documentSaveEnabled
+                      ? handleSaveDocumentDraft
+                      : undefined
+                  }
                 />
             ) : (
               <div className="px-6 py-12 text-sm text-slate-500">
