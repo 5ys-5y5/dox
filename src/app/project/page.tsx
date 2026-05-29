@@ -13,7 +13,6 @@ import {
   Link2,
   Minimize2,
   Plus,
-  RefreshCcw,
   Signature,
   Trash2,
 } from 'lucide-react';
@@ -2301,7 +2300,7 @@ export default function ProjectPage() {
     setSelectedSiteId(requestedSiteId);
     setSelectedSiteIds(requestedSiteId ? [requestedSiteId] : []);
     setSelectedDocumentId(requestedDocumentId);
-    setExpandedDocumentStatusDocumentId(requestedDocumentId);
+    setExpandedDocumentStatusDocumentId('');
   }, [requestedDocumentId, requestedSiteId]);
 
   React.useEffect(() => {
@@ -2407,8 +2406,6 @@ export default function ProjectPage() {
   const selectedDocumentValueEntryValues = React.useMemo<Record<string, unknown>>(() => {
     return mergeDocumentCanvasLabelValues({}, selectedDocumentDetail?.valueEntries || []);
   }, [selectedDocumentDetail?.valueEntries]);
-
-  const isRefreshing = loadingRoot || loadingSiteData;
 
   const selectedDocumentLabelValues = React.useMemo<Record<string, unknown>>(() => {
     return {
@@ -4257,10 +4254,6 @@ export default function ProjectPage() {
     setExpandedSiteMemberId('');
   }, [selectedSiteId]);
 
-  const handleRefresh = () => {
-    void loadRootData();
-  };
-
   const handleChangeSelectedSites = React.useCallback(
     (nextSiteIds: string[]) => {
       if (nextSiteIds.length === 0) {
@@ -5016,7 +5009,7 @@ export default function ProjectPage() {
             : '직접 추가한 문서',
           selected: item.document.id === selectedDocumentId,
           onClick: () => {
-            setExpandedDocumentStatusDocumentId(item.document.id);
+            setExpandedDocumentStatusDocumentId('');
             handleSelectDocument(item.document.id);
           },
           detailAction: {
@@ -5792,22 +5785,6 @@ export default function ProjectPage() {
   return (
     <DoxAppShell title="현장 관리" activeNavigationId="project">
       <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8" {...projectOwnerItem('project-owner-root', '현장 관리 페이지 루트')}>
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between" {...projectOwnerItem('project-page-header', '현장 관리 페이지 머리글')}>
-        <div className="space-y-2" {...projectOwnerItem('project-page-heading-group', '현장 관리 페이지 제목 묶음')}>
-          <Badge variant="slate" {...projectOwnerItem('project-page-feature-badge', '현장 관리 페이지 기능 배지')}>현장 통합 관리</Badge>
-          <h2 className="text-xl font-semibold text-slate-950" {...projectOwnerItem('project-page-title', '현장 관리 페이지 제목')}>현장 관리 개요</h2>
-          <p className="max-w-4xl text-sm text-slate-600" {...projectOwnerItem('project-page-description', '현장 관리 페이지 설명')}>
-            현장을 만들고 필요한 문서를 준비한 뒤, 기록 값과 첨부 파일, 사진 증빙, 구성원 소속과 scope를 한곳에서 관리합니다.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2" {...projectOwnerItem('project-page-actions', '현장 관리 페이지 실행 버튼 영역')}>
-          <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing} {...projectOwnerItem('project-refresh-button', '현장 관리 새로고침 버튼')}>
-            <RefreshCcw className="h-4 w-4" />
-            새로고침
-          </Button>
-        </div>
-      </div>
-
       {message ? (
         <Card className="border-slate-200 bg-white" {...projectOwnerItem('project-message-panel', '현장 관리 메시지 패널')}>
           <CardContent className="p-4 text-sm text-slate-700" {...projectOwnerItem('project-message-content', '현장 관리 메시지 내용')}>{message}</CardContent>
