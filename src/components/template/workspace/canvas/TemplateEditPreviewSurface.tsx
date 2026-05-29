@@ -1474,7 +1474,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
         </div>
         {hasOverlayRail ? (
           <aside
-            className="h-full w-[300px] shrink-0 overflow-y-auto border-l border-slate-300 bg-white p-0"
+            className="h-full min-w-0 w-[min(300px,45%)] max-w-[300px] shrink-0 overflow-y-auto border-l border-slate-300 bg-white p-0"
             data-template-overlay-rail="true"
             data-template-overlay-rail-active-tab={selectionPanelTab}
             data-canvas-owner-item="canvas-aside-상자-편집-패널-2"
@@ -1501,7 +1501,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
           </aside>
         ) : preserveHiddenEditorOverlayRailSpace ? (
           <aside
-            className="h-full w-[300px] shrink-0 border-l border-slate-300 bg-white p-0"
+            className="h-full min-w-0 w-[min(300px,45%)] max-w-[300px] shrink-0 border-l border-slate-300 bg-white p-0"
             data-template-overlay-rail-placeholder="true"
             data-canvas-owner-item="canvas-aside-상자-편집-패널-2"
             data-canvas-owner-name="상자 편집 패널"

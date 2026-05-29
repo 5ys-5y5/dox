@@ -35566,6 +35566,9 @@ export default function TemplateEditWorkspace({
   const canvasPageContainerStyle = hasCanvasPageContainerSize
     ? ({
         width: effectiveCanvasPageContainerWidth || undefined,
+        maxWidth: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
         justifySelf: effectiveCanvasPageContainerWidth ? 'center' : undefined,
         height: resolvedCanvasPageContainerHeight || undefined,
         display: resolvedCanvasPageContainerHeight ? 'flex' : undefined,
@@ -35577,6 +35580,7 @@ export default function TemplateEditWorkspace({
     !canvasFullscreen && hasCanvasPageContainerSize
       ? ({
           width: effectiveCanvasPageContainerWidth ? '100%' : undefined,
+          maxWidth: '100%',
           height: canvasCardFillContainerHeight ? '100%' : undefined,
         } as React.CSSProperties)
       : undefined;
@@ -35616,18 +35620,41 @@ export default function TemplateEditWorkspace({
     ) : null;
 
   return (
-    <div className="relative space-y-6">
+    <div className="template-edit-workspace-root relative min-w-0 max-w-full space-y-6">
       <style>{`
-        .v106-canvas-toolbar {
+        .template-edit-workspace-root {
           container-type: inline-size;
+        }
+        .v106-template-workspace-layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        @container (min-width: 960px) {
+          .v106-template-workspace-layout[data-template-persistence-panel-visible="true"] {
+            grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+          }
+        }
+        .v106-canvas-toolbar-shell {
+          container-type: inline-size;
+        }
+        .v106-canvas-toolbar {
+          flex-wrap: nowrap;
+        }
+        .v106-canvas-toolbar[data-canvas-toolbar-wrap="true"] {
+          flex-wrap: wrap;
         }
         .v106-canvas-toolbar .v106-canvas-toolbar-button {
           width: 6.5rem;
           flex: 0 0 auto;
         }
+        .v106-canvas-toolbar [data-canvas-toolbar-collapse-priority] .v106-canvas-toolbar-button {
+          min-width: 0;
+        }
         .v106-canvas-toolbar .v106-canvas-toolbar-zoom-group {
           width: 15rem;
           flex: 0 0 auto;
+        }
+        .v106-canvas-toolbar .v106-canvas-toolbar-bottom-right-start {
+          margin-left: auto;
         }
         .v106-canvas-toolbar .v106-canvas-toolbar-zoom-slider-wrap {
           min-width: 0;
@@ -35636,27 +35663,93 @@ export default function TemplateEditWorkspace({
         .v106-canvas-toolbar .v106-canvas-toolbar-zoom-value {
           width: 2.5rem;
         }
-        @container (max-width: 1080px) {
-          .v106-canvas-toolbar .v106-canvas-toolbar-zoom-value {
-            display: none;
-          }
-          .v106-canvas-toolbar .v106-canvas-toolbar-zoom-group {
-            width: 8.75rem;
-          }
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="1"],
+          [data-canvas-toolbar-collapse-level="2"],
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="1"] .v106-canvas-toolbar-label,
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="2"],
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="2"] .v106-canvas-toolbar-label,
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="3"] .v106-canvas-toolbar-label,
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="4"] .v106-canvas-toolbar-label,
+        .v106-canvas-toolbar[data-canvas-toolbar-collapse-level="5"] [data-canvas-toolbar-collapse-priority="5"] .v106-canvas-toolbar-label {
+          display: none;
         }
-        @container (max-width: 860px) {
-          .v106-canvas-toolbar .v106-canvas-toolbar-label {
-            display: none;
-          }
-          .v106-canvas-toolbar .v106-canvas-toolbar-button {
-            width: 2.25rem;
-            gap: 0;
-            padding-left: 0;
-            padding-right: 0;
-          }
-          .v106-canvas-toolbar .v106-canvas-toolbar-zoom-group {
-            width: 8.75rem;
-          }
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="1"],
+          [data-canvas-toolbar-collapse-level="2"],
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="1"] .v106-canvas-toolbar-button,
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="2"],
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="2"] .v106-canvas-toolbar-button,
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="3"] .v106-canvas-toolbar-button,
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-collapse-priority="4"] .v106-canvas-toolbar-button,
+        .v106-canvas-toolbar[data-canvas-toolbar-collapse-level="5"] [data-canvas-toolbar-collapse-priority="5"] .v106-canvas-toolbar-button {
+          width: 2.25rem;
+          gap: 0;
+          padding-left: 0;
+          padding-right: 0;
+        }
+        .v106-canvas-toolbar[data-canvas-toolbar-wrap="true"] .v106-canvas-toolbar-label {
+          display: none;
+        }
+        .v106-canvas-toolbar[data-canvas-toolbar-wrap="true"] .v106-canvas-toolbar-button {
+          width: 2.25rem;
+          gap: 0;
+          padding-left: 0;
+          padding-right: 0;
+        }
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-group="zoom"] {
+          width: auto;
+        }
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-group="zoom"] .v106-canvas-toolbar-zoom-slider-wrap,
+        .v106-canvas-toolbar:is(
+          [data-canvas-toolbar-collapse-level="3"],
+          [data-canvas-toolbar-collapse-level="4"],
+          [data-canvas-toolbar-collapse-level="5"]
+        ) [data-canvas-toolbar-group="zoom"] .v106-canvas-toolbar-zoom-value {
+          display: none;
+        }
+        .v106-canvas-toolbar[data-canvas-toolbar-wrap="true"] [data-canvas-toolbar-group="zoom"] {
+          width: auto;
+        }
+        .v106-canvas-toolbar[data-canvas-toolbar-wrap="true"] [data-canvas-toolbar-group="zoom"] .v106-canvas-toolbar-zoom-slider-wrap,
+        .v106-canvas-toolbar[data-canvas-toolbar-wrap="true"] [data-canvas-toolbar-group="zoom"] .v106-canvas-toolbar-zoom-value {
+          display: none;
         }
         .template-edit-preview {
           position: relative;
@@ -36915,7 +37008,10 @@ export default function TemplateEditWorkspace({
         />
       )}
 
-      <div className={`grid items-start gap-6 ${hidePersistencePanel ? 'grid-cols-1' : 'lg:grid-cols-[420px_minmax(0,1fr)]'}`}>
+      <div
+        className="v106-template-workspace-layout grid min-w-0 max-w-full items-start gap-6"
+        data-template-persistence-panel-visible={hidePersistencePanel ? 'false' : 'true'}
+      >
         {hidePersistencePanel ? null : (
           <TemplatePersistencePanel
             templateListDisplay={templateListDisplay}
@@ -36946,7 +37042,7 @@ export default function TemplateEditWorkspace({
           />
         )}
 
-        <div className="min-w-0 self-start" style={canvasPageContainerStyle}>
+        <div className="min-w-0 max-w-full self-start" style={canvasPageContainerStyle}>
         <Card
           ref={stylePanelRef}
           className={`template-edit-canvas-card border-slate-200 min-w-0 overflow-hidden ${
@@ -37073,6 +37169,46 @@ export default function TemplateEditWorkspace({
             handlePreviewLostPointerCapture={handlePreviewLostPointerCapture}
             handlePreviewClickCapture={handlePreviewClickCapture}
             handlePreviewInput={handlePreviewInput}
+          />
+          <TemplateEditCanvasToolbar
+            placement="bottom"
+            documentDraftSaveEnabled={documentDraftSaveEnabled}
+            readOnlyDraftOutput={readOnlyDraftOutput}
+            nameFieldLabel={nameFieldLabel}
+            saveButtonLabel={saveButtonLabel}
+            templateNameReadOnly={templateNameReadOnly}
+            saveDisabled={saveDisabled}
+            templateName={templateName}
+            loading={loading}
+            saving={saving}
+            canvasFullscreen={canvasFullscreen}
+            previewZoom={previewZoom}
+            selectionPanelTab={selectionPanelTab}
+            editSettingsPanelVisible={editSettingsPanelVisible}
+            editSettingsPanelAvailable={!documentDraftSaveEnabled && !templateUsagePreviewActive && Boolean(renderedPreviewHtml.trim())}
+            templateUsagePreviewMode={templateUsagePreviewActive}
+            renderedPreviewHtml={renderedPreviewHtml}
+            canvasInteractionMode={canvasInteractionMode}
+            canUndoCanvasHistory={canUndoCanvasHistory}
+            canRedoCanvasHistory={canRedoCanvasHistory}
+            todoButtonLabel={todoButtonLabel}
+            todoCount={todoCount}
+            todoPanelOpen={todoPanelVisible}
+            todoButtonDisabled={!todoPanel}
+            visibility={canvasToolbarVisibility}
+            onUpdatePreviewZoom={updatePreviewZoom}
+            onToggleCanvasFullscreen={toggleCanvasFullscreen}
+            onToggleEditSettingsPanel={toggleEditSettingsPanelVisible}
+            onSelectionPanelTabChange={handleSelectionPanelTabChange}
+            onToggleTemplateUsagePreviewMode={toggleTemplateUsagePreviewMode}
+            onCanvasInteractionModeChange={setCanvasInteractionMode}
+            onUndoCanvasHistory={handleDocumentModeUndo}
+            onRedoCanvasHistory={handleDocumentModeRedo}
+            onTemplateNameChange={setTemplateName}
+            onSave={() => {
+              void saveTemplate();
+            }}
+            onToggleTodoPanel={todoPanel ? toggleTodoPanelVisible : undefined}
           />
         </Card>
       </div>

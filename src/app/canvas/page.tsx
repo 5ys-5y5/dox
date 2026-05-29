@@ -2336,8 +2336,11 @@ export default function CanvasOwnerPage() {
       data-canvas-owner-auto-name-root="canvas-page"
       {...canvasOwnerItem('canvas-page-root', '상자 편집 캔버스 페이지 루트')}
     >
-      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
-        <header className="space-y-3">
+      <div
+        className="mx-auto flex w-full min-w-0 max-w-[1800px] flex-col gap-6 px-4 py-6 sm:px-6"
+        {...canvasOwnerItem('canvas-page-shell', '상자 편집 캔버스 페이지 본문')}
+      >
+        <header className="min-w-0 max-w-full space-y-3">
           <Badge variant="blue">CANVAS-OWNER-01</Badge>
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold text-slate-950">상자 편집 캔버스</h1>
@@ -2348,21 +2351,24 @@ export default function CanvasOwnerPage() {
         </header>
 
         {message ? (
-          <Card className="border-slate-200 bg-slate-50">
+          <Card className="min-w-0 max-w-full border-slate-200 bg-slate-50">
             <CardContent className="p-4 text-sm text-slate-700">{message}</CardContent>
           </Card>
         ) : null}
 
         {ownerEventMessage ? (
-          <Card className="border-slate-200 bg-slate-50">
+          <Card className="min-w-0 max-w-full border-slate-200 bg-slate-50">
             <CardContent className="p-4 text-sm text-slate-700">{ownerEventMessage}</CardContent>
           </Card>
         ) : null}
 
         {selectedManagedPage.id === 'templates' ? null : extractStatusNotice}
 
-        <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-          <Card className="border-slate-200" {...canvasOwnerItem('canvas-management-panel', '공용 캔버스 관리 패널')}>
+        <div
+          className="grid min-w-0 max-w-full gap-6 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]"
+          {...canvasOwnerItem('canvas-page-main-grid', '상자 편집 캔버스 페이지 주요 영역')}
+        >
+          <Card className="min-w-0 max-w-full border-slate-200" {...canvasOwnerItem('canvas-management-panel', '공용 캔버스 관리 패널')}>
             <CardHeader className="space-y-1 p-4 pb-3" {...canvasOwnerItem('canvas-management-panel-header', '공용 캔버스 관리 패널 머리글')}>
               <CardTitle className="text-sm" {...canvasOwnerItem('canvas-management-panel-title', '공용 캔버스 관리 패널 제목')}>공용 캔버스 관리</CardTitle>
               <CardDescription className="text-xs leading-5" {...canvasOwnerItem('canvas-management-panel-description', '공용 캔버스 관리 패널 설명')}>
@@ -2375,13 +2381,13 @@ export default function CanvasOwnerPage() {
           </Card>
 
           {usesTemplateList ? (
-            <Card className="border-slate-200" {...canvasOwnerItem('current-template-panel', '현재 템플릿 상태 패널')}>
+            <Card className="min-w-0 max-w-full border-slate-200" {...canvasOwnerItem('current-template-panel', '현재 템플릿 상태 패널')}>
               <CardHeader className="space-y-1 p-4 pb-3" {...canvasOwnerItem('current-template-panel-header', '현재 템플릿 상태 패널 머리글')}>
                 <CardTitle className="text-sm" {...canvasOwnerItem('current-template-panel-title', '현재 템플릿 상태 패널 제목')}>현재 템플릿</CardTitle>
                 <CardDescription className="text-xs leading-5" {...canvasOwnerItem('current-template-panel-description', '현재 템플릿 상태 패널 설명')}>템플릿 선택 상태를 확인합니다.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 p-4 pt-0 text-sm text-slate-700" {...canvasOwnerItem('current-template-panel-content', '현재 템플릿 상태 패널 내용')}>
-                <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[72px_minmax(0,1fr)]" {...canvasOwnerItem('current-template-summary-grid', '현재 템플릿 요약 표')}>
+                <div className="grid min-w-0 max-w-full gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[72px_minmax(0,1fr)]" {...canvasOwnerItem('current-template-summary-grid', '현재 템플릿 요약 표')}>
                   <div className="font-medium text-slate-700" {...canvasOwnerItem('current-template-name-label', '현재 템플릿 이름 라벨')}>이름</div>
                   <div className="truncate text-slate-900" {...canvasOwnerItem('current-template-name-value', '현재 템플릿 이름 값')}>{selectedTemplateSummary?.templateName || '아직 선택되지 않음'}</div>
                   <div className="font-medium text-slate-700" {...canvasOwnerItem('current-template-id-label', '현재 템플릿 ID 라벨')}>ID</div>
@@ -2390,7 +2396,7 @@ export default function CanvasOwnerPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="border-slate-200" {...canvasOwnerItem('document-picker-panel', '문서 선택 상태 패널')}>
+            <Card className="min-w-0 max-w-full border-slate-200" {...canvasOwnerItem('document-picker-panel', '문서 선택 상태 패널')}>
               <CardHeader className="space-y-1 p-4 pb-3" {...canvasOwnerItem('document-picker-panel-header', '문서 선택 상태 패널 머리글')}>
                 <CardTitle className="text-sm" {...canvasOwnerItem('document-picker-panel-title', '문서 선택 상태 패널 제목')}>문서 선택</CardTitle>
                 <CardDescription className="text-xs leading-5" {...canvasOwnerItem('document-picker-panel-description', '문서 선택 상태 패널 설명')}>문서 선택 상태와 public prop 설정을 함께 확인합니다.</CardDescription>
@@ -2410,7 +2416,7 @@ export default function CanvasOwnerPage() {
                 />
 
                 {selectedDocumentDetail ? (
-                  <div className="grid gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[88px_minmax(0,1fr)]" {...canvasOwnerItem('document-picker-detail-grid', '문서 선택 상세 요약 표')}>
+                  <div className="grid min-w-0 max-w-full gap-x-3 gap-y-1 rounded-md border border-slate-200 px-3 py-2 text-xs sm:grid-cols-[88px_minmax(0,1fr)]" {...canvasOwnerItem('document-picker-detail-grid', '문서 선택 상세 요약 표')}>
                     <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-title-label', '문서 선택 문서명 라벨')}>문서명</div>
                     <div className="truncate text-slate-900" {...canvasOwnerItem('document-picker-detail-title-value', '문서 선택 문서명 값')}>{selectedDocumentDetail.document.title}</div>
                     <div className="font-medium text-slate-700" {...canvasOwnerItem('document-picker-detail-id-label', '문서 선택 문서 ID 라벨')}>문서 ID</div>
@@ -2437,10 +2443,10 @@ export default function CanvasOwnerPage() {
             </Card>
           )}
 
-	          <Card className="border-slate-200 xl:col-span-2">
+	          <Card className="min-w-0 max-w-full border-slate-200 xl:col-span-2">
 	            <CardHeader className="p-4 pb-3">
-                <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="space-y-1">
+                <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 space-y-1">
 	                    <CardTitle className="text-sm">상자 편집 캔버스 환경설정</CardTitle>
 	                    <CardDescription className="text-xs leading-5">
 	                      {`${selectedManagedPage.label} 페이지 설정을 편집합니다. 설정은 페이지 단위로만 저장됩니다.`}
@@ -2453,7 +2459,7 @@ export default function CanvasOwnerPage() {
                   />
                 </div>
 		            </CardHeader>
-		            <CardContent className="space-y-3 p-4 pt-0">
+		            <CardContent className="min-w-0 max-w-full space-y-3 p-4 pt-0">
 			              {renderPageSettingsImportSection()}
 			              {renderCanvasSizeSettings()}
 		              {renderCanvasSelectionOverlaySettings()}
@@ -2463,7 +2469,7 @@ export default function CanvasOwnerPage() {
 	            </CardContent>
 	          </Card>
 
-	          <div className="space-y-3 xl:col-span-2">
+	          <div className="min-w-0 max-w-full space-y-3 xl:col-span-2">
 	            <Divider
                 label={`공용 캔버스 · ${selectedManagedPage.label}`}
                 className="py-0"
@@ -2560,7 +2566,7 @@ export default function CanvasOwnerPage() {
             )}
           </div>
 
-          <div className="xl:col-span-2">
+          <div className="min-w-0 max-w-full xl:col-span-2">
             <OwnerSharedUiPreview
               ownerLabel={`공용 캔버스 · ${selectedManagedPage.label}`}
               itemAttributes={canvasOwnerItem}

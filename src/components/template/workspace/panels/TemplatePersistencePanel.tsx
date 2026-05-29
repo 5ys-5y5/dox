@@ -70,9 +70,9 @@ export const TemplatePersistencePanel = ({
   const showFieldGrid = showTemplateNameInput || showLayoutResizeModeSelect || showSourceDocumentNameInput;
 
   return (
-  <div className="space-y-6" {...canvasOwnerEnv('hidePersistencePanel')}>
+  <div className="min-w-0 max-w-full space-y-6" {...canvasOwnerEnv('hidePersistencePanel')}>
     {additionalControlPanels}
-    <Card className="border-slate-200">
+    <Card className="min-w-0 max-w-full border-slate-200">
       <CardHeader>
         <CardTitle>불러오기 및 저장</CardTitle>
       </CardHeader>

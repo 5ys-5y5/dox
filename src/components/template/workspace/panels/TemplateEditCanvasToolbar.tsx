@@ -24,6 +24,7 @@ import { CardContent } from '../../../ui/Card';
 import type { SelectionPanelTab, TemplateEditWorkspaceCanvasToolbarVisibility } from '../types';
 
 type TemplateEditCanvasToolbarProps = {
+  placement?: 'top' | 'bottom';
   documentDraftSaveEnabled: boolean;
   readOnlyDraftOutput: boolean;
   nameFieldLabel: string;
@@ -69,6 +70,42 @@ const canvasZoomButtonClassName =
 const canvasToolbarButtonBaseClassName =
   'v106-canvas-toolbar-button relative inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border border-slate-300 px-2 text-xs font-semibold transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-900 disabled:pointer-events-none disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100';
 const canvasOwnerEnv = (definitionName = '') => ({ env: definitionName });
+const canvasToolbarCollapseLevels = [0, 1, 2, 3, 4, 5] as const;
+const useIsomorphicLayoutEffect =
+  typeof window === 'undefined' ? React.useEffect : React.useLayoutEffect;
+
+type CanvasToolbarLayoutState = {
+  collapseLevel: number;
+  wrap: boolean;
+};
+
+const applyCanvasToolbarMeasurementState = (
+  toolbar: HTMLDivElement,
+  collapseLevel: number,
+  wrap: boolean
+) => {
+  toolbar.dataset.canvasToolbarCollapseLevel = String(collapseLevel);
+  toolbar.dataset.canvasToolbarWrap = wrap ? 'true' : 'false';
+  void toolbar.offsetWidth;
+};
+
+const getCanvasToolbarLayoutState = (toolbar: HTMLDivElement): CanvasToolbarLayoutState => {
+  if (toolbar.clientWidth <= 0) {
+    return { collapseLevel: 5, wrap: false };
+  }
+
+  for (const collapseLevel of canvasToolbarCollapseLevels) {
+    applyCanvasToolbarMeasurementState(toolbar, collapseLevel, false);
+
+    if (toolbar.scrollWidth <= toolbar.clientWidth + 1) {
+      return { collapseLevel, wrap: false };
+    }
+  }
+
+  applyCanvasToolbarMeasurementState(toolbar, 5, false);
+
+  return { collapseLevel: 5, wrap: toolbar.scrollWidth > toolbar.clientWidth + 1 };
+};
 
 const getCanvasToolbarButtonStateClassName = (active: boolean, disabled = false) => {
   if (disabled) {
@@ -209,6 +246,7 @@ const getCanvasToolbarButtonShapeClassName = (position: 'single' | 'first' | 'mi
 };
 
 export const TemplateEditCanvasToolbar = ({
+  placement = 'top',
   documentDraftSaveEnabled,
   readOnlyDraftOutput,
   saveButtonLabel,
@@ -241,6 +279,8 @@ export const TemplateEditCanvasToolbar = ({
   onSave,
   onToggleTodoPanel,
 }: TemplateEditCanvasToolbarProps) => {
+  const isBottomToolbar = placement === 'bottom';
+  const isTopToolbar = placement === 'top';
   const showSaveButton = visibility?.showSaveButton !== false;
   const showTodoButton = visibility?.showTodoButton !== false;
   const showPreviewToggle = visibility?.showPreviewToggle !== false;
@@ -250,15 +290,15 @@ export const TemplateEditCanvasToolbar = ({
   const showFullscreenControl = visibility?.showFullscreenControl !== false;
   const showEditSettingsToggle = visibility?.showEditSettingsToggle !== false;
   const showSelectionPanelTabs = visibility?.showSelectionPanelTabs !== false;
-  const renderSaveButton = showSaveButton;
-  const renderTodoButton = showTodoButton;
-  const renderInteractionModeControls = showInteractionModeControls;
-  const renderEditSettingsToggle = showEditSettingsToggle;
-  const renderSelectionPanelTabs = showSelectionPanelTabs;
-  const renderPreviewToggle = showPreviewToggle && !renderSelectionPanelTabs;
-  const renderHistoryControls = showHistoryControls;
-  const renderZoomControls = showZoomControls;
-  const renderFullscreenControl = showFullscreenControl;
+  const renderSaveButton = isTopToolbar && showSaveButton;
+  const renderTodoButton = isTopToolbar && showTodoButton;
+  const renderInteractionModeControls = isBottomToolbar && showInteractionModeControls;
+  const renderEditSettingsToggle = isTopToolbar && showEditSettingsToggle;
+  const renderSelectionPanelTabs = isTopToolbar && showSelectionPanelTabs;
+  const renderPreviewToggle = isTopToolbar && showPreviewToggle && !renderSelectionPanelTabs;
+  const renderHistoryControls = isBottomToolbar && showHistoryControls;
+  const renderZoomControls = isBottomToolbar && showZoomControls;
+  const renderFullscreenControl = isBottomToolbar && showFullscreenControl;
   const showToolbarBody =
     renderSaveButton ||
     renderTodoButton ||
@@ -269,54 +309,86 @@ export const TemplateEditCanvasToolbar = ({
     renderFullscreenControl ||
     renderEditSettingsToggle ||
     renderSelectionPanelTabs;
+  const toolbarRef = React.useRef<HTMLDivElement | null>(null);
+  const [toolbarLayoutState, setToolbarLayoutState] = React.useState<CanvasToolbarLayoutState>({
+    collapseLevel: 5,
+    wrap: false,
+  });
+  const measureToolbarLayout = React.useCallback(() => {
+    const toolbar = toolbarRef.current;
+
+    if (!toolbar) {
+      return;
+    }
+
+    const nextState = getCanvasToolbarLayoutState(toolbar);
+    toolbar.dataset.canvasToolbarCollapseLevel = String(nextState.collapseLevel);
+    toolbar.dataset.canvasToolbarWrap = nextState.wrap ? 'true' : 'false';
+    setToolbarLayoutState((previousState) =>
+      previousState.collapseLevel === nextState.collapseLevel && previousState.wrap === nextState.wrap
+        ? previousState
+        : nextState
+    );
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    measureToolbarLayout();
+  });
+
+  React.useEffect(() => {
+    const toolbar = toolbarRef.current;
+
+    if (!toolbar || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    let animationFrameId = 0;
+    const scheduleMeasure = () => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(measureToolbarLayout);
+    };
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleMeasure);
+
+    resizeObserver?.observe(toolbar);
+    if (toolbar.parentElement) {
+      resizeObserver?.observe(toolbar.parentElement);
+    }
+    Array.from(toolbar.children).forEach((child) => resizeObserver?.observe(child));
+
+    window.addEventListener('resize', scheduleMeasure);
+    scheduleMeasure();
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+    };
+  }, [measureToolbarLayout]);
 
   return (
   <>
     {showToolbarBody ? (
       <CardContent
-        className={`border-b border-slate-200 bg-white px-6 pb-6 pt-6 ${canvasFullscreen ? 'shrink-0' : ''}`}
-        data-canvas-owner-item="canvas-toolbar-body"
-        data-canvas-owner-name="캔버스 도구 모음"
+        className={`v106-canvas-toolbar-shell ${isBottomToolbar ? 'border-t' : 'border-b'} border-slate-200 bg-white px-6 pb-6 pt-6 ${canvasFullscreen ? 'shrink-0' : ''}`}
+        data-canvas-owner-item={isBottomToolbar ? 'canvas-bottom-toolbar-body' : 'canvas-toolbar-body'}
+        data-canvas-owner-name={isBottomToolbar ? '하단 캔버스 도구 모음' : '캔버스 도구 모음'}
       >
       <div
-        className="v106-canvas-toolbar flex w-full min-w-0 flex-wrap items-stretch gap-2 md:gap-3"
-        data-canvas-owner-item="canvas-toolbar-controls"
-        data-canvas-owner-name="캔버스 도구 버튼 묶음"
+        ref={toolbarRef}
+        className="v106-canvas-toolbar flex w-full min-w-0 flex-nowrap items-stretch gap-2 md:gap-3"
+        data-canvas-owner-item={isBottomToolbar ? 'canvas-bottom-toolbar-controls' : 'canvas-toolbar-controls'}
+        data-canvas-owner-name={isBottomToolbar ? '하단 캔버스 도구 버튼 묶음' : '캔버스 도구 버튼 묶음'}
+        data-canvas-toolbar-placement={placement}
+        data-canvas-toolbar-collapse-level={toolbarLayoutState.collapseLevel}
+        data-canvas-toolbar-wrap={toolbarLayoutState.wrap ? 'true' : 'false'}
       >
-        {renderSaveButton ? (
-          <Button
-            {...canvasOwnerEnv('canvasToolbarVisibility.showSaveButton')}
-            onClick={onSave}
-            disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentDraftSaveEnabled)}
-            aria-label={saving ? '저장 중...' : saveButtonLabel}
-            className={`${canvasToolbarButtonBaseClassName} rounded-md`}
-          >
-            <Save className="h-4 w-4 shrink-0" />
-            <span className="v106-canvas-toolbar-label">{saving ? '저장 중...' : saveButtonLabel}</span>
-          </Button>
-        ) : null}
-        {renderTodoButton ? (
-          <Button
-            {...canvasOwnerEnv('canvasToolbarVisibility.showTodoButton')}
-            type="button"
-            variant="outline"
-            onClick={onToggleTodoPanel}
-            disabled={todoButtonDisabled || !onToggleTodoPanel}
-            aria-pressed={todoPanelOpen}
-            aria-label={todoButtonLabel}
-            className={`${canvasToolbarButtonBaseClassName} rounded-md`}
-          >
-            <ListTodo className="h-4 w-4 shrink-0" />
-            <span className="v106-canvas-toolbar-label">{todoButtonLabel}</span>
-            {todoCount > 0 ? (
-              <span className="v106-canvas-toolbar-label ml-1 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
-                {todoCount}
-              </span>
-            ) : null}
-          </Button>
-        ) : null}
         {renderPreviewToggle ? (
-        <div className={`${canvasToolbarGroupClassName} shrink-0`} {...canvasOwnerEnv('canvasToolbarVisibility.showPreviewToggle')}>
+        <div
+          className={`${canvasToolbarGroupClassName} shrink-0`}
+          data-canvas-toolbar-collapse-priority="5"
+          data-canvas-toolbar-group="preview"
+          {...canvasOwnerEnv('canvasToolbarVisibility.showPreviewToggle')}
+        >
           <button
             type="button"
             className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(templateUsagePreviewMode, !renderedPreviewHtml.trim())}`}
@@ -335,6 +407,8 @@ export const TemplateEditCanvasToolbar = ({
           <div
             className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`}
             aria-label="캔버스 조작"
+            data-canvas-toolbar-collapse-priority="2"
+            data-canvas-toolbar-group="interaction"
             {...canvasOwnerEnv('canvasToolbarVisibility.showInteractionToolControls')}
           >
             <button
@@ -365,6 +439,8 @@ export const TemplateEditCanvasToolbar = ({
         <div
           className={`inline-grid h-9 shrink-0 grid-cols-2 ${canvasToolbarGroupClassName}`}
           aria-label="캔버스 실행 기록"
+          data-canvas-toolbar-collapse-priority="3"
+          data-canvas-toolbar-group="history"
           {...canvasOwnerEnv('canvasToolbarVisibility.showHistoryControls')}
         >
           <button
@@ -395,7 +471,9 @@ export const TemplateEditCanvasToolbar = ({
         ) : null}
         {renderZoomControls ? (
         <div
-          className="v106-canvas-toolbar-zoom-group flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 py-0"
+          className={`v106-canvas-toolbar-zoom-group ${isBottomToolbar ? 'v106-canvas-toolbar-bottom-right-start' : ''} flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 py-0`}
+          data-canvas-toolbar-collapse-priority="3"
+          data-canvas-toolbar-group="zoom"
           {...canvasOwnerEnv('canvasToolbarVisibility.showZoomControls')}
         >
           <button
@@ -436,7 +514,12 @@ export const TemplateEditCanvasToolbar = ({
         </div>
         ) : null}
         {renderFullscreenControl ? (
-        <div className={`${canvasToolbarGroupClassName} shrink-0`} {...canvasOwnerEnv('canvasToolbarVisibility.showFullscreenControl')}>
+        <div
+          className={`${canvasToolbarGroupClassName} ${isBottomToolbar && !renderZoomControls ? 'v106-canvas-toolbar-bottom-right-start' : ''} shrink-0`}
+          data-canvas-toolbar-collapse-priority="4"
+          data-canvas-toolbar-group="fullscreen"
+          {...canvasOwnerEnv('canvasToolbarVisibility.showFullscreenControl')}
+        >
           <button
             type="button"
             className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(canvasFullscreen)}`}
@@ -451,7 +534,12 @@ export const TemplateEditCanvasToolbar = ({
         </div>
         ) : null}
         {renderEditSettingsToggle ? (
-          <div className={`${canvasToolbarGroupClassName} shrink-0`} {...canvasOwnerEnv('canvasToolbarVisibility.showEditSettingsToggle')}>
+          <div
+            className={`${canvasToolbarGroupClassName} shrink-0`}
+            data-canvas-toolbar-collapse-priority="4"
+            data-canvas-toolbar-group="edit-settings"
+            {...canvasOwnerEnv('canvasToolbarVisibility.showEditSettingsToggle')}
+          >
             <button
               type="button"
               className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName('single')} ${getCanvasToolbarButtonStateClassName(
@@ -475,6 +563,8 @@ export const TemplateEditCanvasToolbar = ({
             aria-label="상자 편집 탭"
             data-canvas-owner-item="canvas-container-상자-편집-탭"
             data-canvas-owner-name="상자 편집 탭"
+            data-canvas-toolbar-collapse-priority="5"
+            data-canvas-toolbar-group="selection-tabs"
             {...canvasOwnerEnv('canvasToolbarVisibility.showSelectionPanelTabs')}
           >
             {([
@@ -553,6 +643,48 @@ export const TemplateEditCanvasToolbar = ({
                 </button>
               );
             })}
+          </div>
+        ) : null}
+        {renderSaveButton || renderTodoButton ? (
+          <div
+            className="v106-canvas-toolbar-actions ml-auto flex shrink-0 items-stretch gap-2"
+            data-canvas-owner-item="canvas-toolbar-actions"
+            data-canvas-owner-name="캔버스 저장 및 할 일 버튼 묶음"
+            data-canvas-toolbar-collapse-priority="1"
+            data-canvas-toolbar-group="actions"
+          >
+            {renderSaveButton ? (
+              <Button
+                {...canvasOwnerEnv('canvasToolbarVisibility.showSaveButton')}
+                onClick={onSave}
+                disabled={saveDisabled || saving || loading || !renderedPreviewHtml.trim() || (templateUsagePreviewMode && !documentDraftSaveEnabled)}
+                aria-label={saving ? '저장 중...' : saveButtonLabel}
+                className={`${canvasToolbarButtonBaseClassName} rounded-md`}
+              >
+                <Save className="h-4 w-4 shrink-0" />
+                <span className="v106-canvas-toolbar-label">{saving ? '저장 중...' : saveButtonLabel}</span>
+              </Button>
+            ) : null}
+            {renderTodoButton ? (
+              <Button
+                {...canvasOwnerEnv('canvasToolbarVisibility.showTodoButton')}
+                type="button"
+                variant="outline"
+                onClick={onToggleTodoPanel}
+                disabled={todoButtonDisabled || !onToggleTodoPanel}
+                aria-pressed={todoPanelOpen}
+                aria-label={todoButtonLabel}
+                className={`${canvasToolbarButtonBaseClassName} rounded-md`}
+              >
+                <ListTodo className="h-4 w-4 shrink-0" />
+                <span className="v106-canvas-toolbar-label">{todoButtonLabel}</span>
+                {todoCount > 0 ? (
+                  <span className="v106-canvas-toolbar-label ml-1 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                    {todoCount}
+                  </span>
+                ) : null}
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>
