@@ -929,9 +929,7 @@ export const applyCanvasOwnerSettingsToWorkspaceProps = ({
     templateNameReadOnly: shouldApplySetting('templateNameReadOnly')
       ? settings.templateNameReadOnly
       : baseProps.templateNameReadOnly,
-    saveDisabled: shouldApplySetting('saveDisabled')
-      ? Boolean(baseProps.saveDisabled || settings.saveDisabled)
-      : baseProps.saveDisabled,
+    saveDisabled: shouldApplySetting('saveDisabled') ? settings.saveDisabled : baseProps.saveDisabled,
     initialCanvasTab: shouldApplySetting('initialCanvasTab') ? settings.initialCanvasTab : baseProps.initialCanvasTab,
     defaultCanvasFullscreen: shouldApplySetting('defaultCanvasFullscreen')
       ? settings.defaultCanvasFullscreen

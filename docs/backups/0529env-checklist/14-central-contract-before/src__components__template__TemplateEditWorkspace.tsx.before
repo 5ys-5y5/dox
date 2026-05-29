@@ -19692,7 +19692,6 @@ export default function TemplateEditWorkspace({
   const renderedPreviewHtml = previewHtml || templateDetail?.template.draftHtml || '';
   const toolbarTemplateUsagePreviewActive = templateUsagePreviewMode || canvasViewPreviewRequested;
   const templateUsagePreviewActive = documentDraftSaveEnabled || readOnlyDraftOutput || templateUsagePreviewMode || canvasViewPreviewRequested;
-  const surfaceTemplateUsagePreviewActive = toolbarTemplateUsagePreviewActive || readOnlyDraftOutput;
   const templateUsagePreviewRuntimeOptionsSignature = [
     usagePreviewStabilizeInitialLayout ? 'stabilize' : 'raw-layout',
     usagePreviewPreventInitialValueClearShrink ? 'guard-initial-shrink' : 'allow-initial-shrink',
@@ -19708,7 +19707,7 @@ export default function TemplateEditWorkspace({
     templateUsagePreviewActiveRef.current = templateUsagePreviewActive;
   }, [templateUsagePreviewActive]);
   const canvasBoxSelectionModeActive = canvasSelectionMode === 'box';
-  const roleAssignmentTabActive = !toolbarTemplateUsagePreviewActive && selectionPanelTab === 'metadata2';
+  const roleAssignmentTabActive = !templateUsagePreviewActive && selectionPanelTab === 'metadata2';
   const activeCanvasSelectablePolicy = roleAssignmentTabActive
     ? ROLE_ASSIGNMENT_CANVAS_SELECTABLE_POLICY
     : canvasSelectablePolicy;
@@ -19718,8 +19717,7 @@ export default function TemplateEditWorkspace({
       (checklistSelectableTargets.length > 0 &&
         Boolean(onChecklistSelectableTargetSelect || onChecklistSelectableTargetsSelect)));
   const canvasLinkedSelectionControllerActive = checklistCanvasSelectionModeActive || roleAssignmentTabActive;
-  const canvasEditorPointerHandlersSuppressed =
-    toolbarTemplateUsagePreviewActive || readOnlyDraftOutput || roleAssignmentTabActive;
+  const canvasEditorPointerHandlersSuppressed = templateUsagePreviewActive || roleAssignmentTabActive;
   const surfaceRenderedPreviewHtml = renderedPreviewHtml;
   const templateUsagePreviewPending =
     templateUsagePreviewActive &&
@@ -37109,7 +37107,7 @@ export default function TemplateEditWorkspace({
             }
             preparedViewMode={activeCanvasPreparedViewMode}
             selectionInactiveOverlayOpacity={selectionInactiveOverlayOpacity}
-            templateUsagePreviewMode={surfaceTemplateUsagePreviewActive}
+            templateUsagePreviewMode={templateUsagePreviewActive}
             templateUsagePreviewHtml={templateUsagePreviewHtml}
             templateUsagePreviewPending={templateUsagePreviewPending}
             showEditorRoomAsUsagePreviewFallback={documentDraftSaveEnabled || readOnlyDraftOutput}

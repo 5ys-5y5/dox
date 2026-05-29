@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | `00-before-start` | 구현 시작 전 whitelist 대상 파일 복구 | `docs/backups/0529env-checklist/00-before-start/` |
 | `11-runtime-toolbar-before` | runtime preview/toolbar 탭 상태 분리 구현 직전 복구 | `docs/backups/0529env-checklist/11-runtime-toolbar-before/` |
+| `14-central-contract-before` | 중앙 route contract 구현 직전 확장 whitelist 복구 | `docs/backups/0529env-checklist/14-central-contract-before/` |
 
 ## 00-before-start 백업 파일
 
@@ -42,6 +43,26 @@ cp docs/backups/0529env-checklist/11-runtime-toolbar-before/src__app__canvas__pa
 cp docs/backups/0529env-checklist/11-runtime-toolbar-before/src__components__ui__SettingToggleRow.tsx.before src/components/ui/SettingToggleRow.tsx
 cp docs/backups/0529env-checklist/11-runtime-toolbar-before/src__components__template__TemplateEditWorkspace.tsx.before src/components/template/TemplateEditWorkspace.tsx
 cp docs/backups/0529env-checklist/11-runtime-toolbar-before/src__components__template__workspace__panels__TemplateEditCanvasToolbar.tsx.before src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx
+```
+
+## 14-central-contract-before 복구 명령
+
+```sh
+cp docs/backups/0529env-checklist/14-central-contract-before/docs__0529env.md.before docs/0529env.md
+cp docs/backups/0529env-checklist/14-central-contract-before/docs__0529env-checklist.md.before docs/0529env-checklist.md
+cp docs/backups/0529env-checklist/14-central-contract-before/src__app__canvas__ownerSettings.ts.before src/app/canvas/ownerSettings.ts
+cp docs/backups/0529env-checklist/14-central-contract-before/src__app__canvas__ownerPolicy.tsx.before src/app/canvas/ownerPolicy.tsx
+rm -f src/app/canvas/ownerRouteContract.ts
+cp docs/backups/0529env-checklist/14-central-contract-before/src__app__canvas__page.tsx.before src/app/canvas/page.tsx
+cp docs/backups/0529env-checklist/14-central-contract-before/src__components__ui__SettingToggleRow.tsx.before src/components/ui/SettingToggleRow.tsx
+cp docs/backups/0529env-checklist/14-central-contract-before/src__components__template__TemplateEditWorkspace.tsx.before src/components/template/TemplateEditWorkspace.tsx
+cp docs/backups/0529env-checklist/14-central-contract-before/src__components__template__workspace__panels__TemplateEditCanvasToolbar.tsx.before src/components/template/workspace/panels/TemplateEditCanvasToolbar.tsx
+cp docs/backups/0529env-checklist/14-central-contract-before/src__app__project__page.tsx.before src/app/project/page.tsx
+cp 'docs/backups/0529env-checklist/14-central-contract-before/src__app__request-links__[token]__page.tsx.before' 'src/app/request-links/[token]/page.tsx'
+cp 'docs/backups/0529env-checklist/14-central-contract-before/src__app__member-access__document__[documentId]__page.tsx.before' 'src/app/member-access/document/[documentId]/page.tsx'
+cp docs/backups/0529env-checklist/14-central-contract-before/src__app__templates__page.tsx.before src/app/templates/page.tsx
+cp docs/backups/0529env-checklist/14-central-contract-before/src__app__templates__edit__page.tsx.before src/app/templates/edit/page.tsx
+cp docs/backups/0529env-checklist/14-central-contract-before/src__app__templates__extract__page.tsx.before src/app/templates/extract/page.tsx
 ```
 
 ## 복구 후 확인

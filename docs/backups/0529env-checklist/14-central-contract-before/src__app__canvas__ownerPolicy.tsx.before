@@ -9,15 +9,17 @@ import {
   type CanvasOwnerSettingSource,
   useStoredCanvasOwnerSettings,
 } from './ownerSettings';
-import {
-  resolveCanvasOwnerRouteWorkspaceProps,
-  type CanvasOwnerRouteWorkspaceInput,
-  type CanvasOwnerSurface,
-} from './ownerRouteContract';
 
-export type { CanvasOwnerSurface } from './ownerRouteContract';
+export type CanvasOwnerSurface =
+  | 'canvas'
+  | 'member-access'
+  | 'project'
+  | 'request-links'
+  | 'templates'
+  | 'templates-edit'
+  | 'templates-extract-preview';
 
-type CanvasOwnedWorkspaceProps = CanvasOwnerRouteWorkspaceInput & {
+type CanvasOwnedWorkspaceProps = TemplateEditWorkspaceProps & {
   surface: CanvasOwnerSurface;
   applyStoredCanvasOwnerSettings?: boolean;
   canvasOwnerSettings?: CanvasOwnerSettings | null;
@@ -30,17 +32,12 @@ const resolveCanvasOwnedWorkspaceProps = ({
   canvasOwnerSettingSources,
   ...props
 }: CanvasOwnedWorkspaceProps): TemplateEditWorkspaceProps => {
-  const routeWorkspaceProps = resolveCanvasOwnerRouteWorkspaceProps({
-    surface: _surface,
-    props,
-  });
-
   if (!canvasOwnerSettings) {
-    return routeWorkspaceProps;
+    return props;
   }
 
   return applyCanvasOwnerSettingsToWorkspaceProps({
-    baseProps: routeWorkspaceProps,
+    baseProps: props,
     settings: canvasOwnerSettings,
     settingSources: canvasOwnerSettingSources,
   });

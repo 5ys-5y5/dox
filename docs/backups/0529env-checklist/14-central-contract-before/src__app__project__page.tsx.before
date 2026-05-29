@@ -5766,8 +5766,14 @@ export default function ProjectPage() {
             key={`project-edit:${selectedDocumentInitialDraft.draftKey}`}
             surface="project"
             initialDraft={selectedDocumentInitialDraft}
-            canvasOwnerDocumentAttachmentApiPath={`/api/documents/${encodeURIComponent(selectedOwnerDocumentId)}/attachments`}
+            hideHeader
+            hidePersistencePanel
+            nameFieldLabel="문서 이름:"
+            saveButtonLabel="문서 저장"
+            templateNameReadOnly
+            documentAttachmentApiPath={`/api/documents/${encodeURIComponent(selectedOwnerDocumentId)}/attachments`}
             onSaveDraftHtml={handleSaveDocumentDraft}
+            suppressInitialDraftLoadedMessage
           />
         </div>
       );

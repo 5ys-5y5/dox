@@ -651,14 +651,20 @@ export default function RequestLinkTokenPage() {
                 surface="request-links"
                 initialDraft={initialDraft}
                 editableValueKeys={requestLinkEditable ? requestLink?.allowedLabels || [] : null}
-                canvasOwnerDocumentAttachmentApiPath={requestLink ? `/api/request-links/${encodeURIComponent(token)}/attachments` : ''}
-                canvasOwnerRuntimeSaveDisabled={!requestLinkEditable || loading}
+                hidePersistencePanel
+                suppressInitialDraftLoadedMessage
+                templateNameReadOnly
+                saveDisabled={!requestLinkEditable || loading}
+                documentAttachmentApiPath={requestLink ? `/api/request-links/${encodeURIComponent(token)}/attachments` : ''}
                 onSaveDraftHtml={requestLinkEditable ? handleSaveDraft : undefined}
                 canvasSelectablePolicy={canvasSelectablePolicy}
                 selectedCanvasBoxes={selectedCanvasBoxes}
                 onCanvasSelectionChange={handleCanvasSelectionChange}
                 canvasSignatureStates={canvasSignatureStates}
                 onCanvasSignatureSubmit={handleCanvasSignatureSubmit}
+                headerTitle="상자 편집 캔버스"
+                headerDescription="요청 링크에서 허용된 항목만 기록할 수 있습니다."
+                saveButtonLabel="문서 저장"
               />
             ) : (
               <div className="px-6 py-10 text-sm text-slate-500">

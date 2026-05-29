@@ -492,11 +492,15 @@ export default function MemberAccessDocumentPage() {
           surface="member-access"
           key={initialDraft.draftKey}
           initialDraft={initialDraft}
-          canvasOwnerCanEditWorkspace={canEditDocument}
-          canvasOwnerCanSignDocument={canSignDocument}
-          canvasOwnerRuntimeSaveDisabled={!canUseDocumentWorkspace}
+          hidePersistencePanel
+          headerTitle="구성원 문서 접근"
+          headerDescription="멤버 소속과 scope 배정 범위 안에서 현장 문서를 열람하거나 수정합니다."
+          nameFieldLabel="문서 이름:"
+          saveButtonLabel={canEditDocument ? '문서 저장' : canSignDocument ? '서명 완료' : '열람 전용'}
+          templateNameReadOnly
+          saveDisabled={!canUseDocumentWorkspace}
           editableValueKeys={canUseDocumentWorkspace ? editableValueKeys : undefined}
-          canvasOwnerDocumentAttachmentApiPath={
+          documentAttachmentApiPath={
             canEditDocument
               ? buildMemberDocumentApiPath(
                   `/api/member-access/documents/${encodeURIComponent(access.detail.document.id)}/attachments`
