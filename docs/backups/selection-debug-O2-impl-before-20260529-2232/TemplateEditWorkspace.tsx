@@ -2400,21 +2400,6 @@ const resolveMarqueeSelectionIdsFromHitEntries = ({
     return Array.from(new Set([...baseSelectionIds, ...hits]));
   }
 
-  const hitFrameGroupIdSet = new Set(hits);
-  const matchedPositionGroupEntries = positionGroupHitEntries.filter((entry) => {
-    const groupRectMatched =
-      mode === 'contained' ? rectContainsRect(selectionRect, entry.rect) : rectIntersectsRect(selectionRect, entry.rect);
-    const hasMatchedMember = entry.frameGroupIds.some((frameGroupId) => hitFrameGroupIdSet.has(frameGroupId));
-    const allMembersSelected =
-      entry.frameGroupIds.length > 0 &&
-      entry.frameGroupIds.every((frameGroupId) => hitFrameGroupIdSet.has(frameGroupId));
-
-    if (mode === 'contained') {
-      return groupRectMatched || allMembersSelected;
-    }
-
-    return groupRectMatched && hasMatchedMember;
-  });
   const compareMarqueePositionGroupHitEntryPriority = (
     left: MarqueePositionGroupHitEntry,
     right: MarqueePositionGroupHitEntry
@@ -2433,7 +2418,12 @@ const resolveMarqueeSelectionIdsFromHitEntries = ({
     return left.groupId.localeCompare(right.groupId, 'ko');
   };
 
-  const matchedGroups = matchedPositionGroupEntries.slice().sort(compareMarqueePositionGroupHitEntryPriority);
+  const matchedGroups = positionGroupHitEntries
+    .filter((entry) =>
+      mode === 'contained' ? rectContainsRect(selectionRect, entry.rect) : rectIntersectsRect(selectionRect, entry.rect)
+    )
+    .slice()
+    .sort(compareMarqueePositionGroupHitEntryPriority);
   const selectedGroups: MarqueePositionGroupHitEntry[] = [];
 
   matchedGroups.forEach((candidate) => {
@@ -19732,20 +19722,17 @@ export default function TemplateEditWorkspace({
   }, [templateUsagePreviewActive]);
   const canvasBoxSelectionModeActive = canvasSelectionMode === 'box';
   const roleAssignmentTabActive = !toolbarTemplateUsagePreviewActive && selectionPanelTab === 'metadata2';
-  const canvasEditorPointerHandlersSuppressed =
-    toolbarTemplateUsagePreviewActive || readOnlyDraftOutput || roleAssignmentTabActive;
   const activeCanvasSelectablePolicy = roleAssignmentTabActive
     ? ROLE_ASSIGNMENT_CANVAS_SELECTABLE_POLICY
     : canvasSelectablePolicy;
-  const canvasBoxSelectionUsesLinkedController =
-    canvasBoxSelectionModeActive && canvasEditorPointerHandlersSuppressed;
   const checklistCanvasSelectionModeActive =
     templateUsagePreviewActive &&
-    (canvasBoxSelectionUsesLinkedController ||
-      (!canvasBoxSelectionModeActive &&
-        checklistSelectableTargets.length > 0 &&
+    (canvasBoxSelectionModeActive ||
+      (checklistSelectableTargets.length > 0 &&
         Boolean(onChecklistSelectableTargetSelect || onChecklistSelectableTargetsSelect)));
   const canvasLinkedSelectionControllerActive = checklistCanvasSelectionModeActive || roleAssignmentTabActive;
+  const canvasEditorPointerHandlersSuppressed =
+    toolbarTemplateUsagePreviewActive || readOnlyDraftOutput || roleAssignmentTabActive;
   const surfaceRenderedPreviewHtml = renderedPreviewHtml;
   const templateUsagePreviewPending =
     templateUsagePreviewActive &&
@@ -26786,8 +26773,7 @@ export default function TemplateEditWorkspace({
 
     const canvasViewSelectionVisualModeActive =
       templateUsagePreviewActive &&
-      (checklistCanvasSelectionModeActive ||
-        (normalizedCanvasViewMode !== 'preview' && canvasEditorPointerHandlersSuppressed));
+      (checklistCanvasSelectionModeActive || normalizedCanvasViewMode !== 'preview');
 
     if (!canvasViewSelectionVisualModeActive || !root) {
       return;
@@ -26832,7 +26818,6 @@ export default function TemplateEditWorkspace({
       setSelectionPanelTab(canvasViewSelectionPanelTab);
     }
   }, [
-    canvasEditorPointerHandlersSuppressed,
     canvasViewMetadataVisualMode,
     canvasViewSelectionPanelTab,
     checklistCanvasSelectionModeActive,
@@ -27193,13 +27178,21 @@ export default function TemplateEditWorkspace({
         return false;
       }
 
-      root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
-        const anchorNode = resolveFrameSelectionAnchor(element) || element;
-        const frameGroupId = getFrameGroupId(anchorNode).trim();
+      const previousSelectionIds = Array.from(
+        new Set(
+          selectedFrameGroupIdsRef.current
+            .map((frameGroupId) => frameGroupId.trim())
+            .filter((frameGroupId) => Boolean(frameGroupId))
+        )
+      );
 
+      previousSelectionIds.forEach((frameGroupId) => {
         if (frameGroupId === normalizedNextFrameGroupId) {
           return;
         }
+
+        const node = resolveFrameNodeById(frameGroupId);
+        const anchorNode = resolveFrameSelectionAnchor(node) || node;
 
         if (!anchorNode) {
           return;

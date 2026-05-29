@@ -21,85 +21,9 @@ import type {
 
 type UseCanvasPointerHandlersOptions = any;
 
-type PositionSelectionClickCycleState = {
-  sourceFrameGroupId: string;
-  point: { x: number; y: number } | null;
-  entryKeys: string[];
-  index: number;
-};
-
-const POSITION_CLICK_CYCLE_POINT_TOLERANCE_PX = 2;
-
-const getPositionSelectionClickChainEntryKey = (entry: PositionSelectionClickChainEntry) =>
-  entry.kind === 'group' ? `group:${entry.groupId}` : `frame:${entry.frameGroupId}`;
-
-const positionClickChainEntryKeysEqual = (left: string[], right: string[]) =>
-  left.length === right.length && left.every((entryKey, index) => entryKey === right[index]);
-
-const positionClickCyclePointsEqual = (
-  left: { x: number; y: number } | null,
-  right: { x: number; y: number } | null
-) => {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  return (
-    Math.abs(left.x - right.x) <= POSITION_CLICK_CYCLE_POINT_TOLERANCE_PX &&
-    Math.abs(left.y - right.y) <= POSITION_CLICK_CYCLE_POINT_TOLERANCE_PX
-  );
-};
-
 export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOptions) => {
   const optionsRef = React.useRef(options);
-  const positionSelectionClickCycleRef = React.useRef<PositionSelectionClickCycleState | null>(null);
   optionsRef.current = options;
-
-  const resolveNextPositionSelectionClickChainIndex = React.useCallback(
-    ({
-      sourceFrameGroupId,
-      point,
-      entries,
-      currentChainIndex,
-      continuePreviousCycle,
-    }: {
-      sourceFrameGroupId: string;
-      point: { x: number; y: number } | null;
-      entries: PositionSelectionClickChainEntry[];
-      currentChainIndex: number;
-      continuePreviousCycle: boolean;
-    }) => {
-      if (entries.length <= 0) {
-        positionSelectionClickCycleRef.current = null;
-        return -1;
-      }
-
-      const normalizedSourceFrameGroupId = sourceFrameGroupId.trim();
-      const entryKeys = entries.map(getPositionSelectionClickChainEntryKey);
-      const previousCycle = positionSelectionClickCycleRef.current;
-      const canContinuePreviousCycle =
-        continuePreviousCycle &&
-        Boolean(previousCycle) &&
-        previousCycle?.sourceFrameGroupId === normalizedSourceFrameGroupId &&
-        positionClickCyclePointsEqual(previousCycle.point, point) &&
-        positionClickChainEntryKeysEqual(previousCycle.entryKeys, entryKeys);
-      const nextIndex = canContinuePreviousCycle
-        ? ((previousCycle?.index ?? -1) + 1) % entries.length
-        : currentChainIndex >= 0
-          ? (currentChainIndex + 1) % entries.length
-          : 0;
-
-      positionSelectionClickCycleRef.current = {
-        sourceFrameGroupId: normalizedSourceFrameGroupId,
-        point: point ? { ...point } : null,
-        entryKeys,
-        index: nextIndex,
-      };
-
-      return nextIndex;
-    },
-    []
-  );
 
   const updateMarqueeSelectionFromClientPoint = React.useCallback(
     (marqueeSelectionState: MarqueeSelectionState, clientX: number, clientY: number) => {
@@ -139,7 +63,6 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
       }
 
       if (!marqueeSelectionState.active) {
-        positionSelectionClickCycleRef.current = null;
         const nextGhost = createFrameEditorGhost(FRAME_MARQUEE_GHOST_CLASS, marqueeSelectionState.mode);
         marqueeSelectionState.pageInner.appendChild(nextGhost);
         marqueeSelectionState.ghost = nextGhost;
@@ -722,17 +645,8 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
           const currentChainIndex = positionOrderLockSelectionMode
             ? resolvePositionOrderLockClickChainCurrentIndex(clickChain.entries)
             : resolvePositionClickChainCurrentIndex(clickChain.entries);
-          const nextChainIndex = positionOrderLockSelectionMode
-            ? currentChainIndex >= 0
-              ? (currentChainIndex + 1) % clickChain.entries.length
-              : 0
-            : resolveNextPositionSelectionClickChainIndex({
-                sourceFrameGroupId: '',
-                point: pointerPoint,
-                entries: clickChain.entries,
-                currentChainIndex,
-                continuePreviousCycle: selectedFrameGroupIdsRef.current.length > 0,
-              });
+          const nextChainIndex =
+            currentChainIndex >= 0 ? (currentChainIndex + 1) % clickChain.entries.length : 0;
           const nextEntry = clickChain.entries[nextChainIndex] || null;
 
           if (!nextEntry) {
@@ -1025,7 +939,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
               kind: 'frame',
               frameGroupId,
             },
-          }, []);
+          });
 
           if (startSelectionMarqueeAfterClickSelection([])) {
             return;
@@ -1072,7 +986,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
               kind: 'frame',
               frameGroupId,
             },
-          }, []);
+          });
           if (startSelectionMarqueeAfterClickSelection([])) {
             return;
           }
@@ -1088,13 +1002,12 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
           });
         });
         const currentChainIndex = resolvePositionClickChainCurrentIndex(clickChain.entries);
-        const nextChainIndex = resolveNextPositionSelectionClickChainIndex({
-          sourceFrameGroupId: frameGroupId,
-          point: pointerPoint,
-          entries: clickChain.entries,
-          currentChainIndex,
-          continuePreviousCycle: currentSelectionIds.length > 0,
-        });
+        const nextChainIndex =
+          clickChain.entries.length > 0
+            ? currentChainIndex >= 0
+              ? (currentChainIndex + 1) % clickChain.entries.length
+              : 0
+            : -1;
         const nextEntry = nextChainIndex >= 0 ? clickChain.entries[nextChainIndex] : null;
 
         if (positionGroupEditModeRef.current.kind !== 'idle') {
@@ -1128,7 +1041,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
               kind: 'frame',
               frameGroupId,
             },
-          }, []);
+          });
           if (startSelectionMarqueeAfterClickSelection([])) {
             return;
           }
@@ -1173,12 +1086,12 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
           applyInstantSelectionAndDeferCommit(
             dragSelectionIds,
             {
-              positionGroupProxySelectionGroupId: nextEntry.groupId,
-              positionSelectionEntity: {
-                kind: 'group',
-                groupId: nextEntry.groupId,
-                frameGroupIds: dragSelectionIds,
-              },
+            positionGroupProxySelectionGroupId: nextEntry.groupId,
+            positionSelectionEntity: {
+              kind: 'group',
+              groupId: nextEntry.groupId,
+              frameGroupIds: dragSelectionIds,
+            },
             },
             proxySelection
           );
@@ -1197,7 +1110,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
             kind: 'frame',
             frameGroupId: nextEntry.frameGroupId,
           },
-        }, []);
+        });
         if (startSelectionMarqueeAfterClickSelection([])) {
           return;
         }
