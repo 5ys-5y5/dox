@@ -22,6 +22,7 @@ type MultiEntityPickerProps = {
   selectionSummary?: (selectedOptions: EntityPickerOption[]) => string;
   onDeleteOption?: (option: EntityPickerOption) => void;
   deleteOptionLabel?: string;
+  deferOptionChange?: boolean;
   controlAction?: {
     ariaLabel: string;
     title?: string;
@@ -101,6 +102,7 @@ export function MultiEntityPicker({
   selectionSummary,
   onDeleteOption,
   deleteOptionLabel = '항목 삭제',
+  deferOptionChange = false,
   controlAction,
   dropdownAction,
   ownerItemKey,
@@ -112,6 +114,7 @@ export function MultiEntityPicker({
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const dropdownRef = React.useRef<HTMLDivElement | null>(null);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const deferredChangeFrameRef = React.useRef<number | null>(null);
   const [dropdownPortalStyle, setDropdownPortalStyle] = React.useState<React.CSSProperties | null>(null);
 
   const selectedOptions = React.useMemo(
@@ -199,8 +202,34 @@ export function MultiEntityPicker({
     [ownerItemAttributes]
   );
   const toggleValue = (optionId: string) => {
-    onChange(values.includes(optionId) ? values.filter((value) => value !== optionId) : [...values, optionId]);
+    const nextValues = values.includes(optionId) ? values.filter((value) => value !== optionId) : [...values, optionId];
+
+    if (!deferOptionChange) {
+      onChange(nextValues);
+      return;
+    }
+
+    setOpen(false);
+    setQuery('');
+
+    if (deferredChangeFrameRef.current !== null) {
+      window.cancelAnimationFrame(deferredChangeFrameRef.current);
+    }
+
+    deferredChangeFrameRef.current = window.requestAnimationFrame(() => {
+      deferredChangeFrameRef.current = null;
+      onChange(nextValues);
+    });
   };
+
+  React.useEffect(
+    () => () => {
+      if (deferredChangeFrameRef.current !== null) {
+        window.cancelAnimationFrame(deferredChangeFrameRef.current);
+      }
+    },
+    []
+  );
 
   const dropdownNode =
     open && dropdownPortalStyle && typeof document !== 'undefined' ? (

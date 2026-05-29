@@ -2093,6 +2093,7 @@ export default function ProjectPage() {
   const [dashboardRefreshKey, setDashboardRefreshKey] = React.useState(0);
   const [showCreateSiteForm, setShowCreateSiteForm] = React.useState(false);
   const [deferProjectOverviewRender, setDeferProjectOverviewRender] = React.useState(false);
+  const [, startSiteSelectionTransition] = React.useTransition();
   const [newSiteName, setNewSiteName] = React.useState('');
   const [newSiteOpenDate, setNewSiteOpenDate] = React.useState(getTodayInputValue());
   const [newSiteTemplateIds, setNewSiteTemplateIds] = React.useState<string[]>([]);
@@ -4273,10 +4274,14 @@ export default function ProjectPage() {
 
   const handleChangeSelectedSites = React.useCallback(
     (nextSiteIds: string[]) => {
+      setDeferProjectOverviewRender(true);
+
       if (nextSiteIds.length === 0) {
         setSelectedSiteIds([]);
-        setSelectedSiteId('');
-        setSelectedDocumentId('');
+        startSiteSelectionTransition(() => {
+          setSelectedSiteId('');
+          setSelectedDocumentId('');
+        });
         return;
       }
 
@@ -4289,10 +4294,12 @@ export default function ProjectPage() {
       setSelectedSiteIds(nextSiteIds);
 
       if (nextActiveSiteId && nextActiveSiteId !== selectedSiteId) {
-        setSelectedSiteId(nextActiveSiteId);
+        startSiteSelectionTransition(() => {
+          setSelectedSiteId(nextActiveSiteId);
+        });
       }
     },
-    [selectedSiteId, selectedSiteIds]
+    [selectedSiteId, selectedSiteIds, startSiteSelectionTransition]
   );
 
   const loadSiteMembers = React.useCallback(async (siteId: string) => {
@@ -5782,6 +5789,7 @@ export default function ProjectPage() {
                 emptyMessage="선택 가능한 현장이 없습니다."
                 disabled={deletingSite}
                 allowClear
+                deferOptionChange
                 onDeleteOption={(option) => {
                   void handlePrepareDeleteSite(option.id);
                 }}
