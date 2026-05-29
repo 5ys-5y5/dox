@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 import { ExternalLink, FileText, FolderKanban, KeyRound, LogOut, RefreshCcw, Search, ShieldCheck } from 'lucide-react';
+import { DoxAppShell } from '../../components/design-system/layout';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
@@ -390,11 +391,12 @@ export default function MemberAccessPage() {
   );
 
   return (
-    <main className="mx-auto flex min-h-screen w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-8 md:px-8">
+    <DoxAppShell title="구성원 문서 접근" activeNavigationId="member-access">
+      <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="space-y-2">
           <Badge variant="slate">MEMBER-DOCUMENT-01</Badge>
-          <h1 className="text-3xl font-semibold text-slate-950">구성원 문서 접근</h1>
+          <h2 className="text-3xl font-semibold text-slate-950">구성원 문서 접근</h2>
           <p className="max-w-4xl text-sm text-slate-600">
             번호 인증을 통과한 구성원이 소속 현장과 소속 문서를 확인하는 화면입니다.
           </p>
@@ -588,6 +590,7 @@ export default function MemberAccessPage() {
           </Card>
         </div>
       )}
-    </main>
+      </div>
+    </DoxAppShell>
   );
 }

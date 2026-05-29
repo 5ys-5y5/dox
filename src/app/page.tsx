@@ -10,6 +10,7 @@ const pageGroups: Array<{
     title: string;
     summary: string;
     status: string;
+    relatedRoutes?: string[];
     statusVariant?: 'blue' | 'green' | 'amber' | 'slate' | 'red';
   }>;
 }> = [
@@ -89,9 +90,17 @@ const pageGroups: Array<{
       },
       {
         href: '/request-links',
-        title: '일괄 요청',
-        summary: '허용 라벨만 수정 가능한 제한 입력 링크를 발급하고 검증합니다.',
+        title: '요청 링크 발급/전송',
+        summary: '허용 라벨만 수정 가능한 제한 입력 링크를 발급하고, 발급된 토큰 링크에서 제한 입력을 받습니다.',
         status: '구현중',
+        relatedRoutes: ['/request-links/[token]'],
+      },
+      {
+        href: '/member-access',
+        title: '구성원 문서 접근',
+        summary: '번호 인증을 통과한 구성원이 소속 현장과 접근 가능한 문서를 확인하고 문서별 열람, 서명, 수정을 진행합니다.',
+        status: '구현중',
+        relatedRoutes: ['/member-access/document', '/member-access/document/[documentId]'],
       },
       {
         href: '/exports',
@@ -190,6 +199,11 @@ export default function HomePage() {
                         <div className="space-y-1">
                           <h3 className={cn('text-xl font-semibold text-slate-950', legacyTextClassName)}>{page.title}</h3>
                           <p className={cn('text-sm text-slate-600', legacyTextClassName)}>{page.summary}</p>
+                          {page.relatedRoutes && page.relatedRoutes.length > 0 ? (
+                            <p className={cn('text-xs text-slate-500', legacyTextClassName)}>
+                              관련 경로: {page.relatedRoutes.join(', ')}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
                       <div className={cn('pt-4 text-sm font-medium text-slate-900', legacyTextClassName)}>페이지 열기</div>
