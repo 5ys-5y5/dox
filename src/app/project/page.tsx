@@ -99,6 +99,8 @@ type ProjectListAction = {
 type ProjectListRow = {
   key: string;
   label: string;
+  siteName?: string;
+  siteContent?: React.ReactNode;
   labelContent?: React.ReactNode;
   statusLabel: string;
   statusVariant: ProjectListStatusVariant;
@@ -837,6 +839,79 @@ const copyTextToClipboard = async (text: string) => {
   }
 };
 
+const fetchDocumentMembersForSiteDocuments = async (siteDocuments: DocumentListItem[]) => {
+  if (siteDocuments.length === 0) {
+    return [];
+  }
+
+  const results = await Promise.allSettled(
+    siteDocuments.map((item) =>
+      fetchSuccessData<DocumentMemberRecordDto[]>(
+        `/api/member-access/document-members?documentId=${encodeURIComponent(item.document.id)}`
+      )
+    )
+  );
+
+  return results.flatMap((result) =>
+    result.status === 'fulfilled' && Array.isArray(result.value) ? result.value : []
+  );
+};
+
+const fetchTemplateScopeContextsForSiteDocuments = async (siteId: string, siteDocuments: DocumentListItem[]) => {
+  const normalizedSiteId = siteId.trim();
+  const templateIds = Array.from(
+    new Set(siteDocuments.map((item) => item.document.templateId?.trim() || '').filter(Boolean))
+  );
+
+  if (!normalizedSiteId || templateIds.length <= 0) {
+    return {};
+  }
+
+  const results = await Promise.allSettled(
+    templateIds.map(async (templateId) => {
+      const response = await fetch(
+        `/api/scopes/template-scopes?templateId=${encodeURIComponent(templateId)}&siteId=${encodeURIComponent(normalizedSiteId)}`,
+        { cache: 'no-store' }
+      );
+      const payload = await response.json();
+
+      if (!response.ok || !payload?.success || !payload?.data) {
+        throw new Error(payload?.message || 'scope 조회에 실패했습니다.');
+      }
+
+      return [templateId, payload.data as TemplateScopeContextDto] as const;
+    })
+  );
+
+  return results.reduce<Record<string, TemplateScopeContextDto>>((accumulator, result) => {
+    if (result.status === 'fulfilled') {
+      accumulator[result.value[0]] = result.value[1];
+    }
+
+    return accumulator;
+  }, {});
+};
+
+const countMemberScopeDocuments = (
+  memberId: string,
+  siteDocuments: DocumentListItem[],
+  scopeContextsByTemplateId: Record<string, TemplateScopeContextDto>
+) =>
+  siteDocuments.reduce((count, item) => {
+    const templateId = item.document.templateId?.trim() || '';
+    const context = templateId ? scopeContextsByTemplateId[templateId] : null;
+
+    if (!context) {
+      return count;
+    }
+
+    const hasScope = context.logicalScopes.some((scope) =>
+      (context.assignmentsByScopeKey[scope.scopeKey] || []).includes(memberId)
+    );
+
+    return hasScope ? count + 1 : count;
+  }, 0);
+
 function RoleSegmentedButtons<TValue extends string>({
   value,
   options,
@@ -1453,6 +1528,15 @@ const PROJECT_INFO_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   },
 ];
 
+const PROJECT_SITE_LIST_COLUMN: MejaiScrollTableColumn = {
+  key: 'siteName',
+  label: '현장',
+  width: 80,
+  minWidth: 80,
+  maxWidth: 80,
+  clampLines: 1,
+};
+
 const PROJECT_DOCUMENT_LIST_COLUMNS: MejaiScrollTableColumn[] = [
   {
     key: 'label',
@@ -1902,6 +1986,7 @@ function ProjectInfoList({
   variant = 'detail',
   actionColumnWidth = PROJECT_INFO_LIST_FIXED_ACTION_COLUMN_WIDTH,
   fixedColumnWidths = false,
+  showSiteColumn = false,
   ownerItemKey,
   ownerItemName = '현장 관리 목록',
 }: {
@@ -1912,6 +1997,7 @@ function ProjectInfoList({
   variant?: 'detail' | 'document' | 'photo' | 'signature' | 'member' | 'memberDocument' | 'checklist';
   actionColumnWidth?: number;
   fixedColumnWidths?: boolean;
+  showSiteColumn?: boolean;
   ownerItemKey?: string;
   ownerItemName?: string;
 }) {
@@ -1943,6 +2029,7 @@ function ProjectInfoList({
           maxWidth: actionColumnWidth,
         };
   const columns = [
+    ...(showSiteColumn ? [PROJECT_SITE_LIST_COLUMN] : []),
     ...baseColumns,
     ...(hasDetailColumn ? [resolveActionColumn(PROJECT_INFO_LIST_DETAIL_COLUMN)] : []),
     ...(hasDocumentLinkColumn ? [resolveActionColumn(PROJECT_INFO_LIST_DOCUMENT_LINK_COLUMN)] : []),
@@ -1953,6 +2040,7 @@ function ProjectInfoList({
   const linkColumnWidth = hasDocumentLinkColumn ? actionColumnWidth : 0;
   const registerColumnWidth = hasRegisterColumn ? actionColumnWidth : 0;
   const rowActionColumnWidth = hasActionColumn ? actionColumnWidth : 0;
+  const siteColumnWidth = showSiteColumn ? 80 : 0;
   const baseMinTableWidth =
     variant === 'document'
       ? 180
@@ -1968,7 +2056,7 @@ function ProjectInfoList({
                 ? 900
               : 492;
   const resolvedMinTableWidth =
-    minTableWidth || baseMinTableWidth + detailColumnWidth + linkColumnWidth + registerColumnWidth + rowActionColumnWidth;
+    minTableWidth || siteColumnWidth + baseMinTableWidth + detailColumnWidth + linkColumnWidth + registerColumnWidth + rowActionColumnWidth;
   const renderLinkActionButton = (action: ProjectListAction | undefined) =>
     action ? (
       <ProjectListActionButton
@@ -1987,6 +2075,7 @@ function ProjectInfoList({
     ariaLabel: item.label,
     title: [
       item.signatureSlotLabel || item.label,
+      item.siteName,
       item.statusLabel,
       item.signatureSignerName,
       item.signatureRequestedAt,
@@ -1999,6 +2088,7 @@ function ProjectInfoList({
       .filter(Boolean)
       .join(' / '),
     cells: {
+      siteName: item.siteContent ?? item.siteName ?? '-',
       label: item.labelContent ?? item.label,
       status: item.statusContent ?? (
         <Badge variant={item.statusVariant} className="px-1.5 py-0 text-[10px] font-semibold leading-5">
@@ -2161,6 +2251,10 @@ export default function ProjectPage() {
   const fileRegistrationInputRef = React.useRef<HTMLInputElement | null>(null);
   const [siteMembers, setSiteMembers] = React.useState<SiteMemberRecordDto[]>([]);
   const [siteDocumentMembers, setSiteDocumentMembers] = React.useState<DocumentMemberRecordDto[]>([]);
+  const [selectedSiteDocumentsBySiteId, setSelectedSiteDocumentsBySiteId] = React.useState<Record<string, DocumentListItem[]>>({});
+  const [selectedSiteMembersBySiteId, setSelectedSiteMembersBySiteId] = React.useState<Record<string, SiteMemberRecordDto[]>>({});
+  const [selectedSiteDocumentMembersBySiteId, setSelectedSiteDocumentMembersBySiteId] = React.useState<Record<string, DocumentMemberRecordDto[]>>({});
+  const [selectedSiteScopeContextsBySiteId, setSelectedSiteScopeContextsBySiteId] = React.useState<Record<string, Record<string, TemplateScopeContextDto>>>({});
   const [templateScopeContextsByTemplateId, setTemplateScopeContextsByTemplateId] = React.useState<Record<string, TemplateScopeContextDto>>({});
   const [loadingTemplateScopeContexts, setLoadingTemplateScopeContexts] = React.useState(false);
   const [memberAccessSession, setMemberAccessSession] = React.useState<MemberAccessSessionDto | null>(null);
@@ -2341,6 +2435,15 @@ export default function ProjectPage() {
     () => sites.find((site) => site.id === selectedSiteId) || null,
     [selectedSiteId, sites]
   );
+  const siteById = React.useMemo(
+    () => new Map(sites.map((site) => [site.id, site] as const)),
+    [sites]
+  );
+  const selectedListSiteIds = React.useMemo(
+    () => selectedSiteIds.filter((siteId) => siteById.has(siteId)),
+    [selectedSiteIds, siteById]
+  );
+  const showSiteColumnInSiteLists = selectedListSiteIds.length > 1;
   const siteOptions = React.useMemo(
     () =>
       sites.map((site) => ({
@@ -4189,6 +4292,86 @@ export default function ProjectPage() {
   }, [selectedSiteId]);
 
   React.useEffect(() => {
+    if (selectedListSiteIds.length <= 1) {
+      setSelectedSiteDocumentsBySiteId({});
+      setSelectedSiteMembersBySiteId({});
+      setSelectedSiteDocumentMembersBySiteId({});
+      setSelectedSiteScopeContextsBySiteId({});
+      return;
+    }
+
+    let active = true;
+    setLoadingSiteMembers(true);
+    setLoadingSiteDocumentMembers(true);
+
+    const loadSelectedSiteCollections = async () => {
+      const results = await Promise.allSettled(
+        selectedListSiteIds.map(async (siteId) => {
+          const nextDocuments = await fetchSuccessData<DocumentListItem[]>(
+            `/api/documents?siteId=${encodeURIComponent(siteId)}`
+          );
+          const safeDocuments = Array.isArray(nextDocuments) ? nextDocuments : [];
+          const [memberResult, documentMemberResult] = await Promise.allSettled([
+            fetchSuccessData<SiteMemberRecordDto[]>(
+              `/api/member-access/site-members?siteId=${encodeURIComponent(siteId)}`
+            ),
+            fetchDocumentMembersForSiteDocuments(safeDocuments),
+          ]);
+          const scopeContexts = await fetchTemplateScopeContextsForSiteDocuments(siteId, safeDocuments);
+
+          return {
+            siteId,
+            documents: safeDocuments,
+            members: memberResult.status === 'fulfilled' && Array.isArray(memberResult.value) ? memberResult.value : [],
+            documentMembers: documentMemberResult.status === 'fulfilled' ? documentMemberResult.value : [],
+            scopeContexts,
+          };
+        })
+      );
+
+      if (!active) {
+        return;
+      }
+
+      const nextDocumentsBySiteId: Record<string, DocumentListItem[]> = {};
+      const nextMembersBySiteId: Record<string, SiteMemberRecordDto[]> = {};
+      const nextDocumentMembersBySiteId: Record<string, DocumentMemberRecordDto[]> = {};
+      const nextScopeContextsBySiteId: Record<string, Record<string, TemplateScopeContextDto>> = {};
+
+      results.forEach((result) => {
+        if (result.status !== 'fulfilled') {
+          return;
+        }
+
+        nextDocumentsBySiteId[result.value.siteId] = result.value.documents;
+        nextMembersBySiteId[result.value.siteId] = result.value.members;
+        nextDocumentMembersBySiteId[result.value.siteId] = result.value.documentMembers;
+        nextScopeContextsBySiteId[result.value.siteId] = result.value.scopeContexts;
+      });
+
+      setSelectedSiteDocumentsBySiteId(nextDocumentsBySiteId);
+      setSelectedSiteMembersBySiteId(nextMembersBySiteId);
+      setSelectedSiteDocumentMembersBySiteId(nextDocumentMembersBySiteId);
+      setSelectedSiteScopeContextsBySiteId(nextScopeContextsBySiteId);
+
+      if (results.some((result) => result.status === 'rejected')) {
+        setMessage('일부 선택 현장의 문서 또는 구성원 정보를 불러오지 못했습니다.');
+      }
+    };
+
+    void loadSelectedSiteCollections().finally(() => {
+      if (active) {
+        setLoadingSiteMembers(false);
+        setLoadingSiteDocumentMembers(false);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedListSiteIds]);
+
+  React.useEffect(() => {
     if (!rootDataLoaded || sites.length === 0) {
       setDashboardSummaries([]);
       setLoadingDashboardSummaries(false);
@@ -4319,33 +4502,15 @@ export default function ProjectPage() {
   }, []);
 
   const loadSiteDocumentMembers = React.useCallback(async (siteDocuments: DocumentListItem[]) => {
-    if (siteDocuments.length === 0) {
-      setSiteDocumentMembers([]);
-      return [];
-    }
-
-    const results = await Promise.allSettled(
-      siteDocuments.map((item) =>
-        fetchSuccessData<DocumentMemberRecordDto[]>(
-          `/api/member-access/document-members?documentId=${encodeURIComponent(item.document.id)}`
-        )
-      )
-    );
-    const nextMembers = results.flatMap((result) =>
-      result.status === 'fulfilled' && Array.isArray(result.value) ? result.value : []
-    );
-
+    const nextMembers = await fetchDocumentMembersForSiteDocuments(siteDocuments);
     setSiteDocumentMembers(nextMembers);
     return nextMembers;
   }, []);
 
   const loadTemplateScopeContexts = React.useCallback(async (siteId: string, siteDocuments: DocumentListItem[]) => {
     const normalizedSiteId = siteId.trim();
-    const templateIds = Array.from(
-      new Set(siteDocuments.map((item) => item.document.templateId?.trim() || '').filter(Boolean))
-    );
 
-    if (!normalizedSiteId || templateIds.length <= 0) {
+    if (!normalizedSiteId || siteDocuments.length <= 0) {
       setTemplateScopeContextsByTemplateId({});
       return {};
     }
@@ -4353,29 +4518,7 @@ export default function ProjectPage() {
     setLoadingTemplateScopeContexts(true);
 
     try {
-      const results = await Promise.allSettled(
-        templateIds.map(async (templateId) => {
-          const response = await fetch(
-            `/api/scopes/template-scopes?templateId=${encodeURIComponent(templateId)}&siteId=${encodeURIComponent(normalizedSiteId)}`,
-            { cache: 'no-store' }
-          );
-          const payload = await response.json();
-
-          if (!response.ok || !payload?.success || !payload?.data) {
-            throw new Error(payload?.message || 'scope 조회에 실패했습니다.');
-          }
-
-          return [templateId, payload.data as TemplateScopeContextDto] as const;
-        })
-      );
-      const nextContexts = results.reduce<Record<string, TemplateScopeContextDto>>((accumulator, result) => {
-        if (result.status === 'fulfilled') {
-          accumulator[result.value[0]] = result.value[1];
-        }
-
-        return accumulator;
-      }, {});
-
+      const nextContexts = await fetchTemplateScopeContextsForSiteDocuments(normalizedSiteId, siteDocuments);
       setTemplateScopeContextsByTemplateId(nextContexts);
       return nextContexts;
     } finally {
@@ -4387,7 +4530,28 @@ export default function ProjectPage() {
     const nextDocuments = await fetchSuccessData<DocumentListItem[]>(
       `/api/documents?siteId=${encodeURIComponent(siteId)}`
     );
-    setDocuments(Array.isArray(nextDocuments) ? nextDocuments : []);
+    const safeDocuments = Array.isArray(nextDocuments) ? nextDocuments : [];
+    const nextScopeContexts = await fetchTemplateScopeContextsForSiteDocuments(siteId, safeDocuments).catch(() => null);
+
+    setDocuments(safeDocuments);
+    setSelectedSiteDocumentsBySiteId((previous) =>
+      previous[siteId]
+        ? {
+            ...previous,
+            [siteId]: safeDocuments,
+        }
+        : previous
+    );
+    if (nextScopeContexts) {
+      setSelectedSiteScopeContextsBySiteId((previous) =>
+        previous[siteId]
+          ? {
+              ...previous,
+              [siteId]: nextScopeContexts,
+            }
+          : previous
+      );
+    }
     setDocumentsLoadedSiteId(siteId);
     setDashboardRefreshKey((current) => current + 1);
   }, []);
@@ -4555,6 +4719,9 @@ export default function ProjectPage() {
 
       const documentTitle =
         documents.find((item) => item.document.id === normalizedDocumentId)?.document.title ||
+        Object.values(selectedSiteDocumentsBySiteId)
+          .flat()
+          .find((item) => item.document.id === normalizedDocumentId)?.document.title ||
         (selectedDocumentDetail?.document.id === normalizedDocumentId ? selectedDocumentDetail.document.title : '') ||
         '현장 문서';
       const confirmed = window.confirm(
@@ -4581,6 +4748,22 @@ export default function ProjectPage() {
         const deletedDocument = result.data as DocumentDeleteResult;
 
         setDocuments((previous) => previous.filter((item) => item.document.id !== normalizedDocumentId));
+        setSelectedSiteDocumentsBySiteId((previous) =>
+          Object.fromEntries(
+            Object.entries(previous).map(([siteId, siteDocuments]) => [
+              siteId,
+              siteDocuments.filter((item) => item.document.id !== normalizedDocumentId),
+            ])
+          )
+        );
+        setSelectedSiteDocumentMembersBySiteId((previous) =>
+          Object.fromEntries(
+            Object.entries(previous).map(([siteId, documentMembers]) => [
+              siteId,
+              documentMembers.filter((membership) => membership.documentId !== normalizedDocumentId),
+            ])
+          )
+        );
 
         if (selectedDocumentId === normalizedDocumentId) {
           clearSelectedDocumentContext();
@@ -4601,7 +4784,16 @@ export default function ProjectPage() {
         setDeletingDocument(false);
       }
     },
-    [clearSelectedDocumentContext, deletingDocument, documents, selectedDocumentDetail, selectedDocumentId, selectedSiteId, syncSiteDocuments]
+    [
+      clearSelectedDocumentContext,
+      deletingDocument,
+      documents,
+      selectedDocumentDetail,
+      selectedDocumentId,
+      selectedSiteDocumentsBySiteId,
+      selectedSiteId,
+      syncSiteDocuments,
+    ]
   );
 
   const setDocumentLinkButtonFeedback = React.useCallback((linkKey: string, state: 'idle' | 'completed') => {
@@ -4907,8 +5099,9 @@ export default function ProjectPage() {
   );
 
   const handleDeleteSiteMember = React.useCallback(
-    async (membershipId: string, memberId: string, memberLabel: string) => {
+    async (membershipId: string, memberId: string, memberLabel: string, sourceSiteId?: string) => {
       const normalizedMembershipId = membershipId.trim();
+      const normalizedSourceSiteId = sourceSiteId?.trim() || selectedSiteId;
 
       if (!normalizedMembershipId || deletingSiteMemberId) {
         return;
@@ -4924,7 +5117,14 @@ export default function ProjectPage() {
       setMessage(null);
 
       try {
-        const linkedDocumentMemberships = siteDocumentMembers.filter((membership) => membership.member.id === memberId);
+        const sourceDocumentMembers =
+          (normalizedSourceSiteId ? selectedSiteDocumentMembersBySiteId[normalizedSourceSiteId] : undefined) ||
+          (normalizedSourceSiteId === selectedSiteId ? siteDocumentMembers : []) ||
+          siteDocumentMembers;
+        const linkedDocumentMemberships = sourceDocumentMembers.filter((membership) => membership.member.id === memberId);
+        const linkedDocumentMembershipIdSet = new Set(
+          linkedDocumentMemberships.map((membership) => membership.membershipId)
+        );
 
         await Promise.all(
           linkedDocumentMemberships.map(async (membership) => {
@@ -4954,6 +5154,28 @@ export default function ProjectPage() {
           await reloadSelectedSiteMembers();
         }
 
+        setSelectedSiteMembersBySiteId((previous) =>
+          Object.fromEntries(
+            Object.entries(previous).map(([siteId, members]) => [
+              siteId,
+              !normalizedSourceSiteId || siteId === normalizedSourceSiteId
+                ? members.filter((membership) => membership.membershipId !== normalizedMembershipId)
+                : members,
+            ])
+          )
+        );
+        setSelectedSiteDocumentMembersBySiteId((previous) =>
+          Object.fromEntries(
+            Object.entries(previous).map(([siteId, documentMembers]) => [
+              siteId,
+              !normalizedSourceSiteId || siteId === normalizedSourceSiteId
+                ? documentMembers.filter((membership) => !linkedDocumentMembershipIdSet.has(membership.membershipId))
+                : documentMembers,
+            ])
+          )
+        );
+        setExpandedSiteMemberId((current) => (current === normalizedMembershipId ? '' : current));
+
         setMessage(`"${memberLabel}"의 현장 소속을 삭제했습니다.`);
       } catch (error) {
         setMessage(getMemberAccessErrorMessage(error, '현장 구성원 소속 삭제에 실패했습니다.'));
@@ -4961,26 +5183,69 @@ export default function ProjectPage() {
         setDeletingSiteMemberId('');
       }
     },
-    [deletingSiteMemberId, reloadSelectedSiteMembers, selectedSiteId, siteDocumentMembers]
+    [deletingSiteMemberId, reloadSelectedSiteMembers, selectedSiteDocumentMembersBySiteId, selectedSiteId, siteDocumentMembers]
+  );
+
+  const selectedSiteDocumentCollections = React.useMemo(
+    () => {
+      if (!showSiteColumnInSiteLists) {
+        return selectedSiteId
+          ? [
+              {
+                siteId: selectedSiteId,
+                siteName: selectedSite?.siteName || '선택 현장',
+                documents,
+                documentMembers: siteDocumentMembers,
+              },
+            ]
+          : [];
+      }
+
+      return selectedListSiteIds.map((siteId) => ({
+        siteId,
+        siteName: siteById.get(siteId)?.siteName || '현장',
+        documents: selectedSiteDocumentsBySiteId[siteId] || (siteId === selectedSiteId ? documents : []),
+        documentMembers: selectedSiteDocumentMembersBySiteId[siteId] || (siteId === selectedSiteId ? siteDocumentMembers : []),
+      }));
+    },
+    [
+      documents,
+      selectedListSiteIds,
+      selectedSite?.siteName,
+      selectedSiteDocumentMembersBySiteId,
+      selectedSiteDocumentsBySiteId,
+      selectedSiteId,
+      showSiteColumnInSiteLists,
+      siteById,
+      siteDocumentMembers,
+    ]
   );
 
   const siteDocumentRows = React.useMemo<ProjectListRow[]>(
     () =>
-      documents.map((item) => {
+      selectedSiteDocumentCollections.flatMap((collection) =>
+        collection.documents.map((item) => {
         const linkedTemplate = item.document.templateId
           ? templates.find((template) => template.id === item.document.templateId) || null
           : null;
-        const directDocumentMembers = siteDocumentMembers.filter(
+        const directDocumentMembers = collection.documentMembers.filter(
           (membership) => membership.documentId === item.document.id
         );
         const documentLinkPhoneNumber =
           directDocumentMembers[0]?.member.phoneNumber ||
           null;
         const isStatusExpanded = expandedDocumentStatusDocumentId === item.document.id;
+        const rowKey = showSiteColumnInSiteLists ? `${collection.siteId}:${item.document.id}` : item.document.id;
 
         return {
-          key: item.document.id,
+          key: rowKey,
           label: item.document.title,
+          siteName: collection.siteName,
+          siteContent: (
+            <div className="truncate text-[11px] font-medium text-slate-700" title={collection.siteName}>
+              {collection.siteName}
+            </div>
+          ),
           statusLabel: getDocumentStatusLabel(item.document.status),
           statusVariant: getDocumentStatusVariant(item.document.status),
           labelContent: (
@@ -5072,18 +5337,19 @@ export default function ProjectPage() {
             },
           },
         };
-      }),
+        })
+      ),
     [
       copiedDocumentLinkKey,
       copyingDocumentLinkKey,
       deletingDocument,
-      documents,
       handleCopyDocumentLink,
       handleDeleteDocument,
       handleSelectDocument,
       expandedDocumentStatusDocumentId,
+      selectedSiteDocumentCollections,
       selectedDocumentId,
-      siteDocumentMembers,
+      showSiteColumnInSiteLists,
       templates,
     ]
   );
@@ -5178,101 +5444,157 @@ export default function ProjectPage() {
   const memberScopeDocumentCountByMemberId = React.useMemo(() => {
     const counts: Record<string, number> = {};
 
-    documents.forEach((item) => {
-      const templateId = item.document.templateId?.trim() || '';
-      const context = templateId ? templateScopeContextsByTemplateId[templateId] : null;
-
-      if (!context) {
-        return;
-      }
-
-      siteMembers.forEach((membership) => {
-        const hasScope = context.logicalScopes.some((scope) =>
-          (context.assignmentsByScopeKey[scope.scopeKey] || []).includes(membership.member.id)
-        );
-
-        if (hasScope) {
-          counts[membership.member.id] = (counts[membership.member.id] || 0) + 1;
-        }
-      });
+    siteMembers.forEach((membership) => {
+      counts[membership.member.id] = countMemberScopeDocuments(
+        membership.member.id,
+        documents,
+        templateScopeContextsByTemplateId
+      );
     });
 
     return counts;
   }, [documents, siteMembers, templateScopeContextsByTemplateId]);
 
-	  const siteMemberRows = React.useMemo<ProjectListRow[]>(
-	    () =>
-      siteMembers.map((membership) => {
-        const memberLabel = membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber);
-        const memberScopeDocumentCount = memberScopeDocumentCountByMemberId[membership.member.id] || 0;
-        const isDeletingMember = deletingSiteMemberId === membership.membershipId;
-        const expanded = expandedSiteMemberId === membership.membershipId;
-        const scopeLabel = memberScopeDocumentCount > 0
-            ? `scope 접근 · ${memberScopeDocumentCount}개 문서`
-            : 'scope 접근 · 지정 없음';
+  const selectedSiteMemberCollections = React.useMemo(
+    () => {
+      if (!showSiteColumnInSiteLists) {
+        return selectedSiteId
+          ? [
+              {
+                siteId: selectedSiteId,
+                siteName: selectedSite?.siteName || '선택 현장',
+                documents,
+                members: siteMembers,
+                scopeContextsByTemplateId: templateScopeContextsByTemplateId,
+              },
+            ]
+          : [];
+      }
+
+      return selectedListSiteIds.map((siteId) => {
+        const fallbackToActiveSite = siteId === selectedSiteId;
 
         return {
-	          key: membership.membershipId,
-	          label: memberLabel,
-	          statusLabel: getMemberVerificationStatusLabel(membership.member.verificationStatus),
-	          statusVariant: getMemberVerificationStatusVariant(membership.member.verificationStatus),
-	          summary: scopeLabel,
-	          contact: formatPhoneNumber(membership.member.phoneNumber),
-	          roleLabel: '현장 소속',
-	          scopeLabel,
-          scopeContent: (
-            <div className="flex min-w-0 items-center gap-2">
-              <Badge
-                variant={memberScopeDocumentCount > 0 ? 'blue' : 'slate'}
-                className="shrink-0 px-2 py-0 text-[10px] leading-5"
-              >
-                scope
-              </Badge>
-              <span className="min-w-0 truncate text-[10px] text-slate-500">
-                {memberScopeDocumentCount > 0
+          siteId,
+          siteName: siteById.get(siteId)?.siteName || '현장',
+          documents: selectedSiteDocumentsBySiteId[siteId] || (fallbackToActiveSite ? documents : []),
+          members: selectedSiteMembersBySiteId[siteId] || (fallbackToActiveSite ? siteMembers : []),
+          scopeContextsByTemplateId:
+            selectedSiteScopeContextsBySiteId[siteId] || (fallbackToActiveSite ? templateScopeContextsByTemplateId : {}),
+        };
+      });
+    },
+    [
+      documents,
+      selectedListSiteIds,
+      selectedSite?.siteName,
+      selectedSiteDocumentsBySiteId,
+      selectedSiteId,
+      selectedSiteMembersBySiteId,
+      selectedSiteScopeContextsBySiteId,
+      showSiteColumnInSiteLists,
+      siteById,
+      siteMembers,
+      templateScopeContextsByTemplateId,
+    ]
+  );
+
+  const siteMemberRows = React.useMemo<ProjectListRow[]>(
+    () =>
+      selectedSiteMemberCollections.flatMap((collection) =>
+        collection.members.map((membership) => {
+          const memberLabel =
+            membership.member.displayName?.trim() || formatPhoneNumber(membership.member.phoneNumber);
+          const memberScopeDocumentCount = countMemberScopeDocuments(
+            membership.member.id,
+            collection.documents,
+            collection.scopeContextsByTemplateId
+          );
+          const isDeletingMember = deletingSiteMemberId === membership.membershipId;
+          const canOpenDetail = collection.siteId === selectedSiteId;
+          const expanded = canOpenDetail && expandedSiteMemberId === membership.membershipId;
+          const scopeLabel =
+            memberScopeDocumentCount > 0
+              ? `scope 접근 · ${memberScopeDocumentCount}개 문서`
+              : 'scope 접근 · 지정 없음';
+          const rowKey = showSiteColumnInSiteLists
+            ? `${collection.siteId}:${membership.membershipId}`
+            : membership.membershipId;
+
+          return {
+            key: rowKey,
+            label: memberLabel,
+            siteName: collection.siteName,
+            siteContent: (
+              <div className="truncate text-[11px] font-medium text-slate-700" title={collection.siteName}>
+                {collection.siteName}
+              </div>
+            ),
+            statusLabel: getMemberVerificationStatusLabel(membership.member.verificationStatus),
+            statusVariant: getMemberVerificationStatusVariant(membership.member.verificationStatus),
+            summary: scopeLabel,
+            contact: formatPhoneNumber(membership.member.phoneNumber),
+            roleLabel: '현장 소속',
+            scopeLabel,
+            scopeContent: (
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge
+                  variant={memberScopeDocumentCount > 0 ? 'blue' : 'slate'}
+                  className="shrink-0 px-2 py-0 text-[10px] leading-5"
+                >
+                  scope
+                </Badge>
+                <span className="min-w-0 truncate text-[10px] text-slate-500">
+                  {memberScopeDocumentCount > 0
                     ? `${memberScopeDocumentCount}개 문서 scope`
                     : '지정 scope 없음'}
-              </span>
-            </div>
-          ),
-	          lastVerifiedAt: membership.member.lastVerifiedAt ? formatDateTime(membership.member.lastVerifiedAt) : '인증 이력 없음',
-	          source: '현장 소속',
-	          selected: expanded,
-          detailAction: {
-            title: expanded ? '구성원 접근 상세 숨기기' : '구성원 접근 상세 보기',
-            ariaLabel: `${memberLabel} 구성원 접근 상세 ${expanded ? '숨기기' : '보기'}`,
-            icon: expanded ? <Minimize2 className="h-4 w-4" /> : <Info className="h-4 w-4" />,
-            disabled: isDeletingMember,
-            onClick: () => {
-              setExpandedSiteMemberId((current) =>
-                current === membership.membershipId ? '' : membership.membershipId
-              );
+                </span>
+              </div>
+            ),
+            lastVerifiedAt: membership.member.lastVerifiedAt
+              ? formatDateTime(membership.member.lastVerifiedAt)
+              : '인증 이력 없음',
+            source: '현장 소속',
+            selected: expanded,
+            detailAction: canOpenDetail
+              ? {
+                  title: expanded ? '구성원 접근 상세 숨기기' : '구성원 접근 상세 보기',
+                  ariaLabel: `${memberLabel} 구성원 접근 상세 ${expanded ? '숨기기' : '보기'}`,
+                  icon: expanded ? <Minimize2 className="h-4 w-4" /> : <Info className="h-4 w-4" />,
+                  disabled: isDeletingMember,
+                  onClick: () => {
+                    setExpandedSiteMemberId((current) =>
+                      current === membership.membershipId ? '' : membership.membershipId
+                    );
+                  },
+                }
+              : undefined,
+            action: {
+              title: '현장 소속 삭제',
+              ariaLabel: `${memberLabel} 현장 소속 삭제`,
+              icon: <Trash2 className="h-4 w-4" />,
+              disabled: isDeletingMember,
+              onClick: () => {
+                void handleDeleteSiteMember(membership.membershipId, membership.member.id, memberLabel, collection.siteId);
+              },
             },
-          },
-	          action: {
-	            title: '현장 소속 삭제',
-	            ariaLabel: `${memberLabel} 현장 소속 삭제`,
-	            icon: <Trash2 className="h-4 w-4" />,
-	            disabled: isDeletingMember,
-	            onClick: () => {
-	              void handleDeleteSiteMember(membership.membershipId, membership.member.id, memberLabel);
-	            },
-	          },
-	        };
-	      }),
-	    [
-	      deletingSiteMemberId,
-	      expandedSiteMemberId,
-	      handleDeleteSiteMember,
-	      memberScopeDocumentCountByMemberId,
-	      siteMembers,
-	    ]
-	  );
+          };
+        })
+      ),
+    [
+      deletingSiteMemberId,
+      expandedSiteMemberId,
+      handleDeleteSiteMember,
+      selectedSiteId,
+      selectedSiteMemberCollections,
+      showSiteColumnInSiteLists,
+    ]
+  );
 
-	  const expandedSiteMember = React.useMemo(
-	    () => siteMembers.find((membership) => membership.membershipId === expandedSiteMemberId) || null,
-	    [expandedSiteMemberId, siteMembers]
-	  );
+  const expandedSiteMember = React.useMemo(
+    () => siteMembers.find((membership) => membership.membershipId === expandedSiteMemberId) || null,
+    [expandedSiteMemberId, siteMembers]
+  );
   const expandedSiteMemberLabel = expandedSiteMember
     ? expandedSiteMember.member.displayName?.trim() || formatPhoneNumber(expandedSiteMember.member.phoneNumber)
     : '';
@@ -5976,14 +6298,14 @@ export default function ProjectPage() {
                   </div>
                 </div>
 
-                <CardContent className="min-w-0 space-y-6 p-0" {...projectOwnerItem('site-document-member-panel-content', '현장 문서 구성원 내용')}>
+                <CardContent className="min-w-0 space-y-5 p-0" {...projectOwnerItem('site-document-member-panel-content', '현장 문서 구성원 내용')}>
                   <div className="space-y-3" {...projectOwnerItem('site-document-section', '현장 문서 섹션')}>
                     <div className="flex items-start justify-between gap-3" {...projectOwnerItem('site-document-section-header', '현장 문서 섹션 머리글')}>
 	                      <div className="space-y-1" {...projectOwnerItem('site-document-section-heading-group', '현장 문서 섹션 제목 묶음')}>
 	                        <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-document-section-title', '현장 문서 섹션 제목')}>현장 문서</div>
 	                      </div>
                       <div className="flex items-center gap-2" {...projectOwnerItem('site-document-section-actions', '현장 문서 섹션 실행 영역')}>
-                        <span className="text-xs text-slate-500" {...projectOwnerItem('site-document-total-count', '현장 문서 전체 개수')}>전체 {documents.length}건</span>
+                        <span className="text-xs text-slate-500" {...projectOwnerItem('site-document-total-count', '현장 문서 전체 개수')}>전체 {siteDocumentRows.length}건</span>
                         <Button
                           type="button"
                           variant="outline"
@@ -6046,6 +6368,7 @@ export default function ProjectPage() {
                           maxBodyHeightClassName="max-h-[220px]"
                           actionColumnWidth={44}
                           fixedColumnWidths
+                          showSiteColumn={showSiteColumnInSiteLists}
                           ownerItemKey="site-document-list"
                           ownerItemName="현장 문서 목록"
                         />
@@ -6197,7 +6520,7 @@ export default function ProjectPage() {
                     )}
                   </div>
 
-	                  <div className="space-y-3 border-t border-slate-200 pt-6" {...projectOwnerItem('site-member-section', '구성원 섹션')}>
+	                  <div className="space-y-3" {...projectOwnerItem('site-member-section', '구성원 섹션')}>
 	                    {selectedSite ? (
 	                      <div className="space-y-5" {...projectOwnerItem('site-member-content', '구성원 내용')}>
 	                        <div className="space-y-2" {...projectOwnerItem('site-member-access-section', '현장 소속 섹션')}>
@@ -6207,7 +6530,7 @@ export default function ProjectPage() {
 	                              <span className="text-xs text-slate-500" {...projectOwnerItem('site-member-count', '현장 구성원 수')}>
 	                                {loadingSiteMembers || loadingSiteDocumentMembers
 	                                  ? '불러오는 중...'
-	                                  : `${siteMembers.length}명`}
+	                                  : `${siteMemberRows.length}명`}
 	                              </span>
 	                              <Button
 	                                type="button"
@@ -6314,6 +6637,7 @@ export default function ProjectPage() {
 	                            maxBodyHeightClassName="max-h-[260px]"
 	                            actionColumnWidth={44}
 	                            fixedColumnWidths
+	                            showSiteColumn={showSiteColumnInSiteLists}
 	                            ownerItemKey="site-member-list"
 	                            ownerItemName="현장 소속 구성원 목록"
 	                          />

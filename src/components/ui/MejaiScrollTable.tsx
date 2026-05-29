@@ -69,6 +69,7 @@ type RowPointerGesture = {
 
 const ROW_CLICK_CANCEL_DRAG_THRESHOLD_PX = 6;
 const RIGHT_SCROLL_SHADOW_VISUAL_WIDTH_PX = 26;
+const DEFAULT_EMPTY_BODY_ROW_HEIGHT_PX = 36;
 
 const toCssSize = (value: number | string | undefined) => {
   if (value === undefined) {
@@ -634,7 +635,7 @@ export function MejaiScrollTable({
 
   const renderBodyRows = (targetColumns: MejaiScrollTableColumn[], pane: 'scroll' | 'fixed-right') => {
     if (rows.length === 0) {
-      const emptyHeight = pane === 'fixed-right' ? layoutMetrics.bodyRowHeights[0] : undefined;
+      const emptyHeight = Math.max(layoutMetrics.bodyRowHeights[0] || 0, DEFAULT_EMPTY_BODY_ROW_HEIGHT_PX);
 
       return (
         <tr
@@ -651,11 +652,11 @@ export function MejaiScrollTable({
               `${ownerItemName} 빈 셀`
             )}
             className={cn(
-              'px-3 py-6 text-sm text-slate-500',
+              'px-1.5 py-1 text-[11px] text-slate-500',
               pane === 'fixed-right' ? 'border-b-0 bg-white' : ''
             )}
           >
-            {pane === 'scroll' ? emptyMessage : null}
+            {null}
           </td>
         </tr>
       );
@@ -827,6 +828,16 @@ export function MejaiScrollTable({
       )}
       style={{ marginTop: 4 }}
     >
+      {rows.length === 0 ? (
+        <div
+          data-mejai-empty-overlay="1"
+          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-empty-overlay` : undefined, `${ownerItemName} 빈 상태 전체 폭 표시`)}
+          className="pointer-events-none absolute left-0 right-0 z-[4] flex h-9 items-center whitespace-nowrap px-1.5 py-1 text-[11px] text-slate-500"
+          style={{ top: layoutMetrics.headerRowHeight || 24 }}
+        >
+          {emptyMessage}
+        </div>
+      ) : null}
       <style>{`
         [data-mejai-scroll-table="1"],
         [data-mejai-scroll-table="1"] *,
