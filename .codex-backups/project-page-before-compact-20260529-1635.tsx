@@ -2092,7 +2092,6 @@ export default function ProjectPage() {
   const [, setLoadingDashboardSummaries] = React.useState(false);
   const [dashboardRefreshKey, setDashboardRefreshKey] = React.useState(0);
   const [showCreateSiteForm, setShowCreateSiteForm] = React.useState(false);
-  const [deferProjectOverviewRender, setDeferProjectOverviewRender] = React.useState(false);
   const [newSiteName, setNewSiteName] = React.useState('');
   const [newSiteOpenDate, setNewSiteOpenDate] = React.useState(getTodayInputValue());
   const [newSiteTemplateIds, setNewSiteTemplateIds] = React.useState<string[]>([]);
@@ -4115,29 +4114,6 @@ export default function ProjectPage() {
   }, [showCreateSiteForm]);
 
   React.useEffect(() => {
-    if (!deferProjectOverviewRender) {
-      return;
-    }
-
-    let firstFrameId = 0;
-    let secondFrameId = 0;
-
-    firstFrameId = window.requestAnimationFrame(() => {
-      secondFrameId = window.requestAnimationFrame(() => {
-        setDeferProjectOverviewRender(false);
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(firstFrameId);
-
-      if (secondFrameId) {
-        window.cancelAnimationFrame(secondFrameId);
-      }
-    };
-  }, [deferProjectOverviewRender]);
-
-  React.useEffect(() => {
     setShowAddSiteDocumentForm(false);
     setSiteDocumentTemplateIds([]);
   }, [selectedSiteId]);
@@ -5742,16 +5718,6 @@ export default function ProjectPage() {
     return renderProjectDocumentNoSelectionNotice();
   };
 
-  const handleOpenCreateSiteForm = React.useCallback(() => {
-    setDeferProjectOverviewRender(false);
-    setShowCreateSiteForm(true);
-  }, []);
-
-  const handleCloseCreateSiteForm = React.useCallback(() => {
-    setShowCreateSiteForm(false);
-    setDeferProjectOverviewRender(true);
-  }, []);
-
   const renderProjectDocumentOutputTabs = () => (
     <div className="space-y-4" {...projectOwnerItem('document-output-tabs', '현장 문서 출력 탭 영역')}>
       <div {...projectOwnerItem('document-edit-output-panel', '현장 문서 편집 출력 패널')}>
@@ -5769,103 +5735,30 @@ export default function ProjectPage() {
       ) : null}
 
       <div className="space-y-6" {...projectOwnerItem('project-main-content', '현장 관리 주요 내용')}>
-        <Card className="min-w-0 border-slate-200">
-          <CardContent className="space-y-4 p-4 md:p-5">
-            <div className="space-y-3">
-              <div className="text-sm font-semibold text-slate-900">현장 문서 리스트</div>
-              <MultiEntityPicker
-                values={selectedSiteIds}
-                options={siteOptions}
-                onChange={handleChangeSelectedSites}
-                placeholder="전체 현장"
-                searchPlaceholder="현장 이름 검색"
-                emptyMessage="선택 가능한 현장이 없습니다."
-                disabled={deletingSite}
-                allowClear
-                onDeleteOption={(option) => {
-                  void handlePrepareDeleteSite(option.id);
-                }}
-                deleteOptionLabel="현장 삭제"
-                controlAction={
-                  showCreateSiteForm
-                    ? {
-                        ariaLabel: '새 현장 만들기 닫기',
-                        title: '새 현장 만들기 닫기',
-                        onClick: handleCloseCreateSiteForm,
-                      }
-                    : undefined
-                }
-                dropdownAction={{
-                  label: '새 현장 만들기',
-                  onClick: handleOpenCreateSiteForm,
-                }}
-                selectionSummary={(selectedOptions) => {
-                  if (selectedOptions.length === 0) {
-                    return '';
-                  }
-
-                  if (selectedOptions.length === 1) {
-                    const option = selectedOptions[0];
-                    return `${option.label}${option.meta ? ` · ${option.meta}` : ''}`;
-                  }
-
-                  const firstOption = selectedOptions[0];
-                  const firstLabel = `${firstOption?.label || '현장'}${
-                    firstOption?.meta ? ` · ${firstOption.meta}` : ''
-                  }`;
-
-                  return `${selectedOptions.length}곳 선택 · ${firstLabel} 외 ${selectedOptions.length - 1}곳`;
-                }}
-                ownerItemKey="site-picker"
-                ownerItemName="현장 리스트 선택기"
-                ownerItemAttributes={projectOwnerItem}
-              />
+        <div
+          className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]"
+          {...projectOwnerItem('project-primary-row-layout', '현장 선택과 현장 대시보드 2열 배치')}
+        >
+        <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-selection-panel', '1. 현장 선택과 기본 정보 패널')}>
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0" {...projectOwnerItem('site-selection-panel-header', '현장 선택과 기본 정보 제목 영역')}>
+            <div className="space-y-1.5" {...projectOwnerItem('site-selection-panel-heading-group', '현장 선택과 기본 정보 제목 묶음')}>
+              <CardTitle {...projectOwnerItem('site-selection-panel-title', '현장 선택과 기본 정보 제목')}>1. 현장 선택과 기본 정보</CardTitle>
+              <CardDescription {...projectOwnerItem('site-selection-panel-description', '현장 선택과 기본 정보 설명')}>
+                새 현장을 만들거나 기존 현장을 선택해 문서, 사진, 구성원을 관리합니다.
+              </CardDescription>
             </div>
-
-            {!showCreateSiteForm && loadingDeleteImpact ? (
-              <div className="text-xs text-slate-500" {...projectOwnerItem('site-delete-impact-loading-state', '현장 삭제 영향 확인 로딩 상태')}>삭제 시 함께 지워질 항목을 확인하는 중입니다.</div>
-            ) : null}
-
-            {!showCreateSiteForm && deleteImpact ? (
-              <div className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-4" {...projectOwnerItem('site-delete-impact-panel', '현장 삭제 영향 확인 패널')}>
-                <div className="space-y-1" {...projectOwnerItem('site-delete-impact-header', '현장 삭제 영향 확인 머리글')}>
-                  <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-delete-impact-title', '현장 삭제 영향 확인 제목')}>
-                    "{deleteImpact.site.siteName}" 현장을 삭제하면 아래 항목도 함께 삭제됩니다.
-                  </div>
-                  <p className="text-sm text-slate-600" {...projectOwnerItem('site-delete-impact-description', '현장 삭제 영향 확인 설명')}>
-                    삭제 후 되돌릴 수 없습니다. 항목을 확인한 뒤 정말 삭제할지 한 번 더 선택해 주세요.
-                  </p>
-                </div>
-
-                <div className="space-y-2" {...projectOwnerItem('site-delete-impact-list', '현장 삭제 영향 항목 목록')}>
-                  {deleteImpact.items.map((item) => (
-                    <div key={item.key} className="rounded-lg border border-rose-100 bg-white px-3 py-3" {...projectOwnerItem(`site-delete-impact-row-${item.key}`, `${item.label} 삭제 영향 항목`)}>
-                      <div className="flex items-start justify-between gap-3" {...projectOwnerItem(`site-delete-impact-row-${item.key}-content`, `${item.label} 삭제 영향 항목 내용`)}>
-                        <div className="min-w-0" {...projectOwnerItem(`site-delete-impact-row-${item.key}-text`, `${item.label} 삭제 영향 항목 텍스트`)}>
-                          <div className="text-sm font-medium text-slate-900" {...projectOwnerItem(`site-delete-impact-row-${item.key}-label`, `${item.label} 삭제 영향 항목 라벨`)}>{item.label}</div>
-                          {item.description ? (
-                            <div className="mt-1 text-xs leading-5 text-slate-600" {...projectOwnerItem(`site-delete-impact-row-${item.key}-description`, `${item.label} 삭제 영향 항목 설명`)}>{item.description}</div>
-                          ) : null}
-                        </div>
-                        <Badge variant="red" className="shrink-0" {...projectOwnerItem(`site-delete-impact-row-${item.key}-count-badge`, `${item.label} 삭제 영향 항목 개수`)}>
-                          {item.count}건
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex flex-wrap gap-2" {...projectOwnerItem('site-delete-impact-actions', '현장 삭제 영향 실행 버튼 영역')}>
-                  <Button variant="destructive" onClick={handleDeleteSite} disabled={deletingSite} {...projectOwnerItem('site-delete-confirm-button', '현장 삭제 확정 버튼')}>
-                    {deletingSite ? '삭제하는 중...' : '정말 삭제'}
-                  </Button>
-                  <Button variant="outline" onClick={handleCancelDeleteSite} disabled={deletingSite} {...projectOwnerItem('site-delete-cancel-button', '현장 삭제 취소 버튼')}>
-                    취소
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
+            <Button
+              type="button"
+              variant={showCreateSiteForm ? 'outline' : 'default'}
+              size="sm"
+              onClick={() => setShowCreateSiteForm((previous) => !previous)}
+              className="h-[42px] shrink-0"
+              {...projectOwnerItem('site-create-form-toggle-button', '새 현장 만들기 입력 열고 닫기 버튼')}
+            >
+              {showCreateSiteForm ? '입력 닫기' : '새 현장 만들기'}
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-5" {...projectOwnerItem('site-picker-field', '현장 리스트 선택 항목')}>
             {showCreateSiteForm ? (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" {...projectOwnerItem('site-create-form-panel', '새 현장 만들기 입력 패널')}>
                 <div className="space-y-4" {...projectOwnerItem('site-create-form-content', '새 현장 만들기 입력 내용')}>
@@ -5927,53 +5820,157 @@ export default function ProjectPage() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" {...projectOwnerItem('site-create-form-actions', '새 현장 만들기 실행 버튼 영역')}>
-                    <Button className="w-full" onClick={handleCreateSite} disabled={creatingSite} {...projectOwnerItem('site-create-submit-button', '새 현장 만들기 버튼')}>
+                  <div className="flex flex-wrap gap-2" {...projectOwnerItem('site-create-form-actions', '새 현장 만들기 실행 버튼 영역')}>
+                    <Button onClick={handleCreateSite} disabled={creatingSite} {...projectOwnerItem('site-create-submit-button', '새 현장 만들기 버튼')}>
                       {creatingSite ? '현장 만드는 중...' : '현장 만들기'}
                     </Button>
-                    <Button className="w-full" variant="outline" onClick={handleResetCreateSiteForm} disabled={creatingSite} {...projectOwnerItem('site-create-reset-button', '새 현장 입력 비우기 버튼')}>
+                    <Button variant="outline" onClick={handleResetCreateSiteForm} disabled={creatingSite} {...projectOwnerItem('site-create-reset-button', '새 현장 입력 비우기 버튼')}>
                       입력 비우기
                     </Button>
                   </div>
                 </div>
               </div>
-            ) : deferProjectOverviewRender ? null : (
-              <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
-                <div className="min-w-0">
-                  <div className="grid gap-3 sm:grid-cols-2" {...projectOwnerItem('site-dashboard-metric-grid', '현장 대시보드 지표 목록')}>
-                    <MetricCard
-                      icon={FolderKanban}
-                      label="현장"
-                      value={String(dashboardSiteCount)}
-                      description="대시보드에 포함된 현장"
-                    />
-                    <MetricCard
-                      icon={FileStack}
-                      label="문서"
-                      value={String(dashboardDocumentCount)}
-                      description="포함된 현장의 전체 문서"
-                    />
-                    <MetricCard
-                      icon={FileImage}
-                      label="사진"
-                      value={String(dashboardPhotoCount)}
-                      description="포함된 현장의 전체 사진"
-                    />
-                    <MetricCard
-                      icon={Signature}
-                      label="할 일"
-                      value={String(dashboardTodoCount)}
-                      description="문서, 사진, 확인 필요 항목"
-                    />
-                  </div>
-                </div>
+            ) : null}
 
-                <CardContent className="min-w-0 space-y-6 p-0" {...projectOwnerItem('site-document-member-panel-content', '현장 문서 구성원 내용')}>
+            {showCreateSiteForm ? null : (
+              <div className="space-y-3" {...projectOwnerItem('site-picker-control-field', '현장 리스트 선택 컨트롤 항목')}>
+                <label className="text-sm font-medium text-slate-800" {...projectOwnerItem('site-picker-label', '현장 리스트 라벨')}>현장 리스트</label>
+                <MultiEntityPicker
+                  values={selectedSiteIds}
+                  options={siteOptions}
+                  onChange={handleChangeSelectedSites}
+                  placeholder="전체 현장"
+                  searchPlaceholder="현장 이름 검색"
+                  emptyMessage="선택 가능한 현장이 없습니다."
+                  disabled={deletingSite}
+                  allowClear
+                  onDeleteOption={(option) => {
+                    void handlePrepareDeleteSite(option.id);
+                  }}
+                  deleteOptionLabel="현장 삭제"
+                  selectionSummary={(selectedOptions) => {
+                    if (selectedOptions.length === 0) {
+                      return '';
+                    }
+
+                    if (selectedOptions.length === 1) {
+                      const option = selectedOptions[0];
+                      return `${option.label}${option.meta ? ` · ${option.meta}` : ''}`;
+                    }
+
+                    const firstOption = selectedOptions[0];
+                    const firstLabel = `${firstOption?.label || '현장'}${
+                      firstOption?.meta ? ` · ${firstOption.meta}` : ''
+                    }`;
+
+                    return `${selectedOptions.length}곳 선택 · ${firstLabel} 외 ${selectedOptions.length - 1}곳`;
+                  }}
+                  ownerItemKey="site-picker"
+                  ownerItemName="현장 리스트 선택기"
+                  ownerItemAttributes={projectOwnerItem}
+                />
+
+                {loadingDeleteImpact ? (
+                  <div className="text-xs text-slate-500" {...projectOwnerItem('site-delete-impact-loading-state', '현장 삭제 영향 확인 로딩 상태')}>삭제 시 함께 지워질 항목을 확인하는 중입니다.</div>
+                ) : null}
+
+                {deleteImpact ? (
+                  <div className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-4" {...projectOwnerItem('site-delete-impact-panel', '현장 삭제 영향 확인 패널')}>
+                    <div className="space-y-1" {...projectOwnerItem('site-delete-impact-header', '현장 삭제 영향 확인 머리글')}>
+                      <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-delete-impact-title', '현장 삭제 영향 확인 제목')}>
+                        "{deleteImpact.site.siteName}" 현장을 삭제하면 아래 항목도 함께 삭제됩니다.
+                      </div>
+                      <p className="text-sm text-slate-600" {...projectOwnerItem('site-delete-impact-description', '현장 삭제 영향 확인 설명')}>
+                        삭제 후 되돌릴 수 없습니다. 항목을 확인한 뒤 정말 삭제할지 한 번 더 선택해 주세요.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2" {...projectOwnerItem('site-delete-impact-list', '현장 삭제 영향 항목 목록')}>
+                      {deleteImpact.items.map((item) => (
+                        <div key={item.key} className="rounded-lg border border-rose-100 bg-white px-3 py-3" {...projectOwnerItem(`site-delete-impact-row-${item.key}`, `${item.label} 삭제 영향 항목`)}>
+                          <div className="flex items-start justify-between gap-3" {...projectOwnerItem(`site-delete-impact-row-${item.key}-content`, `${item.label} 삭제 영향 항목 내용`)}>
+                            <div className="min-w-0" {...projectOwnerItem(`site-delete-impact-row-${item.key}-text`, `${item.label} 삭제 영향 항목 텍스트`)}>
+                              <div className="text-sm font-medium text-slate-900" {...projectOwnerItem(`site-delete-impact-row-${item.key}-label`, `${item.label} 삭제 영향 항목 라벨`)}>{item.label}</div>
+                              {item.description ? (
+                                <div className="mt-1 text-xs leading-5 text-slate-600" {...projectOwnerItem(`site-delete-impact-row-${item.key}-description`, `${item.label} 삭제 영향 항목 설명`)}>{item.description}</div>
+                              ) : null}
+                            </div>
+                            <Badge variant="red" className="shrink-0" {...projectOwnerItem(`site-delete-impact-row-${item.key}-count-badge`, `${item.label} 삭제 영향 항목 개수`)}>
+                              {item.count}건
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2" {...projectOwnerItem('site-delete-impact-actions', '현장 삭제 영향 실행 버튼 영역')}>
+                      <Button variant="destructive" onClick={handleDeleteSite} disabled={deletingSite} {...projectOwnerItem('site-delete-confirm-button', '현장 삭제 확정 버튼')}>
+                        {deletingSite ? '삭제하는 중...' : '정말 삭제'}
+                      </Button>
+                      <Button variant="outline" onClick={handleCancelDeleteSite} disabled={deletingSite} {...projectOwnerItem('site-delete-cancel-button', '현장 삭제 취소 버튼')}>
+                        취소
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+          <Card className="min-w-0 border-slate-200">
+            <CardHeader>
+              <CardTitle>현장 대시보드</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-0">
+              <div className="grid gap-3 sm:grid-cols-2" {...projectOwnerItem('site-dashboard-metric-grid', '현장 대시보드 지표 목록')}>
+                <MetricCard
+                  icon={FolderKanban}
+                  label="현장"
+                  value={String(dashboardSiteCount)}
+                  description="대시보드에 포함된 현장"
+                />
+                <MetricCard
+                  icon={FileStack}
+                  label="문서"
+                  value={String(dashboardDocumentCount)}
+                  description="포함된 현장의 전체 문서"
+                />
+                <MetricCard
+                  icon={FileImage}
+                  label="사진"
+                  value={String(dashboardPhotoCount)}
+                  description="포함된 현장의 전체 사진"
+                />
+                <MetricCard
+                  icon={Signature}
+                  label="할 일"
+                  value={String(dashboardTodoCount)}
+                  description="문서, 사진, 확인 필요 항목"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div
+          className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]"
+          {...projectOwnerItem('project-secondary-row-layout', '현장 문서 구성원과 현장 문서 출력 2열 배치')}
+        >
+          <div className="min-w-0">
+          {selectedSiteIds.length > 0 && selectedSite && !showCreateSiteForm ? (
+            <Card className="min-w-0 border-slate-200" {...projectOwnerItem('site-document-member-panel', '현장 문서 구성원 패널')}>
+                <CardHeader {...projectOwnerItem('site-document-member-panel-header', '현장 문서 구성원 제목 영역')}>
+                  <CardTitle {...projectOwnerItem('site-document-member-panel-title', '현장 문서 구성원 제목')}>현장 문서 · 구성원</CardTitle>
+                  <CardDescription {...projectOwnerItem('site-document-member-panel-description', '현장 문서 구성원 설명')}>선택한 현장의 문서와 구성원 권한을 관리합니다.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6" {...projectOwnerItem('site-document-member-panel-content', '현장 문서 구성원 내용')}>
                   <div className="space-y-3" {...projectOwnerItem('site-document-section', '현장 문서 섹션')}>
                     <div className="flex items-start justify-between gap-3" {...projectOwnerItem('site-document-section-header', '현장 문서 섹션 머리글')}>
-	                      <div className="space-y-1" {...projectOwnerItem('site-document-section-heading-group', '현장 문서 섹션 제목 묶음')}>
-	                        <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-document-section-title', '현장 문서 섹션 제목')}>현장 문서</div>
-	                      </div>
+                      <div className="space-y-1" {...projectOwnerItem('site-document-section-heading-group', '현장 문서 섹션 제목 묶음')}>
+                        <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-document-section-title', '현장 문서 섹션 제목')}>현장 문서</div>
+                        <p className="text-xs text-slate-500" {...projectOwnerItem('site-document-section-description', '현장 문서 섹션 설명')}>선택한 현장의 문서를 만들고, 접근 링크와 삭제를 관리합니다.</p>
+                      </div>
                       <div className="flex items-center gap-2" {...projectOwnerItem('site-document-section-actions', '현장 문서 섹션 실행 영역')}>
                         <span className="text-xs text-slate-500" {...projectOwnerItem('site-document-total-count', '현장 문서 전체 개수')}>전체 {documents.length}건</span>
                         <Button
@@ -6190,6 +6187,10 @@ export default function ProjectPage() {
                   </div>
 
 	                  <div className="space-y-3 border-t border-slate-200 pt-6" {...projectOwnerItem('site-member-section', '구성원 섹션')}>
+	                    <div className="space-y-1" {...projectOwnerItem('site-member-section-heading-group', '구성원 섹션 제목 묶음')}>
+	                      <div className="text-sm font-semibold text-slate-900" {...projectOwnerItem('site-member-section-title', '구성원 섹션 제목')}>구성원</div>
+	                      <p className="text-xs text-slate-500" {...projectOwnerItem('site-member-section-description', '구성원 섹션 설명')}>현장 소속과 문서별 scope를 구성원별로 관리합니다.</p>
+	                    </div>
 	                    {selectedSite ? (
 	                      <div className="space-y-5" {...projectOwnerItem('site-member-content', '구성원 내용')}>
 	                        <div className="space-y-2" {...projectOwnerItem('site-member-access-section', '현장 소속 섹션')}>
@@ -6429,13 +6430,13 @@ export default function ProjectPage() {
                     )}
 	                  </div>
 		                </CardContent>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+		              </Card>
+          ) : null}
+          </div>
 
-        <div className="min-w-0 space-y-4" {...projectOwnerItem('document-output-section', '현장 문서 하단 출력 섹션')}>
-          {renderProjectDocumentOutputTabs()}
+          <div className="min-w-0 space-y-4" {...projectOwnerItem('document-output-section', '현장 문서 하단 출력 섹션')}>
+            {renderProjectDocumentOutputTabs()}
+          </div>
         </div>
       </div>
       </div>

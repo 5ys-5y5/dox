@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, Plus, Trash2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { EntityPickerOption } from './EntityPicker';
 
@@ -22,6 +22,15 @@ type MultiEntityPickerProps = {
   selectionSummary?: (selectedOptions: EntityPickerOption[]) => string;
   onDeleteOption?: (option: EntityPickerOption) => void;
   deleteOptionLabel?: string;
+  controlAction?: {
+    ariaLabel: string;
+    title?: string;
+    onClick: () => void;
+  };
+  dropdownAction?: {
+    label: string;
+    onClick: () => void;
+  };
   ownerItemKey?: string;
   ownerItemName?: string;
   ownerItemAttributes?: (item: string, name: string) => Record<string, string>;
@@ -92,6 +101,8 @@ export function MultiEntityPicker({
   selectionSummary,
   onDeleteOption,
   deleteOptionLabel = '항목 삭제',
+  controlAction,
+  dropdownAction,
   ownerItemKey,
   ownerItemName = '복수 항목 선택기',
   ownerItemAttributes,
@@ -203,6 +214,20 @@ export function MultiEntityPicker({
         {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-dropdown` : undefined, `${ownerItemName} 드롭다운`)}
       >
         <div className="space-y-2" {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-dropdown-content` : undefined, `${ownerItemName} 드롭다운 내용`)}>
+          {dropdownAction ? (
+            <button
+              type="button"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+              onClick={() => {
+                dropdownAction.onClick();
+                setOpen(false);
+                setQuery('');
+              }}
+            >
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              {dropdownAction.label}
+            </button>
+          ) : null}
           <div
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
             {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-option-count` : undefined, `${ownerItemName} 옵션 개수`)}
@@ -309,73 +334,86 @@ export function MultiEntityPicker({
         className={cn('relative w-full', className)}
         {...ownerAttrs(ownerItemKey, ownerItemName)}
       >
-        <div
-          className={cn(
-            'group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:ring-1 focus-within:ring-slate-300',
-            disabled ? 'cursor-not-allowed opacity-60' : '',
-            triggerClassName
-          )}
-          {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-control` : undefined, `${ownerItemName} 컨트롤`)}
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={open ? query : resolvedSelectionSummary}
-            readOnly={!open}
-            disabled={disabled}
-            placeholder={open ? searchPlaceholder : placeholder}
-            aria-haspopup="listbox"
-            aria-expanded={open}
-            onFocus={() => {
-              setQuery('');
-              setOpen(true);
-            }}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setOpen(true);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                setOpen(false);
-                setQuery('');
-              }
-            }}
-            className="h-6 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
-            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-input` : undefined, `${ownerItemName} 검색 입력`)}
-          />
-          {allowClear && values.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => {
-                onChange([]);
-                setQuery('');
-              }}
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
-              aria-label="선택 초기화"
-              title="선택 초기화"
-              {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-clear-button` : undefined, `${ownerItemName} 선택 초기화 버튼`)}
-            >
-              <X aria-hidden="true" className="h-4 w-4" />
-            </button>
-          ) : null}
+        {controlAction ? (
           <button
             type="button"
-            disabled={disabled}
-            onClick={() => {
-              setQuery('');
-              setOpen((current) => !current);
-            }}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
-            aria-label="목록 열기"
-            title="목록 열기"
-            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-toggle-button` : undefined, `${ownerItemName} 목록 열기 버튼`)}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-950 bg-slate-950 px-3 py-2 text-white"
+            aria-label={controlAction.ariaLabel}
+            title={controlAction.title || controlAction.ariaLabel}
+            onClick={controlAction.onClick}
+            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-control` : undefined, `${ownerItemName} 컨트롤`)}
           >
-            <ChevronDown
-              aria-hidden="true"
-              className="h-4 w-4"
-            />
+            <X aria-hidden="true" className="h-4 w-4" />
           </button>
-        </div>
+        ) : (
+          <div
+            className={cn(
+              'group flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:ring-1 focus-within:ring-slate-300',
+              disabled ? 'cursor-not-allowed opacity-60' : '',
+              triggerClassName
+            )}
+            {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-control` : undefined, `${ownerItemName} 컨트롤`)}
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              value={open ? query : resolvedSelectionSummary}
+              readOnly={!open}
+              disabled={disabled}
+              placeholder={open ? searchPlaceholder : placeholder}
+              aria-haspopup="listbox"
+              aria-expanded={open}
+              onFocus={() => {
+                setQuery('');
+                setOpen(true);
+              }}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setOpen(true);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setOpen(false);
+                  setQuery('');
+                }
+              }}
+              className="h-6 min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+              {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-input` : undefined, `${ownerItemName} 검색 입력`)}
+            />
+            {allowClear && values.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange([]);
+                  setQuery('');
+                }}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
+                aria-label="선택 초기화"
+                title="선택 초기화"
+                {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-clear-button` : undefined, `${ownerItemName} 선택 초기화 버튼`)}
+              >
+                <X aria-hidden="true" className="h-4 w-4" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => {
+                setQuery('');
+                setOpen((current) => !current);
+              }}
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400"
+              aria-label="목록 열기"
+              title="목록 열기"
+              {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-toggle-button` : undefined, `${ownerItemName} 목록 열기 버튼`)}
+            >
+              <ChevronDown
+                aria-hidden="true"
+                className="h-4 w-4"
+              />
+            </button>
+          </div>
+        )}
       </div>
       {dropdownNode ? createPortal(dropdownNode, document.body) : null}
     </>
