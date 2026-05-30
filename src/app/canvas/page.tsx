@@ -2609,68 +2609,99 @@ export default function CanvasOwnerPage() {
         <div className="grid gap-1 md:grid-cols-2">
           {previewProblemSettingDiagnostics.map((settingDiagnostic) => {
             const diagnosticFixLabel = settingDiagnostic.fixes.map((fix) => fix.label).join(' · ');
+            const formatDiagnosticValue = (value: unknown) => {
+              if (typeof value === 'boolean') {
+                return value ? 'ON' : 'OFF';
+              }
+
+              if (value === '') {
+                return '빈 값';
+              }
+
+              if (value === null || typeof value === 'undefined') {
+                return '없음';
+              }
+
+              return String(value);
+            };
+            const diagnosticCurrentValue =
+              settingDiagnostic.fixes.length > 0
+                ? settingDiagnostic.fixes
+                    .map(
+                      (fix) =>
+                        `${fix.settingKey}=${formatDiagnosticValue(workspacePreviewSettings[fix.settingKey])}`
+                    )
+                    .join(' · ')
+                : settingDiagnostic.effectiveValue;
+            const diagnosticNextValue =
+              settingDiagnostic.fixes.length > 0
+                ? settingDiagnostic.fixes
+                    .map((fix) => `${fix.settingKey}=${formatDiagnosticValue(fix.value)}`)
+                    .join(' · ')
+                : '확인 필요';
+            const diagnosticNativeTooltip = [
+              `감지 내용: ${settingDiagnostic.message}`,
+              `권장 조치: ${settingDiagnostic.recommendedAction}`,
+              diagnosticFixLabel ? `적용: ${diagnosticFixLabel}` : '적용: 자동 적용 가능한 수정안이 없습니다.',
+              `현재 값: ${diagnosticCurrentValue}`,
+              `변경 값: ${diagnosticNextValue}`,
+            ].join('\n');
             const diagnosticCardClassName = `min-w-0 rounded border px-2 py-1.5 text-left text-[11px] transition-colors ${
               settingDiagnostic.severity === 'blocking-risk'
-                ? 'border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100'
+                ? 'border-rose-200 bg-rose-50 text-rose-800'
                 : settingDiagnostic.severity === 'warning'
-                  ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
-                  : 'border-blue-100 bg-blue-50 text-blue-800 hover:bg-blue-100'
-            } ${settingDiagnostic.fixes.length > 0 ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500' : ''}`;
-            const diagnosticCardContent = (
-              <>
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                  <div className="min-w-0 truncate font-semibold">
-                    {settingDiagnostic.label}
-                  </div>
-                  <span
-                    className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold leading-none ${getSettingDiagnosticBadgeClassName(settingDiagnostic.severity)}`}
-                  >
-                    {getSettingDiagnosticLabel(settingDiagnostic)}
-                  </span>
-                </div>
-                <div className="mt-0.5 truncate text-[10px] font-semibold" title={settingDiagnostic.definitionName}>
-                  {settingDiagnostic.definitionName}
-                </div>
-                <p className="mt-1 text-[10px] leading-4">
-                  {settingDiagnostic.message}
-                </p>
-                <p className="mt-0.5 text-[10px] leading-4 opacity-80">
-                  {settingDiagnostic.recommendedAction}
-                </p>
-                {diagnosticFixLabel ? (
-                  <div className="mt-1 truncate rounded bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold" title={diagnosticFixLabel}>
-                    클릭 적용: {diagnosticFixLabel}
-                  </div>
-                ) : null}
-                <div className="mt-1 grid gap-1 text-[9px] font-semibold opacity-80 sm:grid-cols-2">
-                  <div className="truncate" title={settingDiagnostic.configuredValue}>
-                    설정 {settingDiagnostic.configuredValue}
-                  </div>
-                  <div className="truncate" title={settingDiagnostic.effectiveValue}>
-                    적용 {settingDiagnostic.effectiveValue}
-                  </div>
-                </div>
-              </>
-            );
+                  ? 'border-amber-200 bg-amber-50 text-amber-800'
+                  : 'border-blue-100 bg-blue-50 text-blue-800'
+            }`;
 
-            return settingDiagnostic.fixes.length > 0 ? (
-              <button
-                key={`${settingDiagnostic.settingKey}:${settingDiagnostic.severity}`}
-                type="button"
-                className={diagnosticCardClassName}
-                title={diagnosticFixLabel}
-                onClick={() => applySettingDiagnosticFix(settingDiagnostic)}
-                {...canvasOwnerEnv(settingDiagnostic.definitionName)}
-              >
-                {diagnosticCardContent}
-              </button>
-            ) : (
+            return (
               <div
                 key={`${settingDiagnostic.settingKey}:${settingDiagnostic.severity}`}
                 className={diagnosticCardClassName}
+                title={diagnosticNativeTooltip}
                 {...canvasOwnerEnv(settingDiagnostic.definitionName)}
               >
-                {diagnosticCardContent}
+                <div className="grid min-w-0 items-center gap-1.5 text-left sm:grid-cols-[auto_minmax(0,1.4fr)_minmax(0,0.75fr)_minmax(0,0.75fr)_auto]">
+                  <span
+                    className={`w-fit rounded px-1.5 py-0.5 text-[9px] font-semibold leading-none ${getSettingDiagnosticBadgeClassName(settingDiagnostic.severity)}`}
+                  >
+                    {getSettingDiagnosticLabel(settingDiagnostic)}
+                  </span>
+                  <div className="min-w-0 truncate font-semibold leading-4">
+                    {settingDiagnostic.label}
+                    <span className="font-medium opacity-70"> ({settingDiagnostic.definitionName})</span>
+                  </div>
+                  <div className="min-w-0 truncate leading-4" title={diagnosticCurrentValue}>
+                    <span className="font-semibold opacity-60">현재 </span>
+                    {diagnosticCurrentValue}
+                  </div>
+                  <div className="min-w-0 truncate leading-4" title={diagnosticNextValue}>
+                    <span className="font-semibold opacity-60">변경 </span>
+                    {diagnosticNextValue}
+                  </div>
+                  {settingDiagnostic.fixes.length > 0 ? (
+                    <button
+                      type="button"
+                      className="w-fit rounded border border-current/20 bg-white/70 px-2 py-0.5 text-[10px] font-semibold leading-4 hover:bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+                      title={diagnosticNativeTooltip}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        applySettingDiagnosticFix(settingDiagnostic);
+                      }}
+                    >
+                      적용
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="w-fit rounded border border-current/10 bg-white/40 px-2 py-0.5 text-[10px] font-semibold leading-4 opacity-50"
+                      title={diagnosticNativeTooltip}
+                      disabled
+                    >
+                      적용
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
