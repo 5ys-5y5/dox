@@ -35796,7 +35796,8 @@ export default function TemplateEditWorkspace({
           max-height: 100%;
           overflow: auto;
           margin: 0 !important;
-          scrollbar-width: thin;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
           border-top: 1px solid rgb(226 232 240);
           border-radius: 0;
           background: rgb(226 232 240) !important;
@@ -35805,15 +35806,9 @@ export default function TemplateEditWorkspace({
           overscroll-behavior: contain;
         }
         .template-edit-preview::-webkit-scrollbar {
-          width: 10px;
-          height: 10px;
-        }
-        .template-edit-preview::-webkit-scrollbar-thumb {
-          border-radius: 9999px;
-          background: rgba(148, 163, 184, 0.7);
-        }
-        .template-edit-preview::-webkit-scrollbar-track {
-          background: rgba(226, 232, 240, 0.7);
+          display: none;
+          width: 0;
+          height: 0;
         }
         .template-edit-preview [${TEMPLATE_CHECKLIST_HIGHLIGHT_ATTR}="true"] {
           z-index: 2147483000 !important;

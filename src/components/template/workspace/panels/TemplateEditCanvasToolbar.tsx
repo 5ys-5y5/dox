@@ -369,7 +369,7 @@ export const TemplateEditCanvasToolbar = ({
   <>
     {showToolbarBody ? (
       <CardContent
-        className={`v106-canvas-toolbar-shell ${isBottomToolbar ? 'border-t' : 'border-b'} border-slate-200 bg-white px-6 pb-6 pt-6 ${canvasFullscreen ? 'shrink-0' : ''}`}
+        className={`v106-canvas-toolbar-shell ${isBottomToolbar ? 'border-t' : 'border-b'} border-slate-200 bg-white px-3 py-3 ${canvasFullscreen ? 'shrink-0' : ''}`}
         data-canvas-owner-item={isBottomToolbar ? 'canvas-bottom-toolbar-body' : 'canvas-toolbar-body'}
         data-canvas-owner-name={isBottomToolbar ? '하단 캔버스 도구 모음' : '캔버스 도구 모음'}
       >

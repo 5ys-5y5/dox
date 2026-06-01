@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronUp, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from 'lucide-react';
 import * as React from 'react';
 import { CardContent } from '../../../ui/Card';
 import {
@@ -32,6 +32,42 @@ type OverlayRailSection = {
 type OverlayRailRoom = {
   tab: SelectionPanelTab;
   sections: OverlayRailSection[];
+};
+
+type CanvasScrollEdgeState = {
+  top: boolean;
+  right: boolean;
+  bottom: boolean;
+  left: boolean;
+};
+
+const emptyCanvasScrollEdgeState: CanvasScrollEdgeState = {
+  top: false,
+  right: false,
+  bottom: false,
+  left: false,
+};
+
+const areCanvasScrollEdgeStatesEqual = (left: CanvasScrollEdgeState, right: CanvasScrollEdgeState) =>
+  left.top === right.top &&
+  left.right === right.right &&
+  left.bottom === right.bottom &&
+  left.left === right.left;
+
+const readCanvasScrollEdgeState = (node: HTMLElement | null): CanvasScrollEdgeState => {
+  if (!node) {
+    return emptyCanvasScrollEdgeState;
+  }
+
+  const horizontalMax = Math.max(0, node.scrollWidth - node.clientWidth);
+  const verticalMax = Math.max(0, node.scrollHeight - node.clientHeight);
+
+  return {
+    top: node.scrollTop > 2,
+    right: node.scrollLeft < horizontalMax - 2,
+    bottom: node.scrollTop < verticalMax - 2,
+    left: node.scrollLeft > 2,
+  };
 };
 
 function compactOverlayRailSections(sections: Array<OverlayRailSection | null>) {
@@ -117,6 +153,10 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const editorPreviewNodeRef = React.useRef<HTMLDivElement | null>(null);
   const templateUsagePreviewNodeRef = React.useRef<HTMLDivElement | null>(null);
   const syncedTemplateUsagePreviewHtmlRef = React.useRef('');
+  const canvasScrollIndicatorFrameRef = React.useRef<number | null>(null);
+  const [canvasScrollEdgeState, setCanvasScrollEdgeState] = React.useState<CanvasScrollEdgeState>(
+    emptyCanvasScrollEdgeState
+  );
   const hasPreparedTemplateUsagePreviewHtml = templateUsagePreviewHtml.trim().length > 0;
   const showEditorRoomFallbackForUsagePreview =
     templateUsagePreviewMode && showEditorRoomAsUsagePreviewFallback && !hasPreparedTemplateUsagePreviewHtml;
@@ -148,12 +188,35 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     metadataRoleSecondary: 'top-right',
     metadataRoleTertiary: 'top-right',
   });
+  const syncCanvasScrollEdgeState = React.useCallback(() => {
+    const nextState = readCanvasScrollEdgeState(previewNodeRef.current);
+
+    setCanvasScrollEdgeState((currentState) =>
+      areCanvasScrollEdgeStatesEqual(currentState, nextState) ? currentState : nextState
+    );
+  }, []);
+  const scheduleCanvasScrollEdgeStateSync = React.useCallback(() => {
+    if (typeof window === 'undefined') {
+      syncCanvasScrollEdgeState();
+      return;
+    }
+
+    if (canvasScrollIndicatorFrameRef.current !== null) {
+      return;
+    }
+
+    canvasScrollIndicatorFrameRef.current = window.requestAnimationFrame(() => {
+      canvasScrollIndicatorFrameRef.current = null;
+      syncCanvasScrollEdgeState();
+    });
+  }, [syncCanvasScrollEdgeState]);
   const setActivePreviewSurfaceNode = React.useCallback(
     (node: HTMLDivElement | null) => {
       previewNodeRef.current = node;
       setPreviewNode(node);
+      scheduleCanvasScrollEdgeStateSync();
     },
-    [setPreviewNode]
+    [scheduleCanvasScrollEdgeStateSync, setPreviewNode]
   );
   const setEditorPreviewSurfaceNode = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -191,6 +254,56 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   }, [
     renderedPreviewHtml,
     setActivePreviewSurfaceNode,
+    showEditorRoomFallbackForUsagePreview,
+    templateUsagePreviewHtml,
+    templateUsagePreviewMode,
+  ]);
+
+  React.useEffect(() => {
+    const node = previewNodeRef.current;
+
+    scheduleCanvasScrollEdgeStateSync();
+
+    if (!node || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleScroll = () => {
+      scheduleCanvasScrollEdgeStateSync();
+    };
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => {
+            scheduleCanvasScrollEdgeStateSync();
+          });
+
+    node.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+    resizeObserver?.observe(node);
+    Array.from(node.children).forEach((child) => {
+      if (child instanceof HTMLElement) {
+        resizeObserver?.observe(child);
+      }
+    });
+
+    return () => {
+      node.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+      resizeObserver?.disconnect();
+
+      if (canvasScrollIndicatorFrameRef.current !== null) {
+        window.cancelAnimationFrame(canvasScrollIndicatorFrameRef.current);
+        canvasScrollIndicatorFrameRef.current = null;
+      }
+    };
+  }, [
+    canvasSurfaceFillAvailableHeight,
+    canvasSurfaceHeight,
+    preparedViewMode,
+    renderedPreviewHtml,
+    scheduleCanvasScrollEdgeStateSync,
+    selectionPanelTab,
     showEditorRoomFallbackForUsagePreview,
     templateUsagePreviewHtml,
     templateUsagePreviewMode,
@@ -1427,6 +1540,11 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const visibleTemplateUsagePreviewRoomClassName = `${previewSurfaceBaseClassName} absolute inset-0 z-20`;
   const hiddenTemplateUsagePreviewRoomClassName = `${previewSurfaceBaseClassName} pointer-events-none invisible absolute inset-0 z-0`;
   const hideEditorRoomForUsagePreview = templateUsagePreviewMode && !showEditorRoomFallbackForUsagePreview;
+  const hasCanvasScrollEdgeIndicator =
+    canvasScrollEdgeState.top ||
+    canvasScrollEdgeState.right ||
+    canvasScrollEdgeState.bottom ||
+    canvasScrollEdgeState.left;
 
   return (
     <CardContent
@@ -1471,6 +1589,51 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
             onInput={handlePreviewInput}
             dangerouslySetInnerHTML={renderedPreviewMarkup}
           />
+          {hasCanvasScrollEdgeIndicator ? (
+            <div
+              className="pointer-events-none absolute inset-0 z-30"
+              data-canvas-owner-item="canvas-scroll-edge-indicators"
+              data-canvas-owner-name="캔버스 스크롤 가능 방향 표시"
+              aria-hidden="true"
+            >
+              {canvasScrollEdgeState.top ? (
+                <div
+                  className="absolute left-0 right-0 top-0 flex h-[26px] items-start justify-center bg-gradient-to-b from-[rgba(226,232,240,0.94)] to-transparent pt-1"
+                  data-canvas-owner-item="canvas-scroll-edge-indicator-top"
+                  data-canvas-owner-name="캔버스 위쪽 스크롤 가능 표시"
+                >
+                  <ChevronUp className="h-4 w-4 text-slate-500" aria-hidden="true" />
+                </div>
+              ) : null}
+              {canvasScrollEdgeState.right ? (
+                <div
+                  className="absolute bottom-0 right-0 top-0 flex w-[26px] items-center justify-end bg-gradient-to-l from-[rgba(226,232,240,0.94)] to-transparent pr-1"
+                  data-canvas-owner-item="canvas-scroll-edge-indicator-right"
+                  data-canvas-owner-name="캔버스 오른쪽 스크롤 가능 표시"
+                >
+                  <ChevronRight className="h-4 w-4 text-slate-500" aria-hidden="true" />
+                </div>
+              ) : null}
+              {canvasScrollEdgeState.bottom ? (
+                <div
+                  className="absolute bottom-0 left-0 right-0 flex h-[26px] items-end justify-center bg-gradient-to-t from-[rgba(226,232,240,0.94)] to-transparent pb-1"
+                  data-canvas-owner-item="canvas-scroll-edge-indicator-bottom"
+                  data-canvas-owner-name="캔버스 아래쪽 스크롤 가능 표시"
+                >
+                  <ChevronDown className="h-4 w-4 text-slate-500" aria-hidden="true" />
+                </div>
+              ) : null}
+              {canvasScrollEdgeState.left ? (
+                <div
+                  className="absolute bottom-0 left-0 top-0 flex w-[26px] items-center justify-start bg-gradient-to-r from-[rgba(226,232,240,0.94)] to-transparent pl-1"
+                  data-canvas-owner-item="canvas-scroll-edge-indicator-left"
+                  data-canvas-owner-name="캔버스 왼쪽 스크롤 가능 표시"
+                >
+                  <ChevronLeft className="h-4 w-4 text-slate-500" aria-hidden="true" />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         {hasOverlayRail ? (
           <aside
