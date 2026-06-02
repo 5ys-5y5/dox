@@ -2038,6 +2038,8 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
         dragStateRef,
         resizeStateRef,
         stopPointerInteraction,
+        stringArraysEqual,
+        positionGroupProxySelectionsEqual,
       } = optionsRef.current;
       const panState = canvasPanStateRef.current;
 
@@ -2223,6 +2225,10 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                   []
               )
             : undefined;
+          const preserveAppliedSelectionVisuals =
+            marqueeSelectionState.active &&
+            stringArraysEqual(marqueeSelectionState.lastSelectionIds, nextSelectionIds) &&
+            positionGroupProxySelectionsEqual(marqueeSelectionState.lastProxySelections, marqueeProxySelections);
           if (positionOrderLockSelectionMode) {
             applyPositionOrderLockMarqueeSelection(nextSelectionIds, marqueeProxySelections);
             if (deferredPreviewEditorStateRef.current) {
@@ -2235,7 +2241,9 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
           if (selectionPanelTab === 'position') {
             selectedFrameGroupIdsRef.current = nextSelectionIds;
             edgeSelectionStateRef.current = emptyEdgeSelection;
-            applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
+            if (!preserveAppliedSelectionVisuals) {
+              applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
+            }
             window.setTimeout(() => {
               applyFrameBoxSelection(
                 nextSelectionIds,
@@ -2244,19 +2252,24 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                       showAllGroupProxySelections: true,
                       overridePositionGroupProxySelections: marqueeProxySelections,
                       deferReactStateCommit: true,
+                      preserveAppliedSelectionVisuals,
                     }
                   : {
                       deferReactStateCommit: true,
+                      preserveAppliedSelectionVisuals,
                     }
               );
             }, 0);
           } else {
             selectedFrameGroupIdsRef.current = nextSelectionIds;
             edgeSelectionStateRef.current = emptyEdgeSelection;
-            applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection);
+            if (!preserveAppliedSelectionVisuals) {
+              applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection);
+            }
             window.setTimeout(() => {
               applyFrameBoxSelection(nextSelectionIds, {
                 deferReactStateCommit: true,
+                preserveAppliedSelectionVisuals,
               });
             }, 0);
           }
@@ -2291,6 +2304,10 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                 ) || []
               )
             : undefined;
+          const preserveAppliedSelectionVisuals =
+            marqueeSelectionState.active &&
+            stringArraysEqual(marqueeSelectionState.lastSelectionIds, nextSelectionIds) &&
+            positionGroupProxySelectionsEqual(marqueeSelectionState.lastProxySelections, marqueeProxySelections);
           if (positionOrderLockSelectionMode) {
             applyPositionOrderLockMarqueeSelection(nextSelectionIds, marqueeProxySelections);
             if (deferredPreviewEditorStateRef.current) {
@@ -2302,7 +2319,9 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
 
           selectedFrameGroupIdsRef.current = nextSelectionIds;
           edgeSelectionStateRef.current = emptyEdgeSelection;
-          applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
+          if (!preserveAppliedSelectionVisuals) {
+            applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
+          }
           window.setTimeout(() => {
             applyFrameBoxSelection(
               nextSelectionIds,
@@ -2311,9 +2330,11 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                     showAllGroupProxySelections: true,
                     overridePositionGroupProxySelections: marqueeProxySelections,
                     deferReactStateCommit: true,
+                    preserveAppliedSelectionVisuals,
                   }
                 : {
                     deferReactStateCommit: true,
+                    preserveAppliedSelectionVisuals,
                   }
             );
           }, 0);
