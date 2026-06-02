@@ -292,8 +292,10 @@ export const TemplateEditCanvasToolbar = ({
   const showSelectionPanelTabs = visibility?.showSelectionPanelTabs !== false;
   const renderSaveButton = isTopToolbar && showSaveButton;
   const renderTodoButton = isTopToolbar && showTodoButton;
-  const renderInteractionModeControls = isBottomToolbar && showInteractionModeControls;
-  const renderEditSettingsToggle = isTopToolbar && showEditSettingsToggle;
+  const renderInteractionModeControls =
+    isBottomToolbar && showInteractionModeControls && !templateUsagePreviewMode && !readOnlyDraftOutput;
+  const renderEditSettingsToggle =
+    isTopToolbar && showEditSettingsToggle && !templateUsagePreviewMode && !readOnlyDraftOutput;
   const renderSelectionPanelTabs = isTopToolbar && showSelectionPanelTabs;
   const renderPreviewToggle = isTopToolbar && showPreviewToggle && !renderSelectionPanelTabs;
   const renderHistoryControls = isBottomToolbar && showHistoryControls;
@@ -615,7 +617,7 @@ export const TemplateEditCanvasToolbar = ({
                   className={`${canvasToolbarButtonBaseClassName} ${getCanvasToolbarButtonShapeClassName(shape)} ${getCanvasToolbarButtonStateClassName(isActive)}`}
                   onClick={(event) => {
                     if (isPreviewTab) {
-                      if (!readImmediatePreviewTabActive(event.currentTarget)) {
+                      if (!templateUsagePreviewMode) {
                         applyImmediateSelectionPanelTabVisualState(event.currentTarget, tab.key);
                         onToggleTemplateUsagePreviewMode({ forceEnter: true });
                       }

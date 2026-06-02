@@ -4,6 +4,12 @@ import { mergePersistedSignatureRuntimeStateIntoHtml } from './documentCanvasRun
 const templateRuntimeKindSelector =
   '[data-template-runtime-kind="file_slot"], [data-template-runtime-' + 'mo' + 'de="file_slot"]';
 
+export const DOCUMENT_CANVAS_VALUE_ORIGIN_ATTR = 'data-document-canvas-value-origin';
+export const DOCUMENT_CANVAS_HAS_ACTUAL_VALUE_ATTR = 'data-document-canvas-has-actual-value';
+export const DOCUMENT_CANVAS_SAMPLE_VALUE_ATTR = 'data-document-canvas-sample-value';
+export const DOCUMENT_CANVAS_VALUE_ORIGIN_ACTUAL = 'actual';
+export const DOCUMENT_CANVAS_VALUE_ORIGIN_SAMPLE = 'sample';
+
 export const collapseDocumentCanvasWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
 
 export const stringifyDocumentValue = (value: unknown) => {
@@ -131,6 +137,66 @@ export const setDocumentCanvasValueElement = (element: HTMLElement, value: strin
   }
 };
 
+const readDocumentCanvasControlText = (element: HTMLElement) => {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    return element.value || element.defaultValue || element.getAttribute('value') || element.textContent || '';
+  }
+
+  const input = element.querySelector<HTMLInputElement | HTMLTextAreaElement>('[data-template-frame-input="true"]');
+
+  if (input) {
+    return input.value || input.defaultValue || input.getAttribute('value') || input.textContent || '';
+  }
+
+  return element.textContent || '';
+};
+
+const readDocumentCanvasSampleValue = (element: HTMLElement) => {
+  const owner =
+    element.closest<HTMLElement>('[data-template-frame-role="value"]') ||
+    element.closest<HTMLElement>('[data-template-frame-value-key]') ||
+    element;
+  const input =
+    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      ? element
+      : element.querySelector<HTMLInputElement | HTMLTextAreaElement>('[data-template-frame-input="true"]');
+
+  return (
+    readDocumentCanvasControlText(element) ||
+    element.getAttribute('data-template-frame-source-text') ||
+    input?.getAttribute('data-template-frame-source-text') ||
+    owner?.getAttribute('data-template-frame-source-text') ||
+    element.getAttribute('data-template-frame-extracted-text') ||
+    input?.getAttribute('data-template-frame-extracted-text') ||
+    owner?.getAttribute('data-template-frame-extracted-text') ||
+    ''
+  ).trim();
+};
+
+const markDocumentCanvasValueElementState = (
+  element: HTMLElement,
+  origin: typeof DOCUMENT_CANVAS_VALUE_ORIGIN_ACTUAL | typeof DOCUMENT_CANVAS_VALUE_ORIGIN_SAMPLE,
+  sampleValue: string
+) => {
+  const targets = new Set<HTMLElement>([element]);
+  const owner = element.closest<HTMLElement>('[data-template-frame-role="value"], [data-template-frame-value-key]');
+
+  if (owner) {
+    targets.add(owner);
+  }
+
+  targets.forEach((target) => {
+    target.setAttribute(DOCUMENT_CANVAS_VALUE_ORIGIN_ATTR, origin);
+    target.setAttribute(DOCUMENT_CANVAS_HAS_ACTUAL_VALUE_ATTR, origin === DOCUMENT_CANVAS_VALUE_ORIGIN_ACTUAL ? 'true' : 'false');
+
+    if (sampleValue) {
+      target.setAttribute(DOCUMENT_CANVAS_SAMPLE_VALUE_ATTR, sampleValue);
+    } else {
+      target.removeAttribute(DOCUMENT_CANVAS_SAMPLE_VALUE_ATTR);
+    }
+  });
+};
+
 export const materializeDocumentCanvasHtmlWithLabelValues = (
   htmlCanonical: string,
   labelValues: Record<string, unknown>,
@@ -155,11 +221,19 @@ export const materializeDocumentCanvasHtmlWithLabelValues = (
         return;
       }
 
-      setDocumentCanvasValueElement(
+      const hasLabelValue = Object.prototype.hasOwnProperty.call(labelValues, valueKey);
+      const sampleValue = readDocumentCanvasSampleValue(element);
+      const actualValueText = isDocumentCanvasAttachmentValueElement(element)
+        ? stringifyAttachmentDocumentValue(labelValues[valueKey])
+        : stringifyDocumentValue(labelValues[valueKey]);
+      const hasActualValue = hasLabelValue && (Boolean(actualValueText) || !sampleValue);
+      const nextValue = hasActualValue ? actualValueText : isDocumentCanvasAttachmentValueElement(element) ? '' : sampleValue;
+
+      setDocumentCanvasValueElement(element, nextValue);
+      markDocumentCanvasValueElementState(
         element,
-        isDocumentCanvasAttachmentValueElement(element)
-          ? stringifyAttachmentDocumentValue(labelValues[valueKey])
-          : stringifyDocumentValue(labelValues[valueKey])
+        hasActualValue ? DOCUMENT_CANVAS_VALUE_ORIGIN_ACTUAL : DOCUMENT_CANVAS_VALUE_ORIGIN_SAMPLE,
+        sampleValue
       );
     });
 
@@ -188,6 +262,13 @@ export const extractDocumentCanvasLabelValuesFromHtml = (
       const valueKey = resolveDocumentCanvasValueKey(element);
 
       if (!valueKey) {
+        return;
+      }
+
+      const origin = element.getAttribute(DOCUMENT_CANVAS_VALUE_ORIGIN_ATTR)?.trim() || '';
+      const hasActualValue = element.getAttribute(DOCUMENT_CANVAS_HAS_ACTUAL_VALUE_ATTR) === 'true';
+
+      if (origin === DOCUMENT_CANVAS_VALUE_ORIGIN_SAMPLE && !hasActualValue) {
         return;
       }
 

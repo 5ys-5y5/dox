@@ -1344,7 +1344,8 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     );
   }
 
-  const positionEditOverlayRailSections = editSettingsPanelVisible
+  const editOverlayRailVisible = editSettingsPanelVisible && !templateUsagePreviewMode;
+  const positionEditOverlayRailSections = editOverlayRailVisible
     ? [
         renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
         renderFloatingOverlaySection(
@@ -1394,7 +1395,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
   const positionOverlayRailSections = compactOverlayRailSections(
     todoOverlayActive ? [renderActiveTodoOverlaySection('position')] : positionEditOverlayRailSections
   );
-  const metadataEditOverlayRailSections = editSettingsPanelVisible
+  const metadataEditOverlayRailSections = editOverlayRailVisible
     ? [
         renderFloatingOverlaySection('summary', '요약', summaryOverlayCollapsed, setSummaryOverlayCollapsed, finishSummaryOverlayDrag, summaryOverlay),
         renderFloatingOverlaySection(
@@ -1436,7 +1437,7 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
       metadata2RoleExpirationOverlay ||
       metadata2RoleAssignmentOverlay
   );
-  const metadata2EditOverlayRailSections = editSettingsPanelVisible
+  const metadata2EditOverlayRailSections = editOverlayRailVisible
     ? hasMetadata2ScopeRailOverlay
       ? [
           renderFloatingOverlaySection(
@@ -1531,8 +1532,8 @@ export const TemplateEditPreviewSurface = React.memo(function TemplateEditPrevie
     { tab: 'metadata', sections: metadataOverlayRailSections },
     { tab: 'metadata2', sections: metadata2OverlayRailSections },
   ];
-  const hasOverlayRail = editSettingsPanelVisible && overlayRailRooms.some((room) => room.sections.length > 0);
-  const preserveHiddenEditorOverlayRailSpace = templateUsagePreviewMode && editSettingsPanelVisible && !hasOverlayRail;
+  const hasOverlayRail = editOverlayRailVisible && overlayRailRooms.some((room) => room.sections.length > 0);
+  const preserveHiddenEditorOverlayRailSpace = false;
   const previewSurfaceBaseClassName =
     'template-edit-preview template-extract-draft-preview template-extract-preview-surface h-full max-h-full bg-slate-200 template-clone template-clone--raster-first-v2-structured';
   const visibleEditorRoomClassName = `${previewSurfaceBaseClassName} relative z-10`;

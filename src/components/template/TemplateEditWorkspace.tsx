@@ -29,6 +29,11 @@ import type {
   TemplateRecordDto,
 } from '../../lib/templateDtos';
 import type { DocumentValueFileDto, DocumentValueFileInput } from '../../lib/documentDtos';
+import {
+  DOCUMENT_CANVAS_HAS_ACTUAL_VALUE_ATTR,
+  DOCUMENT_CANVAS_VALUE_ORIGIN_ACTUAL,
+  DOCUMENT_CANVAS_VALUE_ORIGIN_ATTR,
+} from '../../lib/documentCanvasState';
 import type {
   TemplateFrameBoxKind,
   TemplateFrameResizeDirection,
@@ -191,6 +196,7 @@ import type {
   TemplateChecklistSignatureSubmitParams,
   TemplateEditWorkspaceInitialDraft,
   TemplateEditWorkspaceAttachmentDraft,
+  TemplateEditWorkspaceCanvasToolbarVisibility,
   TemplateEditWorkspaceCanvasViewMode,
   TemplateEditWorkspaceProps,
   TemplateFramePositionGroupConfig,
@@ -1785,6 +1791,7 @@ const materializeFrameBandTableGeometryInHtml = (html: string) => {
 };
 
 type TemplateCanvasPersistenceAttachmentFile = DocumentValueFileDto | DocumentValueFileInput;
+type TemplateUsagePreviewValueTextPolicy = 'clear' | 'preserve' | 'actualOnly';
 
 type TemplateCanvasPersistenceOptions = {
   attachmentFiles?: TemplateCanvasPersistenceAttachmentFile[] | null;
@@ -1792,6 +1799,7 @@ type TemplateCanvasPersistenceOptions = {
 
 type TemplateCanvasGeometrySanitizeOptions = {
   preserveValueText?: boolean;
+  valueTextPolicy?: TemplateUsagePreviewValueTextPolicy;
   readOnly?: boolean;
   editableValueKeys?: string[] | null;
   attachmentFilesByValueKey?: Record<string, DocumentValueFileDto[]>;
@@ -1885,6 +1893,7 @@ const sanitizeTemplateCanvasHtmlGeometry = (
 
   const runtimeHtml = buildTemplateUsagePreviewHtml(normalizedHtml, {
     preserveValueText: options?.preserveValueText ?? true,
+    valueTextPolicy: options?.valueTextPolicy || ((options?.preserveValueText ?? true) ? 'preserve' : 'clear'),
     readOnly: options?.readOnly,
     editableValueKeys: options?.editableValueKeys,
     initialAttachmentFilesByValueKey: options?.attachmentFilesByValueKey,
@@ -12770,6 +12779,7 @@ const prepareTemplateUsageTextValueControl = (
   node: HTMLElement,
   options?: {
     preserveValueText?: boolean;
+    valueTextPolicy?: TemplateUsagePreviewValueTextPolicy;
     readOnly?: boolean;
   }
 ) => {
@@ -12779,8 +12789,21 @@ const prepareTemplateUsageTextValueControl = (
     node.querySelector<HTMLTextAreaElement>('[data-template-frame-input="true"]') ||
     node.querySelector<HTMLInputElement>('[data-template-frame-input="true"]');
 
+  const valueTextPolicy: TemplateUsagePreviewValueTextPolicy =
+    options?.valueTextPolicy || (options?.preserveValueText ? 'preserve' : 'clear');
+  const hasActualValue = (target: HTMLElement | null | undefined) =>
+    Boolean(
+      target &&
+        (target.getAttribute(DOCUMENT_CANVAS_HAS_ACTUAL_VALUE_ATTR) === 'true' ||
+          target.getAttribute(DOCUMENT_CANVAS_VALUE_ORIGIN_ATTR) === DOCUMENT_CANVAS_VALUE_ORIGIN_ACTUAL)
+    );
+  const shouldPreserveValueText = (target: HTMLElement | null | undefined) =>
+    valueTextPolicy === 'preserve' || (valueTextPolicy === 'actualOnly' && (hasActualValue(target) || hasActualValue(node)));
+
   if (input) {
-    const preservedValue = options?.preserveValueText ? input.value || input.defaultValue || input.textContent || '' : '';
+    const preservedValue = shouldPreserveValueText(input)
+      ? input.value || input.defaultValue || input.getAttribute('value') || input.textContent || ''
+      : '';
 
     input.value = preservedValue;
     input.defaultValue = preservedValue;
@@ -12805,7 +12828,7 @@ const prepareTemplateUsageTextValueControl = (
   }
 
   const target = resolveFrameContentTarget(node);
-  const preservedValue = options?.preserveValueText ? target.textContent || '' : '';
+  const preservedValue = shouldPreserveValueText(target) ? target.textContent || '' : '';
 
   target.textContent = preservedValue;
   target.setAttribute('contenteditable', 'true');
@@ -12831,6 +12854,28 @@ const prepareTemplateUsageTextValueControl = (
     enableTemplateUsagePreviewTextControl(target);
   }
   applyTemplateUsagePreviewValueTextTone(target);
+};
+
+const markTemplateUsagePreviewTextControlAsActual = (target: HTMLElement) => {
+  const textControl = target.closest<HTMLElement>(`[${TEMPLATE_USAGE_PREVIEW_CONTROL_ATTR}="text"]`);
+
+  if (!textControl) {
+    return;
+  }
+
+  const targets = new Set<HTMLElement>([textControl]);
+  const valueBox = textControl.closest<HTMLElement>(
+    `[${TEMPLATE_USAGE_PREVIEW_VALUE_BOX_ATTR}="true"], [data-template-frame-role="value"]`
+  );
+
+  if (valueBox) {
+    targets.add(valueBox);
+  }
+
+  targets.forEach((element) => {
+    element.setAttribute(DOCUMENT_CANVAS_VALUE_ORIGIN_ATTR, DOCUMENT_CANVAS_VALUE_ORIGIN_ACTUAL);
+    element.setAttribute(DOCUMENT_CANVAS_HAS_ACTUAL_VALUE_ATTR, 'true');
+  });
 };
 
 type TemplateUsagePreviewSignatureHistoryEntry = {
@@ -14004,6 +14049,7 @@ const prepareTemplateUsagePreviewValueBox = (
   node: HTMLElement,
   options?: {
     preserveValueText?: boolean;
+    valueTextPolicy?: TemplateUsagePreviewValueTextPolicy;
     readOnly?: boolean;
     initialAttachmentFilesByValueKey?: Record<string, DocumentValueFileDto[]>;
     documentAttachmentApiPath?: string;
@@ -14126,6 +14172,7 @@ const buildTemplateUsagePreviewHtml = (
   source: HTMLElement | string | null | undefined,
   options?: {
     preserveValueText?: boolean;
+    valueTextPolicy?: TemplateUsagePreviewValueTextPolicy;
     readOnly?: boolean;
     editableValueKeys?: string[] | null;
     selectionOnlyTextInteractions?: boolean;
@@ -14158,8 +14205,10 @@ const buildTemplateUsagePreviewHtml = (
   stripFrameMetadataMarkers(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   annotateTemplateUsagePreviewGroupBottomGapAnchors(container);
+  const valueTextPolicy: TemplateUsagePreviewValueTextPolicy =
+    options?.valueTextPolicy || (options?.preserveValueText ? 'preserve' : 'clear');
   const preventInitialShrink =
-    options?.preventInitialValueClearShrink !== false && options?.preserveValueText !== true;
+    options?.preventInitialValueClearShrink !== false && valueTextPolicy !== 'preserve';
   const sourceFrameRectSnapshot = preventInitialShrink
     ? snapshotTemplateUsagePreviewFrameRects(container)
     : new Map<string, FrameNodeRect>();
@@ -19716,7 +19765,21 @@ export default function TemplateEditWorkspace({
   const toolbarTemplateUsagePreviewActive = templateUsagePreviewMode || canvasViewPreviewRequested;
   const templateUsagePreviewActive = documentDraftSaveEnabled || readOnlyDraftOutput || templateUsagePreviewMode || canvasViewPreviewRequested;
   const surfaceTemplateUsagePreviewActive = toolbarTemplateUsagePreviewActive || readOnlyDraftOutput;
+  const toolbarTemplateUsagePreviewUiSuppressed = toolbarTemplateUsagePreviewActive || readOnlyDraftOutput;
+  const activeCanvasToolbarVisibility = React.useMemo<TemplateEditWorkspaceCanvasToolbarVisibility | undefined>(() => {
+    if (!toolbarTemplateUsagePreviewUiSuppressed) {
+      return canvasToolbarVisibility;
+    }
+
+    return {
+      ...canvasToolbarVisibility,
+      showInteractionModeControls: false,
+      showEditSettingsToggle: false,
+    };
+  }, [canvasToolbarVisibility, toolbarTemplateUsagePreviewUiSuppressed]);
+  const cachedTemplateUsagePreviewValueTextPolicy: TemplateUsagePreviewValueTextPolicy = 'clear';
   const templateUsagePreviewRuntimeOptionsSignature = [
+    `value:${cachedTemplateUsagePreviewValueTextPolicy}`,
     usagePreviewStabilizeInitialLayout ? 'stabilize' : 'raw-layout',
     usagePreviewPreventInitialValueClearShrink ? 'guard-initial-shrink' : 'allow-initial-shrink',
     usagePreviewMeasurePeerClusterHeightTargets ? 'measure-peer-height' : 'skip-peer-height',
@@ -20642,6 +20705,7 @@ export default function TemplateEditWorkspace({
       }
 
       const runtimeHtml = buildTemplateUsagePreviewHtml(normalizedSourceHtml, {
+        valueTextPolicy: cachedTemplateUsagePreviewValueTextPolicy,
         stabilizeInitialLayout: usagePreviewStabilizeInitialLayout,
         preventInitialValueClearShrink: usagePreviewPreventInitialValueClearShrink,
         measurePeerClusterHeightTargets: usagePreviewMeasurePeerClusterHeightTargets,
@@ -20662,6 +20726,7 @@ export default function TemplateEditWorkspace({
       return runtimeHtml;
     },
     [
+      cachedTemplateUsagePreviewValueTextPolicy,
       templateUsagePreviewRuntimeOptionsSignature,
       usagePreviewMeasurePeerClusterHeightTargets,
       usagePreviewMeasurePeerClusterWidthTargets,
@@ -20944,6 +21009,19 @@ export default function TemplateEditWorkspace({
 
   const toggleTemplateUsagePreviewMode = React.useCallback((options?: { forceEnter?: boolean; forceExit?: boolean }) => {
     if (documentDraftSaveEnabled || readOnlyDraftOutput) {
+      if (options?.forceEnter) {
+        setCanvasViewModeRuntimeOverride('preview');
+        return;
+      }
+
+      if (options?.forceExit) {
+        setCanvasViewModeRuntimeOverride(
+          pendingCanvasViewModeRuntimeOverrideRef.current ||
+            resolveTemplateCanvasViewModeForSelectionPanelTab(selectionPanelTab)
+        );
+        return;
+      }
+
       return;
     }
 
@@ -21206,6 +21284,7 @@ export default function TemplateEditWorkspace({
 
     const runtimeHtml = buildTemplateUsagePreviewHtml(documentOutputSourceRoot, {
       preserveValueText: true,
+      valueTextPolicy: 'actualOnly',
       readOnly: readOnlyDraftOutput,
       editableValueKeys: normalizedEditableValueKeys,
       selectionOnlyTextInteractions,
@@ -33838,8 +33917,8 @@ export default function TemplateEditWorkspace({
     syncDraftPreviewHtmlRef();
   }, [canvasEditorPointerHandlersSuppressed, deleteCanvasSelectionEntity, selectionOnlyTextInteractions, syncDraftPreviewHtmlRef]);
 
-	  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
-	    const target = event.target instanceof HTMLElement ? event.target : null;
+  const handlePreviewInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
 
     if (!target) {
       return;
@@ -33848,7 +33927,8 @@ export default function TemplateEditWorkspace({
     const frameTextInput = target.closest<HTMLTextAreaElement | HTMLInputElement>('[data-template-frame-input="true"]');
     const frameEditableScope = target.closest<HTMLElement>('[data-template-edit-scope]');
 
-	    if (templateUsagePreviewActive) {
+    if (templateUsagePreviewActive) {
+      markTemplateUsagePreviewTextControlAsActual(target);
       const root = previewRef.current;
       const frameNode = resolveFrameSelectionAnchor(target.closest<HTMLElement>(RAW_FRAME_NODE_SELECTOR));
       const shouldRestoreTextInputFocus = Boolean(frameTextInput && document.activeElement === frameTextInput);
@@ -35916,6 +35996,12 @@ export default function TemplateEditWorkspace({
         .template-edit-preview [data-v106-position-group-proxy-selection-ui="true"] {
           display: block !important;
         }
+        .template-edit-canvas-card[data-template-usage-preview-ui-active="true"] [data-canvas-toolbar-group="interaction"],
+        .template-edit-canvas-card[data-template-usage-preview-ui-active="true"] [data-canvas-toolbar-group="edit-settings"],
+        .template-edit-canvas-card[data-template-usage-preview-ui-active="true"] [data-template-overlay-rail="true"],
+        .template-edit-canvas-card[data-template-usage-preview-ui-active="true"] [data-template-overlay-rail-placeholder="true"] {
+          display: none !important;
+        }
         .template-edit-preview [${SELECTION_TONEDOWN_OVERLAY_ATTR}="true"] {
           background: rgba(255, 255, 255, var(--v106-selection-inactive-overlay-alpha, .5));
           pointer-events: none;
@@ -37076,6 +37162,7 @@ export default function TemplateEditWorkspace({
             canvasFullscreen ? 'fixed inset-0 z-[140] m-0 flex h-dvh w-screen max-w-none flex-col rounded-none border-0' : ''
           } ${canvasCardFillContainerHeight ? 'flex flex-col' : ''}`}
           data-canvas-fullscreen={canvasFullscreen ? 'true' : 'false'}
+          data-template-usage-preview-ui-active={surfaceTemplateUsagePreviewActive ? 'true' : 'false'}
           style={canvasCardStyle}
         >
           <TemplateEditCanvasToolbar
@@ -37102,7 +37189,7 @@ export default function TemplateEditWorkspace({
             todoCount={todoCount}
             todoPanelOpen={todoPanelVisible}
             todoButtonDisabled={!todoPanel}
-            visibility={canvasToolbarVisibility}
+            visibility={activeCanvasToolbarVisibility}
             onUpdatePreviewZoom={updatePreviewZoom}
             onToggleCanvasFullscreen={toggleCanvasFullscreen}
             onToggleEditSettingsPanel={toggleEditSettingsPanelVisible}
@@ -37221,7 +37308,7 @@ export default function TemplateEditWorkspace({
             todoCount={todoCount}
             todoPanelOpen={todoPanelVisible}
             todoButtonDisabled={!todoPanel}
-            visibility={canvasToolbarVisibility}
+            visibility={activeCanvasToolbarVisibility}
             onUpdatePreviewZoom={updatePreviewZoom}
             onToggleCanvasFullscreen={toggleCanvasFullscreen}
             onToggleEditSettingsPanel={toggleEditSettingsPanelVisible}
