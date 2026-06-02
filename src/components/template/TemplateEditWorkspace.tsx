@@ -27368,7 +27368,6 @@ export default function TemplateEditWorkspace({
         positionSelectionEntity?: PositionActiveSelectionEntity;
         forceImmediateReactState?: boolean;
         deferReactStateCommit?: boolean;
-        preserveAppliedSelectionVisuals?: boolean;
       }
     ) => {
       const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
@@ -27481,7 +27480,6 @@ export default function TemplateEditWorkspace({
       };
       selectedFrameGroupIdsRef.current = normalizedSelectionIds;
       edgeSelectionStateRef.current = emptyEdgeSelection;
-      const root = previewRef.current;
       const shouldPreviewSelectedTextAutoSizeImmediately =
         selectionPanelTab === 'position' && !sizeTypeOverlayCollapsedRef.current;
       const selectionAutoSizeState = shouldPreviewSelectedTextAutoSizeImmediately
@@ -27536,24 +27534,8 @@ export default function TemplateEditWorkspace({
         nextPositionGroupProxySelections.length === 0 &&
         edgeSelectionStateRef.current.tokens.length === 0 &&
         positionGroupProxySelectionGroupIdRef.current.trim().length === 0;
-      const canPreserveAppliedSelectionVisuals =
-        Boolean(options?.preserveAppliedSelectionVisuals) &&
-        Boolean(root) &&
-        (selectionPanelTab === 'position'
-          ? isStablePositionFrameSelectionUiAlreadyApplied(
-              root as HTMLElement,
-              normalizedSelectionIds,
-              emptyEdgeSelection,
-              [],
-              nextPositionGroupProxySelections
-            )
-          : isStableDirectFrameSelectionUiAlreadyApplied(root as HTMLElement, normalizedSelectionIds, emptyEdgeSelection, []));
 
-      if (canPreserveAppliedSelectionVisuals) {
-        if (selectionPanelTab === 'position' && root) {
-          syncPositionSelectionVisualStyles(root);
-        }
-      } else if (canUseMinimalDirectSelectionVisuals) {
+      if (canUseMinimalDirectSelectionVisuals) {
         applyMinimalDirectFrameSelectionVisuals(normalizedSelectionIds[0] || '', options?.fastFrameNodeById);
       } else if (selectionPanelTab === 'position') {
         applyFastFrameBoxSelectionVisuals(
@@ -28570,20 +28552,32 @@ export default function TemplateEditWorkspace({
 
     if (userTabOnlySwitch || tabOnlySwitch) {
       selectionPanelSkipRuntimeVisualSyncRef.current = { tab: selectionPanelTab };
+      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+      selectedFrameGroupIdsRef.current = [];
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      if (selectedFrameGroupIds.length > 0) {
+        setSelectedFrameGroupIds([]);
+      }
+      if (edgeSelectionState.tokens.length > 0) {
+        setEdgeSelectionState(emptyEdgeSelection);
+      }
       syncPreviewSurfaceSelectionPanelTabAttr(root, selectionPanelTab);
       syncPreviewSurfacePositionSpacingSelectionVisualAttr(
         root,
         selectionPanelTab === 'position' && positionOrderLockSelectionMode
       );
       applyPreviewEditPermissions(root, selectionPanelTab, textCanvasEditModeActiveRef.current);
-      const activeSelectionIds =
-        selectedFrameGroupIdsRef.current.length > 0
-          ? selectedFrameGroupIdsRef.current
-          : selectedFrameGroupIds;
-
-      if (activeSelectionIds.length > 0 || edgeSelectionStateRef.current.tokens.length > 0) {
-        applyRuntimeSelectionVisuals(activeSelectionIds, edgeSelectionStateRef.current);
+      if (selectionPanelTab !== 'position') {
+        clearPositionOnlyEditorUi(root);
+        applyFrameCanvasVisualHints(root);
       }
+      applyFastFrameSelectionUi(root, [], [], collectFrameSelectionAnchorByIdMap(root));
+      applyFrameRelationSelectionUi(root, { kind: 'idle' }, []);
+      applyPositionImpactGroupSelectionUi(root, selectionPanelTab, [], '');
+      applyDefinedPositionRelativeRelationUi(root, selectionPanelTab, highlightedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, selectionPanelTab, positionSpacingGuideRelations);
+      applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+      syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
       return;
     }
 

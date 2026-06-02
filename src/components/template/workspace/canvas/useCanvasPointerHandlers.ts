@@ -2225,7 +2225,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                   []
               )
             : undefined;
-          const preserveAppliedSelectionVisuals =
+          const shouldSkipDuplicateMarqueeReleaseVisuals =
             marqueeSelectionState.active &&
             stringArraysEqual(marqueeSelectionState.lastSelectionIds, nextSelectionIds) &&
             positionGroupProxySelectionsEqual(marqueeSelectionState.lastProxySelections, marqueeProxySelections);
@@ -2241,7 +2241,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
           if (selectionPanelTab === 'position') {
             selectedFrameGroupIdsRef.current = nextSelectionIds;
             edgeSelectionStateRef.current = emptyEdgeSelection;
-            if (!preserveAppliedSelectionVisuals) {
+            if (!shouldSkipDuplicateMarqueeReleaseVisuals) {
               applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
             }
             window.setTimeout(() => {
@@ -2252,24 +2252,21 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                       showAllGroupProxySelections: true,
                       overridePositionGroupProxySelections: marqueeProxySelections,
                       deferReactStateCommit: true,
-                      preserveAppliedSelectionVisuals,
                     }
                   : {
                       deferReactStateCommit: true,
-                      preserveAppliedSelectionVisuals,
                     }
               );
             }, 0);
           } else {
             selectedFrameGroupIdsRef.current = nextSelectionIds;
             edgeSelectionStateRef.current = emptyEdgeSelection;
-            if (!preserveAppliedSelectionVisuals) {
+            if (!shouldSkipDuplicateMarqueeReleaseVisuals) {
               applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection);
             }
             window.setTimeout(() => {
               applyFrameBoxSelection(nextSelectionIds, {
                 deferReactStateCommit: true,
-                preserveAppliedSelectionVisuals,
               });
             }, 0);
           }
@@ -2304,7 +2301,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                 ) || []
               )
             : undefined;
-          const preserveAppliedSelectionVisuals =
+          const shouldSkipDuplicateMarqueeReleaseVisuals =
             marqueeSelectionState.active &&
             stringArraysEqual(marqueeSelectionState.lastSelectionIds, nextSelectionIds) &&
             positionGroupProxySelectionsEqual(marqueeSelectionState.lastProxySelections, marqueeProxySelections);
@@ -2319,7 +2316,7 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
 
           selectedFrameGroupIdsRef.current = nextSelectionIds;
           edgeSelectionStateRef.current = emptyEdgeSelection;
-          if (!preserveAppliedSelectionVisuals) {
+          if (!shouldSkipDuplicateMarqueeReleaseVisuals) {
             applyInstantFrameBoxSelectionVisuals(nextSelectionIds, emptyEdgeSelection, marqueeProxySelections);
           }
           window.setTimeout(() => {
@@ -2330,11 +2327,9 @@ export const useCanvasPointerHandlers = (options: UseCanvasPointerHandlersOption
                     showAllGroupProxySelections: true,
                     overridePositionGroupProxySelections: marqueeProxySelections,
                     deferReactStateCommit: true,
-                    preserveAppliedSelectionVisuals,
                   }
                 : {
                     deferReactStateCommit: true,
-                    preserveAppliedSelectionVisuals,
                   }
             );
           }, 0);
