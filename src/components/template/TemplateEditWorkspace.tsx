@@ -856,18 +856,6 @@ const writeSharedVirtualFrameDefinitions = (definitions: VirtualFrameDefinition[
   } catch {}
 };
 
-const isStatusHistoryFrameNode = (node: HTMLElement | null | undefined) => {
-  if (!node) {
-    return false;
-  }
-
-  const frameGroupId = getFrameGroupId(node);
-  const valueKey = normalizeFrameValueKey(node.getAttribute(TEMPLATE_FRAME_VALUE_KEY_ATTR) || '');
-  const colorGroup = node.getAttribute(TEMPLATE_FRAME_COLOR_GROUP_ATTR)?.trim() || '';
-
-  return frameGroupId.startsWith('status-history-') || valueKey === '상태 이력' || colorGroup === '상태 이력';
-};
-
 const resolvePersistedFrameNode = (node: HTMLElement | null | undefined) => {
   if (!node) {
     return null;
@@ -10939,6 +10927,7 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
     root.getAttribute(TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR) === visualHintsSignature &&
     root.querySelector(`.${FRAME_KIND_MARKER_CLASS}`)
   ) {
+    syncSelectedFrameVisualHintAttrs(root);
     return;
   }
 
@@ -10979,6 +10968,7 @@ const applyFrameCanvasVisualHints = (root: HTMLElement) => {
       element.removeAttribute('data-template-frame-marker-host');
     }
   });
+  syncSelectedFrameVisualHintAttrs(root);
 };
 
 const clearFrameMetadataRelationOutlineUi = (root: ParentNode) => {
@@ -11314,6 +11304,11 @@ const applyFrameRelationSelectionUi = (
   }
 
   if (activeSelectionPanelTab !== 'metadata') {
+    clearMetadataDerivedSelectionUi(root);
+    return;
+  }
+
+  if (relationMode.kind === 'idle') {
     clearMetadataDerivedSelectionUi(root);
     return;
   }
@@ -15622,6 +15617,40 @@ const collectCanvasSelectionTargetItems = (
   });
 
   const targetItemsById = new Map<string, TemplateCanvasSelectableTargetItem>();
+  const mergeFrameGroupIds = (...frameGroupIdLists: Array<Array<string | null | undefined>>) =>
+    Array.from(
+      new Set(
+        frameGroupIdLists
+          .flat()
+          .map((frameGroupId) => frameGroupId?.trim())
+          .filter((frameGroupId): frameGroupId is string => Boolean(frameGroupId))
+      )
+    );
+  const mergeSelectedBoxes = (
+    current: TemplateCanvasSelectedBox,
+    incoming: TemplateCanvasSelectedBox
+  ): TemplateCanvasSelectedBox => ({
+    ...current,
+    label: current.label || incoming.label,
+    value: current.value || incoming.value,
+    valueKey: current.valueKey || incoming.valueKey,
+    slotKey: current.slotKey || incoming.slotKey,
+    contextKey: current.contextKey || incoming.contextKey,
+    keyFrameGroupId: current.keyFrameGroupId || incoming.keyFrameGroupId,
+    valueFrameGroupId: current.valueFrameGroupId || incoming.valueFrameGroupId,
+    highlightFrameGroupIds: mergeFrameGroupIds(
+      current.highlightFrameGroupIds || [],
+      incoming.highlightFrameGroupIds || [],
+      [current.keyFrameGroupId, current.valueFrameGroupId, current.frameGroupId],
+      [incoming.keyFrameGroupId, incoming.valueFrameGroupId, incoming.frameGroupId]
+    ),
+    boxKind: current.boxKind || incoming.boxKind,
+    frameRole: current.frameRole || incoming.frameRole,
+    runtimeMode: current.runtimeMode || incoming.runtimeMode,
+    requestKind: current.requestKind || incoming.requestKind,
+    requestId: current.requestId || incoming.requestId,
+    signerName: current.signerName || incoming.signerName,
+  });
 
   frameNodeById.forEach((node, frameGroupId) => {
     const metadata = metadataById.get(frameGroupId);
@@ -15708,7 +15737,18 @@ const collectCanvasSelectionTargetItems = (
       return;
     }
 
-    if (targetItemsById.has(selectedBox.id)) {
+    const existingTargetItem = targetItemsById.get(selectedBox.id) || null;
+    if (existingTargetItem) {
+      const mergedSelectedBox = mergeSelectedBoxes(existingTargetItem.selectedBox, selectedBox);
+      const mergedTarget = buildChecklistTargetForCanvasSelectedBox(mergedSelectedBox);
+      const mergedNodes = Array.from(
+        new Set([...existingTargetItem.nodes, ...nodes, ...collectChecklistTargetVisualNodes(root, mergedTarget)])
+      );
+      targetItemsById.set(selectedBox.id, {
+        target: mergedTarget,
+        selectedBox: mergedSelectedBox,
+        nodes: mergedNodes,
+      });
       return;
     }
 
@@ -16708,10 +16748,6 @@ const deriveFrameValueKey = (
   const metadata = resolvedMetadata || resolveNextFrameMetadata(node, {});
   const frameGroupId = getFrameGroupId(node);
 
-  if (isStatusHistoryFrameNode(node)) {
-    return '상태 이력';
-  }
-
   if (metadata.role === 'value' && metadata.parentGroupId) {
     const parentNode = frameNodeById.get(metadata.parentGroupId) || null;
     const parentLabel =
@@ -17675,6 +17711,34 @@ const appendFrameSelectionFill = (frameNode: HTMLElement, showDeleteButton = fal
   }
 };
 
+const syncFrameVisualHintAttrsForElement = (targetNode: HTMLElement, sourceNode: HTMLElement = targetNode) => {
+  const role = readFrameRole(sourceNode);
+  const boxKind = readFrameBoxKind(sourceNode);
+  const visualEmphasis = sourceNode.getAttribute(TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR)?.trim() || '';
+
+  if (role) {
+    setElementAttributeIfChanged(targetNode, TEMPLATE_FRAME_ROLE_VISUAL_ATTR, role);
+  } else {
+    removeElementAttributeIfPresent(targetNode, TEMPLATE_FRAME_ROLE_VISUAL_ATTR);
+  }
+
+  if (boxKind) {
+    setElementAttributeIfChanged(targetNode, TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR, boxKind);
+  } else {
+    removeElementAttributeIfPresent(targetNode, TEMPLATE_FRAME_BOX_KIND_VISUAL_ATTR);
+  }
+
+  if (visualEmphasis) {
+    setElementAttributeIfChanged(targetNode, TEMPLATE_FRAME_VISUAL_EMPHASIS_ATTR, visualEmphasis);
+  }
+};
+
+const syncSelectedFrameVisualHintAttrs = (root: HTMLElement) => {
+  root.querySelectorAll<HTMLElement>('[data-template-selected="true"]').forEach((element) => {
+    syncFrameVisualHintAttrsForElement(element, resolveFrameSelectionAnchor(element) || element);
+  });
+};
+
 const removeFrameSelectionChromeFromShell = (shell: HTMLElement) => {
   shell.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_FILL_CLASS}, .${FRAME_DELETE_BUTTON_CLASS}`).forEach((element) => {
     element.remove();
@@ -17690,6 +17754,7 @@ const ensureFrameSelectionChrome = (
   setElementAttributeIfChanged(frameNode, 'data-template-edge-host', 'true');
   setElementAttributeIfChanged(frameNode, 'data-template-selected', 'true');
   setElementAttributeIfChanged(frameNode, 'data-template-selection-order', String(selectionIndex + 1));
+  syncFrameVisualHintAttrsForElement(frameNode, resolveFrameSelectionAnchor(frameNode) || frameNode);
 
   if (selectionIndex === 0) {
     setElementAttributeIfChanged(frameNode, 'data-template-primary-selected', 'true');
@@ -18196,6 +18261,7 @@ const applyFastFrameSelectionUi = (
       []
     )
   ) {
+    syncSelectedFrameVisualHintAttrs(root);
     syncPositionSelectionVisualStyles(root);
     return;
   }
@@ -18242,6 +18308,7 @@ const applyFastFrameSelectionUi = (
   root.querySelectorAll<HTMLElement>(`.${FRAME_SELECTION_BADGE_CLASS}`).forEach((element) => {
     element.remove();
   });
+  syncSelectedFrameVisualHintAttrs(root);
   syncPositionSelectionVisualStyles(root);
 };
 
@@ -25768,6 +25835,10 @@ export default function TemplateEditWorkspace({
       }
     }
 
+    if (metadataVirtualConnectionDraft.mode === 'idle') {
+      return { kind: 'idle' };
+    }
+
     const linkedKeyFrameGroupId = frameMetadataDraft.parentGroupId.trim();
 
     if (linkedKeyFrameGroupId && selectedFrameGroupIds.length > 0) {
@@ -26866,6 +26937,27 @@ export default function TemplateEditWorkspace({
       positionSpacingGuideRelations,
       visibleMetadataReviewIssues,
     ]
+  );
+  const applyMetadataConnectionRuntimeSelectionUi = React.useCallback(
+    (
+      nextSelectedFrameGroupIds: string[],
+      nextEdgeSelectionState: TemplateEdgeSelectionStateDto,
+      overridePositionGroupProxySelections?: PositionGroupProxySelection[]
+    ) => {
+      const relationMode = metadataRelationSelectionModeRef.current;
+      const actualSelectionIds =
+        relationMode.kind === 'value'
+          ? normalizeFrameSelectionIds([relationMode.sourceKeyFrameGroupId])
+          : relationMode.kind === 'parent'
+            ? normalizeFrameSelectionIds(relationMode.sourceFrameGroupIds)
+            : normalizeFrameSelectionIds(nextSelectedFrameGroupIds);
+
+      applyRuntimeSelectionUi(actualSelectionIds, nextEdgeSelectionState, overridePositionGroupProxySelections);
+      setSelectedFrameGroupIds((previous) =>
+        stringArraysEqual(previous, actualSelectionIds) ? previous : actualSelectionIds
+      );
+    },
+    [applyRuntimeSelectionUi]
   );
 
   React.useLayoutEffect(() => {
@@ -29585,7 +29677,7 @@ export default function TemplateEditWorkspace({
     normalizeFrameValueKey,
     requestPreviewTextFit,
     syncFrameMetadataDraft,
-    applyRuntimeSelectionUi,
+    applyRuntimeSelectionUi: applyMetadataConnectionRuntimeSelectionUi,
     applyRuntimeSelectionVisuals,
     resolveMetadataConnectionOption,
     formatIssueList,
@@ -32288,6 +32380,25 @@ export default function TemplateEditWorkspace({
     ensureFrameOverlayCacheFromNodes(affectedNodes, { metadata: true, force: true });
     syncOpenSelectionOverlayDraftsFromCache(root, frameNodeById);
     syncFrameRelationshipValueKeys(root, resolvedMetadataById, virtualFrameDefinitions);
+    const postApplySelectionIds = (() => {
+      if (relationMode.kind === 'value') {
+        return normalizeFrameSelectionIds([relationMode.sourceKeyFrameGroupId]);
+      }
+
+      if (relationMode.kind === 'parent') {
+        return normalizeFrameSelectionIds(relationMode.sourceFrameGroupIds);
+      }
+
+      return normalizeFrameSelectionIds(activeSelectionIds);
+    })();
+    selectedFrameGroupIdsRef.current = postApplySelectionIds;
+    setSelectedFrameGroupIds((previous) =>
+      stringArraysEqual(previous, postApplySelectionIds) ? previous : postApplySelectionIds
+    );
+    root.removeAttribute(TEMPLATE_FRAME_VISUAL_HINTS_SIGNATURE_ATTR);
+    applyFrameCanvasVisualHints(root);
+    applyFastFrameSelectionUi(root, postApplySelectionIds, [], frameNodeById);
+    applyFrameRelationSelectionUi(root, { kind: 'idle' }, postApplySelectionIds);
     syncDraftPreviewHtmlRef();
     syncFrameMetadataDraft();
     if (relationMode.kind === 'value') {
