@@ -11314,8 +11314,8 @@ const applyFrameRelationSelectionUi = (
   }
 
   if (activeSelectionPanelTab !== 'metadata') {
-    removeElementAttributeIfPresent(root, TEMPLATE_METADATA_ACTIVE_FILTER_ATTR);
-    clearSelectionTonedownOverlays(root, 'metadata');
+    clearMetadataDerivedSelectionUi(root);
+    return;
   }
 
   const relationRenderSignature = JSON.stringify({
@@ -26881,7 +26881,10 @@ export default function TemplateEditWorkspace({
     }
 
     const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
-    const canvasSelectedBoxFrameGroupIds = collectCanvasSelectedBoxCanvasSelectionIds(root, selectedCanvasBoxes);
+    const roleAssignmentSourceSelectedBoxes = roleAssignmentTabActive
+      ? roleAssignmentSelectedBoxesRef.current
+      : selectedCanvasBoxes;
+    const canvasSelectedBoxFrameGroupIds = collectCanvasSelectedBoxCanvasSelectionIds(root, roleAssignmentSourceSelectedBoxes);
     const checklistTargetFrameGroupIds = collectChecklistTargetCanvasSelectionIds(root, checklistRegistrationTarget);
     const nextSelectedFrameGroupIds = Array.from(
       new Set([...(canvasSelectedBoxFrameGroupIds.length > 0 ? canvasSelectedBoxFrameGroupIds : checklistTargetFrameGroupIds)])
@@ -26928,6 +26931,7 @@ export default function TemplateEditWorkspace({
     normalizedCanvasViewMode,
     positionRelationAnchorFrameGroupId,
     positionSpacingGuideRelations,
+    roleAssignmentTabActive,
     selectionPanelTab,
     selectedCanvasBoxes,
     surfaceRenderedPreviewHtml,
@@ -28398,6 +28402,104 @@ export default function TemplateEditWorkspace({
     ]
   );
 
+  const resetCanvasSelectionForPanelTabSwitch = React.useCallback(
+    (nextTab: SelectionPanelTab, root: HTMLElement | null) => {
+      const emptyEdgeSelection = TemplateEdgeSelectionService.createEmptyState();
+      const ownerDocument = root?.ownerDocument || (typeof document !== 'undefined' ? document : null);
+
+      selectedFrameGroupIdsRef.current = [];
+      edgeSelectionStateRef.current = emptyEdgeSelection;
+      selectedCanvasBoxesRef.current = [];
+      roleAssignmentSelectedBoxesRef.current = [];
+      roleAssignmentSelectionSignatureRef.current = buildRoleAssignmentSelectionSignature([], []);
+      roleAssignmentScopeHydrationSignatureRef.current = '';
+      positionGroupProxySelectionGroupIdRef.current = '';
+      positionGroupProxySelectionShowAllGroupsRef.current = false;
+      positionGroupProxySelectionsOverrideRef.current = null;
+      positionActiveSelectionEntityRef.current = null;
+      positionGroupEditModeRef.current = { kind: 'idle' };
+      metadataRelationSelectionModeRef.current = { kind: 'idle' };
+      frameRelationPreviewModeRef.current = { kind: 'idle' };
+      sizeMatchSourcePickModeRef.current = false;
+
+      if (typeof window !== 'undefined') {
+        if (roleAssignmentDeferredCommitTimerRef.current !== null) {
+          window.clearTimeout(roleAssignmentDeferredCommitTimerRef.current);
+          roleAssignmentDeferredCommitTimerRef.current = null;
+        }
+
+        if (roleAssignmentParentNotifyTimerRef.current !== null) {
+          window.clearTimeout(roleAssignmentParentNotifyTimerRef.current);
+          roleAssignmentParentNotifyTimerRef.current = null;
+        }
+      }
+
+      if (newScopeDisplayNameCommitTimerRef.current) {
+        clearTimeout(newScopeDisplayNameCommitTimerRef.current);
+        newScopeDisplayNameCommitTimerRef.current = null;
+      }
+
+      setSelectedFrameGroupIds([]);
+      setEdgeSelectionState(emptyEdgeSelection);
+      syncEdgeRoleDiagnosticsState(emptyEdgeRoleDiagnosticsState);
+      setSelectionValidationIssues([]);
+      setSelectionReviewIssues([]);
+      setSelectionSaveProgress(defaultSelectionSaveProgressState);
+      setRoleAssignmentRenderSelection({
+        boxes: [],
+        hasLocalValue: true,
+      });
+      setPositionRelationAnchorFrameGroupId('');
+      setPositionRelationTargetFrameGroupId('');
+      setPositionOrderLockSelectionMode(false);
+      setPositionOrderLockFrameGroupIds([]);
+      setPositionOrderLockSelectionKindByFrameGroupId({});
+      setPositionOrderLockSelectionGroupIdByFrameGroupId({});
+      setPositionOrderLockCandidateFrameGroupId('');
+      setPositionOrderLockCandidateGroupId('');
+      setPositionOrderLockCandidateSelectionStage('');
+      setPositionGroupEditMode({ kind: 'idle' });
+      setMetadataRelationSelectionMode({ kind: 'idle' });
+      setMetadataVirtualConnectionDraft(defaultMetadataVirtualConnectionDraft);
+      setMetadataConnectionPickerOpen(false);
+      setSizeMatchSourcePickMode(false);
+      setScopeCreationMode(false);
+      setActiveScopeKey('');
+      newScopeDisplayNameRef.current = '';
+      setNewScopeDisplayName('');
+      setScopeDraftMessage('');
+      applyImmediateRoleAssignmentPanelDomState(ownerDocument, []);
+      onChecklistSelectionClear?.();
+      onCanvasSelectionChange?.([], { source: 'clear' });
+
+      if (!root) {
+        return;
+      }
+
+      syncPreviewSurfaceSelectionPanelTabAttr(root, nextTab);
+      syncPreviewSurfacePositionSpacingSelectionVisualAttr(root, false);
+      applyPreviewEditPermissions(root, nextTab, textCanvasEditModeActiveRef.current);
+      if (nextTab !== 'position') {
+        clearPositionOnlyEditorUi(root);
+      }
+      applyFrameCanvasVisualHints(root);
+      applyFastFrameSelectionUi(root, [], [], collectFrameSelectionAnchorByIdMap(root));
+      applyFrameRelationSelectionUi(root, { kind: 'idle' }, []);
+      applyPositionImpactGroupSelectionUi(root, nextTab, [], '');
+      applyDefinedPositionRelativeRelationUi(root, nextTab, highlightedDefinedPositionRelativeRelations);
+      applyPositionSpacingGuideUi(root, nextTab, positionSpacingGuideRelations);
+      applyFrameReviewWarningUi(root, visibleMetadataReviewIssues);
+    },
+    [
+      highlightedDefinedPositionRelativeRelations,
+      onCanvasSelectionChange,
+      onChecklistSelectionClear,
+      positionSpacingGuideRelations,
+      syncEdgeRoleDiagnosticsState,
+      visibleMetadataReviewIssues,
+    ]
+  );
+
   const handleSelectionPanelTabChange = React.useCallback(
     (nextTab: SelectionPanelTab) => {
       const nextCanvasViewMode = resolveTemplateCanvasViewModeForSelectionPanelTab(nextTab);
@@ -28416,20 +28518,13 @@ export default function TemplateEditWorkspace({
       cancelScheduledPreviewEditorState();
       const root = previewRef.current;
 
-      if (root) {
-        syncPreviewSurfaceSelectionPanelTabAttr(root, nextTab);
-        syncPreviewSurfacePositionSpacingSelectionVisualAttr(
-          root,
-          nextTab === 'position' && positionOrderLockSelectionMode
-        );
-        applyPreviewEditPermissions(root, nextTab, textCanvasEditModeActiveRef.current);
-      }
+      resetCanvasSelectionForPanelTabSwitch(nextTab, root);
 
       scheduleSelectionPanelTabStateCommit(nextTab, nextCanvasViewMode);
     },
     [
       cancelScheduledPreviewEditorState,
-      positionOrderLockSelectionMode,
+      resetCanvasSelectionForPanelTabSwitch,
       scheduleSelectionPanelTabStateCommit,
       selectionPanelTab,
     ]
