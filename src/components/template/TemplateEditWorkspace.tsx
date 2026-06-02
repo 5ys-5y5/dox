@@ -11006,6 +11006,11 @@ const clearMetadataDerivedSelectionUi = (root: HTMLElement) => {
     });
 };
 
+const stripTemplateUsagePreviewDerivedVisualUi = (root: HTMLElement) => {
+  stripSelectionAttrs(root);
+  clearMetadataDerivedSelectionUi(root);
+};
+
 const applyMetadataRelationOutlineEdges = (
   root: ParentNode,
   members: Array<{
@@ -14203,6 +14208,7 @@ const buildTemplateUsagePreviewHtml = (
   clearFrameValidationErrorUi(container);
   clearFrameReviewWarningUi(container);
   stripFrameMetadataMarkers(container);
+  stripTemplateUsagePreviewDerivedVisualUi(container);
   TemplateFrameEditHtmlService.stripEditorUiState(container);
   annotateTemplateUsagePreviewGroupBottomGapAnchors(container);
   const valueTextPolicy: TemplateUsagePreviewValueTextPolicy =
@@ -21333,6 +21339,7 @@ export default function TemplateEditWorkspace({
       }
 
       root.setAttribute(TEMPLATE_USAGE_PREVIEW_READ_ONLY_ATTR, readOnlyDraftOutput ? 'true' : 'false');
+      stripTemplateUsagePreviewDerivedVisualUi(root);
 
       if (readOnlyDraftOutput) {
         applyTemplateUsagePreviewReadOnlyState(root);
@@ -26693,6 +26700,7 @@ export default function TemplateEditWorkspace({
     syncPreviewSurfaceCloneAttrs(node);
 
     if (templateUsagePreviewActive) {
+      stripTemplateUsagePreviewDerivedVisualUi(node);
       enableTemplateUsagePreviewTextControls(node);
       syncPreviewSurfaceScale(node);
       return;
@@ -37262,6 +37270,8 @@ export default function TemplateEditWorkspace({
             setEditorPreviewNode={setEditorPreviewSourceNode}
             setTemplateUsagePreviewNode={setTemplateUsagePreviewPreparedNode}
             syncTemplateUsagePreviewTextControls={(root) => {
+              stripTemplateUsagePreviewDerivedVisualUi(root);
+
               if (readOnlyDraftOutput) {
                 applyTemplateUsagePreviewReadOnlyState(root);
                 if (selectionOnlyTextInteractions) {
