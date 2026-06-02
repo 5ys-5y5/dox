@@ -55,6 +55,7 @@ type MejaiScrollTableProps = {
 
 type MejaiScrollTableLayoutMetrics = {
   fillerWidth: number;
+  scrollAreaWidth: number;
   headerRowHeight: number;
   bodyRowHeights: number[];
 };
@@ -211,6 +212,7 @@ export function MejaiScrollTable({
   const [canScrollRight, setCanScrollRight] = React.useState(false);
   const [layoutMetrics, setLayoutMetrics] = React.useState<MejaiScrollTableLayoutMetrics>({
     fillerWidth: 0,
+    scrollAreaWidth: 0,
     headerRowHeight: 0,
     bodyRowHeights: [],
   });
@@ -241,14 +243,18 @@ export function MejaiScrollTable({
 
     if (!scrollArea || !table || !body) {
       setLayoutMetrics((current) =>
-        current.fillerWidth === 0 && current.headerRowHeight === 0 && current.bodyRowHeights.length === 0
+        current.fillerWidth === 0 &&
+        current.scrollAreaWidth === 0 &&
+        current.headerRowHeight === 0 &&
+        current.bodyRowHeights.length === 0
           ? current
-          : { fillerWidth: 0, headerRowHeight: 0, bodyRowHeights: [] }
+          : { fillerWidth: 0, scrollAreaWidth: 0, headerRowHeight: 0, bodyRowHeights: [] }
       );
       return;
     }
 
-    const fillerWidth = Math.max(0, scrollArea.getBoundingClientRect().width - table.getBoundingClientRect().width);
+    const scrollAreaWidth = scrollArea.getBoundingClientRect().width;
+    const fillerWidth = Math.max(0, scrollAreaWidth - table.getBoundingClientRect().width);
     const scrollBodyRows = Array.from(body.querySelectorAll(':scope > tr'));
     const fixedRightBodyRows = fixedRightBody
       ? Array.from(fixedRightBody.querySelectorAll(':scope > tr'))
@@ -280,17 +286,19 @@ export function MejaiScrollTable({
 
     setLayoutMetrics((current) => {
       const sameFillerWidth = Math.abs(current.fillerWidth - fillerWidth) < 0.5;
+      const sameScrollAreaWidth = Math.abs(current.scrollAreaWidth - scrollAreaWidth) < 0.5;
       const sameHeaderHeight = Math.abs(current.headerRowHeight - headerRowHeight) < 0.5;
       const sameBodyRows =
         current.bodyRowHeights.length === bodyRowHeights.length &&
         current.bodyRowHeights.every((height, index) => Math.abs(height - (bodyRowHeights[index] ?? 0)) < 0.5);
 
-      if (sameFillerWidth && sameHeaderHeight && sameBodyRows) {
+      if (sameFillerWidth && sameScrollAreaWidth && sameHeaderHeight && sameBodyRows) {
         return current;
       }
 
       return {
         fillerWidth,
+        scrollAreaWidth,
         headerRowHeight,
         bodyRowHeights,
       };
@@ -426,6 +434,20 @@ export function MejaiScrollTable({
 
       return sum;
     }, 0);
+  const lastExpandableScrollColumnKey = scrollColumns[scrollColumns.length - 1]?.key;
+  const computedMinTableWidthPx =
+    typeof computedMinTableWidth === 'number' ? computedMinTableWidth : toPixelNumber(computedMinTableWidth);
+  const scrollPaneTargetWidthPx =
+    fixedColumnWidths && hasRightStickyColumns && computedMinTableWidthPx > 0
+      ? Math.max(scrollColumnWidthTotal, computedMinTableWidthPx, layoutMetrics.scrollAreaWidth)
+      : 0;
+  const scrollColumnExpansionWidth =
+    fixedColumnWidths && hasRightStickyColumns && lastExpandableScrollColumnKey
+      ? Math.max(0, scrollPaneTargetWidthPx - scrollColumnWidthTotal)
+      : 0;
+  const expandedScrollTableWidth =
+    scrollColumnExpansionWidth > 0.5 ? `${scrollColumnWidthTotal + scrollColumnExpansionWidth}px` : undefined;
+  const shouldRenderScrollFiller = layoutMetrics.fillerWidth > 0.5 && scrollColumnExpansionWidth <= 0.5;
 
   const handleRowPointerDown = React.useCallback((event: React.PointerEvent<HTMLTableRowElement>, rowKey: string) => {
     if (event.button !== 0) {
@@ -505,7 +527,11 @@ export function MejaiScrollTable({
     [columns, showIndexColumn]
   );
 
-  const renderColGroup = (targetColumns: MejaiScrollTableColumn[], includeIndexColumn: boolean) => (
+  const renderColGroup = (
+    targetColumns: MejaiScrollTableColumn[],
+    includeIndexColumn: boolean,
+    pane: 'scroll' | 'fixed-right'
+  ) => (
     <colgroup>
       {includeIndexColumn ? (
         <col
@@ -516,9 +542,18 @@ export function MejaiScrollTable({
         />
       ) : null}
       {targetColumns.map((column) => {
-        const width = toCssSize(column.width);
-        const minWidth = toCssSize(column.minWidth || column.width);
-        const maxWidth = toCssSize(column.maxWidth);
+        const shouldExpandColumn =
+          pane === 'scroll' &&
+          scrollColumnExpansionWidth > 0.5 &&
+          column.key === lastExpandableScrollColumnKey;
+        const baseColumnWidthPx = toPixelNumber(column.width ?? column.minWidth);
+        const expandedColumnWidth =
+          shouldExpandColumn && baseColumnWidthPx > 0
+            ? `${baseColumnWidthPx + scrollColumnExpansionWidth}px`
+            : undefined;
+        const width = expandedColumnWidth || toCssSize(column.width);
+        const minWidth = expandedColumnWidth || toCssSize(column.minWidth || column.width);
+        const maxWidth = expandedColumnWidth || toCssSize(column.maxWidth);
         const renderedColumnIndex = getRenderedColumnIndex(column);
 
         return (
@@ -793,13 +828,16 @@ export function MejaiScrollTable({
         pane === 'fixed-right'
           ? { minWidth: stickyRightOffsetPx, width: stickyRightOffsetPx }
           : fixedColumnWidths && computedMinTableWidth
-            ? { minWidth: computedMinTableWidth, width: computedMinTableWidth }
+            ? {
+                minWidth: expandedScrollTableWidth || computedMinTableWidth,
+                width: expandedScrollTableWidth || computedMinTableWidth,
+              }
             : computedMinTableWidth
               ? { minWidth: computedMinTableWidth }
-            : undefined
+              : undefined
       }
     >
-      {renderColGroup(targetColumns, pane === 'scroll' && showIndexColumn)}
+      {renderColGroup(targetColumns, pane === 'scroll' && showIndexColumn, pane)}
       <thead {...ownerAttrs(ownerItemKey ? `${ownerItemKey}${pane === 'fixed-right' ? '-fixed-right' : ''}-table-head` : undefined, `${ownerItemName} 표 머리`)}>
         <tr
           ref={pane === 'scroll' ? headerRowRef : fixedRightHeaderRowRef}
@@ -902,7 +940,7 @@ export function MejaiScrollTable({
               className="flex min-w-full w-max items-start"
             >
               {renderTable(scrollColumns, 'scroll')}
-              {layoutMetrics.fillerWidth > 0.5 ? (
+              {shouldRenderScrollFiller ? (
                 <div
                   data-mejai-scroll-filler="1"
                   {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-scroll-filler` : undefined, `${ownerItemName} 스크롤 채움 영역`)}
@@ -958,7 +996,7 @@ export function MejaiScrollTable({
             className="flex min-w-full w-max items-start"
           >
             {renderTable(scrollColumns, 'scroll')}
-            {layoutMetrics.fillerWidth > 0.5 ? (
+            {shouldRenderScrollFiller ? (
               <div
                 data-mejai-scroll-filler="1"
                 {...ownerAttrs(ownerItemKey ? `${ownerItemKey}-scroll-filler` : undefined, `${ownerItemName} 스크롤 채움 영역`)}
